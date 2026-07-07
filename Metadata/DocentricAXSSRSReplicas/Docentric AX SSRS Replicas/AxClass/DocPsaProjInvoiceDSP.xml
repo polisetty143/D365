@@ -1,0 +1,747 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>DocPsaProjInvoiceDSP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class DocPsaProjInvoiceDSP extends DocDataSourceProviderSrsProforma
+{
+    PSAProjInvoiceHeaderTmp                 projInvoiceHeader;
+    PSAProjInvoiceTmp                       projInvoiceLine;
+    PSAProjInvoiceContract                  reportContract;
+    LogisticsAddressCountryRegionISOCode    isoCountryCode;
+    ProjProposalJour                        projProposalJour;
+    AmountCur                               totalAmount;
+    boolean                                 multipleProjIds = false, taxAdded = false;
+
+
+    /* Variables for custom placeholders */
+    str      placeholder_invoiceNum;
+    date     placeholder_invoiceDate;
+    date     placeholder_invoiceDueDate;
+    str      placeholder_projContract;
+    str      placeholder_projId;
+    str      placeholder_custAccount;
+    str      placeholder_custName;
+    str      placeholder_custContactName;
+    str      placeholder_paymTerms;
+    str      placeholder_projEmail;
+
+    #ISOCountryRegionCodes
+    
+    #define.PSAProjInvoiceHeader('PSAProjInvoiceHeader')
+    #define.PSAProjInvoiceHeaderExt('PSAProjInvoiceHeaderExt')
+    #define.PSAProjInvoiceLine('PSAProjInvoiceLine')
+    #define.PaymentStubLine('ProjInvoiceTmp')
+    #define.DefaultDimensionField('FinancialDimensions')
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>addParameters</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extend/Override this method in order to add additional parameters to the report data source.
+    /// </summary>
+    /// <param name = "_recordBuilderParameters">Record builder for the Parameters data section.</param>
+    protected void addParameters(DocXmlRecordBuilder _recordBuilderParameters)
+    {
+        super(_recordBuilderParameters);
+
+        // Add the Original/Copy print information to the Parameters data section of DDSP
+        DocPrintMgmtOriginalCopyType printMgmtOriginalCopyType = this.parmParamsReporting().parmOriginalCopyType();
+        DocDspHelper::addPrintMgmtOriginalCopyField(_recordBuilderParameters.topRecord(), printMgmtOriginalCopyType);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>description</Name>
+				<Source><![CDATA[
+    public ClassDescription description()
+    {
+        return 'Project invoice without billing rules DSP';
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>proformaReportStoragePrefix</Name>
+				<Source><![CDATA[
+    protected str proformaReportStoragePrefix()
+    {
+        return DocConstantDSP::Prefix_ProjInvoice;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>onSelectedRdpTableRecord</Name>
+				<Source><![CDATA[
+    protected void onSelectedRdpTableRecord(Common _rdpTableRecord, TableName _rdpTableName)
+    {
+        PSAProjInvoiceHeaderTmp currentRecordHeader;
+        PSAProjInvoiceTmp       currentRecordLine;
+
+        super(_rdpTableRecord, _rdpTableName);
+
+        if (_rdpTableName == tableStr(PSAProjInvoiceHeaderTmp))
+        {
+            currentRecordHeader = _rdpTableRecord;
+            
+            // Store custom placeholders' values.
+            placeholder_invoiceNum = currentRecordHeader.InvoiceNum;
+            placeholder_invoiceDate = currentRecordHeader.InvoiceDate;
+            placeholder_invoiceDueDate = currentRecordHeader.DueDate;
+            placeholder_projContract = currentRecordHeader.ProjectContract;
+            placeholder_custAccount = currentRecordHeader.CustAccountNum;
+            placeholder_custName = currentRecordHeader.CustName;
+            placeholder_paymTerms = currentRecordHeader.Payment;
+        }
+        else if (_rdpTableName == tableStr(PSAProjInvoiceTmp))
+        {
+            // Store value for ProjId placeholder. If all lines have the same ProjId,
+            // ProjId placeholder will have that value. Otherwise it will have '*' value.
+            currentRecordLine = _rdpTableRecord;
+            
+            if (placeholder_projId == '')
+            {
+                placeholder_projId = currentRecordLine.ProjId;
+                placeholder_projEmail = ProjTable::find(placeholder_projId).Email;
+            }
+            else if (!multipleProjIds && (currentRecordLine.ProjId != placeholder_projId))
+            {
+                multipleProjIds = true;
+                placeholder_projId = DocConstantDSP::MULTIPLE;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>preRunGenerateDS</Name>
+				<Source><![CDATA[
+    protected void preRunGenerateDS()
+    {
+        super();
+
+        // Initialize here the class global variables.
+        reportContract = this.getSrsRdpContract();
+
+        isoCountryCode = SysCountryRegionCode::countryInfo();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>overrideReportRunSettings</Name>
+				<Source><![CDATA[
+    // List of defined custom placeholders for the report:
+    #define.InvoiceNum('InvoiceNum')
+    #define.InvoiceDate('InvoiceDate')
+    #define.InvoiceDueDate('InvoiceDueDate')
+    #define.ProjContract('ProjContract')
+    #define.ProjId('ProjId')
+    #define.PaymentTerms('PaymentTerms')
+    #define.CustAccount('CustAccount')
+    #define.CustName('CustName')
+    #define.CustContactName('CustContactName')
+    #define.ProjEmail('ProjEmail')
+
+    [DocPlaceholderAttribute(#InvoiceNum, 'PI - Invoice Number'),
+     DocPlaceholderAttribute(#InvoiceDate, 'PI - Invoice Date'),
+     DocPlaceholderAttribute(#InvoiceDueDate, 'PI - Invoice Due Date'),
+     DocPlaceholderAttribute(#ProjContract, 'PI - Project Contract ID'),
+     DocPlaceholderAttribute(#ProjId, 'PI - Project ID'),
+     DocPlaceholderAttribute(#PaymentTerms, 'PI - Terms of Payment'),
+     DocPlaceholderAttribute(#CustAccount, 'PI - Customer Account ID'),
+     DocPlaceholderAttribute(#CustName, 'PI - Customer Name'),
+     DocPlaceholderAttribute(#CustContactName, 'PI - Customer Contact Name'),
+     DocPlaceholderAttribute(#ProjEmail, 'PI - Project Email')]
+    public DocPlaceholderManager overrideReportRunSettings(DocReportRunContext _reportRunContext, boolean _replaceStandardPlaceholders = true)
+    {
+        // Set the report execution context record to the corresponding projProposalJour. This will affect:
+        // (1) Standard placeholders
+        // (2) Saving to Attachments -> Record type: Context record
+        // (3) Additional Attachments -> Load from: Context record
+        _reportRunContext.setReportExecutionContextRecord(this.projProposalJour());
+
+        // Replace standard placeholders.
+        DocPlaceholderManager placeholderMng = super(_reportRunContext, _replaceStandardPlaceholders);
+        
+        // Replace custom placeholders:
+        // -- Placeholder @InvoiceNum@
+        placeholderMng.replacePlaceholderInCurrentPrintDest(#InvoiceNum, placeholder_invoiceNum);
+
+        // -- Placeholder @InvoiceDate@
+        placeholderMng.replacePlaceholderInCurrentPrintDest(#InvoiceDate, placeholder_invoiceDate);
+
+        // -- Placeholder @InvoiceDueDate@
+        placeholderMng.replacePlaceholderInCurrentPrintDest(#InvoiceDueDate, placeholder_invoiceDueDate);
+
+        // -- Placeholder @ProjContract@
+        placeholderMng.replacePlaceholderInCurrentPrintDest(#ProjContract, placeholder_projContract);
+
+        // -- Placeholder @ProjId@
+        placeholderMng.replacePlaceholderInCurrentPrintDest(#ProjId, placeholder_projId);
+        
+        // -- Placeholder @CustAccount@
+        placeholderMng.replacePlaceholderInCurrentPrintDest(#CustAccount, placeholder_custAccount);
+
+        // -- Placeholder @ProjEmail@
+        placeholderMng.replacePlaceholderInCurrentPrintDest(#ProjEmail, placeholder_projEmail);
+
+        // -- Placeholder @PaymentTerms@
+        placeholderMng.replacePlaceholderInCurrentPrintDest(#PaymentTerms, placeholder_paymTerms);
+
+        // -- Placeholder @CustName@
+        placeholderMng.replacePlaceholderInCurrentPrintDest(#CustName, placeholder_custName);
+
+        // -- Placeholder @CustContactName@
+        placeholderMng.replacePlaceholderInCurrentPrintDest(#CustContactName, DocDspHelper::custContactPersonName(placeholder_custAccount));
+
+
+        // Fill the Print archive contract.
+        _reportRunContext.archiveContract().setCustAccount(placeholder_custAccount);
+        _reportRunContext.archiveContract().setProjInvoiceProjId(placeholder_projContract);
+        _reportRunContext.archiveContract().setDocument(placeholder_invoiceNum, placeholder_invoiceDate);
+        _reportRunContext.archiveContract().setJournal(this.projInvoiceJour().RecId, DocJournalType::ProjInvoiceJour);
+
+        return placeholderMng;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addDataFieldsForHeader</Name>
+				<Source><![CDATA[
+    protected void addDataFieldsForHeader(DocXmlRecord _addingRecord, PSAProjInvoiceHeaderTmp _header)
+    {
+        buf2Buf(_header, projInvoiceHeader);
+
+        // Rename the record from 'PSAProjInvoiceHeaderTmp' to 'PSAProjInvoiceHeader'.
+        _addingRecord.setRecordName(#PSAProjInvoiceHeader);
+        // Change the label of the record.
+        _addingRecord.setRecordLabel('Project Invoice header'); // NOTE: use literalStr("@LabelID")
+
+        // Setting the flag needed for Docentric NextGen.
+        _addingRecord.setSingleRecord(true);
+
+        _addingRecord.addAllFieldsExcept([
+                fieldstr(PSAProjInvoiceHeaderTmp, CompanyAddress),  // we have company data in the GeneralData data section
+                fieldstr(PSAProjInvoiceHeaderTmp, CompanyLogo),     // we have company data in the GeneralData data section
+                fieldstr(PSAProjInvoiceHeaderTmp, AuthorizedSignatory_BR),
+                fieldstr(PSAProjInvoiceHeaderTmp, City_BR),
+                fieldstr(PSAProjInvoiceHeaderTmp, CNPJCPFNum_BR),
+                fieldstr(PSAProjInvoiceHeaderTmp, DesignationSignatory_BR),
+                fieldstr(PSAProjInvoiceHeaderTmp, Narration_BR),
+                fieldstr(PSAProjInvoiceHeaderTmp, CashAccountingRegime_ES),
+                fieldstr(PSAProjInvoiceHeaderTmp, Enterpriseregister_NO),
+                fieldstr(PSAProjInvoiceHeaderTmp, PaymentReference_BE),
+                fieldstr(PSAProjInvoiceHeaderTmp, GSTReliefClause_MY),
+                fieldstr(PSAProjInvoiceHeaderTmp, InvoiceType_MY),
+                fieldstr(PSAProjInvoiceHeaderTmp, GSTReasonCode_MY),
+                fieldstr(PSAProjInvoiceHeaderTmp, DeliveryAddress_TH),
+                fieldstr(PSAProjInvoiceHeaderTmp, InvoiceBranch_TH),
+                fieldstr(PSAProjInvoiceHeaderTmp, InvoiceTaxNatureOfAddress_TH),
+                fieldstr(PSAProjInvoiceHeaderTmp, InvoiceTaxRegNumber_TH),
+                fieldstr(PSAProjInvoiceHeaderTmp, RefInvoiceId_TH),
+                fieldstr(PSAProjInvoiceHeaderTmp, InvoiceBranchName_TH),
+                fieldstr(PSAProjInvoiceHeaderTmp, RemarkTxt_TH),
+                fieldstr(PSAProjInvoiceHeaderTmp, AdjustmentDetailsTxt_TH)
+            ]);
+
+        /* COUNTRY REGION RELATED DATA */
+        switch (isoCountryCode)
+        {
+            case #isoBR:
+                _addingRecord.addField(fieldStr(PSAProjInvoiceHeaderTmp, AuthorizedSignatory_BR));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceHeaderTmp, City_BR));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceHeaderTmp, CNPJCPFNum_BR));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceHeaderTmp, DesignationSignatory_BR));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceHeaderTmp, Narration_BR));
+                break;
+
+            case #isoES:
+                _addingRecord.addField(fieldStr(PSAProjInvoiceHeaderTmp, CashAccountingRegime_ES));
+                break;
+
+            case #isoNO:
+                _addingRecord.addField(fieldStr(PSAProjInvoiceHeaderTmp, Enterpriseregister_NO));
+                break;
+
+            case #isoBE:
+                _addingRecord.addField(fieldStr(PSAProjInvoiceHeaderTmp, PaymentReference_BE));
+                break;
+
+            case #isoMY:
+                _addingRecord.addField(fieldStr(PSAProjInvoiceHeaderTmp, GSTReliefClause_MY));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceHeaderTmp, InvoiceType_MY));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceHeaderTmp, GSTReasonCode_MY));
+                break;
+
+            case #isoTH:
+                _addingRecord.addField(fieldStr(PSAProjInvoiceHeaderTmp, DeliveryAddress_TH));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceHeaderTmp, InvoiceBranch_TH));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceHeaderTmp, InvoiceTaxNatureOfAddress_TH));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceHeaderTmp, InvoiceTaxRegNumber_TH));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceHeaderTmp, RefInvoiceId_TH));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceHeaderTmp, InvoiceBranchName_TH));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceHeaderTmp, RemarkTxt_TH));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceHeaderTmp, AdjustmentDetailsTxt_TH));
+                break;
+        }
+        
+        //-- Add Customer primary email.
+        CustTable custTable = CustTable::find(_header.CustAccountNum);
+        _addingRecord.addCalculatedField('CustomerEmail', custTable.email());
+        
+        //-- Add Custom Fields defined on CustTable, if any.
+        // Custom Fields: https://docs.microsoft.com/en-us/dynamics365/unified-operations/fin-and-ops/get-started/user-defined-fields
+        DocCustomFieldsHelper::tryAddAllCustomFieldsToDataRecord(custTable, _addingRecord);
+
+        //-- Add Financial dimensions.
+        ProjInvoiceJour projInvoiceJour = this.projInvoiceJour();
+        _addingRecord.addCalculatedFieldFromEdt(#DefaultDimensionField, extendedTypeStr(DimensionDefault), projInvoiceJour.DefaultDimension);
+
+
+        // TODO: Add here additional fields (or records) to the header record
+        // by using the related data to _header table buffer (PSAProjInvoiceHeaderTmp) or reportContract.
+        // For example, get the related ProjInvoiceJour record and add additional data you need:
+        //ProjInvoiceJour projInvoiceJour = this.projInvoiceJour();
+        //DocXmlRecord jourDataRecord = headerDataRecord.addChildRecord(projInvoiceJour);
+        //jourDataRecord.addField(fieldStr(ProjInvoiceJour, DefaultDimension));
+        //jourDataRecord.addDisplayMethod(tableMethodStr(ProjInvoiceJour, paymentCondition));
+        // Or, add the customer group name:
+        //_addingRecord.addCalculatedField('CustGroup', CustTable::find(_header.CustAccountNum).customerGroup());
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addDataFieldsForLine</Name>
+				<Source><![CDATA[
+    protected void addDataFieldsForLine(DocXmlRecord _addingRecord, PSAProjInvoiceTmp _currentLine)
+    {
+        // Store the first PSAProjInvoiceTmp record into the global variable,
+        // which will be used later in the generateXmlDataSource() method
+        // to add the header-related fields to the header.
+        if (projInvoiceLine.RecId == 0)
+        {
+            buf2Buf(_currentLine, projInvoiceLine);
+            projInvoiceLIne.RecId = _currentLine.RecId;
+        }
+
+        // Populate the line field TransDate with the proper value, which does not get populated in the SSRS data provider class PSAProjInvoiceDP.
+        switch (_currentLine.SourceTableId_DR)
+        {
+            case tableNum(ProjInvoiceEmpl):
+                ProjInvoiceEmpl projInvoiceEmpl = this.projInvoiceEmpl(_currentline.SourceRecId_DR);
+                _currentLine.TransDate = projInvoiceEmpl.TransDate;
+                break;
+            case tableNum(ProjInvoiceCost):
+                ProjInvoiceCost projInvoiceCost = this.projInvoiceCost(_currentline.SourceRecId_DR);
+                _currentLine.TransDate = projInvoiceCost.TransDate;
+                break;
+            case tableNum(ProjInvoiceItem):
+                ProjInvoiceItem projInvoiceItem = this.projInvoiceItem(_currentline.SourceRecId_DR);
+                _currentLine.TransDate = projInvoiceItem.TransDate;
+                break;
+            case tableNum(ProjInvoiceOnAcc):
+                ProjInvoiceOnAcc projInvoiceOnAcc = this.projInvoiceOnAcc(_currentline.SourceRecId_DR);
+                _currentLine.TransDate = projInvoiceOnAcc.TransDate;
+                break;
+            case tableNum(ProjInvoiceRevenue):
+                ProjInvoiceRevenue projInvoiceRevenue = this.projInvoiceRevenue(_currentline.SourceRecId_DR);
+                _currentLine.TransDate = projInvoiceRevenue.TransDate;
+                break;
+        }
+
+        // Update total sum
+        totalAmount += _currentLine.LineAmount;
+
+        // Rename the record from 'PSAProjInvoiceTmp' to 'PSAProjInvoiceLine'.
+        _addingRecord.setRecordName(#PSAProjInvoiceLine);
+        // Change the label of the record.
+        _addingRecord.setRecordLabel('Project Invoice line'); // NOTE: use literalStr("@LabelID")
+
+        _addingRecord.addAllFieldsExcept([
+                fieldstr(PSAProjInvoiceTmp, CompanyAddress),
+                fieldstr(PSAProjInvoiceTmp, InvoiceAccountVATNum),
+                fieldstr(PSAProjInvoiceTmp, InvoiceVATNumVisibility),
+                fieldstr(PSAProjInvoiceTmp, DocumentHeader),
+                fieldstr(PSAProjInvoiceTmp, DocuRefHeaderVisibility),
+                fieldstr(PSAProjInvoiceTmp, Amount_MY),
+                fieldstr(PSAProjInvoiceTmp, CashDiscAmount_MY),
+                fieldstr(PSAProjInvoiceTmp, GSTReliefItemNumber_MY),
+                fieldstr(PSAProjInvoiceTmp, GSTReliefSchedule_MY),
+                fieldstr(PSAProjInvoiceTmp, GSTSummaryText_MY),
+                fieldstr(PSAProjInvoiceTmp, IsGSTSummary_MY),
+                fieldstr(PSAProjInvoiceTmp, TaxAmount_MY),
+                fieldstr(PSAProjInvoiceTmp, TaxBaseAmount_MY),
+                fieldstr(PSAProjInvoiceTmp, TaxBaseQty_MY),
+                fieldstr(PSAProjInvoiceTmp, RefInvoiceDate_MY),
+                fieldstr(PSAProjInvoiceTmp, RefInvoiceID_MY),
+                fieldstr(PSAProjInvoiceTmp, PKWiUCode_PL),
+                fieldstr(PSAProjInvoiceTmp, GiroType_BE)
+            ]);
+
+        /* COUNTRY REGION RELATED DATA */
+        switch (isoCountryCode)
+        {
+            case #isoMY:
+                _addingRecord.addField(fieldStr(PSAProjInvoiceTmp, Amount_MY));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceTmp, CashDiscAmount_MY));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceTmp, GSTReliefItemNumber_MY));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceTmp, GSTReliefSchedule_MY));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceTmp, GSTSummaryText_MY));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceTmp, IsGSTSummary_MY));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceTmp, TaxAmount_MY));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceTmp, TaxBaseAmount_MY));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceTmp, TaxBaseQty_MY));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceTmp, RefInvoiceDate_MY));
+                _addingRecord.addField(fieldStr(PSAProjInvoiceTmp, RefInvoiceID_MY));
+                break;
+
+            case #isoPL:
+                _addingRecord.addField(fieldStr(PSAProjInvoiceTmp, PKWiUCode_PL));
+                break;
+
+            case #isoBE:
+                _addingRecord.addField(fieldStr(PSAProjInvoiceTmp, GiroType_BE));
+                break;
+        }
+
+        // Add Project email.
+        _addingRecord.addCalculatedField('ProjectEmail', placeholder_projEmail);
+
+
+        // TODO: Add here additional fields from the related ProjInvoiceEmpl, ProjInvoiceCost, ProjInvoiceItem,
+        // ProjInvoiceOnAcc or ProjInvoiceRevenue table (or some other tables).
+        // Use 'keys' fields: psaProjInvoiceTmp.SourceTableId_DR and psaProjInvoiceTmp.SourceRecId_DR.
+        // Note that those fields are filled using the extension of the PSAProjInvoiceDP class: PSAProjInvoiceDP_DR_Extension
+        // that is provided only for app version 8.0 and up.
+        // For example:
+        //if (_currentLine.SourceTableId_DR == tableNum(ProjInvoiceEmpl))
+        //{
+        //    ProjInvoiceEmpl projInvoiceEmpl = this.projInvoiceEmpl(_currentLine.SourceRecId_DR);
+        //    _addingRecord.addCalculatedField('Activity', projInvoiceEmpl.ActivityNumber);
+        //    _addingRecord.addCalculatedFieldFromEdt('DefaultDimension', extendedTypeStr(DimensionDefault), projInvoiceEmpl.DefaultDimension);
+        //}
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addDataFieldsForHeaderExt</Name>
+				<Source><![CDATA[
+    protected void addDataFieldsForHeaderExt(DocXmlRecord _headerExtDataRecord)
+    {
+        _headerExtDataRecord.addField(fieldStr(PSAProjInvoiceTmp, DocumentHeader));
+        _headerExtDataRecord.addField(fieldStr(PSAProjInvoiceTmp, DocuRefHeaderVisibility));
+        _headerExtDataRecord.addField(fieldStr(PSAProjInvoiceTmp, InvoiceAccountVATNum));
+        _headerExtDataRecord.addField(fieldStr(PSAProjInvoiceTmp, InvoiceVATNumVisibility));
+
+        _headerExtDataRecord.addCalculatedField('TotalAmount', totalAmount);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addDataFieldsForRdpTableRecord</Name>
+				<Source><![CDATA[
+    protected void addDataFieldsForRdpTableRecord(DocXmlRecord _addingRecord, Common _rdpTableRecord, TableName _rdpTableName)
+    {
+        if (_rdpTableName == tableStr(PSAProjInvoiceHeaderTmp))
+        {
+            this.addDataFieldsForHeader(_addingRecord, _rdpTableRecord);
+        }
+        else if (_rdpTableName == tableStr(PSAProjInvoiceTmp))
+        {
+            this.addDataFieldsForLine(_addingRecord, _rdpTableRecord);
+        }
+        else if (_rdpTableName == tableStr(PSAProjInvoiceTaxTmp))
+        {
+            super(_addingRecord, _rdpTableRecord, _rdpTableName);
+            _addingRecord.setRecordLabel('Taxes');
+            taxAdded = true;
+        }
+        else
+        {
+            super(_addingRecord, _rdpTableRecord, _rdpTableName);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>skipRdpTableRecord</Name>
+				<Source><![CDATA[
+    protected boolean skipRdpTableRecord(Common _rdpTableRecord, TableName _rdpTableName)
+    {
+        // Skip each record from the ProjInvoiceLocalizationTmp table if isoCountryCode
+        // is not one of the listed countries below.
+        // This means that for these countries, the ProjInvoiceLocalizationTmp table
+        // will not be presented in the report data source.
+        if (tableStr(ProjInvoiceLocalizationTmp) == _rdpTableName)
+        {
+            switch (isoCountryCode)
+            {
+                case #isoLT, #isoHU, #isoCZ, #isoPL:
+                    return false;
+
+                default:
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>generateXmlDataSource</Name>
+				<Source><![CDATA[
+    protected void generateXmlDataSource(DocXmlRecordBuilder _recordBuilder)
+    {
+        DocXmlRecord            headerExtDataRecord, emptyLineDataRecord;
+        PSAProjInvoiceTaxTmp    emptyLine;
+
+        // Build the internal record tree from the built-in report RDP tables.
+        super(_recordBuilder);
+
+        // Add fields from PSAProjInvoiceTmp which should be moved to the header
+        if (projInvoiceLine.RecId != 0)
+        {
+            _recordBuilder.goToTopRecord();
+            headerExtDataRecord = _recordBuilder.addRecord(projInvoiceLine).setSingleRecord(true);
+
+            // Rename the record to PSAProjInvoiceHeaderExt
+            headerExtDataRecord.setRecordName(#PSAProjInvoiceHeaderExt);
+
+            // Change the record label
+            headerExtDataRecord.setRecordLabel('Project invoice header extended');
+
+            // Add "header" fields from the stored line record
+            this.addDataFieldsForHeaderExt(headerExtDataRecord);
+        }
+
+        // If this is design time, add tax line if they haven't been already added.
+        _recordBuilder.goToTopRecord();
+        if (!this.isRuntime())
+        {
+            emptyLine.clear();
+
+            if (!taxAdded)
+            {
+                emptyLineDataRecord = _recordBuilder.addRecord(emptyLine).setRecordLabel('Taxes');
+                emptyLineDataRecord.addAllFields();
+                _recordBuilder.goToTopRecord();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>projInvoiceJour</Name>
+				<Source><![CDATA[
+    protected ProjInvoiceJour projInvoiceJour()
+    {
+        if (!journal)
+        {
+            if (this.isProforma())
+            {
+                journal = this.getProformaJournal();
+            }
+            else
+            {
+                journal = ProjInvoiceJour::findRecId(journalRecId);
+            }
+        }
+
+        return journal;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>projProposalJour</Name>
+				<Source><![CDATA[
+    protected ProjProposalJour projProposalJour()
+    {
+        if (!projProposalJour)
+        {
+            projProposalJour = ProjProposalJour::find(this.projInvoiceJour().ProposalId);
+        }
+
+        return projProposalJour;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>projInvoiceEmpl</Name>
+				<Source><![CDATA[
+    protected ProjInvoiceEmpl projInvoiceEmpl(RecId _projInvoiceEmplRecId)
+    {
+        ProjInvoiceEmpl projInvoiceEmpl;
+        
+        if (this.isProforma())
+        {
+            projInvoiceEmpl = this.getProformaProjInvoiceEmpl(_projInvoiceEmplRecId);
+        }
+        else
+        {
+            projInvoiceEmpl = ProjInvoiceEmpl::findRecId(_projInvoiceEmplRecId);
+        }
+
+        return projInvoiceEmpl;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>projInvoiceCost</Name>
+				<Source><![CDATA[
+    protected ProjInvoiceCost projInvoiceCost(RecId _projInvoiceCostRecId)
+    {
+        ProjInvoiceCost projInvoiceCost;
+        
+        if (this.isProforma())
+        {
+            projInvoiceCost = this.getProformaProjInvoiceCost(_projInvoiceCostRecId);
+        }
+        else
+        {
+            projInvoiceCost = ProjInvoiceCost::findRecId(_projInvoiceCostRecId);
+        }
+
+        return projInvoiceCost;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>projInvoiceItem</Name>
+				<Source><![CDATA[
+    protected ProjInvoiceItem projInvoiceItem(RecId _projInvoiceItemRecId)
+    {
+        ProjInvoiceItem projInvoiceItem;
+        
+        if (this.isProforma())
+        {
+            projInvoiceItem = this.getProformaProjInvoiceItem(_projInvoiceItemRecId);
+        }
+        else
+        {
+            projInvoiceItem = ProjInvoiceItem::findRecId(_projInvoiceItemRecId);
+        }
+
+        return projInvoiceItem;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>projInvoiceOnAcc</Name>
+				<Source><![CDATA[
+    protected ProjInvoiceOnAcc projInvoiceOnAcc(RecId _projInvoiceOnAccRecId)
+    {
+        ProjInvoiceOnAcc projInvoiceOnAcc;
+        
+        if (this.isProforma())
+        {
+            projInvoiceOnAcc = this.getProformaProjInvoiceOnAcc(_projInvoiceOnAccRecId);
+        }
+        else
+        {
+            projInvoiceOnAcc = ProjInvoiceOnAcc::findRecId(_projInvoiceOnAccRecId);
+        }
+
+        return projInvoiceOnAcc;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>projInvoiceRevenue</Name>
+				<Source><![CDATA[
+    protected ProjInvoiceRevenue projInvoiceRevenue(RecId _projInvoiceRevenueRecId)
+    {
+        ProjInvoiceRevenue projInvoiceRevenue;
+        
+        if (this.isProforma())
+        {
+            projInvoiceRevenue = this.getProformaProjInvoiceRevenue(_projInvoiceRevenueRecId);
+        }
+        else
+        {
+            projInvoiceRevenue = ProjInvoiceRevenue::findRecId(_projInvoiceRevenueRecId);
+        }
+
+        return projInvoiceRevenue;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// -- When to use this method?
+    /// If you want to quickly generate DDSP for a sample journal record.
+    /// -- How to run it?
+    /// Set up this class as the startup object in your project.
+    /// -- NOTE
+    /// Please verify all TODOs in the method and make changes if needed.
+    /// </summary>
+    /// <param name = "_args">An instance of the Args class</param>
+    public static void main(Args _args)
+    {
+        ProjInvoiceJour projInvoiceJour;
+
+        // TODO: (1) Select the sample journal record.
+        select firstOnly projInvoiceJour /* where projInvoiceJour.ProjInvoiceId == '000178' */;
+
+        // Add it as the context record, which is going to be printed.
+        Args args = new Args();
+        args.record(projInvoiceJour);
+
+        PSAProjAndContractInvoiceController controller = new PSAProjAndContractInvoiceController();
+
+        // TODO: (2) Change the name SSRS Report Design if needed.
+        controller.parmReportName(PrintMgmtDocType::construct(PrintMgmtDocumentType::ProjectInvoice).getDefaultReportFormat());
+        
+        controller.parmArgs(args);
+        args.parmEnumType(enumNum(PrintCopyOriginal));
+        args.parmEnum(PrintCopyOriginal::OriginalPrint);
+
+        // Set the Docentric Generate DS print destination settings.
+        SRSPrintDestinationSettings pds = controller.parmReportContract().parmPrintSettings();
+        pds.printMediumType(SRSPrintMediumType::GenerateDataSource_DC);
+
+        // TODO: (3) Set Design and Preview languages if needed.
+        pds.parmGenerateDSPrintDestSettings_DC().parmLanguageId(projInvoiceJour.LanguageId);
+        pds.parmGenerateDSPrintDestSettings_DC().parmPreviewLanguages('fr,de,it,es');
+
+        PSAProjPrintInvoice psaProjPrintInvoice = PSAProjPrintInvoice::construct();
+        psaProjPrintInvoice.updatePrinterSettingsPrintInvoice(controller.parmReportContract().parmPrintSettings().pack());
+        args.caller(psaProjPrintInvoice);
+
+        // Call protected method controller.initArgs(args) with reflection
+        new DictClass(classNum(PSAProjAndContractInvoiceController)).callObject(methodStr(PSAProjAndContractInvoiceController, initArgs), controller, args);
+
+        controller.parmExecutionMode(SysOperationExecutionMode::Synchronous);
+        controller.parmShowDialog(false);
+        controller.startOperation();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>
