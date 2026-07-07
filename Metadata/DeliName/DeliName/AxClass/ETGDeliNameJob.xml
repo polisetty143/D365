@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGDeliNameJob</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGDeliNameJob
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args _args)
+    {
+        CustInvoiceJour custInvoiceJour;
+        CustTable       custTable;
+        DirPartyTable   dirPartyTable;
+        
+        int             recordsUpdated = 0;
+        List            recIdList = new List(Types::Int64);
+        ListEnumerator  enumerator;
+
+        info("Starting the highly optimized script for massive data in company o001...");
+
+        changecompany('o001')
+        {
+           
+            while select RecId from custInvoiceJour
+                where custInvoiceJour.OrderAccount != ''
+                join TableId from custTable
+                    where custTable.AccountNum == custInvoiceJour.OrderAccount
+                join Name from dirPartyTable
+                    where dirPartyTable.RecId == custTable.Party
+                       && dirPartyTable.Name != custInvoiceJour.DeliveryName
+            {
+                recIdList.addEnd(custInvoiceJour.RecId);
+            }
+            
+            info(strFmt("Found %1 records that require updating. Processing in safe batches...", recIdList.elements()));
+
+           
+            enumerator = recIdList.getEnumerator();
+            
+            ttsbegin;
+
+            while (enumerator.moveNext())
+            {
+                // Fetch the exact record using its RecId with a lock, and join the name tables again
+                select firstonly forupdate custInvoiceJour
+                    where custInvoiceJour.RecId == enumerator.current()
+                    join Party from custTable
+                        where custTable.AccountNum == custInvoiceJour.OrderAccount
+                    join Name from dirPartyTable
+                        where dirPartyTable.RecId == custTable.Party;
+                
+                // Double check to be absolutely safe
+                if (custInvoiceJour && custInvoiceJour.DeliveryName != dirPartyTable.Name)
+                {
+                    custInvoiceJour.DeliveryName = dirPartyTable.Name;
+                    custInvoiceJour.update();
+                    
+                    recordsUpdated++;
+                    
+                    // Safely commit every 500 records to prevent SQL locks and timeouts
+                    if ((recordsUpdated mod 500) == 0)
+                    {
+                        ttscommit;
+                        ttsbegin; 
+                    }
+                }
+            }
+
+            ttscommit; 
+        }
+
+        info(strFmt("Job completed cleanly. Successfully updated %1 records.", recordsUpdated));
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>
