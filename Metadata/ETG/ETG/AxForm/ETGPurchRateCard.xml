@@ -1,0 +1,3100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxForm xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V6">
+	<Name>ETGPurchRateCard</Name>
+	<SourceCode>
+		<Methods xmlns="">
+			<Method>
+				<Name>classDeclaration</Name>
+				<Source><![CDATA[
+[Form]
+public class ETGPurchRateCard extends FormRun
+{
+    [FormObservable]
+    InventMovement                  movement;
+    [FormObservable]
+    InventTransWMS_Register         inventTransWMS_Register;
+    InventDimCtrl_Frm_Mov_InventWMS inventDimFormSetup;
+
+    QueryBuildRange                 rangeChildType;
+    QueryBuildRange                 rangeChildRefId;
+
+    boolean                         salesReturnMode;
+    SalesLine                       salesReturnLine;
+    PurchLine                       callerPurchLine;
+
+    boolean                         tmpTransCreated;
+    PdsCWFormCtrl_InventTransRegister   cwFormCtrl;
+    boolean                         pdsUseVendUpdated;
+    PdsUpdBatchDate                 pdsBlankDateQuest;
+    boolean                         pdsUpdBlankBatchDate;
+
+    Common                          callerRecord;
+    boolean                         attribValRequired;
+    PdsBatchAttrib                  pdsBatchAttrib;
+
+    #ISOCountryRegionCodes
+    boolean                         countryRegion_RU;
+    PurchParmLine                   callerPurchParmLine;
+    boolean                         calledFromPurchaseOrder, calledFromProductReceipt;
+
+
+
+}
+]]></Source>
+			</Method>
+			<Method>
+				<Name>tmpInventTransWMSSetEnabled</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Delegate raised after <c>TmpInventTransWMS</c> data source is set to enabled.
+    /// </summary>
+    /// <param name = "_fromCreate">Indicates whether the data source is set to enabled during creation process.</param>
+    delegate void tmpInventTransWMSSetEnabled(boolean _fromCreate)
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>activate</Name>
+				<Source><![CDATA[
+    public void activate(boolean _active)
+    {
+        if (#PdsShelfEnabled)
+        {
+            element.pdsShow();
+        }
+
+        super(_active);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>canClose</Name>
+				<Source><![CDATA[
+    public boolean canClose()
+    {
+        boolean ret;
+
+        if (tmpinventTransWMS.RecId)
+        {
+            if (Box::yesNo("Rate card is not applied. If you close this form your changes will not be save. Do you want to continue?" ,
+                DialogButton::Yes) != DialogButton::Yes)
+            {
+                return false;
+            }
+        }
+        ret = super();
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>doRefresh</Name>
+				<Source><![CDATA[
+    void doRefresh()
+    {
+        InventTrans           pmfInventTrans;
+
+        pmfInventTrans = inventTrans.data();
+        inventTrans_ds.research();
+        inventTrans_ds.positionToRecord(pmfInventTrans);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>doResearch</Name>
+				<Source><![CDATA[
+    public void doResearch(boolean _resetTmpInventTransWMS = false)
+    {
+        InventTrans findInventTrans = inventTrans.data();
+
+        inventTrans_ds.research();
+        inventTrans_ds.positionToRecord(findInventTrans);
+
+        tmpInventTransWMS_dS.setEnabled(false);
+
+        if (_resetTmpInventTransWMS)
+        {
+            if (inventTransWMS_Register)
+            {
+                inventTransWMS_Register.makeTableEmpty();
+            }
+
+            tmpInventTransWMS_ds.research();
+        }
+
+        ctrlTransactions.setFocus();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>init</Name>
+				<Source><![CDATA[
+    public void init()
+    {
+
+        super();
+
+        if (!element.args().dataset())
+        {
+            throw error(strFmt("@SYS22678",element.name()));
+        }
+
+        callerRecord = element.args().record();
+
+        if (element.args() && element.args().dataset() == tableNum(PurchLine))
+        {
+            calledFromPurchaseOrder = true;
+            callerPurchLine = element.args().record() as PurchLine;
+            this.canRateCardApply();
+            ETGPurchRateCardApplyRate.visible(true);
+        }
+        if (element.args() && element.args().dataset() == tableNum(PurchParmLine))
+        {
+            calledFromProductReceipt = true;
+            callerPurchParmLine = element.args().record() as PurchParmLine;
+            callerPurchLine     = callerPurchParmLine.purchLine();
+            this.canRateCardApply();
+            ETGPurchRateCardApplyRate.visible(false);
+        }
+
+        this.validateRateCard();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>canRateCardApply</Name>
+				<Source><![CDATA[
+    public void canRateCardApply()
+    {
+        ETGRateCardMaster rateCardMaster;
+
+        if(!callerPurchLine.MatchingAgreementLine)
+        {
+            throw Error(strFmt("Rate card not be applied. Matching agreement line does not exists for purchase order %1 and item %2", callerPurchLine.PurchId, callerPurchLine.ItemId));
+        }
+        //select firstonly RecId from rateCardMaster 
+        //    where rateCardMaster.RefRecId == callerPurchLine.MatchingAgreementLine
+        //    && rateCardMaster.IsConfirmed == NoYes::Yes;
+        //{
+        //    if(!rateCardMaster.RecId)
+        //    {
+        //        throw Error(strFmt("Rate card not be applied. Confirmed rate card master does not exists for purchase order %1 and item %2", callerPurchLine.PurchId, callerPurchLine.ItemId));
+        //    }
+        //}
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateRateCard</Name>
+				<Source><![CDATA[
+    public void validateRateCard()
+    {
+        PurchLine     purchLineLoc;
+
+        select firstonly RecId from purchLineLoc
+                where purchLineLoc.PurchId == callerPurchLine.PurchId
+                    && purchLineLoc.ItemId == callerPurchLine.ItemId
+                    && purchLineLoc.ETGRateCardApplied == NoYes::Yes;
+
+        if(purchLineLoc.RecId)
+        {
+            warning(strFmt("Rate card is already applied for item %1", callerPurchLine.ItemId));
+            element.close();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>inventDimSetupObject</Name>
+				<Source><![CDATA[
+    public Object inventDimSetupObject()
+    {
+        return inventDimFormSetup;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>inventTransWMS_Register</Name>
+				<Source><![CDATA[
+    public InventTransWMS_Register inventTransWMS_Register(boolean _forceNew = false)
+    {
+        if (!inventTransWMS_Register || _forceNew)
+        {
+            inventTransWMS_Register = InventTransWMS_Register::newStandard(tmpInventTransWMS);
+        }
+
+        return inventTransWMS_Register;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>movement</Name>
+				<Source><![CDATA[
+    public InventMovement movement()
+    {
+        if (!movement)
+        {
+            movement = InventTransWMS_Register::inventMovement(element.args().record());
+        }
+
+        return movement;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>pdsFieldEnabled</Name>
+				<Source><![CDATA[
+    public void pdsFieldEnabled()
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>pdsShow</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Determine if PdsDispositionCode and PdsDispositionStatus are visible based on InventBatchId status.
+    /// </summary>
+    void pdsShow()
+    {
+        if (inventoryDimensionsGrid_inventBatchId.visible()==true)
+        {
+            pdsDispositionCode.visible(true);
+            pdsDispositionStatus.visible(true);
+        }
+        else
+        {
+            pdsDispositionCode.visible(false);
+            pdsDispositionStatus.visible(false);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    public void run()
+    {
+        super();
+
+        ctrlTransactions.setFocus();
+
+        tmpInventTransWMS_ds.setEnabled(false);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateDesign</Name>
+				<Source><![CDATA[
+    public void updateDesign(InventDimFormDesignUpdate _mode)
+    {
+        boolean resize;
+
+        if (!movement)
+        {
+            return;
+        }
+
+        switch (_mode)
+        {
+            case InventDimFormDesignUpdate::Init:
+                inventDimFormSetup  = InventDimCtrl_Frm_Mov_InventWMS::newFromFormMovement(element,movement);
+                resize = true;
+                // do continue
+            case InventDimFormDesignUpdate::Active:
+                if (!inventDimFormSetup)
+                {
+                    inventDimFormSetup  = InventDimCtrl_Frm_Mov_InventWMS::newFromFormMovement(element,movement);
+                }
+                this.allowEditingInventoryOwner();
+                inventDimFormSetup.formActiveSetup(movement.inventDimGroupSetup(),movement,inventTrans);
+                inventDimFormSetup.formSetControls(true,resize);
+                break;
+            default:
+                throw error(strFmt("@SYS54195",funcName()));
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>allowEditingInventoryOwner</Name>
+				<Source><![CDATA[
+    private void allowEditingInventoryOwner()
+    {
+       
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>autoTmpCreate</Name>
+				<Source><![CDATA[
+    public void autoTmpCreate(InventTrans _inventTrans)
+    {
+        element.inventTransWMS_Register();
+
+        inventTransWMS_Register.createFromInventTrans(_inventTrans, _inventTrans.inventDim());
+
+        tmpInventTransWMS_ds.executeQuery();
+
+        inventTransOriginMovement_DS.refresh();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>close</Name>
+				<Source><![CDATA[
+    public void close()
+    {
+        
+        super();
+
+        if (callerRecord && FormDataUtil::getFormDataSource(callerRecord))
+        {
+            Common callerRecordBuf;
+            callerRecordBuf.RecId = callerRecord.RecId;
+
+            FormObjectSet callerDS = FormDataUtil::getFormDataSource(callerRecord);
+            callerDS.research(true);
+            callerDS.reread();
+            callerDS.refresh();
+            callerDS.positionToRecord(callerRecordBuf);
+        }
+ 
+        FormRun callerForm = element.args().caller();
+        FormDataSource purchTableDS;
+
+        if (callerForm)
+        {
+            purchTableDS = callerForm.dataSource(
+            formDataSourceStr(PurchTable, PurchTable));
+
+            if (purchTableDS)
+            {
+                purchTableDS.reread();
+                purchTableDS.refresh();
+                purchTableDS.research(true);
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>mustCheckExpiryDate</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Determines if expiry date must be checked.
+    /// </summary>
+    /// <returns>true if expiry date must be checked; otherwise, false.</returns>
+    protected boolean mustCheckExpiryDate()
+    {
+        return #PdsShelfEnabled;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>rateCardCalc</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    private void rateCardCalc()
+    {
+        ETGRateCardMaster rateCardMaster;
+        LineAmount        priceAfterCashDisc, priceAfterDiscPercent;
+        DiscPct           totalDiscPct;
+
+        select firstonly rateCardMaster where rateCardMaster.RateCardId == TmpInventTransWMS.ETGDisplayProductNumber;
+
+        TmpInventTransWMS.ETGRateCardUnitPrice  = TmpInventTransWMS.ETGRateCardUnitPrice;
+        TmpInventTransWMS.InventQty             = TmpInventTransWMS.InventQty;
+        priceAfterCashDisc                      = TmpInventTransWMS.ETGRateCardUnitPrice;
+        priceAfterCashDisc                      = TmpInventTransWMS.ETGRateCardUnitPrice - (rateCardMaster.DiscAmount + callerPurchLine.LineDisc);
+        TmpInventTransWMS.ETGRateCardDiscAmount = rateCardMaster.DiscAmount + callerPurchLine.LineDisc;
+        TmpInventTransWMS.ETGRateCardLineAmount = priceAfterCashDisc * TmpInventTransWMS.InventQty;
+        totalDiscPct                            = rateCardMaster.DiscPct + callerPurchLine.LinePercent;
+        priceAfterDiscPercent                   = priceAfterCashDisc - (priceAfterCashDisc * totalDiscPct) / 100;
+        TmpInventTransWMS.ETGRateCardDiscPct    = rateCardMaster.DiscPct;
+        TmpInventTransWMS.ETGRateCardLineAmount = priceAfterDiscPercent * TmpInventTransWMS.InventQty;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+		<DataSources xmlns="">
+			<DataSource>
+				<Name>InventTrans</Name>
+				<Methods>
+					<Method>
+						<Name>executeQuery</Name>
+						<Source><![CDATA[
+        public void executeQuery()
+        {
+            if (element.movement().transChildType())
+            {
+                rangeChildType.value(queryValue(element.movement().transChildType()));
+                rangeChildRefId.value(queryValue(element.movement().transChildRefId()));
+            }
+            else
+            {
+                rangeChildType.value(queryValue(InventTransChildType::None));
+                rangeChildRefId.value(queryValue(''));
+            }
+
+            super();
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>init</Name>
+						<Source><![CDATA[
+        public void init()
+        {
+            QueryBuildDataSource    qbds;
+
+            super();
+
+            qbds = this.query().dataSourceTable(tableNum(InventTrans));
+            qbds.addRange(fieldNum(InventTrans,StatusIssue)).value(SysQuery::value(StatusIssue::None));
+            qbds.addRange(fieldNum(InventTrans,StatusReceipt)).value(SysQuery::range(StatusReceipt::Registered,StatusReceipt::Ordered));
+
+            qbds.addOrderByField(fieldNum(InventTrans, StatusReceipt), SortOrder::Descending);
+
+            rangeChildType  = qbds.addRange(fieldNum(InventTrans,TransChildType));
+            rangeChildRefId = qbds.addRange(fieldNum(InventTrans,TransChildRefId));
+
+            if (cwFormCtrl)
+            {
+                cwFormCtrl.itemDataSourceInitPost(inventTrans);
+            }
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>active</Name>
+						<Source><![CDATA[
+        public int active()
+        {
+            int ret;
+
+            ret = super();
+
+            element.updateDesign(InventDimFormDesignUpdate::Active);
+         
+            if (!InventTable::find(movement.itemId()).isItemBatchActivated()
+                || inventDim.InventBatchId == '')
+            {
+                ctrlInventBatch.enabled(false);
+            }
+            else
+            {
+                ctrlInventBatch.enabled(inventTrans.RecId);
+            }
+            if (cwFormCtrl)
+            {
+                cwFormCtrl.itemDataSourceActivePost();
+            }
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields />
+			</DataSource>
+			<DataSource>
+				<Name>TmpInventTransWMS</Name>
+				<Methods>
+					<Method>
+						<Name>init</Name>
+						<Source><![CDATA[
+        public void init()
+        {
+            super();
+
+            if (cwFormCtrl)
+            {
+                cwFormCtrl.dataSourceInitPost(tmpInventTransWMS);
+            }
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>write</Name>
+						<Source><![CDATA[
+        public void write()
+        {
+            InventDim   inventDimLocal;
+            boolean     result;
+
+            if (!inventTransWMS_Register)
+            {
+                return;
+            }
+
+            if (cwFormCtrl)
+            {
+                cwFormCtrl.dataSourceWritePre();
+            }
+
+            inventDimLocal                =  InventDim::findOrCreate(tmpInventDim);
+            inventDimLocal.inventBatchId  = InventTable::find(tmpInventTransWMS.ItemId).ETGDefaultBatchNumber;
+            tmpInventTransWMS.InventDimId = InventDim::findOrCreate(inventDimLocal).inventDimId;
+
+            result = inventTransWMS_Register.writeTmpInventTransWMS(tmpInventTransWMS,inventTrans,inventDimLocal);
+
+            tmpInventDim.data(inventDimLocal);
+            tmpInventDim_ds.write();
+
+            if (result)
+            {
+                tmpInventTransWMS_ds.reread();
+
+                inventTrans_ds.research(true);
+
+                inventTransOriginMovement_DS.research();
+            }
+            tmpInventDim_ds.refresh();
+            tmpInventDim_ds.research(true);
+
+            tmpInventTransWMS_ds.refresh();
+            tmpInventTransWMS_ds.research(true);
+
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>delete</Name>
+						<Source><![CDATA[
+        public void delete()
+        {
+            TmpInventTransWMS   tmpInventTransWMSLocal;
+
+            tmpInventTransWMSLocal.data(tmpInventTransWMS);
+
+            super();
+
+            if (inventTransWMS_Register)
+            {
+                inventTransWMS_Register.deleteTmp(tmpInventTransWMSLocal);
+            }
+
+            inventTrans_ds.research();
+
+            inventTransOriginMovement_DS.research();
+
+            tmpInventTransWMS_ds.setEnabled(false);
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>create</Name>
+						<Source><![CDATA[
+        public void create(boolean _append = false)
+        {
+            super(_append);
+
+            if (inventTransWMS_Register)
+            {
+                inventTransWMS_Register.initFromInventTransInventTransOrigin(tmpInventTransWMS,inventTrans,inventTransOriginMovement);
+            }
+
+            tmpInventDim.data(InventDim::find(inventTrans.InventDimId));
+            tmpInventDim_DS.refresh();
+
+            tmpInventTransWMS_ds.setEnabled(true);
+
+            inventTransOriginMovement_DS.research();
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>active</Name>
+						<Source><![CDATA[
+        public int active()
+        {
+            int  ret;
+
+            ret = super();
+
+          //  element.pdsFieldEnabled();
+
+            tmpInventTransWMS_DS.setEnabled(!tmpInventTransWMS.RecId);
+            tmpInventDim_DS.active();
+
+            if (cwFormCtrl)
+            {
+                cwFormCtrl.dataSourceActivePost();
+            }
+
+            pdsBlankDateQuest = PdsUpdateBatchDate::None;
+
+            //tmpInventTransWMS_DS.object(fieldNum(TmpInventTransWMS, ETGRateCardUnitPrice)).allowEdit(false);
+
+            if(ETGCanadaparameters::find().EnableRateCardChanges)
+            {
+                //tmpInventDim_DS.object(fieldNum(InventDim,inventBatchId)).mandatory(true);
+                tmpInventDim_DS.object(fieldNum(InventDim,InventSerialId)).mandatory(true);
+            }
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>setEnabled</Name>
+						<Source><![CDATA[
+        public void setEnabled(boolean _fromCreate)
+        {
+            element.tmpInventTransWMSSetEnabled(_fromCreate);
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>initValue</Name>
+						<Source><![CDATA[
+        public void initValue()
+        {
+            super();
+
+            tmpInventTransWMS.pdsInitFromInventTrans(inventTrans);
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields>
+					<Field>
+						<DataField>ETGDisplayProductNumber</DataField>
+						<Methods>
+							<Method>
+								<Name>lookup</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            /// <param name = "_formControl"></param>
+            /// <param name = "_filterStr"></param>
+            public void lookup(FormControl _formControl, str _filterStr)
+            {
+                Query query = new Query();
+                QueryBuildDataSource qbds;
+                QueryBuildRange qbr, qbr1, qbr2;
+                SysTableLookup  sysTableLookup = SysTableLookup::newParameters(tableNum(ETGRateCardMaster), _formControl);
+
+                qbds = query.addDataSource(tableNum(ETGRateCardMaster));
+                //qbr1  = SysQuery::findOrCreateRange(qbds, fieldNum(ETGRateCardMaster, IsConfirmed));
+                //qbr1.value(queryValue(NoYes::Yes));
+                //qbr1.status(RangeStatus::Hidden);
+
+                qbr2  = SysQuery::findOrCreateRange(qbds, fieldNum(ETGRateCardMaster, RefRecId));
+                qbr2.value(queryValue(callerPurchLine.MatchingAgreementLine));
+                qbr2.status(RangeStatus::Hidden);
+
+                sysTableLookup.addLookupfield(fieldNum(ETGRateCardMaster, RateCardId), true);
+                sysTableLookup.addLookupfield(fieldNum(ETGRateCardMaster, ItemId));
+                sysTableLookup.addLookupfield(fieldNum(ETGRateCardMaster, configId));
+                sysTableLookup.addLookupfield(fieldNum(ETGRateCardMaster, InventSizeId));
+                sysTableLookup.addLookupfield(fieldNum(ETGRateCardMaster, InventColorId));
+                sysTableLookup.addLookupfield(fieldNum(ETGRateCardMaster, InventStyleId));
+                sysTableLookup.addLookupfield(fieldNum(ETGRateCardMaster, DiscPct));
+                sysTableLookup.addLookupfield(fieldNum(ETGRateCardMaster, DiscAmount));
+ 
+                sysTableLookup.parmQuery(query);
+                sysTableLookup.performFormLookup();
+            }
+
+]]></Source>
+							</Method>
+							<Method>
+								<Name>modified</Name>
+								<Source><![CDATA[
+            public void modified()
+            {
+                ETGRateCardMaster rateCardMaster;
+                LineAmount        priceAfterCashDisc, priceAfterDiscPercent;
+                DiscPct           totalDiscPct;
+        
+                super();
+
+                select firstonly rateCardMaster where rateCardMaster.RateCardId == TmpInventTransWMS.ETGDisplayProductNumber;
+
+                if(!rateCardMaster)
+                {
+                    throw error("Rate card details not found");
+                }
+
+                TmpInventTransWMS.ItemId                = rateCardMaster.ItemId;
+                TmpInventTransWMS.ETGRetailVariantId    = rateCardMaster.RetailVariantId;
+                TmpInventDim.configId                   = rateCardMaster.configId;
+                TmpInventDim.InventSizeId               = rateCardMaster.InventSizeId;
+                TmpInventDim.InventColorId              = rateCardMaster.InventColorId;
+                TmpInventDim.InventStyleId              = rateCardMaster.InventStyleId;
+
+                if(ETGcanadaparameters::find().EnableRateCardChanges)
+                {
+                    TmpInventDim.inventSerialId             = InventTable::find(rateCardMaster.ItemId).ETGDefaultSerialNumber;
+                }
+
+                if(callerPurchLine)
+                {
+                    TmpInventTransWMS.ETGRateCardUnitPrice  = callerPurchLine.PurchPrice;
+                    TmpInventTransWMS.InventQty             = callerPurchLine.PurchQty;
+                    priceAfterCashDisc                      = callerPurchLine.PurchPrice;
+                    priceAfterCashDisc                      = callerPurchLine.PurchPrice - (rateCardMaster.DiscAmount + callerPurchLine.LineDisc);
+                    TmpInventTransWMS.ETGRateCardDiscAmount = rateCardMaster.DiscAmount + callerPurchLine.LineDisc;
+                    TmpInventTransWMS.ETGRateCardLineAmount = priceAfterCashDisc * callerPurchLine.PurchQty;
+                    totalDiscPct                            = rateCardMaster.DiscPct + callerPurchLine.LinePercent;
+                    priceAfterDiscPercent                   = priceAfterCashDisc - (priceAfterCashDisc * totalDiscPct) / 100;
+                    TmpInventTransWMS.ETGRateCardDiscPct    = rateCardMaster.DiscPct;
+                    TmpInventTransWMS.ETGRateCardLineAmount = priceAfterDiscPercent * callerPurchLine.PurchQty;
+
+                    //if(rateCardMaster.DiscAmount == 0 && rateCardMaster.DiscPct == 0)
+                    //{
+                    //    TmpInventTransWMS.ETGRateCardDiscAmount = rateCardMaster.DiscAmount + callerPurchLine.LineDisc;
+                    //    TmpInventTransWMS.ETGRateCardLineAmount = priceAfterCashDisc * callerPurchLine.PurchQty;
+                    //}
+                    //else
+                    //{
+                    //    if(rateCardMaster.DiscAmount > 0 || callerPurchLine.LineDisc > 0)
+                    //    {
+                    //        priceAfterCashDisc = callerPurchLine.PurchPrice - (rateCardMaster.DiscAmount + callerPurchLine.LineDisc);
+                    //        TmpInventTransWMS.ETGRateCardDiscAmount = rateCardMaster.DiscAmount + callerPurchLine.LineDisc;
+                    //        TmpInventTransWMS.ETGRateCardLineAmount = priceAfterCashDisc * callerPurchLine.PurchQty;
+                    //    }
+                    //    if(rateCardMaster.DiscPct > 0 || callerPurchLine.LinePercent > 0)
+                    //    {
+                    //        totalDiscPct                            = rateCardMaster.DiscPct + callerPurchLine.LinePercent;
+                    //        priceAfterDiscPercent                   = priceAfterCashDisc - (priceAfterCashDisc * totalDiscPct) / 100;
+                    //        TmpInventTransWMS.ETGRateCardDiscPct    = rateCardMaster.DiscPct;
+                    //        TmpInventTransWMS.ETGRateCardLineAmount = priceAfterDiscPercent * callerPurchLine.PurchQty;
+                    //    }
+                    //}
+                }
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>ETGRateCardDiscAmount</DataField>
+						<Methods>
+							<Method>
+								<Name>modified</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            public void modified()
+            {
+                //ETGRateCardMaster rateCardMaster;
+                //LineAmount        priceAfterCashDisc, priceAfterDiscPercent;
+                //DiscPct           totalDiscPct;
+        
+                super();
+
+                element.rateCardCalc();
+                ////start commented 09-feb-26
+                //select firstonly rateCardMaster where rateCardMaster.RateCardId == TmpInventTransWMS.ETGDisplayProductNumber;
+
+                //TmpInventTransWMS.ETGRateCardUnitPrice  = callerPurchLine.PurchPrice;
+                //TmpInventTransWMS.InventQty             = callerPurchLine.PurchQty;
+                //priceAfterCashDisc                      = callerPurchLine.PurchPrice;
+                //priceAfterCashDisc                      = callerPurchLine.PurchPrice - (rateCardMaster.DiscAmount + callerPurchLine.LineDisc);
+                //TmpInventTransWMS.ETGRateCardDiscAmount = rateCardMaster.DiscAmount + callerPurchLine.LineDisc;
+                //TmpInventTransWMS.ETGRateCardLineAmount = priceAfterCashDisc * callerPurchLine.PurchQty;
+                //totalDiscPct                            = rateCardMaster.DiscPct + callerPurchLine.LinePercent;
+                //priceAfterDiscPercent                   = priceAfterCashDisc - (priceAfterCashDisc * totalDiscPct) / 100;
+                //TmpInventTransWMS.ETGRateCardDiscPct    = rateCardMaster.DiscPct;
+                //TmpInventTransWMS.ETGRateCardLineAmount = priceAfterDiscPercent * callerPurchLine.PurchQty;
+                ////end commented 09-feb-26
+
+                //TmpInventTransWMS.ETGRateCardUnitPrice  = callerPurchLine.PurchPrice;
+                //TmpInventTransWMS.InventQty             = callerPurchLine.QtyOrdered;
+
+                //priceAfterCashDisc = callerPurchLine.PurchPrice;
+                //if(rateCardMaster.DiscAmount > 0 || callerPurchLine.LineDisc > 0)
+                //{
+                //    priceAfterCashDisc = callerPurchLine.PurchPrice - (rateCardMaster.DiscAmount + callerPurchLine.LineDisc);
+                //    TmpInventTransWMS.ETGRateCardDiscAmount = rateCardMaster.DiscAmount + callerPurchLine.LineDisc;
+                //    TmpInventTransWMS.ETGRateCardLineAmount = priceAfterCashDisc * callerPurchLine.PurchQty;
+                //}
+                //if(rateCardMaster.DiscPct > 0 || callerPurchLine.LinePercent > 0)
+                //{
+                //    totalDiscPct                            = rateCardMaster.DiscPct + callerPurchLine.LinePercent;
+                //    priceAfterDiscPercent                   = priceAfterCashDisc - (priceAfterCashDisc * totalDiscPct) / 100;
+                //    TmpInventTransWMS.ETGRateCardDiscPct    = rateCardMaster.DiscPct;
+                //    TmpInventTransWMS.ETGRateCardLineAmount = priceAfterDiscPercent * callerPurchLine.PurchQty;
+                //}
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>ETGRateCardDiscPct</DataField>
+						<Methods>
+							<Method>
+								<Name>modified</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            public void modified()
+            {
+                //ETGRateCardMaster rateCardMaster;
+                //LineAmount        priceAfterCashDisc, priceAfterDiscPercent;
+                //DiscPct           totalDiscPct;
+        
+                super();
+
+                element.rateCardCalc();
+
+                //select firstonly rateCardMaster where rateCardMaster.RateCardId == TmpInventTransWMS.ETGDisplayProductNumber;
+
+                //TmpInventTransWMS.ETGRateCardUnitPrice  =  TmpInventTransWMS.ETGRateCardUnitPrice;
+                //TmpInventTransWMS.InventQty              =  TmpInventTransWMS.InventQty;
+                //priceAfterCashDisc                      = TmpInventTransWMS.ETGRateCardUnitPrice;
+                //priceAfterCashDisc                      = TmpInventTransWMS.ETGRateCardUnitPrice - (rateCardMaster.DiscAmount + callerPurchLine.LineDisc);
+                //TmpInventTransWMS.ETGRateCardDiscAmount = rateCardMaster.DiscAmount + callerPurchLine.LineDisc;
+                //TmpInventTransWMS.ETGRateCardLineAmount = priceAfterCashDisc * TmpInventTransWMS.InventQty;
+                //totalDiscPct                            = rateCardMaster.DiscPct + callerPurchLine.LinePercent;
+                //priceAfterDiscPercent                   = priceAfterCashDisc - (priceAfterCashDisc * totalDiscPct) / 100;
+                //TmpInventTransWMS.ETGRateCardDiscPct    = rateCardMaster.DiscPct;
+                //TmpInventTransWMS.ETGRateCardLineAmount = priceAfterDiscPercent * TmpInventTransWMS.InventQty;
+
+                //TmpInventTransWMS.ETGRateCardUnitPrice  =  TmpInventTransWMS.ETGRateCardUnitPrice;// callerPurchLine.PurchPrice;
+                //TmpInventTransWMS.InventQty              =  TmpInventTransWMS.InventQty;//callerPurchLine.PurchQty;
+                //priceAfterCashDisc                      = TmpInventTransWMS.ETGRateCardUnitPrice;//callerPurchLine.PurchPrice;
+                //priceAfterCashDisc                      = callerPurchLine.PurchPrice - (rateCardMaster.DiscAmount + callerPurchLine.LineDisc);
+                //TmpInventTransWMS.ETGRateCardDiscAmount = rateCardMaster.DiscAmount + callerPurchLine.LineDisc;
+                //TmpInventTransWMS.ETGRateCardLineAmount = priceAfterCashDisc * callerPurchLine.PurchQty;
+                //totalDiscPct                            = rateCardMaster.DiscPct + callerPurchLine.LinePercent;
+                //priceAfterDiscPercent                   = priceAfterCashDisc - (priceAfterCashDisc * totalDiscPct) / 100;
+                //TmpInventTransWMS.ETGRateCardDiscPct    = rateCardMaster.DiscPct;
+                //TmpInventTransWMS.ETGRateCardLineAmount = priceAfterDiscPercent * callerPurchLine.PurchQty;
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>ETGRateCardUnitPrice</DataField>
+						<Methods>
+							<Method>
+								<Name>modified</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            public void modified()
+            {
+                super();
+
+                //CS - Abhinav - Unit price modified 
+                if(ETGCanadaParameters::find().EnableRateCardChanges)
+                {
+                    element.rateCardCalc();
+                }
+                //CE
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>InventQty</DataField>
+						<Methods>
+							<Method>
+								<Name>modified</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            public void modified()
+            {
+                super();
+
+                element.rateCardCalc();
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+				</Fields>
+			</DataSource>
+			<DataSource>
+				<Name>TmpInventDim</Name>
+				<Methods>
+					<Method>
+						<Name>initValue</Name>
+						<Source><![CDATA[
+        public void initValue()
+        {
+            tmpInventDim.data(InventDim::find(inventTrans.InventDimId));
+            super();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields>
+					<Field>
+						<DataField>inventBatchId</DataField>
+						<Methods>
+							<Method>
+								<Name>modified</Name>
+								<Source><![CDATA[
+            public void modified()
+            {
+                InventBatch inventBatch;
+
+                super();
+
+                if (InventTable::isPotencyItem(TmpInventTransWMS.ItemId))
+                {
+                    inventBatch = InventBatch::find(TmpInventDim.inventBatchId, TmpInventTransWMS.ItemId);
+                }
+            }
+
+]]></Source>
+							</Method>
+							<Method>
+								<Name>validate</Name>
+								<Source><![CDATA[
+            public boolean validate()
+            {
+                boolean ret = true;
+
+                ret = ret && super();
+
+                return ret;
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+				</Fields>
+			</DataSource>
+			<DataSource>
+				<Name>InventTransOriginMovement</Name>
+				<Methods>
+					<Method>
+						<Name>init</Name>
+						<Source><![CDATA[
+        public void init()
+        {
+            super();
+            inventTransOriginMovement_DS.query().dataSourceTable(tableNum(InventTransOrigin)).clearDynalinks();
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>linkActive</Name>
+						<Source><![CDATA[
+        public void linkActive()
+        {
+            movement = null;
+            movement = element.movement();
+
+            if (inventTransWMS_Register)
+            {
+                inventTransWMS_Register.makeTableEmpty();
+            }
+            element.inventTransWMS_Register(true);
+
+            tmpInventTransWMS_DS.executeQuery();
+
+            element.updateDesign(InventDimFormDesignUpdate::Init);
+            createTransSerialNumber.enabled(inventTransWMS_Register && inventTransWMS_Register.canUpdateTransSerialId(inventTrans, movement, inventTransOriginMovement) ? true : false);
+            interCompany.enabled(inventTransWMS_Register && inventTransOriginMovement.interCompanyOrder());
+            super();
+
+            //The form is closed if the inventTrans record does not exist.
+            //This scenario could be invoked when scrolling through - to a non-inventoried purchase order line - on the purchase order form.
+            if (!inventTransOriginMovement.RecId)
+            {
+                element.close();
+            }
+            if (#PdsShelfEnabled)
+            {
+                pdsResetDispositionStatus.enabled(InventTable::find(inventTransOriginMovement.ItemId).isItemBatchActivated());
+            }
+
+            if (cwFormCtrl)
+            {
+                cwFormCtrl.itemDataSourceActivePost();
+            }
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>registerRemain</Name>
+						<Source><![CDATA[
+        public display InventQtyRegisterRemain registerRemain()
+        {
+            return inventTransWMS_Register ? (inventTransWMS_Register.registerRemain(movement)) : 0;
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>ordered</Name>
+						<Source><![CDATA[
+        public display InventQtyOrdered ordered()
+        {
+            return element.movement() ? element.movement().transIdSum().ordered() : 0;
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>executeQuery</Name>
+						<Source><![CDATA[
+        public void executeQuery()
+        {
+            InventTransferLine      inventTransferLine;
+            InventTransferJourLine  inventTransferJourLine;
+            QueryBuildDataSource    qbds;
+            QueryBuildRange         qbr;
+
+            qbds = inventTransOriginMovement_DS.query().dataSourceTable(tableNum(InventTransOrigin));
+            qbr = SysQuery::findOrCreateRange(qbds, fieldNum(InventTransOrigin,RecId));
+
+            switch (element.args().dataset())
+            {
+                case tableNum(InventTransferLine):
+                    inventTransferLine = element.args().record() as InventTransferLine;
+                    qbds.clearDynalinks();
+                    qbr.value(queryValue(InventTransOriginTransferReceive::findInventTransOriginId(
+                        inventTransferLine.DataAreaId,
+                        inventTransferLine.TransferId,
+                        inventTransferLine.LineNum)));
+                    break;
+                case tableNum(InventTransferJourLine):
+                    inventTransferJourLine = element.args().record() as InventTransferJourLine;
+                    qbds.clearDynalinks();
+                    qbr.value(queryValue(InventTransOriginJournalTransReceipt::findInventTransOriginId(
+                        inventTransferJourLine.DataAreaId,
+                        inventTransferJourLine.TransferId,
+                        inventTransferLine.LineNum)));
+                    break;
+                default:
+                    InventTransFormHelper::formQueryPreExecute(
+                        inventTransOriginMovement_DS,
+                        inventTransExists_DS,
+                        element.args());
+                    break;
+            }
+
+            super();
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>inventUnit</Name>
+						<Source><![CDATA[
+        display UnitIDInventory inventUnit()
+        {
+            return InventTableModule::find(InventTransOriginMovement.ItemId, ModuleInventPurchSales::Invent).UnitId;
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields />
+			</DataSource>
+			<DataSource>
+				<Name>InventTransExists</Name>
+				<Methods>
+					<Method>
+						<Name>init</Name>
+						<Source><![CDATA[
+        public void init()
+        {
+            QueryBuildDataSource    qbds;
+
+            super();
+
+            inventTransExists_DS.query().dataSourceTable(tableNum(InventTrans)).clearDynalinks();
+
+            InventTransFormHelper::formQueryAddDynalink(
+                inventTransOriginMovement_DS,
+                inventTransExists_DS,
+                element.args());
+
+            qbds = this.query().dataSourceTable(tableNum(InventTrans));
+            qbds.addRange(fieldNum(InventTrans, StatusIssue)).value('0');
+
+            if (element.args().dataset() == tableNum(InventQuarantineOrder))
+            {
+                qbds.addRange(fieldNum(InventTrans,StatusReceipt)).value(SysQuery::range(StatusReceipt::Registered,StatusReceipt::QuotationReceipt));
+            }
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields />
+			</DataSource>
+		</DataSources>
+		<DataControls xmlns="">
+			<Control>
+				<Name>AddRegistrationLinesButton</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        public void clicked()
+        {
+            InventTrans marked = inventTrans_ds.getFirst(1);
+
+            if (marked)
+            {
+                do
+                {
+                    element.autoTmpCreate(marked);
+
+                    marked = inventTrans_ds.getNext();
+                }
+                while (marked);
+            }
+            else
+            {
+                element.autoTmpCreate(inventTrans);
+            }
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ETGPurchRateCardApplyRate</Name>
+				<Type>MenuFunctionButton</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        public void clicked()
+        {
+            TmpInventDim_ds.write();
+
+            //CS - Abhinav - Validate rate card lines with elevator recceipt
+            Purchtable PurchTableCheck = callerPurchLine.purchTable();
+            if(ETGCanadaParameters::find().EnableRateCardChanges && PurchTableCheck.ETGElevatorReceiptNumber)
+            {
+                TmpInventTransWMS_ds.write();
+                this.validateRateCardItemsWithElevatorReceipt(callerPurchLine,TmpInventTransWMS_ds);
+            }
+            //CE
+
+            ETGPurchRateCardUtil obj = ETGPurchRateCardUtil::construct();
+            obj.parmPurchLine(callerPurchLine);
+            obj.parmPurchParmLine(callerPurchParmLine);
+            obj.parmInventDim(TmpInventDim);
+            obj.parmFormDataSource(TmpInventTransWMS_ds);
+            obj.parmCalledFromProductReceipt(calledFromProductReceipt);
+            obj.run();
+
+            element.close();
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>validateRateCardItemsWithElevatorReceipt</Name>
+						<Source><![CDATA[
+        // CS - Abhinav - Validate rate card lines
+        public void validateRateCardItemsWithElevatorReceipt(PurchLine _purchLine,FormDataSource fds)
+        {
+            PurchTable                          purchTable = _purchLine.purchTable();
+            TmpInventTransWMS                   inventTransWMS,inventTransWMSLoop;
+            DataAreaId                          CurrentCompany = curExt();
+
+            changecompany(purchTable.ETGERNEntity)
+            {
+                ETGElevatorReceiptGrainItemTable    etgElevatorReceiptGrainItemTable;
+                ETGElevatorReceiptSplitsItemTable   etgElevatorReceiptSplitsItemTable;
+                ETGElevatorReceiptTable             etgElevatorReceiptTable;
+
+                select firstonly etgElevatorReceiptTable
+                    where etgElevatorReceiptTable.ElevatorReceiptNumber == purchTable.ETGElevatorReceiptNumber;
+
+                //Check if all grain items selected if any
+                while select etgElevatorReceiptGrainItemTable
+                    where etgElevatorReceiptGrainItemTable.ElevatorReceiptNumber == purchTable.ETGElevatorReceiptNumber
+                {
+                    changecompany(CurrentCompany)
+                    {
+                        inventTransWMS = fds.getFirst() as TmpInventTransWMS;
+
+                        while(inventTransWMS.ItemId)
+                        {
+                            if(inventTransWMS.ItemId == etgElevatorReceiptGrainItemTable.ItemId)
+                            {
+                                break;
+                            }
+                            inventTransWMS = fds.getNext() as TmpInventTransWMS;
+                        }
+
+                        if(!inventTransWMS.ItemId)
+                        {
+                            throw error(strFmt("@ETG_New:GrainItemRateCardValidation",etgElevatorReceiptGrainItemTable.ItemId,purchTable.ETGElevatorReceiptNumber));
+                        }
+                        else
+                        {
+                            if(inventTransWMS.InventQty != decround(etgElevatorReceiptGrainItemTable.GrainQty, 3))
+                            {
+                                throw error(strFmt("@ETG_New:RateCardERNQtyValidation",etgElevatorReceiptGrainItemTable.ItemId,purchTable.ETGElevatorReceiptNumber));
+                            }
+                        }
+                    } 
+                }
+
+                //Check if all splits items selected if any
+                while select etgElevatorReceiptSplitsItemTable
+                    where etgElevatorReceiptSplitsItemTable.ElevatorReceiptNumber == purchTable.ETGElevatorReceiptNumber
+                {
+                    changecompany(CurrentCompany)
+                    {
+
+                        inventTransWMS = fds.getFirst() as TmpInventTransWMS;
+
+                        while(inventTransWMS.ItemId)
+                        {
+                            if(inventTransWMS.ItemId == etgElevatorReceiptSplitsItemTable.ItemId)
+                            {
+                                break;
+                            }
+                            inventTransWMS = fds.getNext() as TmpInventTransWMS;
+                        }
+
+                        if(!inventTransWMS.ItemId)
+                        {
+                            throw error(strFmt("@ETG_New:SplitsItemRateCardValidation",etgElevatorReceiptSplitsItemTable.ItemId,purchTable.ETGElevatorReceiptNumber));
+                        }
+                        else
+                        {
+                            if(inventTransWMS.InventQty != decround(((etgElevatorReceiptTable.GrainUnloadedWeight * etgElevatorReceiptSplitsItemTable.SplitsPercentage ) / 100),3))
+                            {
+                                throw error(strFmt("@ETG_New:RateCardERNQtyValidation",etgElevatorReceiptSplitsItemTable.ItemId,purchTable.ETGElevatorReceiptNumber));
+                            }
+                        }
+                    }
+                }
+
+                //Check if dockage item is selected if any
+
+                if(etgElevatorReceiptTable.DockageGrain)
+                {
+                    changecompany(CurrentCompany)
+                    {
+                        inventTransWMS = fds.getFirst() as TmpInventTransWMS;
+
+                        while(inventTransWMS.ItemId)
+                        {
+                            if(inventTransWMS.ItemId == etgElevatorReceiptTable.DockageGrain)
+                            {
+                                break;
+                            }
+                            inventTransWMS = fds.getNext() as TmpInventTransWMS;
+                        }
+
+                        if(!inventTransWMS.ItemId)
+                        {
+                            throw error(strFmt("@ETG_New:DockageItemrateCardValidation",etgElevatorReceiptTable.DockageGrain,purchTable.ETGElevatorReceiptNumber));
+                        }
+                        else
+                        {
+                            if(inventTransWMS.InventQty != decround(etgElevatorReceiptTable.DockageWeight,3))
+                            {
+                                throw error(strFmt("@ETG_New:RateCardERNQtyValidation",etgElevatorReceiptTable.DockageGrain,purchTable.ETGElevatorReceiptNumber));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        //CE - Abhinav
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+		</DataControls>
+		<Members xmlns="" />
+	</SourceCode>
+	<DataSources>
+		<AxFormDataSource xmlns="">
+			<Name>InventDim</Name>
+			<Table>InventDim</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>configId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>createdDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>dataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventBatchId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventColorId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventDimId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventGtdId_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventLocationId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventOwnerId_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventProfileId_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventSerialId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventSiteId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventSizeId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventStatusId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventStyleId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventVersionId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LicensePlateId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>modifiedBy</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>modifiedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SHA1Hash</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>wMSLocationId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>wMSPalletId</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<DelayActive>No</DelayActive>
+			<JoinSource>InventTrans</JoinSource>
+			<LinkType>InnerJoin</LinkType>
+			<AllowCreate>No</AllowCreate>
+			<AllowDelete>No</AllowDelete>
+			<AllowEdit>No</AllowEdit>
+			<InsertAtEnd>No</InsertAtEnd>
+			<InsertIfEmpty>No</InsertIfEmpty>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+		<AxFormDataSource xmlns="">
+			<Name>InventTrans</Name>
+			<Table>InventTrans</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>ActivityNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountAdjustment</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountOperations</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountPhysical</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountPosted</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountSecCurAdjustment_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountSecCurPhysical_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountSecCurPosted_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountSettled</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountSettledSecCur_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountStd</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountStdSecCur_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CurrencyCode</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>dataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DateClosed</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DateClosedSecCur_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DateExpected</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DateFinancial</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DateInvent</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DatePhysical</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DateStatus</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>GroupRefId_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>GroupRefType_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InterCompanyInventDimTransferred</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventDimFixed</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventDimId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimIdSales_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventTransOrigin</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventTransOriginDelivery_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventTransOriginSales_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventTransOriginTransit_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InvoiceId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InvoiceReturned</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ItemId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>MarkingRefInventTransOrigin</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>modifiedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PackingSlipId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PackingSlipReturned</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PdsCWQty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PdsCWSettled</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PickingRouteID</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ProjAdjustRefId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ProjCategoryId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ProjId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Qty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>QtySettled</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>QtySettledSecCur_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ReturnInventTransOrigin</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RevenueAmountPhysical</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShippingDateConfirmed</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShippingDateRequested</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>StatusIssue</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>StatusReceipt</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Storno_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>StornoPhysical_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TaxAmountPhysical</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TimeExpected</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TransChildRefId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TransChildType</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ValueOpen</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ValueOpenSecCur_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Voucher</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>VoucherPhysical</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<DelayActive>No</DelayActive>
+			<JoinSource>InventTransOriginMovement</JoinSource>
+			<AllowCreate>No</AllowCreate>
+			<AllowDelete>No</AllowDelete>
+			<InsertAtEnd>No</InsertAtEnd>
+			<InsertIfEmpty>No</InsertIfEmpty>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+		<AxFormDataSource xmlns="">
+			<Name>TmpInventTransWMS</Name>
+			<Table>TmpInventTransWMS</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>dataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGDisplayProductNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGRateCardDiscAmount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGRateCardDiscPct</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGRateCardLineAmount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<AllowEdit>No</AllowEdit>
+					<DataField>ETGRateCardUnitPrice</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventQty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventTrans</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventTransOrigin</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ItemId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LineNum</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PDSBaseValue</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PdsCountryOfOrigin1</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PdsCountryOfOrigin2</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PdsCWQty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PdsUpdateBatchDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PdsUseVendBatchDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PdsUseVendBatchExp</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PdsVendBatchDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PdsVendBatchId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PdsVendExpiryDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ReferenceCategory</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ReferenceId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>UnitId</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<LinkType>Passive</LinkType>
+			<CounterField>LineNum</CounterField>
+			<InsertIfEmpty>No</InsertIfEmpty>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+		<AxFormDataSource xmlns="">
+			<Name>TmpInventDim</Name>
+			<Table>InventDim</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>configId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>createdDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>dataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventBatchId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventColorId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventDimId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventGtdId_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventLocationId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventOwnerId_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventProfileId_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventSerialId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventSiteId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventSizeId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventStatusId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventStyleId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventVersionId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LicensePlateId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>modifiedBy</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>modifiedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SHA1Hash</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>wMSLocationId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>wMSPalletId</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<DelayActive>No</DelayActive>
+			<JoinSource>TmpInventTransWMS</JoinSource>
+			<LinkType>InnerJoin</LinkType>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+		<AxFormDataSource xmlns="">
+			<Name>InventTransOriginMovement</Name>
+			<Table>InventTransOrigin</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>dataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventTransId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ItemId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ItemInventDimId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Party</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ReferenceCategory</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ReferenceId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<AllowCreate>No</AllowCreate>
+			<AllowDelete>No</AllowDelete>
+			<AllowEdit>No</AllowEdit>
+			<InsertAtEnd>No</InsertAtEnd>
+			<InsertIfEmpty>No</InsertIfEmpty>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+		<AxFormDataSource xmlns="">
+			<Name>InventTransExists</Name>
+			<Table>InventTrans</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>ActivityNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountAdjustment</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountOperations</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountPhysical</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountPosted</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountSecCurAdjustment_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountSecCurPhysical_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountSecCurPosted_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountSettled</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountSettledSecCur_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountStd</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmountStdSecCur_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CurrencyCode</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>dataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DateClosed</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DateClosedSecCur_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DateExpected</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DateFinancial</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DateInvent</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DatePhysical</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DateStatus</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>GroupRefId_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>GroupRefType_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InterCompanyInventDimTransferred</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventDimFixed</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventDimId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimIdSales_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventTransOrigin</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventTransOriginDelivery_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventTransOriginSales_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventTransOriginTransit_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InvoiceId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InvoiceReturned</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ItemId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>MarkingRefInventTransOrigin</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>modifiedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PackingSlipId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PackingSlipReturned</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PdsCWQty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PdsCWSettled</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PickingRouteID</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ProjAdjustRefId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ProjCategoryId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ProjId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Qty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>QtySettled</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>QtySettledSecCur_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ReturnInventTransOrigin</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RevenueAmountPhysical</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShippingDateConfirmed</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShippingDateRequested</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>StatusIssue</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>StatusReceipt</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Storno_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>StornoPhysical_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TaxAmountPhysical</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TimeExpected</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TransChildRefId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TransChildType</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ValueOpen</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ValueOpenSecCur_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Voucher</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>VoucherPhysical</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<JoinSource>InventTransOriginMovement</JoinSource>
+			<LinkType>ExistJoin</LinkType>
+			<AllowCreate>No</AllowCreate>
+			<AllowDelete>No</AllowDelete>
+			<AllowEdit>No</AllowEdit>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+	</DataSources>
+	<Design>
+		<Caption xmlns="">Rate card</Caption>
+		<DialogSize xmlns="">Large</DialogSize>
+		<Height xmlns="">400</Height>
+		<Pattern xmlns="">SimpleDetails-FastTabsContainer</Pattern>
+		<PatternVersion xmlns="">1.4</PatternVersion>
+		<ShowDeleteButton xmlns="">No</ShowDeleteButton>
+		<ShowNewButton xmlns="">No</ShowNewButton>
+		<ViewEditMode xmlns="">Edit</ViewEditMode>
+		<Width xmlns="">0</Width>
+		<WidthMode xmlns="">Column</WidthMode>
+		<Controls xmlns="">
+			<AxFormControl xmlns=""
+				i:type="AxFormActionPaneControl">
+				<Name>ActionBar</Name>
+				<Type>ActionPane</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls />
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGroupControl">
+				<Name>ReferenceGroup</Name>
+				<ElementPosition>429496729</ElementPosition>
+				<FilterExpression>%1</FilterExpression>
+				<Pattern>FieldsFieldGroups</Pattern>
+				<PatternVersion>1.1</PatternVersion>
+				<Top>0</Top>
+				<Type>Group</Type>
+				<VerticalSpacing>-1</VerticalSpacing>
+				<WidthMode>SizeToAvailable</WidthMode>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormComboBoxControl">
+						<Name>InventTransOriginMovement_ReferenceCategory</Name>
+						<ElementPosition>715827882</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<HelpText>@FieldDescriptions_CostManagement:InventTransRegister_InventTransOriginMovement_ReferenceCategory</HelpText>
+						<Type>ComboBox</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ReferenceCategory</DataField>
+						<DataSource>InventTransOriginMovement</DataSource>
+						<Items />
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>InventTransOriginMovement_ReferenceId</Name>
+						<ElementPosition>1073741823</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<HelpText>@FieldDescriptions_CostManagement:InventTransRegister_InventTransOriginMovement_ReferenceId</HelpText>
+						<Type>String</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ReferenceId</DataField>
+						<DataSource>InventTransOriginMovement</DataSource>
+						<LookupButton>Never</LookupButton>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormRealControl">
+						<Name>Ordered</Name>
+						<AllowEdit>No</AllowEdit>
+						<ElementPosition>1431655764</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<HelpText>@FieldDescriptions_CostManagement:InventTransRegister_Ordered</HelpText>
+						<Type>Real</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<FormControlExtension
+							i:nil="true" />
+						<DataMethod>ordered</DataMethod>
+						<DataSource>InventTransOriginMovement</DataSource>
+						<NoOfDecimals>-1</NoOfDecimals>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormRealControl">
+						<Name>RegisterRemain</Name>
+						<AllowEdit>No</AllowEdit>
+						<ElementPosition>1789569705</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<HelpText>@FieldDescriptions_CostManagement:InventTransRegister_RegisterRemain</HelpText>
+						<Type>Real</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<FormControlExtension
+							i:nil="true" />
+						<DataMethod>registerRemain</DataMethod>
+						<DataSource>InventTransOriginMovement</DataSource>
+						<NoOfDecimals>-1</NoOfDecimals>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>UnitId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataMethod>inventUnit</DataMethod>
+						<DataSource>InventTransOriginMovement</DataSource>
+					</AxFormControl>
+				</Controls>
+				<ColumnsMode>Fill</ColumnsMode>
+				<Breakable>No</Breakable>
+				<FrameType>None</FrameType>
+				<Style>DialogContent</Style>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormTabControl">
+				<Name>Tab</Name>
+				<Type>Tab</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>TransactionsTabPage</Name>
+						<Pattern>ToolbarList</Pattern>
+						<PatternVersion>1.2</PatternVersion>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormActionPaneControl">
+								<Name>ActionPane</Name>
+								<ElementPosition>1073741822</ElementPosition>
+								<FilterExpression>%1</FilterExpression>
+								<Type>ActionPane</Type>
+								<VerticalSpacing>-1</VerticalSpacing>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormActionPaneTabControl">
+										<Name>ActionPaneTab</Name>
+										<ElementPosition>1431655764</ElementPosition>
+										<FilterExpression>%1</FilterExpression>
+										<HeightMode>Auto</HeightMode>
+										<Type>ActionPaneTab</Type>
+										<VerticalSpacing>-1</VerticalSpacing>
+										<Visible>No</Visible>
+										<WidthMode>Auto</WidthMode>
+										<FormControlExtension
+											i:nil="true" />
+										<Controls>
+											<AxFormControl xmlns=""
+												i:type="AxFormButtonGroupControl">
+												<Name>ButtonGroup</Name>
+												<ElementPosition>1431655764</ElementPosition>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Left>0</Left>
+												<Type>ButtonGroup</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<Controls>
+													<AxFormControl xmlns=""
+														i:type="AxFormButtonControl">
+														<Name>AddRegistrationLinesButton</Name>
+														<NeededPermission>Delete</NeededPermission>
+														<Type>Button</Type>
+														<FormControlExtension
+															i:nil="true" />
+														<ButtonDisplay>TextOnly</ButtonDisplay>
+														<MultiSelect>Yes</MultiSelect>
+														<Text>@SCM:AddRegisterLine</Text>
+													</AxFormControl>
+													<AxFormControl xmlns=""
+														i:type="AxFormButtonControl">
+														<Name>CreateTransSerialNumber</Name>
+														<AutoDeclaration>Yes</AutoDeclaration>
+														<ElementPosition>858993458</ElementPosition>
+														<FilterExpression>%1</FilterExpression>
+														<HeightMode>Auto</HeightMode>
+														<NeededPermission>Update</NeededPermission>
+														<Type>Button</Type>
+														<VerticalSpacing>-1</VerticalSpacing>
+														<WidthMode>Auto</WidthMode>
+														<FormControlExtension
+															i:nil="true" />
+														<ButtonDisplay>TextOnly</ButtonDisplay>
+														<Text>@SYS18245</Text>
+													</AxFormControl>
+													<AxFormControl xmlns=""
+														i:type="AxFormMenuFunctionButtonControl">
+														<Name>ctrlSplitButton</Name>
+														<AutoDeclaration>Yes</AutoDeclaration>
+														<ElementPosition>1288490187</ElementPosition>
+														<Enabled>No</Enabled>
+														<FilterExpression>%1</FilterExpression>
+														<HeightMode>Auto</HeightMode>
+														<Type>MenuFunctionButton</Type>
+														<VerticalSpacing>-1</VerticalSpacing>
+														<WidthMode>Auto</WidthMode>
+														<FormControlExtension
+															i:nil="true" />
+														<ButtonDisplay>TextOnly</ButtonDisplay>
+														<DataSource>InventTrans</DataSource>
+														<MenuItemName>InventTransSplit</MenuItemName>
+														<MenuItemType>Action</MenuItemType>
+													</AxFormControl>
+													<AxFormControl xmlns=""
+														i:type="AxFormMenuButtonControl">
+														<Name>InterCompany</Name>
+														<AutoDeclaration>Yes</AutoDeclaration>
+														<ConfigurationKey>TradeInterCompany</ConfigurationKey>
+														<ElementPosition>1717986916</ElementPosition>
+														<FilterExpression>%1</FilterExpression>
+														<HeightMode>Auto</HeightMode>
+														<Type>MenuButton</Type>
+														<VerticalSpacing>-1</VerticalSpacing>
+														<WidthMode>Auto</WidthMode>
+														<FormControlExtension
+															i:nil="true" />
+														<Controls>
+															<AxFormControl xmlns=""
+																i:type="AxFormButtonControl">
+																<Name>InterCompanyBatchSerialNumbers</Name>
+																<ConfigurationKey>TradeInterCompany</ConfigurationKey>
+																<ElementPosition>1073741822</ElementPosition>
+																<FilterExpression>%1</FilterExpression>
+																<HeightMode>Auto</HeightMode>
+																<Type>Button</Type>
+																<VerticalSpacing>-1</VerticalSpacing>
+																<WidthMode>Auto</WidthMode>
+																<FormControlExtension
+																	i:nil="true" />
+																<ButtonDisplay>TextOnly</ButtonDisplay>
+																<Text>@SYS98951</Text>
+															</AxFormControl>
+															<AxFormControl xmlns=""
+																i:type="AxFormMenuFunctionButtonControl">
+																<Name>InterCompanyTransferInventDim</Name>
+																<ConfigurationKey>TradeInterCompany</ConfigurationKey>
+																<ElementPosition>1610612733</ElementPosition>
+																<FilterExpression>%1</FilterExpression>
+																<HeightMode>Auto</HeightMode>
+																<Type>MenuFunctionButton</Type>
+																<VerticalSpacing>-1</VerticalSpacing>
+																<WidthMode>Auto</WidthMode>
+																<FormControlExtension
+																	i:nil="true" />
+																<ButtonDisplay>TextOnly</ButtonDisplay>
+																<DataSource>InventTrans</DataSource>
+																<MenuItemName>InterCompanyTransferInventDim</MenuItemName>
+																<MenuItemType>Action</MenuItemType>
+															</AxFormControl>
+														</Controls>
+														<ButtonDisplay>TextOnly</ButtonDisplay>
+														<Text>@SYS74106</Text>
+													</AxFormControl>
+													<AxFormControl xmlns=""
+														i:type="AxFormMenuFunctionButtonControl">
+														<Name>PdsResetDispositionStatus</Name>
+														<AutoDeclaration>Yes</AutoDeclaration>
+														<ElementPosition>2013265918</ElementPosition>
+														<FilterExpression>%1</FilterExpression>
+														<HeightMode>Auto</HeightMode>
+														<Type>MenuFunctionButton</Type>
+														<VerticalSpacing>-1</VerticalSpacing>
+														<WidthMode>Auto</WidthMode>
+														<FormControlExtension
+															i:nil="true" />
+														<ButtonDisplay>TextOnly</ButtonDisplay>
+														<DataSource>InventTrans</DataSource>
+														<MenuItemName>PdsResetDispositionStatus</MenuItemName>
+														<MenuItemType>Action</MenuItemType>
+													</AxFormControl>
+													<AxFormControl xmlns=""
+														i:type="AxFormMenuFunctionButtonControl">
+														<Name>ctrlInventBatch</Name>
+														<AutoDeclaration>Yes</AutoDeclaration>
+														<ElementPosition>2080374782</ElementPosition>
+														<FilterExpression>%1</FilterExpression>
+														<HeightMode>Auto</HeightMode>
+														<Type>MenuFunctionButton</Type>
+														<VerticalSpacing>-1</VerticalSpacing>
+														<WidthMode>Auto</WidthMode>
+														<FormControlExtension
+															i:nil="true" />
+														<ButtonDisplay>TextOnly</ButtonDisplay>
+														<DataSource>InventDim</DataSource>
+														<MenuItemName>InventBatch</MenuItemName>
+														<Text>@PDS1358</Text>
+													</AxFormControl>
+												</Controls>
+												<ArrangeMethod>Vertical</ArrangeMethod>
+											</AxFormControl>
+										</Controls>
+										<AlignChild>No</AlignChild>
+										<AlignChildren>No</AlignChildren>
+										<ArrangeMethod>Vertical</ArrangeMethod>
+									</AxFormControl>
+								</Controls>
+								<AlignChild>No</AlignChild>
+								<AlignChildren>No</AlignChildren>
+								<ArrangeMethod>Vertical</ArrangeMethod>
+								<Style>Strip</Style>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormGridControl">
+								<Name>ctrlTransactions</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<ElementPosition>1610612734</ElementPosition>
+								<FilterExpression>%1</FilterExpression>
+								<Type>Grid</Type>
+								<VerticalSpacing>-1</VerticalSpacing>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormComboBoxControl">
+										<Name>InventTrans_StatusReceipt</Name>
+										<ElementPosition>715827882</ElementPosition>
+										<FilterExpression>%1</FilterExpression>
+										<HeightMode>Auto</HeightMode>
+										<HelpText>@FieldDescriptions_CostManagement:InventTransRegister_InventTrans_StatusReceipt</HelpText>
+										<Type>ComboBox</Type>
+										<VerticalSpacing>-1</VerticalSpacing>
+										<WidthMode>Auto</WidthMode>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>StatusReceipt</DataField>
+										<DataSource>InventTrans</DataSource>
+										<Items />
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormGroupControl">
+										<Name>InventoryDimensionsGrid</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<ElementPosition>1610612734</ElementPosition>
+										<FilterExpression>%1</FilterExpression>
+										<HeightMode>Auto</HeightMode>
+										<Type>Group</Type>
+										<VerticalSpacing>-1</VerticalSpacing>
+										<WidthMode>Auto</WidthMode>
+										<FormControlExtension
+											i:nil="true" />
+										<Controls>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensionsGrid_configId</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>configId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensionsGrid_InventSizeId</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventSizeId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensionsGrid_InventColorId</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventColorId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensionsGrid_InventStyleId</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventStyleId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensionsGrid_InventVersionId</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventVersionId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensionsGrid_InventSiteId</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventSiteId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensionsGrid_InventLocationId</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventLocationId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensionsGrid_inventBatchId</Name>
+												<AutoDeclaration>Yes</AutoDeclaration>
+												<ElementPosition>2113929214</ElementPosition>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>inventBatchId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensionsGrid_wMSLocationId</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>wMSLocationId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensionsGrid_inventSerialId</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>inventSerialId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensionsGrid_InventStatusId</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventStatusId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensionsGrid_LicensePlateId</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>LicensePlateId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensionsGrid_InventOwnerId_RU</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventOwnerId_RU</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensionsGrid_InventProfileId_RU</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventProfileId_RU</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensionsGrid_InventGtdId_RU</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventGtdId_RU</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+										</Controls>
+										<BackgroundColor>WindowBackground</BackgroundColor>
+										<DataGroup>InventoryDimensions</DataGroup>
+										<DataSource>InventDim</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>InventTrans_PdsCWQty</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<ElementPosition>1744830462</ElementPosition>
+										<FilterExpression>%1</FilterExpression>
+										<HeightMode>Auto</HeightMode>
+										<Type>Real</Type>
+										<VerticalSpacing>-1</VerticalSpacing>
+										<WidthMode>Auto</WidthMode>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>PdsCWQty</DataField>
+										<DataSource>InventTrans</DataSource>
+										<NoOfDecimals>-1</NoOfDecimals>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>PdsCWUnitId</Name>
+										<AllowEdit>No</AllowEdit>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<ElementPosition>1767200083</ElementPosition>
+										<FilterExpression>%1</FilterExpression>
+										<HeightMode>Auto</HeightMode>
+										<Type>String</Type>
+										<VerticalSpacing>-1</VerticalSpacing>
+										<WidthMode>Auto</WidthMode>
+										<FormControlExtension
+											i:nil="true" />
+										<DataMethod>pdsCWUnitId</DataMethod>
+										<DataSource>InventTrans</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>InventTrans_Qty</Name>
+										<ElementPosition>1431655764</ElementPosition>
+										<FilterExpression>%1</FilterExpression>
+										<HeightMode>Auto</HeightMode>
+										<HelpText>@FieldDescriptions_CostManagement:InventTransRegister_InventTrans_Qty</HelpText>
+										<Type>Real</Type>
+										<VerticalSpacing>-1</VerticalSpacing>
+										<WidthMode>Auto</WidthMode>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Qty</DataField>
+										<DataSource>InventTrans</DataSource>
+										<NoOfDecimals>-1</NoOfDecimals>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>InventoryUnitId</Name>
+										<ElementPosition>2145386494</ElementPosition>
+										<FilterExpression>%1</FilterExpression>
+										<HeightMode>Auto</HeightMode>
+										<Type>String</Type>
+										<VerticalSpacing>-1</VerticalSpacing>
+										<WidthMode>Auto</WidthMode>
+										<FormControlExtension
+											i:nil="true" />
+										<DataMethod>inventUnit</DataMethod>
+										<DataSource>InventTrans</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>PdsDispositionCode</Name>
+										<AllowEdit>No</AllowEdit>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<ElementPosition>2063597566</ElementPosition>
+										<FilterExpression>%1</FilterExpression>
+										<HeightMode>Auto</HeightMode>
+										<Type>String</Type>
+										<VerticalSpacing>-1</VerticalSpacing>
+										<WidthMode>Auto</WidthMode>
+										<FormControlExtension
+											i:nil="true" />
+										<DataMethod>PdsDispositionCode</DataMethod>
+										<DataSource>InventTrans</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormComboBoxControl">
+										<Name>PdsDispositionStatus</Name>
+										<AllowEdit>No</AllowEdit>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<ElementPosition>2113929214</ElementPosition>
+										<FilterExpression>%1</FilterExpression>
+										<HeightMode>Auto</HeightMode>
+										<Type>ComboBox</Type>
+										<VerticalSpacing>-1</VerticalSpacing>
+										<WidthMode>Auto</WidthMode>
+										<FormControlExtension
+											i:nil="true" />
+										<DataMethod>PdsDispositionStatus</DataMethod>
+										<DataSource>InventTrans</DataSource>
+										<Items />
+									</AxFormControl>
+								</Controls>
+								<DataSource>InventTrans</DataSource>
+							</AxFormControl>
+						</Controls>
+						<Caption>Order lines</Caption>
+						<FastTabExpanded>Yes</FastTabExpanded>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>RegistrationsTabPage</Name>
+						<Pattern>ToolbarList</Pattern>
+						<PatternVersion>1.2</PatternVersion>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormActionPaneControl">
+								<Name>ActionPaneRegisterNow</Name>
+								<ElementPosition>1073741822</ElementPosition>
+								<FilterExpression>%1</FilterExpression>
+								<Type>ActionPane</Type>
+								<VerticalSpacing>-1</VerticalSpacing>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormActionPaneTabControl">
+										<Name>ActionPaneTabRegisterNow</Name>
+										<ElementPosition>1431655764</ElementPosition>
+										<FilterExpression>%1</FilterExpression>
+										<HeightMode>Auto</HeightMode>
+										<Type>ActionPaneTab</Type>
+										<VerticalSpacing>-1</VerticalSpacing>
+										<WidthMode>Auto</WidthMode>
+										<FormControlExtension
+											i:nil="true" />
+										<Controls>
+											<AxFormControl xmlns=""
+												i:type="AxFormButtonGroupControl">
+												<Name>AddRemoveGroup</Name>
+												<ElementPosition>1073741822</ElementPosition>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Left>0</Left>
+												<NeededPermission>Delete</NeededPermission>
+												<Type>ButtonGroup</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<Controls>
+													<AxFormControl xmlns=""
+														i:type="AxFormCommandButtonControl">
+														<Name>AddButton</Name>
+														<ElementPosition>1073741822</ElementPosition>
+														<FilterExpression>%1</FilterExpression>
+														<HeightMode>Auto</HeightMode>
+														<Type>CommandButton</Type>
+														<VerticalSpacing>-1</VerticalSpacing>
+														<WidthMode>Auto</WidthMode>
+														<FormControlExtension
+															i:nil="true" />
+														<ButtonDisplay>TextWithImageLeft</ButtonDisplay>
+														<Command>New</Command>
+														<NormalImage>New</NormalImage>
+														<Primary>Yes</Primary>
+														<Text>@sys60080</Text>
+													</AxFormControl>
+													<AxFormControl xmlns=""
+														i:type="AxFormCommandButtonControl">
+														<Name>RemoveButton</Name>
+														<ElementPosition>1610612733</ElementPosition>
+														<FilterExpression>%1</FilterExpression>
+														<HeightMode>Auto</HeightMode>
+														<Type>CommandButton</Type>
+														<VerticalSpacing>-1</VerticalSpacing>
+														<WidthMode>Auto</WidthMode>
+														<FormControlExtension
+															i:nil="true" />
+														<ButtonDisplay>TextWithImageLeft</ButtonDisplay>
+														<Command>DeleteRecord</Command>
+														<NeedsRecord>Yes</NeedsRecord>
+														<NormalImage>Delete</NormalImage>
+														<Primary>Yes</Primary>
+														<SaveRecord>No</SaveRecord>
+														<Text>@sys26394</Text>
+													</AxFormControl>
+												</Controls>
+												<ArrangeMethod>Vertical</ArrangeMethod>
+												<DataSource>TmpInventTransWMS</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormButtonGroupControl">
+												<Name>ApplyRateCardGroup</Name>
+												<ElementPosition>1610612733</ElementPosition>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Left>0</Left>
+												<Type>ButtonGroup</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<Controls>
+													<AxFormControl xmlns=""
+														i:type="AxFormMenuFunctionButtonControl">
+														<Name>ETGPurchRateCardApplyRate</Name>
+														<AutoDeclaration>Yes</AutoDeclaration>
+														<Type>MenuFunctionButton</Type>
+														<FormControlExtension
+															i:nil="true" />
+														<DataSource>TmpInventTransWMS</DataSource>
+														<MenuItemName>ETGPurchRateCardApplyRate</MenuItemName>
+														<MenuItemType>Action</MenuItemType>
+														<MultiSelect>Yes</MultiSelect>
+													</AxFormControl>
+												</Controls>
+												<ArrangeMethod>Vertical</ArrangeMethod>
+												<DataSource>TmpInventTransWMS</DataSource>
+											</AxFormControl>
+										</Controls>
+										<AlignChild>No</AlignChild>
+										<AlignChildren>No</AlignChildren>
+										<ArrangeMethod>Vertical</ArrangeMethod>
+									</AxFormControl>
+								</Controls>
+								<AlignChild>No</AlignChild>
+								<AlignChildren>No</AlignChildren>
+								<ArrangeMethod>Vertical</ArrangeMethod>
+								<Style>Strip</Style>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormGridControl">
+								<Name>Register</Name>
+								<ElementPosition>1610612734</ElementPosition>
+								<FilterExpression>%1</FilterExpression>
+								<Type>Grid</Type>
+								<VerticalSpacing>-1</VerticalSpacing>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGDisplayProductNumber</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ETGDisplayProductNumber</DataField>
+										<DataSource>TmpInventTransWMS</DataSource>
+										<Label>Rate card Id</Label>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>TmpInventTransWMS_ItemId</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ItemId</DataField>
+										<DataSource>TmpInventTransWMS</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>TmpInventTransWMS_InventQty</Name>
+										<ElementPosition>1610612733</ElementPosition>
+										<FilterExpression>%1</FilterExpression>
+										<HeightMode>Auto</HeightMode>
+										<Type>Real</Type>
+										<VerticalSpacing>-1</VerticalSpacing>
+										<WidthMode>Auto</WidthMode>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>InventQty</DataField>
+										<DataSource>TmpInventTransWMS</DataSource>
+										<Label>Quantity</Label>
+										<NoOfDecimals>-1</NoOfDecimals>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>TmpInventTransWMS_ETGRateCardUnitPrice</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ETGRateCardUnitPrice</DataField>
+										<DataSource>TmpInventTransWMS</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>TmpInventTransWMS_ETGRateCardDiscPct</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ETGRateCardDiscPct</DataField>
+										<DataSource>TmpInventTransWMS</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>TmpInventTransWMS_ETGRateCardDiscAmount</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ETGRateCardDiscAmount</DataField>
+										<DataSource>TmpInventTransWMS</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>TmpInventTransWMS_ETGRateCardLineAmount</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ETGRateCardLineAmount</DataField>
+										<DataSource>TmpInventTransWMS</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormGroupControl">
+										<Name>InventoryDimensions</Name>
+										<ElementPosition>1073741822</ElementPosition>
+										<FilterExpression>%1</FilterExpression>
+										<HeightMode>Auto</HeightMode>
+										<Type>Group</Type>
+										<VerticalSpacing>-1</VerticalSpacing>
+										<WidthMode>Auto</WidthMode>
+										<FormControlExtension
+											i:nil="true" />
+										<Controls>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensions_configId</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>configId</DataField>
+												<DataSource>TmpInventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensions_InventSizeId</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventSizeId</DataField>
+												<DataSource>TmpInventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensions_InventColorId</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventColorId</DataField>
+												<DataSource>TmpInventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensions_InventStyleId</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventStyleId</DataField>
+												<DataSource>TmpInventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensions_InventSiteId</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventSiteId</DataField>
+												<DataSource>TmpInventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensions_InventLocationId</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventLocationId</DataField>
+												<DataSource>TmpInventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensions_wMSLocationId</Name>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>wMSLocationId</DataField>
+												<DataSource>TmpInventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensions_inventBatchId</Name>
+												<AutoDeclaration>Yes</AutoDeclaration>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>inventBatchId</DataField>
+												<DataSource>TmpInventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>InventoryDimensions_inventSerialId</Name>
+												<AutoDeclaration>Yes</AutoDeclaration>
+												<FilterExpression>%1</FilterExpression>
+												<HeightMode>Auto</HeightMode>
+												<Type>String</Type>
+												<VerticalSpacing>-1</VerticalSpacing>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>inventSerialId</DataField>
+												<DataSource>TmpInventDim</DataSource>
+											</AxFormControl>
+										</Controls>
+										<BackgroundColor>WindowBackground</BackgroundColor>
+										<DataSource>TmpInventDim</DataSource>
+									</AxFormControl>
+								</Controls>
+								<DataSource>TmpInventTransWMS</DataSource>
+							</AxFormControl>
+						</Controls>
+						<Caption>Rate card</Caption>
+						<FastTabExpanded>Yes</FastTabExpanded>
+					</AxFormControl>
+				</Controls>
+				<Style>FastTabs</Style>
+			</AxFormControl>
+		</Controls>
+	</Design>
+	<Parts />
+</AxForm>

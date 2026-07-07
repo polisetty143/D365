@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerJournalTransAssetTblStr_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// extension of table <c>LedgerJournalTrans_Asset</c>
+/// </summary>
+[ExtensionOf(tableStr(LedgerJournalTrans_Asset))]
+internal final class ETGLedgerJournalTransAssetTblStr_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>validateWrite</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Ensures that depreciation or depreciation adjustment transactions are not posted with a transaction date earlier than the asset's acquisition date
+    /// </summary>
+    /// <returns>
+    /// true if the record passes all validations and can be written; otherwise, false.
+    /// </returns>
+    public boolean validateWrite()
+    {
+        boolean isValid = next validateWrite();
+
+        if (isValid &&
+            ETGACFParameters::find().EnableUATSmallPoints &&
+            (this.TransType == AssetTransTypeJournal::Depreciation 
+            || this.TransType == AssetTransTypeJournal::DepreciationAdj) &&
+            this.AssetId && this.BookId)
+        {
+            AssetBook          assetBook          = AssetBook::find(this.AssetId, this.BookId);
+            LedgerJournalTrans ledgerJournalTrans = LedgerJournalTrans::findRecId(this.RefRecId, false);
+
+            if (ledgerJournalTrans && ledgerJournalTrans.TransDate < assetBook.AcquisitionDate)
+            {
+                isValid = checkFailed(strFmt("@ETG_New:AcquisitionDateAndTransDateComparison",
+                        ledgerJournalTrans.TransDate, assetBook.AcquisitionDate));
+            }
+        }           
+
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

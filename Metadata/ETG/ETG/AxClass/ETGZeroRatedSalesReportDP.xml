@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGZeroRatedSalesReportDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This is the DP class for report ETGZeroRatedSalesReport.
+/// </summary>
+[SRSReportParameterAttribute(classStr(ETGZeroRatedSalesReportContract))]
+internal final class ETGZeroRatedSalesReportDP extends SRSReportDataProviderBase
+{
+    FromDate                                fromDate;
+    ToDate                                  toDate;
+    List                                    custAccount = new List(Types::String);
+    ETGBusinessSegment                      etgBusinessSegment;
+    ETGConnectionType                       etgConnectionType;
+    List                                    invoiceId = new List(Types::String);
+    ETGZeroRatedSalesReportContract         etgZeroRatedSalesReportContract;
+    ETGZeroRatedSalesTmp                    etgZeroRatedSalesTmp;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getTmpTable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets temporary table
+    /// </summary>
+    /// <returns>ETGZeroRatedSalesTmp temporary table.</returns>
+    [SrsReportDataSetAttribute(tableStr(ETGZeroRatedSalesTmp))]
+    public ETGZeroRatedSalesTmp getTmpTable()
+    {
+        select * from etgZeroRatedSalesTmp;
+        return etgZeroRatedSalesTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Processes the report business logic.
+    /// </summary>
+    public void processReport()
+    {
+        Query                               query;
+        QueryRun                            queryRun;
+        QueryBuildDataSource                queryBuildDataSourceCustInvoiceJour, queryBuildDataSourceCustInvoiceTrans;
+        QueryBuildRange                     queryBuildRange;
+        SalesLine                           salesLine;
+        CustInvoiceJour                     custInvoiceJour;
+        CustPackingSlipJour                 custPackingSlipJour;
+        CustInvoiceTrans                    custInvoiceTrans;
+        CustPackingSlipTrans                custPackingSlipTrans;
+        DirPartyLocation                    dirPartyLocation;
+        TaxRegistration                     taxRegistration;
+        CustTable                           custTable;
+        TaxTrans                            taxTrans;
+        ListIterator                        custListIterator, invoiceListIterator;
+        ListEnumerator                      listEnumerator;
+       
+        etgZeroRatedSalesReportContract = new ETGZeroRatedSalesReportContract();
+        etgZeroRatedSalesReportContract = this.parmDataContract() as ETGZeroRatedSalesReportContract;
+
+        fromDate            = etgZeroRatedSalesReportContract.parmFromDate();
+        toDate              = etgZeroRatedSalesReportContract.parmToDate();
+        custAccount         = etgZeroRatedSalesReportContract.parmCustAccount();
+        etgBusinessSegment  = etgZeroRatedSalesReportContract.parmBusinessSegment();
+        etgConnectionType   = etgZeroRatedSalesReportContract.parmConnectionType();
+        invoiceId           = etgZeroRatedSalesReportContract.parmInvoiceId();
+
+        query = new Query();
+
+        queryBuildDataSourceCustInvoiceJour           = query.addDataSource(tableNum(CustInvoiceJour));
+        queryBuildDataSourceCustInvoiceTrans          = queryBuildDataSourceCustInvoiceJour.addDataSource(tableNum(CustInvoiceTrans));
+        queryBuildDataSourceCustInvoiceTrans.joinMode(JoinMode::InnerJoin);
+        queryBuildDataSourceCustInvoiceTrans.relations(true);
+        queryBuildDataSourceCustInvoiceTrans.addLink(fieldNum(CustInvoiceJour, SalesId), fieldNum(CustInvoiceTrans, SalesId));
+        queryBuildDataSourceCustInvoiceTrans.addLink(fieldNum(CustInvoiceJour, InvoiceId), fieldNum(CustInvoiceTrans, InvoiceId));
+        queryBuildDataSourceCustInvoiceTrans.addLink(fieldNum(CustInvoiceJour, InvoiceDate), fieldNum(CustInvoiceTrans, InvoiceDate));
+
+        query.dataSourceTable(tableNum(CustInvoiceJour)).addRange(fieldNum(CustInvoiceJour, InvoiceDate)).value(queryRange(fromDate, toDate));
+
+        if(custAccount != null)
+        {
+            listEnumerator = custAccount.getEnumerator();
+            while(listEnumerator.moveNext())
+            {
+                queryBuildDataSourceCustInvoiceJour.addRange(fieldNum(CustInvoiceJour, InvoiceAccount)).value(listEnumerator.current());
+            }
+        }
+
+        if(invoiceId != null)
+        {
+            listEnumerator = invoiceId.getEnumerator();
+            while(listEnumerator.moveNext())
+            {
+                queryBuildDataSourceCustInvoiceJour.addRange(fieldNum(CustInvoiceJour, InvoiceId)).value(listEnumerator.current());
+            }
+        }
+
+        if(etgBusinessSegment)
+        {
+            queryBuildRange = queryBuildDataSourceCustInvoiceJour.addRange(fieldNum(CustInvoiceJour, ETGBusinessSegment));
+            queryBuildRange.value(queryValue(etgBusinessSegment));
+        }
+        if(etgConnectionType)
+        {
+            queryBuildRange = queryBuildDataSourceCustInvoiceTrans.addRange(fieldNum(CustInvoiceTrans, ETGConnectionType));
+            queryBuildRange.value(queryValue(etgConnectionType));
+        }
+        queryRun = new QueryRun(query);
+        while(queryRun.next())
+        {
+            etgZeroRatedSalesTmp.clear();
+
+            custInvoiceJour         = queryRun.get(tableNum(CustInvoiceJour));
+            custInvoiceTrans        = queryRun.get(tableNum(CustInvoiceTrans));
+            SalesTable salesTable   = SalesTable::find(custInvoiceJour.SalesId);
+
+            etgZeroRatedSalesTmp.InvoiceDate                = custInvoiceJour.InvoiceDate;
+            etgZeroRatedSalesTmp.InvoiceId                  = custInvoiceJour.InvoiceId;
+            etgZeroRatedSalesTmp.SalesName                  = salesTable.SalesName;
+            etgZeroRatedSalesTmp.ETGBusinessSegment         = custInvoiceJour.ETGBusinessSegment;
+            etgZeroRatedSalesTmp.ETGConnectionType          = custInvoiceTrans.ETGConnectionType;
+            etgZeroRatedSalesTmp.ItemId                     = custInvoiceTrans.ItemId;
+            etgZeroRatedSalesTmp.SalesId                    = custInvoiceJour.SalesId;
+            etgZeroRatedSalesTmp.DescriptionOfGoodsServices = custInvoiceTrans.itemName();
+
+            select registrationNumber from taxRegistration
+                join dirPartyLocation
+                    where taxRegistration.dirPartyLocation == dirPartyLocation.RecId
+                join custTable
+                    where custTable.Party   == dirPartyLocation.Party
+                    && custTable.AccountNum == custInvoiceJour.InvoiceAccount;
+
+            etgZeroRatedSalesTmp.TaxRegistrationNumber = taxRegistration.RegistrationNumber ;
+
+            select  custPackingSlipTrans where custPackingSlipTrans.InventTransId == custInvoiceTrans.InventTransId;
+            etgZeroRatedSalesTmp.ETGExciseDuty = custPackingSlipTrans.ETGExciseDuty;
+
+            select firstonly TaxBaseAmountCur, TaxAmountCur from taxTrans
+                where taxTrans.Voucher         == custInvoiceJour.ledgerVoucher
+                &&    taxTrans.TransDate       == custInvoiceJour.InvoiceDate
+                &&    taxTrans.InventTransId   == custInvoiceTrans.InventTransId;
+
+            if(custInvoiceTrans.TaxItemGroup == '' || custInvoiceTrans.TaxGroup == '')
+            {
+                etgZeroRatedSalesTmp.SourceBaseAmountCur =  custInvoiceTrans.LineAmount; //Line amount
+            }
+            else
+            {
+                etgZeroRatedSalesTmp.SourceBaseAmountCur       = abs(taxTrans.TaxBaseAmountCur); //amount before tax
+                etgZeroRatedSalesTmp.SourceRegulateAmountCur   = abs(taxTrans.TaxAmountCur); // VAT charged
+            }
+
+            etgZeroRatedSalesTmp.Total = etgZeroRatedSalesTmp.SourceBaseAmountCur + custPackingSlipTrans.ETGExciseDuty;
+
+            etgZeroRatedSalesTmp.insert();
+            
+        }
+    
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

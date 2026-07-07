@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesTableCancelButton_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formControlStr(SalesTable, CancelOrderButton))]
+final class ETGSalesTableCancelButton_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>clicked</Name>
+				<Source><![CDATA[
+    public void clicked()
+    {
+        FormControl    control = this;
+        FormRun        formRun;
+        FormDataSource salesTableDS;
+        SalesTable     salesTable;
+        AgreementHeaderHistory       agreementHeaderHistory;
+
+        next clicked();
+
+        formRun = control.formRun();
+        salesTableDS = formRun.dataSource(formDataSourceStr(SalesTable, SalesTable));
+        salesTable = salesTableDS.cursor();
+
+        if (salesTable && salesTable.SalesStatus == SalesStatus::Canceled)//&& salesTable.MatchingAgreement)
+        {
+            if (ETGACFParameters::find().EnableDMSIntegration
+            && BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGDMSRevereSalesAgreementIntegrationEventClass)))
+            {
+                SalesAgreementHeader salesAgreementHeader = SalesAgreementHeader::find(salesTable.MatchingAgreement);
+                select firstonly agreementHeaderHistory
+                        order by RecId desc
+                          where agreementHeaderHistory.AgreementHeader == salesAgreementHeader.RecId;
+
+                str confirmationnumber  = strFmt("%1-%2", salesAgreementHeader.SalesNumberSequence, agreementHeaderHistory.ConfirmationNumber);
+                str formattedDateTime = DateTimeUtil::toStr(agreementHeaderHistory.CreatedDateTime);
+
+                ETGDMSRevereSalesAgreementIntegrationContract contract = new ETGDMSRevereSalesAgreementIntegrationContract();
+
+                contract.parmDealNumber(salesAgreementHeader.ETGDMSDealNumber);
+                contract.parmDataAreaId(curExt());
+                contract.parmOperationType("Sales Order Cancelled");
+                contract.parmActivityName("Sales Order Cancellation");
+                contract.parmDocumentNumber(confirmationnumber);
+                contract.parmDocumentDate(formattedDateTime);
+                contract.parmActivityOwner(salesAgreementHeader.CreatedBy);
+                contract.parmActivityRemarks(strFmt("The Sale order %1 is cancelled",salesTable.SalesId));
+
+                ETGDMSRevereSalesAgreementIntegrationEventClass eventClass = ETGDMSRevereSalesAgreementIntegrationEventClass::newFromContract(contract);
+                eventClass.send();
+            }
+
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

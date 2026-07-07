@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGVendCustPaymJournalTable_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tableStr(CustVendPaymJournalFee))]
+internal final class ETGVendCustPaymJournalTable_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>validateCurrency</Name>
+				<Source><![CDATA[
+    //Receipt voucher currency and background Bank charges curreny in receipt should be the same
+    // Validate currency before modification or posting
+    private void validateCurrency()
+    {
+        LedgerJournalTrans ledgerJournalTrans;
+        if(ETGACFParameters::find().EnableUATSmallPoints == NoYes::No)
+        {
+            return;
+        }
+        select firstonly RecId from ledgerJournalTrans
+            where ledgerJournalTrans.RecId == this.RefRecId
+            && ledgerJournalTrans.CurrencyCode != this.FeeCurrency;
+
+        if (ledgerJournalTrans.RecId)
+        {
+            DialogButton response = Box::yesNo("@ETG_New:CurrencyMismatched1", DialogButton::No);
+
+            if (response == DialogButton::No)
+            {
+                throw Error("@ETG_New:TransactionCanceled");
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateField</Name>
+				<Source><![CDATA[
+    public boolean validateField(fieldId _fieldIdToCheck)
+    {
+        boolean isValid = next validateField(_fieldIdToCheck);
+
+        if (isValid)
+        {
+            switch (_fieldIdToCheck)
+            {
+                case fieldNum(CustVendPaymJournalFee, FeeCurrency):
+                    if (this.FeeCurrency)
+                    {
+                        this.validateCurrency();
+                    }
+                    break;
+            }
+        }
+
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateWrite</Name>
+				<Source><![CDATA[
+    // Validation on posting
+    public boolean validateWrite()
+    {
+        boolean isValid = next validateWrite(); 
+
+        if(isValid)
+        {
+            this.validateCurrency();
+        }
+
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

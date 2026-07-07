@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesTable_EventHandelers</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+final class ETGSalesTable_EventHandelers
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>CreateLinkNew_OnClicked</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(SalesTable, CreateLinkNew), FormControlEventType::Clicked)]
+    public static void CreateLinkNew_OnClicked(FormControl sender, FormControlEventArgs e)
+    {
+        if(ETGACFParameters::find().EnableUATSmallPoints)
+        {
+            FormDataSource salestable_ds = sender.formRun().dataSource(formDataSourceStr(SalesTable, SalesTable));
+            SalesTable     salestable    = salestable_ds.cursor();
+            FormRun        formRun       =   salestable_ds.formRun();
+            if(formHasMethod(formRun,formMethodStr(SalesTable, createAgreementLink)))
+            {
+                formRun.createAgreementLink();
+            }
+
+            AgreementLineReleasedLine   agreementLineReleasedLine;
+            AgreementHeader             agreementheader;
+            CustInvoiceJour             custInvoiceJour;
+            CustInvoiceTrans            custInvoiceTrans;
+            AgreementLine               agreementLine;
+            SalesLine                   salesLine;
+
+            
+            select firstonly agreementHeader
+                      where agreementHeader.RecId == salestable.MatchingAgreement;
+
+           delete_from agreementLineReleasedLine
+                    exists join agreementLine
+                    where agreementLineReleasedLine.AgreementLine == agreementLine.RecId
+                        && agreementLine.Agreement == agreementHeader.RecId
+                        && !agreementLine.IsDeleted
+                        && agreementLineReleasedLine.CustInvoiceTrans != 0;
+
+            while select custInvoiceTrans
+                    join custInvoiceJour
+                        where custInvoiceTrans.InvoiceId == custInvoiceJour.InvoiceId
+                           && custInvoiceJour.SalesId == salestable.SalesId
+                    join MatchingAgreementLine,LineNum from salesLine
+                        where salesLine.InventTransId == custInvoiceTrans.InventTransId
+                            && salesLine.MatchingAgreementLine != 0
+            {
+                select firstonly agreementheader where agreementheader.RecId == salestable.MatchingAgreement;
+
+                select firstonly agreementLine
+                    where agreementLine.LineNumber == salesLine.LineNum
+                    && agreementLine.Agreement == agreementheader.RecId
+                    && !agreementLine.IsDeleted;
+
+                select firstonly agreementLineReleasedLine
+                    where agreementLineReleasedLine.AgreementLine == agreementLine.RecId
+                    && agreementLineReleasedLine.CustInvoiceTrans == custInvoiceTrans.RecId;
+
+
+                if (salestable.DocumentStatus == DocumentStatus::Invoice && custInvoiceTrans && salesLine .MatchingAgreementLine !=0)
+                {
+                    if(!agreementLineReleasedLine)
+                    {
+                        agreementLineReleasedLine.clear();
+                        agreementLineReleasedLine.AgreementLine         = agreementLine.RecId;
+                        agreementLineReleasedLine.ReferenceRelationType = custInvoiceTrans.TableId;
+                        agreementLineReleasedLine.CustInvoiceTrans      = custInvoiceTrans.RecId;
+                        agreementLineReleasedLine.insert();
+                    }
+                    else
+                    {
+                        ttsbegin;
+                        agreementLineReleasedLine.selectForUpdate(true);
+                        agreementLineReleasedLine.ReferenceRelationType = custInvoiceTrans.TableId;
+                        agreementLineReleasedLine.CustInvoiceTrans      = custInvoiceTrans.RecId;
+                        agreementLineReleasedLine.update();
+                        ttscommit;
+                    
+                    }
+                   
+                }
+            }
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>salesTable_OnActivated</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Sets the payment terms field to be mandatory based on the legal entity.
+    /// </summary>
+    /// <param name="sender">The form datasource (SalesTable).</param>
+    /// <param name="e">Event arguments.</param>
+    [FormDataSourceEventHandler(formDataSourceStr(SalesTable, SalesTable), FormDataSourceEventType::Activated)]
+    public static void salesTable_OnActivated(FormDataSource sender, FormDataSourceEventArgs e)
+    {
+        
+        FormRun formRun = sender.formRun();
+
+        
+        FormStringControl paymentControl = formRun.design().controlName(formControlStr(SalesTable, Payment_Payment)) as FormStringControl;
+
+        
+        if (paymentControl)
+        {
+            
+         paymentControl.mandatory(true);
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

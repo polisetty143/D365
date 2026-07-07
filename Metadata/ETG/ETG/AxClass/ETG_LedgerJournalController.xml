@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_LedgerJournalController</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The <c>LedgerJournalController</c> class is the controller class for the <c>LedgerJournal</c>
+/// report.
+/// </summary>
+public class ETG_LedgerJournalController extends SrsReportRunController
+{
+    private QueryBuildRange journalTableBatchNumberRange;
+    private QueryBuildRange journalTableTypeRange;
+    private QueryBuildRange journalTransBatchNumberRange;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>preRunModifyContract</Name>
+				<Source><![CDATA[
+    protected void preRunModifyContract()
+    {
+        #ISOCountryRegionCodes
+        LedgerJournalContract contract = this.parmReportContract().parmRdpContract() as LedgerJournalContract;
+
+        if (SysCountryRegionCode::isLegalEntityInCountryRegion([#isoPL]))
+        {
+            contract.parmSysVersion(SysReportRun::sysVersion());
+            contract.parmUserName(SysReportRun::userName());
+            contract.parmDisplayDescription(true);
+        }
+        else
+        {
+            contract.parmDisplayDescription(false);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>preRunValidate</Name>
+				<Source><![CDATA[
+    protected container preRunValidate()
+    {
+        return super();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setRange</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Sets the report query range that is based on the caller.
+    /// </summary>
+    /// <param name="_args">
+    /// The <c>Args</c> object.
+    /// </param>
+    /// <param name="_query">
+    /// The <c>Controller</c> object.
+    /// </param>
+    public void setRange(Args _args, Query _query)
+    {
+        LedgerJournalTable externalLedgerJournalTable;
+        LedgerJournalTrans externalLedgerJournalTrans;
+
+        if (_args && _args.dataset())
+        {
+            switch (_args.dataset())
+            {
+                case tableNum(LedgerJournalTrans):
+                    externalLedgerJournalTrans = _args.record();
+                    break;
+
+                case tableNum(LedgerJournalTable):
+                    externalLedgerJournalTable = _args.record();
+                    break;
+            }
+        }
+
+        LedgerJournalContract contract = this.parmReportContract().parmRdpContract() as LedgerJournalContract;
+
+        contract.parmJournalContext(true);
+
+        this.findOrCreateReportRanges(_query);
+
+        if (externalLedgerJournalTrans)
+        {
+            externalLedgerJournalTable = LedgerJournalTable::find(externalLedgerJournalTrans.JournalNum);
+
+            journalTransBatchNumberRange.value(externalLedgerJournalTrans.JournalNum);
+            journalTransBatchNumberRange.status(RangeStatus::Locked);
+
+            journalTableBatchNumberRange.value(externalLedgerJournalTable.JournalNum);
+            journalTableBatchNumberRange.status(RangeStatus::Locked);
+
+            journalTableTypeRange.value(SysQuery::value(enum2int(externalLedgerJournalTable.JournalType)));
+            journalTableTypeRange.status(RangeStatus::Locked);
+        }
+        else if (externalLedgerJournalTable)
+        {
+            journalTransBatchNumberRange.value(externalLedgerJournalTable.JournalNum);
+            journalTransBatchNumberRange.status(RangeStatus::Locked);
+
+            journalTableBatchNumberRange.value(externalLedgerJournalTable.JournalNum);
+            journalTableBatchNumberRange.status(RangeStatus::Locked);
+
+            journalTableTypeRange.value(SysQuery::value(enum2int(externalLedgerJournalTable.JournalType)));
+            journalTableTypeRange.status(RangeStatus::Locked);
+        }
+        else
+        {
+
+            journalTransBatchNumberRange.value('');
+            journalTransBatchNumberRange.status(RangeStatus::Open);
+
+            journalTableBatchNumberRange.value('');
+            journalTableBatchNumberRange.status(RangeStatus::Open);
+
+            journalTableTypeRange.value('');
+            journalTableTypeRange.status(RangeStatus::Open);
+
+            contract.parmJournalContext(false);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>findOrCreateReportRanges</Name>
+				<Source><![CDATA[
+    private void findOrCreateReportRanges(Query _query)
+    {
+        QueryBuildDataSource ledgerJournalTableQBDS = _query.dataSourceTable(tableNum(LedgerJournalTable));
+        journalTableBatchNumberRange = SysQuery::findOrCreateRange(ledgerJournalTableQBDS, fieldNum(LedgerJournalTable, JournalNum));
+        journalTableTypeRange = SysQuery::findOrCreateRange(ledgerJournalTableQBDS, fieldNum(LedgerJournalTable, JournalType));
+
+        QueryBuildDataSource ledgerJournalTransQBDS = _query.dataSourceTable(tableNum(LedgerJournalTrans));
+        journalTransBatchNumberRange = SysQuery::findOrCreateRange(ledgerJournalTransQBDS, fieldNum(LedgerJournalTrans, JournalNum));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args _args)
+    {
+        ETG_LedgerJournalController controller = new ETG_LedgerJournalController();
+        // NS--Financial dimension values are printing along with main account in the voucher print
+        if(ETGACFParameters::find().EnableJournalVoucherReport)
+        {
+            controller.parmReportName(ssrsReportStr(ETG_LedgerJournal , ETGReport));
+        }   // NE--Financial dimension values are printing along with main account in the voucher print
+        else
+        {
+            if( _args.menuItemName() == menuItemOutputStr(ETGLedgerJournalFr))
+            {
+                controller.parmReportName(ssrsReportStr(ETG_LedgerJournal , ReportFrench));
+            }
+            else if( _args.menuItemName() == menuItemOutputStr(ETGLedgerJournalPl))
+            {
+                controller.parmReportName(ssrsReportStr(ETG_LedgerJournal , ReportPortuguese));
+            }
+            else
+            {
+                controller.parmReportName(ssrsReportStr(ETG_LedgerJournal , Report));
+            }
+        }
+        controller.parmArgs(_args);
+        controller.setRange(_args, controller.parmReportContract().parmQueryContracts().lookup(controller.getFirstQueryContractKey()));
+        controller.startOperation();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

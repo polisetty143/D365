@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>AgreementLineETGSPAIN_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the <c>AgreementLine</c> table for the ETGSPAIN model.
+/// </summary>
+[ExtensionOf(tablestr(AgreementLine))]
+final class AgreementLineETGSPAIN_Extension
+{    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initFromAgreementHeader</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the standard method to initialize agreement lines through its header.
+    /// </summary>
+    /// <param name="_agreementHeader">AgreementHeader</param>
+    public void initFromAgreementHeader(AgreementHeader _agreementHeader)
+    {
+        next initFromAgreementHeader(_agreementHeader);
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            this.ETGSPAINPurchExecutionDueDate   = _agreementHeader.ETGSPAINPurchExecutionDueDate;
+            this.ETGSPAINPurchExecutionFromDate  = _agreementHeader.ETGSPAINPurchExecutionFromDate;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insert</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>insert</c> method.
+    /// </summary>
+    public void insert()
+    {
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            this.ETGSPAINLineCode = this.ETGSPAINgetNewLineCode();
+
+            this.ETGSPAINUpdateETGSPAINPurchOperationId();
+        }
+
+        next insert();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>update</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>update</c> method.
+    /// </summary>
+    public void update()
+    {        
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            this.ETGSPAINUpdateETGSPAINPurchOperationId();
+        }
+
+        next update();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>delete</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>delete</c> method.
+    /// </summary>
+    public void delete()
+    {
+        // Refrescamos el registro actual, ya que puede haber sido modificado en el borrado de otra línea.
+        // Por lo que necesitamos el registro con los datos actuales para que no genere error.
+        this.reread();
+
+        boolean         resetAgreementQuota = this.ETGSPAINLineCreatedByQuota;
+        AgreementHeader agreementHeader     = this.agreementHeader(true);
+
+        next delete();
+
+        // Cuando se borre una línea creada por cupos, reseteamos los valores de contrato por cupos.
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            if (resetAgreementQuota)
+            {
+                // Reseteamos los valores de Cupos
+                ttsbegin;
+                agreementHeader.ETGSPAINresetAgreementQuota();
+                agreementHeader.update();
+                ttscommit;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSPAINgetNewLineCode</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Obtain the corresponding line code.
+    /// </summary>
+    /// <returns>Line code.</returns>
+    public ETGSPAINPurchSalesAgreementLineCode ETGSPAINgetNewLineCode()
+    {
+        
+            ETGSPAINPurchSalesAgreementId        agreementId;
+            AgreementLine                   agreementLine;
+            Counter                         i;
+            container                       conLineCode;
+
+            select firstonly agreementLine
+            order by     LineNumber desc
+            where        agreementLine.Agreement == this.Agreement;
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            if (agreementLine && agreementLine.ETGSPAINLineCode)
+            {
+                conLineCode = str2con(agreementLine.ETGSPAINLineCode, "/", false);
+                agreementId = conPeek(conLineCode,1);
+                i           = str2Int(conPeek(conLineCode,2));
+            }
+            else
+            {
+                agreementId = this.agreementHeader().ETGSPAINgetAgreementId();
+            }
+        }
+
+            i++;
+        
+        return strFmt("%1/%2", agreementId, i);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSPAINUpdateETGSPAINPurchOperationId</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method to update the operation ID in the headers.
+    /// </summary>
+    public void ETGSPAINUpdateETGSPAINPurchOperationId()
+    {
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            if (this.InventDimId
+            && this.inventDim()
+            && this.inventDim().inventBatchId
+            && !this.agreementHeader().ETGSPAINAgreementOperationId)
+            {
+                PurchAgreementHeader            purchAgreementHeader = PurchAgreementHeader::find(this.agreementHeader().RecId, true);
+                SalesAgreementHeader            salesAgreementHeader = SalesAgreementHeader::find(this.agreementHeader().RecId, true);
+
+                if (purchAgreementHeader)
+                {
+                    this.ETGSPAINUpdatePurchAgreementHeaderOperationId(purchAgreementHeader, this.inventDim().inventBatchId);
+                }
+                else if (salesAgreementHeader)
+                {
+                    this.ETGSPAINUpdateSalesAgreementHeaderOperationId(salesAgreementHeader, this.inventDim().inventBatchId);
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSPAINUpdatePurchAgreementHeaderOperationId</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method to update the operation ID in purchase agreement headers.
+    /// </summary>
+    /// <param name="_purchAgreementHeader">PurchAgreementHeader</param>
+    /// <param name="_ETGSPAINPurchOperationId">ETGSPAINPurchOperationId</param>
+    private void ETGSPAINUpdatePurchAgreementHeaderOperationId(PurchAgreementHeader  _purchAgreementHeader,
+                                                            ETGSPAINPurchOperationId _ETGSPAINPurchOperationId)
+    {
+        #OCCRetryCount
+        try
+        {
+            if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+            {
+                _purchAgreementHeader.ETGSPAINAgreementOperationId = _ETGSPAINPurchOperationId;
+                _purchAgreementHeader.write();
+            }
+        }
+        catch (Exception::Deadlock)
+        {
+            retry;
+        }
+        catch (Exception::UpdateConflict)
+        {
+            if (appl.ttsLevel() == 0)
+            {
+                if (xSession::currentRetryCount() >= #RetryNum)
+                {
+                    throw Exception::UpdateConflictNotRecovered;
+                }
+                else
+                {
+                    _purchAgreementHeader.reread();
+                    retry;
+                }
+            }
+            else
+            {
+                throw Exception::UpdateConflict;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSPAINUpdateSalesAgreementHeaderOperationId</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method to update the operation ID in sales agreement headers.
+    /// </summary>
+    /// <param name="_salesAgreementHeader">SalesAgreementHeader</param>
+    /// <param name="_ETGSPAINPurchOperationId">ETGSPAINPurchOperationId</param>
+    private void ETGSPAINUpdateSalesAgreementHeaderOperationId(SalesAgreementHeader  _salesAgreementHeader,
+                                                            ETGSPAINPurchOperationId _ETGSPAINPurchOperationId)
+    {
+        #OCCRetryCount
+        try
+        {
+            if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+            {
+                _salesAgreementHeader.ETGSPAINAgreementOperationId = _ETGSPAINPurchOperationId;
+                _salesAgreementHeader.write();
+            }
+        }
+        catch (Exception::Deadlock)
+        {
+            retry;
+        }
+        catch (Exception::UpdateConflict)
+        {
+            if (appl.ttsLevel() == 0)
+            {
+                if (xSession::currentRetryCount() >= #RetryNum)
+                {
+                    throw Exception::UpdateConflictNotRecovered;
+                }
+                else
+                {
+                    _salesAgreementHeader.reread();
+                    retry;
+                }
+            }
+            else
+            {
+                throw Exception::UpdateConflict;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

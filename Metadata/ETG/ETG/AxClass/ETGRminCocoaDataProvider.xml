@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGRminCocoaDataProvider</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(ETGRminCocoaContract))]
+class ETGRminCocoaDataProvider extends  SRSReportDataProviderPreProcessTempDB
+
+{
+    ETGRminCocoaTemp                     ETGRminCocoaTemp;
+    TransDate                               _fromDate,_ToDate;
+    List                                    _InvoiceId= new List(Types::String);
+    List                                    _ItemId= new List(Types::String);
+    List                                    _VendAccount= new List(Types::String);
+    VendPackingSlipJour                     _VendPackingSlipJour;
+    VendPackingSlipTrans                    _VendPackingSlipTrans;
+    ETGPurchLineCoCOAQuality                _ETGPurchLineCoCOAQuality;
+    PurchLine                               _PurchLine;
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGRminCocoaTemp</Name>
+				<Source><![CDATA[
+    [SrsReportDataSetAttribute(tableStr(ETGRminCocoaTemp))]
+    public ETGRminCocoaTemp getETGRminCocoaTemp()
+    {
+        select * from ETGRminCocoaTemp;
+        return ETGRminCocoaTemp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ProcessReport</Name>
+				<Source><![CDATA[
+    public void ProcessReport()
+    {
+        Query                               query;
+        QueryRun                            queryRun;
+        QueryBuildDataSource                queryBuildDataSource, queryBuildDataSource1;
+        QueryBuildDataSource                queryBuildDataSource2;
+        QueryBuildRange                     queryBuildRange;
+        QueryBuildRange                     queryBuildRange2;
+        
+        ETGRminCocoaContract   Contract;
+
+        Contract        = this.parmDataContract();
+
+        _fromDate       = Contract.parmFromDate();
+        _ToDate         = Contract.parmToDate();
+        _VendAccount    = Contract.parmVendAccount();
+        _InvoiceId      = Contract.parmInvoiceId();
+        _ItemId         = contract.parmItemId();
+        ListIterator             ItemIdListIterator,journalIdListIterator;
+        ListEnumerator           ListEnumerator;
+
+        query   =   new query();
+        queryBuildDataSource    =   query.addDataSource(tableNum(VendPackingSlipJour));
+        queryBuildDataSource1   =   queryBuildDataSource.addDataSource(tableNum(VendPackingSlipTrans));
+        queryBuildDataSource1.addLink(fieldNum(VendPackingSlipJour,RecId),fieldNum(VendPackingSlipTrans,VendPackingSlipJour));
+        if(_fromDate && !_ToDate)
+        {
+            queryBuildRange = queryBuildDataSource.addRange(fieldNum(VendPackingSlipJour,DELIVERYDATE));
+            queryBuildRange.value(strFmt('>%1',queryvalue(_fromDate-1)));
+        }
+        if(!_fromDate && _ToDate)
+        {
+            queryBuildDataSource.addRange(fieldNum(VendPackingSlipJour,DELIVERYDATE)).value(strFmt("<%1",queryValue(_ToDate+1)));
+        }
+        if(_fromDate && _ToDate)
+        {
+            queryBuildDataSource.addRange(fieldNum(VendPackingSlipJour,DELIVERYDATE)).value(queryRange(_fromDate,_toDate));
+        }
+        if(_VendAccount != null)
+        {
+            ListEnumerator  = _VendAccount.getEnumerator();
+            while (ListEnumerator.moveNext())
+            {
+                queryBuildDataSource.addRange(fieldNum(VendPackingSlipJour,ORDERACCOUNT)).value(ListEnumerator.current());
+            }
+        }
+        if(_InvoiceId  != null)
+        {
+            ListEnumerator = _invoiceid.getEnumerator();
+            while (ListEnumerator.moveNext())
+            {
+                queryBuildDataSource.addRange(fieldNum(VendPackingSlipJour, PackingSlipId)).value(ListEnumerator.current());
+            }
+        }
+        if(_ItemId != null)
+        {
+            ListEnumerator = _ItemId.getEnumerator();
+            while (ListEnumerator.moveNext())
+            {
+                queryBuildDataSource1.addRange(fieldNum(VendPackingSlipTrans, ItemId)).value(ListEnumerator.current());
+            }
+        }
+        queryBuildDataSource2 = queryBuildDataSource1.addDataSource(tableNum(PurchLine));
+        queryBuildDataSource2.addLink(fieldNum(VendPackingSlipTrans,InventTransId),fieldNum(PurchLine,InventTransId));
+        queryRun    = new queryRun(query) ;
+        while (queryRun.next())
+        {
+
+
+            _VendPackingSlipJour            =   queryRun.get(tableNum(VendPackingSlipJour)) ;
+            _VendPackingSlipTrans           =   queryRun.get(tableNum(VendPackingSlipTrans)) ;
+            _PurchLine                      =   queryRun.get(tableNum(PurchLine));
+
+            select  _ETGPurchLineCoCOAQuality
+                where _ETGPurchLineCoCOAQuality.RefPurchId == _PurchLine.PurchId
+                && _ETGPurchLineCoCOAQuality.PurchLineRecId == _PurchLine.RecId;
+
+           
+
+            ETG_PurchTableTrade ETG_PurchTableTrade;
+            select ETG_PurchTableTrade where ETG_PurchTableTrade.PurchId == _PurchLine.PurchId;
+
+            ETGRminCocoaTemp.clear();
+            ETGRminCocoaTemp.initValue();
+            ETGRminCocoaTemp.Port                           = _ETGPurchLineCoCOAQuality.Port;
+            ETGRminCocoaTemp.ProcessingPlant                = _ETGPurchLineCoCOAQuality.ProcessingPlant;
+            ETGRminCocoaTemp.Date1                          = _ETGPurchLineCoCOAQuality.Date1;
+            ETGRminCocoaTemp.VendorCode                     = _VendPackingSlipJour.OrderAccount;
+            ETGRminCocoaTemp.ItemNumber                     = _PurchLine.ItemId;
+            ETGRminCocoaTemp.ItemDescription                = _PurchLine.itemName();
+           // ETGRminCocoaTemp.Value                           =  _PurchLine.LineAmount;
+            ETGRminCocoaTemp.GRN                            = _ETGPurchLineCoCOAQuality.GRN;
+            ETGRminCocoaTemp.GRNNum                 = _VendPackingSlipJour.PackingSlipId;
+            InventDIm       InventDIm;
+
+            select * from InventDIm
+                where InventDIm.inventDimId == _VendPackingSlipTrans.InventDimId;
+
+            ETGRminCocoaTemp.Site                           = InventDIm.InventSiteId;
+            ETGRminCocoaTemp.Warehouse                      = InventDIm.InventLocationId;
+            ETGRminCocoaTemp.Location                       = InventDIm.wMSLocationId;
+            ETGRminCocoaTemp.BatchNo                        = InventDIm.inventBatchId;
+            ETGRminCocoaTemp.SerialNo                       = InventDIm.inventSerialId;
+            ETGRminCocoaTemp.VendorName                     = VendTable::find(_VendPackingSlipJour.OrderAccount).name();
+            ETGRminCocoaTemp.Origin                         = _ETGPurchLineCoCOAQuality.Origin;
+            ETGRminCocoaTemp.TruckTrailer                   = _ETGPurchLineCoCOAQuality.TruckTrailer;
+            ETGRminCocoaTemp.GrossWeight                    = _ETGPurchLineCoCOAQuality.GrossWeight;
+            ETGRminCocoaTemp.Bagscount                      = _ETGPurchLineCoCOAQuality.Bagscount;
+            ETGRminCocoaTemp.WeightofBags                   = _ETGPurchLineCoCOAQuality.WeightofBags;
+            ETGRminCocoaTemp.Humidityreaction               = _ETGPurchLineCoCOAQuality.Humidityreaction;
+            ETGRminCocoaTemp.Qualityreaction                = _ETGPurchLineCoCOAQuality.Qualityreaction;
+            ETGRminCocoaTemp.NetWeight                      = _ETGPurchLineCoCOAQuality.NetWeight;
+            ETGRminCocoaTemp.FixedGovernmentPrice           = _ETGPurchLineCoCOAQuality.FixedGovernmentPrice;
+
+          //  ETGRminCocoaTemp.Value                          = _ETGPurchLineCoCOAQuality.Value;
+
+           
+        //  select * from _PurchLine 
+        //      where _PurchLine.InventDimId == InventDim.inventDimId;
+
+        select  _ETGPurchLineCoCOAQuality
+                where _ETGPurchLineCoCOAQuality.RefPurchId == _PurchLine.PurchId;
+
+           ETGRminCocoaTemp.Value                           =   _PurchLine.LineAmount;
+
+            //ETGRminCocoaTemp.TransportRate                         = 1;//_ETGPurchLineCoCOAQuality.Origin;
+
+            MarkupTrans         _MarkupTrans;
+            while select Txt,CalculatedAmount,LineNum from _MarkupTrans
+                order by _MarkupTrans.LineNum
+                where _MarkupTrans.TransRecId      == _VendPackingSlipTrans.RecId
+                  &&   _MarkupTrans.Voucher        == _vendPackingSlipJour.PurchId
+            {
+                ETGRminCocoaTemp.TransportAmount += abs(_MarkupTrans.CalculatedAmount);
+            }
+           // ETGRminCocoaTemp.TransportAmount                   = _ETGPurchLineCoCOAQuality.TruckTrailer;
+            ETGRminCocoaTemp.Premiumrate                    = _ETGPurchLineCoCOAQuality.Premiumrate;
+            ETGRminCocoaTemp.PremiumValue                   = _ETGPurchLineCoCOAQuality.PremiumValue;
+            ETGRminCocoaTemp.BicAmount                      = _ETGPurchLineCoCOAQuality.BicAmount;
+            ETGRminCocoaTemp.Onaccount                      = _ETGPurchLineCoCOAQuality.Onaccount;
+           // ETGRminCocoaTemp.AmountPayable                  = _ETGPurchLineCoCOAQuality.AmountPayable;
+            ETGRminCocoaTemp.AmountPayable                    = _ETGPurchLineCoCOAQuality.amountPayable();
+            ETGRminCocoaTemp.Mark                           = _ETGPurchLineCoCOAQuality.Mark;
+            ETGRminCocoaTemp.Nutcount                       = _ETGPurchLineCoCOAQuality.Nutcount;
+            ETGRminCocoaTemp.Humidity                       = _ETGPurchLineCoCOAQuality.Humidity;
+            ETGRminCocoaTemp.Foreignitems                   = _ETGPurchLineCoCOAQuality.Foreignitems;
+            ETGRminCocoaTemp.Scrap                          = _ETGPurchLineCoCOAQuality.Scrap;
+            ETGRminCocoaTemp.Broken                         = _ETGPurchLineCoCOAQuality.Broken;
+            ETGRminCocoaTemp.flat                           = _ETGPurchLineCoCOAQuality.flat;
+            ETGRminCocoaTemp.Damaged                        = _ETGPurchLineCoCOAQuality.Damaged;
+            ETGRminCocoaTemp.Insectdamaged                  = _ETGPurchLineCoCOAQuality.Insectdamaged;
+            ETGRminCocoaTemp.Blue                           = _ETGPurchLineCoCOAQuality.Blue;
+            ETGRminCocoaTemp.Growing                        = _ETGPurchLineCoCOAQuality.Growing;
+            ETGRminCocoaTemp.Violet                         = _ETGPurchLineCoCOAQuality.Violet;
+            ETGRminCocoaTemp.Chemicalsanalyzeresult         = _ETGPurchLineCoCOAQuality.Chemicalsanalyzeresult;
+            ETGRminCocoaTemp.CCCreference                   = _ETGPurchLineCoCOAQuality.CCCreference;
+            ETGRminCocoaTemp.Date1                          = _ETGPurchLineCoCOAQuality.Date1;
+            ETGRminCocoaTemp.MTN                           = _ETGPurchLineCoCOAQuality.MTNNStr;
+          //  ETGRminCocoaTemp.MTNN                           = str2num(_ETGPurchLineCoCOAQuality.MTNNStr);
+            ETGRminCocoaTemp.GRN                            = _ETGPurchLineCoCOAQuality.GRN;
+            ETGRminCocoaTemp.MTNValue                       = _ETGPurchLineCoCOAQuality.MTNValue;
+            ETGRminCocoaTemp.Weightloss                     = _ETGPurchLineCoCOAQuality.Weightloss;
+            ETGRminCocoaTemp.LandedPrice                    = _ETGPurchLineCoCOAQuality.LandedPrice;
+            //ETGRminCocoaTemp.TransportRate                  = _ETGPurchLineCoCOAQuality.TransportPrice / _ETGPurchLineCoCOAQuality.NetWeight;
+            if (_ETGPurchLineCoCOAQuality.NetWeight != 0)
+            {
+                ETGRminCocoaTemp.TransportRate = _ETGPurchLineCoCOAQuality.TransportPrice / _ETGPurchLineCoCOAQuality.NetWeight;
+            }
+            else
+            {
+                ETGRminCocoaTemp.TransportRate = 0; // Assign a default value of 0 if NetWeight is zero
+            }
+            ETGRminCocoaTemp.TransportAmount                = _ETGPurchLineCoCOAQuality.TransportPrice;
+
+            
+
+            ETGRminCocoaTemp.insert();
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

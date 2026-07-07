@@ -1,0 +1,769 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxTable xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerJournalTransAccrualTrans</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGLedgerJournalTransAccrualTrans extends common
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>checkExist</Name>
+				<Source><![CDATA[
+    public static boolean checkExist(tableId _refTableid, recId _refRecid )
+    {
+        boolean ret = true;
+
+        if (!ETGLedgerJournalTransAccrualTrans::exist(_refTableid, _refRecid))
+        {
+            ret = checkFailed(strfmt(ETGLedgerJournalTransAccrualTrans::txtNotExist(), _refTableid, _refRecid));
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>deleteById</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Delete all records from the table related to reference tableid and recid.
+    /// </summary>
+    /// <param name = "_refTableid">Reference table id</param>
+    /// <param name = "_refRecid">Reference record id</param>
+    public static void deleteById(tableId _refTableid, recId _refRecid)
+    {
+        ETGLedgerJournalTransAccrualTrans accrualTrans;
+        LedgerAccrualTable ledgerAccrualTable = LedgerAccrualTable::find(ETGLedgerJournalTransAccrual::find(_refTableid, _refRecid).AccrualId);
+        RefRecId numberSequenceRefRecId = ledgerAccrualTable.NumberSequenceTable;
+
+        ttsbegin;
+
+        if (ETGLedgerJournalTransAccrualTrans::shouldReleaseVouchers())
+        {
+            ETGLedgerJournalTransAccrualTrans::releaseVouchers(numberSequenceRefRecId, _refTableid, _refRecid);
+        }
+
+        delete_from accrualTrans
+            where accrualTrans.RefTableid == _refTableid
+                && accrualTrans.RefRecid == _refRecid;
+
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>releaseVouchers</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Releases the vouchers based on number sequence record of accrual record and voucher.
+    /// </summary>
+    /// <param name="_numberSequenceRefRecId">The number sequence reference record ID.</param>
+    /// <param name="_refTableid">Table ID of referenced table.</param>
+    /// <param name="_refRecid">The record ID of referenced table.</param>
+    protected static void releaseVouchers(RefRecId _numberSequenceRefRecId, TableId _refTableid, RecId _refRecid)
+    {
+        ETGLedgerJournalTransAccrualTrans accrualTrans;
+
+        if (_numberSequenceRefRecId)
+        {
+            while select Voucher from accrualTrans
+                order by Voucher
+                group by Voucher
+                where accrualTrans.RefTableid == _refTableid
+                    && accrualTrans.RefRecid == _refRecid
+            {
+                NumberSeq::releaseNumber(_numberSequenceRefRecId, accrualTrans.Voucher);
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>shouldReleaseVouchers</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Determines whether the vouchers should be released or not.
+    /// </summary>
+    /// <returns>
+    /// true if the voucher is released; otherwise, false.
+    /// </returns>
+    protected static boolean shouldReleaseVouchers()
+    {
+        return true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>exist</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// CHeck if record exist on given paramaters.
+    /// </summary>
+    /// <param name = "_refTableid">Reference table id</param>
+    /// <param name = "_refRecid">Reference rec id</param>
+    /// <returns>Return true if record exists</returns>
+    public static boolean exist(tableId _refTableid, recId _refRecid )
+    {
+        boolean found;
+
+        found = (select firstonly
+                     RecId
+                from
+                     etgLedgerJournalTransAccrualTrans
+                 where
+                     etgLedgerJournalTransAccrualTrans.RefTableid == _refTableid &&
+                    etgLedgerJournalTransAccrualTrans.RefRecid == _refRecid).RecId != 0;
+
+        return found;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>find</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Find record for given parameteters.
+    /// </summary>
+    /// <param name = "_refTableid">Reference table id</param>
+    /// <param name = "_refRecid">Reference recid</param>
+    /// <param name = "_forupdate">true or false</param>
+    /// <param name = "_concurrencyModel">default value</param>
+    /// <returns>Returns the table intance found</returns>
+    public static ETGLedgerJournalTransAccrualTrans find(
+        tableId _refTableid,
+        recId _refRecid ,
+        boolean                 _forupdate = false,
+        ConcurrencyModel        _concurrencyModel = ConcurrencyModel::Auto)
+    {
+        ETGLedgerJournalTransAccrualTrans ledgerJournalTransAccrualTrans;
+
+        ledgerJournalTransAccrualTrans.selectForUpdate(_forupdate);
+
+        if (_forupdate  && _concurrencyModel != ConcurrencyModel::Auto)
+        {
+            ledgerJournalTransAccrualTrans.concurrencyModel(_concurrencyModel);
+        }
+
+        select firstonly ledgerJournalTransAccrualTrans
+            where ledgerJournalTransAccrualTrans.RefTableid == _refTableid &&
+                ledgerJournalTransAccrualTrans.RefRecid == _refRecid;
+
+        return ledgerJournalTransAccrualTrans;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>synchronizeVoucher</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Sync the voucher created.
+    /// </summary>
+    /// <param name = "_newVoucher">new voucher number</param>
+    /// <param name = "_refTableID">reference table id</param>
+    /// <param name = "_refRecID">reference rec id</param>
+    public static void synchronizeVoucher(
+        Voucher _newVoucher,
+        tableId _refTableID,
+        recId   _refRecID)
+    {
+        ETGLedgerJournalTransAccrualTrans ledgerJournalTransAccrualTrans;
+
+        select firstonly ledgerJournalTransAccrualTrans
+            where ledgerJournalTransAccrualTrans.RefTableid == _refTableID  &&
+                  ledgerJournalTransAccrualTrans.RefRecid   == _refRecID    &&
+                  ledgerJournalTransAccrualTrans.Voucher    != _newVoucher;
+
+        if (ledgerJournalTransAccrualTrans)
+        {
+            update_recordset ledgerJournalTransAccrualTrans setting Voucher = _newVoucher
+                where ledgerJournalTransAccrualTrans.RefTableid == _refTableID  &&
+                      ledgerJournalTransAccrualTrans.RefRecid   == _refRecID    &&
+                      ledgerJournalTransAccrualTrans.Voucher    != _newVoucher;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>txtNotExist</Name>
+				<Source><![CDATA[
+    public static TxtNotExist txtNotExist()
+    {
+        return "@SYS102199";
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateLedgerJournalVoucherChanged</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Update if voucher is changed
+    /// </summary>
+    /// <param name = "_journalNum">Ledger journal number</param>
+    /// <param name = "_baseVoucher">Base voucher</param>
+    /// <param name = "_baseTransdate">base transaction date</param>
+    /// <param name = "_refTableid">reference table id</param>
+    /// <param name = "_refRecid">reference record id</param>
+    public static void updateLedgerJournalVoucherChanged(
+        LedgerJournalId    _journalNum,
+        Voucher            _baseVoucher,
+        TransDate          _baseTransdate,
+        tableId            _refTableid,
+        recId              _refRecid)
+    {
+        LedgerJournalVoucherChanged     ledgerJournalVoucherChanged;
+        LedgerJournalVoucherChanged     ledgerJournalVoucherChangedForConflict;
+        ETGLedgerJournalTransAccrualTrans  ledgerJournalTransAccrualTrans;
+
+        ledgerJournalVoucherChanged.JournalNum = _journalNum;
+        ledgerJournalVoucherChanged.FromDate = _baseTransdate;
+        ledgerJournalVoucherChanged.FromVoucher = _baseVoucher;
+        while   select  ledgerJournalTransAccrualTrans
+                group by Voucher, TransDate
+                where   ledgerJournalTransAccrualTrans.RefTableid == _refTableid
+                &&      ledgerJournalTransAccrualTrans.RefRecid   == _refRecid
+                &&     (ledgerJournalTransAccrualTrans.Voucher    != _baseVoucher
+                ||      ledgerJournalTransAccrualTrans.TransDate  != _baseTransdate)
+                notexists join ledgerJournalVoucherChangedForConflict
+                where ledgerJournalVoucherChangedForConflict.ToDate      == ledgerJournalTransAccrualTrans.TransDate
+                   && ledgerJournalVoucherChangedForConflict.ToVoucher   == ledgerJournalTransAccrualTrans.Voucher
+                   && ledgerJournalVoucherChangedForConflict.JournalNum  == _journalNum
+                   && ledgerJournalVoucherChangedForConflict.FromDate    == _baseTransdate
+                   && ledgerJournalVoucherChangedForConflict.FromVoucher == _baseVoucher
+        {
+            ledgerJournalVoucherChanged.ToDate = ledgerJournalTransAccrualTrans.TransDate;
+            ledgerJournalVoucherChanged.ToVoucher = ledgerJournalTransAccrualTrans.Voucher;
+            ledgerJournalVoucherChanged.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insert</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    public  void insert()
+    {
+        super();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateTempVoucherNum</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    public static void updateTempVoucherNum(LedgerJournalId journalId)
+    {
+        ETGLedgerJournalTransAccrualTrans ledgerJournalTransAccrualTrans, ledgerJournalTransAccrualTransCheck;
+        LedgerJournalTrans ledgerJournalTrans;
+        GeneralJournalAccountEntry generalJournalAccountEntry,generalJournalAccountEntryloc;
+        GeneralJournalEntry generalJournalEntry,generalJournalEntryloc;
+        select firstonly ledgerJournalTrans
+            where ledgerJournalTrans.JournalNum == journalId;
+
+        update_recordset ledgerJournalTransAccrualTrans
+            setting OriginalVoucher = ledgerJournalTrans.Voucher
+            where ledgerJournalTransAccrualTrans.RefRecid == ledgerJournalTrans.RecId
+                && ledgerJournalTransAccrualTrans.RefTableid == tablenum(LedgerJournalTrans)
+                && ledgerJournalTransAccrualTrans.JournalNumSource == journalId;
+
+        select firstonly RecId, Voucher, AccrualId, OriginalVoucher from ledgerJournalTransAccrualTransCheck
+             where ledgerJournalTransAccrualTransCheck.RefRecid == ledgerJournalTrans.RecId
+                && ledgerJournalTransAccrualTransCheck.RefTableid == tablenum(LedgerJournalTrans)
+                && ledgerJournalTransAccrualTransCheck.JournalNumSource == journalId;
+
+        
+
+        if(ledgerJournalTransAccrualTransCheck.RecId)
+        {
+            select firstonly RecId from generalJournalEntry
+                where generalJournalEntry.SubledgerVoucher == ledgerJournalTransAccrualTransCheck.OriginalVoucher;
+
+            if(generalJournalEntry.RecId)
+            {
+                while select forupdate generalJournalAccountEntry
+                    where generalJournalAccountEntry.GeneralJournalEntry == generalJournalEntry.RecId
+                        && generalJournalAccountEntry.TransactionCurrencyAmount > 0
+                {
+                    String30 mainAcc = MainAccount::find(generalJournalAccountEntry.MainAccount).MainAccountId;
+                    RecId dimDefault          = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(generalJournalAccountEntry.LedgerDimension);
+                    RecId debitMainAccount    = LedgerAccrualTable::find(ledgerJournalTransAccrualTransCheck.AccrualId).DebitLedgerDimension;
+                    RecId ledgerDimETG = CostLedgerDimensionDerivationRule::createLedgerDimension(debitMainAccount, dimDefault);
+                    if(ledgerDimETG)
+                    {
+                        String30 debitAccrualAcc                   = LedgerDimensionFacade::getMainAccountIdFromLedgerDimension(ledgerDimETG);
+                        generalJournalAccountEntry.LedgerAccount   = strReplace(generalJournalAccountEntry.LedgerAccount, mainAcc, debitAccrualAcc);
+                        generalJournalAccountEntry.LedgerDimension = ledgerDimETG;
+                        generalJournalAccountEntry.MainAccount     = debitMainAccount;
+                        generalJournalAccountEntry.doUpdate();
+                        ledgerJournalTransAccrualTrans.ledgeraccount(debitAccrualAcc,generalJournalAccountEntry,ledgerJournalTrans);
+                      //  this.ledgeraccount(mainAcc,generalJournalAccountEntryloc,ledgerJournalTrans);
+                    }
+                }
+
+                while select forupdate generalJournalAccountEntryloc
+                   where generalJournalAccountEntryloc.GeneralJournalEntry == generalJournalEntry.RecId
+                     &&  generalJournalAccountEntryloc.TransactionCurrencyAmount < 0
+                {
+                   
+                    String30 mainAcclock = MainAccount::find(generalJournalAccountEntryloc.MainAccount).MainAccountId;
+                    if(mainAcclock)
+                    {
+                        ledgerJournalTransAccrualTrans.ledgeraccount(mainAcclock,generalJournalAccountEntryloc,ledgerJournalTrans);
+                    }
+
+                }
+
+            }
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ledgeraccount</Name>
+				<Source><![CDATA[
+    public void ledgeraccount(String30 _mainAcc,GeneralJournalAccountEntry _generalJournalAccountEntryloc,LedgerJournalTrans _ledgerJournalTrans)
+    {
+        DimensionAttributeValueCombination    dimensionAttributeValueCombination,dimensionAttributeValueCombinationloc;
+        ETGCostDistributionsLines             eTGCostDistributionsLines;
+        ETGCostDistributionsHeader            etgcostDisttributionheader;
+        str                                   mainaccountloc;
+        DimensionFinancialTag                 dimensionfinancialtag;
+        int                                   i = 1;
+        ETGLedgerJournalTransAccrual          etgledgerJournalTransAccrual;
+
+        select firstonly etgledgerJournalTransAccrual where etgledgerJournalTransAccrual.RefRecid == _ledgerJournalTrans.RecId;
+        select * from dimensionAttributeValueCombination where DimensionAttributeValueCombination.RecId == _ledgerJournalTrans.LedgerDimension;
+
+        container    mainaccount                    = str2con(dimensionAttributeValueCombination.DisplayValue, '|');
+        mainaccountloc                              = conPeek(mainaccount,1);
+        AmountCur transorgcurrencyamount             =  _generalJournalAccountEntryloc.TransactionCurrencyAmount;
+        AmountCur accountingCurrencyAmountorig       = _generalJournalAccountEntryloc.AccountingCurrencyAmount;
+        AmountCur ReportingCurrencyAmountorig        = _generalJournalAccountEntryloc.ReportingCurrencyAmount;
+
+
+        select firstonly etgcostDisttributionheader where etgcostDisttributionheader.ETGCostAllocationRuleId == etgledgerJournalTransAccrual.CostAllocationRuleId;
+
+        if(!etgcostDisttributionheader)
+                throw error('Rule Id not exists in Cost distribution');        
+
+        while  select eTGCostDistributionsLines
+                where eTGCostDistributionsLines.ETGMainAccount == mainaccountloc
+                && eTGCostDistributionsLines.ETGRefRecId == etgcostDisttributionheader.RecId
+        {
+                        
+            DimensionDefault                    defaultDimension, defaultDimensionOffSet;
+            DimensionAttributeValueSetStorage   dimStorage = new DimensionAttributeValueSetStorage();
+            DimensionAttributeValueSetStorage   dimStorageOffset = new DimensionAttributeValueSetStorage();
+            DimensionAttribute                  dimAttribute1, dimAttribute2, dimAttribute1Offset,dimAttribute2Offset;
+            DimensionAttributeValue             dimAttributeValue1, dimAttributeValue2, dimAttributeValue1Offset,dimAttributeValue2Offset;
+            LedgerParameters                    LedgerParameters;            
+
+            select firstonly LedgerParameters
+                       where LedgerParameters.DataAreaId == curExt();
+
+            dimensionAttributeValueCombinationloc          = DimensionAttributeValueCombination::find(_generalJournalAccountEntryloc.LedgerDimension);
+
+            defaultDimension          = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(dimensionAttributeValueCombinationloc.RecId);
+            dimStorage                = DimensionAttributeValueSetStorage::find(defaultDimension);
+
+            if(eTGCostDistributionsLines.ETGFDVertical)
+            {
+                dimAttribute1        = DimensionAttribute::findByName(LedgerParameters.ETGCostDistributionVerticalDimension);
+                dimAttributeValue1   = DimensionAttributeValue::findByDimensionAttributeAndValue(dimAttribute1,eTGCostDistributionsLines.ETGFDVertical, true, true);
+                dimStorage.addItem(dimAttributeValue1);
+            }
+
+            if(eTGCostDistributionsLines.ETGFDSubVertical)
+            {
+                dimAttribute2        = DimensionAttribute::findByName(LedgerParameters.ETGCostDistributionSubVerticalDimension);
+                dimAttributeValue2   = DimensionAttributeValue::findByDimensionAttributeAndValue(dimAttribute2,eTGCostDistributionsLines.ETGFDSubVertical, true, true);
+                dimStorage.addItem(dimAttributeValue2);
+            }
+
+            defaultDimension = dimStorage.save();
+            _generalJournalAccountEntryloc.LedgerDimension = LedgerDimensionFacade::serviceCreateLedgerDimension(LedgerDefaultAccountHelper::getDefaultAccountFromMainAccountRecId(
+                                    MainAccount::findByMainAccountId(_mainAcc).RecId), defaultDimension);
+
+            ttsbegin;
+            
+
+            if(i==1)
+            {
+                _generalJournalAccountEntryloc.LedgerAccount = DimensionAttributeValueCombination::find(_generalJournalAccountEntryloc.LedgerDimension).DisplayValue;
+                _generalJournalAccountEntryloc.TransactionCurrencyAmount = transorgcurrencyamount * eTGCostDistributionsLines.ETGLinePercentage/100;
+                _generalJournalAccountEntryloc.AccountingCurrencyAmount = accountingCurrencyAmountorig * eTGCostDistributionsLines.ETGLinePercentage/100;
+                _generalJournalAccountEntryloc.ReportingCurrencyAmount = ReportingCurrencyAmountorig  * eTGCostDistributionsLines.ETGLinePercentage/100;
+                _generalJournalAccountEntryloc.update();
+                i++;
+            }
+            else
+            {
+                _generalJournalAccountEntryloc.LedgerAccount = DimensionAttributeValueCombination::find(_generalJournalAccountEntryloc.LedgerDimension).DisplayValue;
+                _generalJournalAccountEntryloc.TransactionCurrencyAmount = transorgcurrencyamount * eTGCostDistributionsLines.ETGLinePercentage/100;
+                _generalJournalAccountEntryloc.AccountingCurrencyAmount = accountingCurrencyAmountorig * eTGCostDistributionsLines.ETGLinePercentage/100;
+                _generalJournalAccountEntryloc.ReportingCurrencyAmount = ReportingCurrencyAmountorig  * eTGCostDistributionsLines.ETGLinePercentage/100;
+                _generalJournalAccountEntryloc.insert();
+            }
+            ttscommit;
+                
+        }
+    
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+	<ConfigurationKey>LedgerAdvanced</ConfigurationKey>
+	<DeveloperDocumentation>@SYS126134</DeveloperDocumentation>
+	<Label>@SYS78068</Label>
+	<TitleField1>CurrentVoucher</TitleField1>
+	<TitleField2>TransDate</TitleField2>
+	<CacheLookup>FoundAndEmpty</CacheLookup>
+	<ClusteredIndex>RecId</ClusteredIndex>
+	<Modules>AccountingFoundation</Modules>
+	<PrimaryIndex>RecId</PrimaryIndex>
+	<DeleteActions />
+	<FieldGroups>
+		<AxTableFieldGroup>
+			<Name>AutoReport</Name>
+			<Fields>
+				<AxTableFieldGroupField>
+					<DataField>TransDate</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>DocumentDate</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>LedgerDimension</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>TransTxt</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>AmountCur</DataField>
+				</AxTableFieldGroupField>
+			</Fields>
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoLookup</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoIdentification</Name>
+			<AutoPopulate>Yes</AutoPopulate>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoSummary</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoBrowse</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>Amount</Name>
+			<Label>@SYS12227</Label>
+			<Fields>
+				<AxTableFieldGroupField>
+					<DataField>AmountCur</DataField>
+				</AxTableFieldGroupField>
+			</Fields>
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>Description</Name>
+			<Label>@SYS7576</Label>
+			<Fields>
+				<AxTableFieldGroupField>
+					<DataField>TransTxt</DataField>
+				</AxTableFieldGroupField>
+			</Fields>
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>identification</Name>
+			<Label>@SYS5711</Label>
+			<Fields>
+				<AxTableFieldGroupField>
+					<DataField>RefTableid</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>RefRecid</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>TransDate</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>DocumentDate</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>LedgerDimension</DataField>
+				</AxTableFieldGroupField>
+			</Fields>
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>TaxInCostPrice</Name>
+			<Label>@SYS24596</Label>
+			<Fields />
+		</AxTableFieldGroup>
+	</FieldGroups>
+	<Fields>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldReal">
+			<Name>AmountCur</Name>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>AmountCur</ExtendedDataType>
+			<Mandatory>Yes</Mandatory>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldDate">
+			<Name>DocumentDate</Name>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>DocumentDate</ExtendedDataType>
+			<Label>@SYS78227</Label>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldInt64">
+			<Name>LedgerDimension</Name>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>LedgerDimensionAccount</ExtendedDataType>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldInt64">
+			<Name>RefRecid</Name>
+			<AssetClassification>System Metadata</AssetClassification>
+			<ExtendedDataType>RefRecId</ExtendedDataType>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldInt">
+			<Name>RefTableid</Name>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>RefTableId</ExtendedDataType>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldDate">
+			<Name>TransDate</Name>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>TransDate</ExtendedDataType>
+			<Label>@SYS14475</Label>
+			<Mandatory>Yes</Mandatory>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldString">
+			<Name>TransTxt</Name>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>TransTxt</ExtendedDataType>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldString">
+			<Name>CurrentVoucher</Name>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>Voucher</ExtendedDataType>
+			<Label>@ETG_New:ETGCurrentJourVoucher</Label>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldEnum">
+			<Name>IsTaxInCostPrice</Name>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>TaxIsTaxInCostPrice</ExtendedDataType>
+			<Label>@ETG_New:CurrentJournal</Label>
+			<Visible>No</Visible>
+			<EnumType>NoYes</EnumType>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldString">
+			<Name>JournalNumSource</Name>
+			<AllowEdit>No</AllowEdit>
+			<AllowEditOnCreate>No</AllowEditOnCreate>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>LedgerJournalId</ExtendedDataType>
+			<IgnoreEDTRelation>Yes</IgnoreEDTRelation>
+			<Label>@ETG_New:OriginalTransactionJournal</Label>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldString">
+			<Name>JournalNumPosted</Name>
+			<AllowEdit>No</AllowEdit>
+			<AllowEditOnCreate>No</AllowEditOnCreate>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>LedgerJournalId</ExtendedDataType>
+			<Label>@ETG_New:CurrentJournal</Label>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldEnum">
+			<Name>Posted</Name>
+			<AllowEdit>No</AllowEdit>
+			<AllowEditOnCreate>No</AllowEditOnCreate>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>JournalPosted</ExtendedDataType>
+			<EnumType>NoYes</EnumType>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldString">
+			<Name>OriginalVoucher</Name>
+			<AllowEdit>No</AllowEdit>
+			<AllowEditOnCreate>No</AllowEditOnCreate>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>Voucher</ExtendedDataType>
+			<Label>@ETG_New:ETGOriginalJourVoucher</Label>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldString">
+			<Name>CurrencyCode</Name>
+			<AllowEdit>No</AllowEdit>
+			<AllowEditOnCreate>No</AllowEditOnCreate>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>CurrencyCode</ExtendedDataType>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldString">
+			<Name>AccrualId</Name>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>LedgerAccrualId</ExtendedDataType>
+			<Mandatory>Yes</Mandatory>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldString">
+			<Name>Voucher</Name>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>Voucher</ExtendedDataType>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldInt64">
+			<Name>LedgerJournalTransRecId</Name>
+		</AxTableField>
+	</Fields>
+	<FullTextIndexes />
+	<Indexes>
+		<AxTableIndex>
+			<Name>TableidRecidTransdate</Name>
+			<AllowDuplicates>Yes</AllowDuplicates>
+			<Fields>
+				<AxTableIndexField>
+					<DataField>RefTableid</DataField>
+				</AxTableIndexField>
+				<AxTableIndexField>
+					<DataField>RefRecid</DataField>
+				</AxTableIndexField>
+				<AxTableIndexField>
+					<DataField>DocumentDate</DataField>
+				</AxTableIndexField>
+			</Fields>
+		</AxTableIndex>
+		<AxTableIndex>
+			<Name>FK_DimensionAttributeValueCombination_Le</Name>
+			<AllowDuplicates>Yes</AllowDuplicates>
+			<Fields>
+				<AxTableIndexField>
+					<DataField>LedgerDimension</DataField>
+				</AxTableIndexField>
+			</Fields>
+		</AxTableIndex>
+		<AxTableIndex>
+			<Name>VoucherTransDateIdx</Name>
+			<AllowDuplicates>Yes</AllowDuplicates>
+			<Fields>
+				<AxTableIndexField>
+					<DataField>TransDate</DataField>
+				</AxTableIndexField>
+			</Fields>
+		</AxTableIndex>
+	</Indexes>
+	<Mappings />
+	<Relations>
+		<AxTableRelation xmlns=""
+			i:type="AxTableRelationForeignKey">
+			<Name>LedgerDimension</Name>
+			<Cardinality>ZeroMore</Cardinality>
+			<RelatedTable>DimensionAttributeValueCombination</RelatedTable>
+			<RelatedTableCardinality>ZeroOne</RelatedTableCardinality>
+			<RelatedTableRole>LedgerDimension</RelatedTableRole>
+			<RelationshipType>Association</RelationshipType>
+			<Role>LedgerJournalTransAccrualTrans</Role>
+			<UseDefaultRoleNames>No</UseDefaultRoleNames>
+			<Constraints>
+				<AxTableRelationConstraint xmlns=""
+					i:type="AxTableRelationConstraintField">
+					<Name>LedgerDimension</Name>
+					<Field>LedgerDimension</Field>
+					<RelatedField>RecId</RelatedField>
+				</AxTableRelationConstraint>
+			</Constraints>
+			<Index>RecId</Index>
+		</AxTableRelation>
+		<AxTableRelation>
+			<Name>ETGLedgerJournalTransAccrual</Name>
+			<Cardinality>ZeroMore</Cardinality>
+			<EntityRelationshipRole>@SYS126135</EntityRelationshipRole>
+			<OnDelete>Cascade</OnDelete>
+			<RelatedTable>ETGLedgerJournalTransAccrual</RelatedTable>
+			<RelatedTableCardinality>ZeroOne</RelatedTableCardinality>
+			<RelatedTableRole>ETGLedgerJournalTransAccrual</RelatedTableRole>
+			<RelationshipType>Composition</RelationshipType>
+			<Role>ETGLedgerJournalTransAccrualTrans</Role>
+			<UseDefaultRoleNames>No</UseDefaultRoleNames>
+			<Constraints>
+				<AxTableRelationConstraint xmlns=""
+					i:type="AxTableRelationConstraintField">
+					<Name>RefTableid</Name>
+					<Field>RefTableid</Field>
+					<RelatedField>RefTableid</RelatedField>
+				</AxTableRelationConstraint>
+				<AxTableRelationConstraint xmlns=""
+					i:type="AxTableRelationConstraintField">
+					<Name>RefRecid</Name>
+					<Field>RefRecid</Field>
+					<RelatedField>RefRecid</RelatedField>
+				</AxTableRelationConstraint>
+			</Constraints>
+		</AxTableRelation>
+		<AxTableRelation>
+			<Name>LedgerJournalTable</Name>
+			<RelatedTable>LedgerJournalTable</RelatedTable>
+			<Constraints>
+				<AxTableRelationConstraint xmlns=""
+					i:type="AxTableRelationConstraintField">
+					<Name>JournalNumPosted</Name>
+					<SourceEDT>LedgerJournalId</SourceEDT>
+					<Field>JournalNumPosted</Field>
+					<RelatedField>JournalNum</RelatedField>
+				</AxTableRelationConstraint>
+			</Constraints>
+		</AxTableRelation>
+		<AxTableRelation>
+			<Name>LedgerJournalTableOrigJour</Name>
+			<Cardinality>ZeroMore</Cardinality>
+			<OnDelete>Cascade</OnDelete>
+			<RelatedTable>LedgerJournalTable</RelatedTable>
+			<RelatedTableCardinality>ZeroOne</RelatedTableCardinality>
+			<RelationshipType>Association</RelationshipType>
+			<Constraints>
+				<AxTableRelationConstraint xmlns=""
+					i:type="AxTableRelationConstraintField">
+					<Name>JournalNumSource</Name>
+					<Field>JournalNumSource</Field>
+					<RelatedField>JournalNum</RelatedField>
+				</AxTableRelationConstraint>
+			</Constraints>
+		</AxTableRelation>
+	</Relations>
+	<StateMachines />
+</AxTable>

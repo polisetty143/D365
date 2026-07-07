@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGInventAgingDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(ETGInventAgingContract))]
+class ETGInventAgingDP extends SrsReportDataProviderPreProcess
+{
+    ETGInventAgingTmp etgInventAgingTmp;
+
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getAgingTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETGInventAgingTmp))]
+    public ETGInventAgingTmp getAgingTmp()
+    {
+        select etgInventAgingTmp;
+        return etgInventAgingTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETGInventAgingContract contract = this.parmDataContract() as ETGInventAgingContract;
+        date asOfDate = contract.parmAsOnDate();
+
+        etgInventAgingTmp.setConnection(this.parmUserConnection());
+
+        InventTrans       inventTrans, inventTransOrg;
+        InventSettlement  inventSettlement;
+        InventTable       inventTable;
+        InventDim         inventDim;
+
+        real qtyBalance, costBalance, settledQty, settledCost;
+        int agingDays;
+
+        while select * from inventTrans group by ItemId
+        {
+            settledQty  = 0;
+            settledCost = 0;
+
+            etgInventAgingTmp.clear();
+
+            select sum(Qty), sum(CostAmountPosted) from inventTransOrg where inventTransOrg.ItemId == inventTrans.ItemId
+                                            &&  inventTransOrg.DatePhysical <= asOfDate
+                &&  inventTransOrg.DatePhysical >= asOfDate - 30;
+            {
+                etgInventAgingTmp.Bucket01 = inventTransOrg.CostAmountPosted;
+                etgInventAgingTmp.Qty1     = inventTransOrg.Qty;
+            }
+        
+            select sum(Qty), sum(CostAmountPosted) from inventTransOrg where inventTransOrg.ItemId == inventTrans.ItemId
+                                            &&  inventTransOrg.DatePhysical <= asOfDate - 31
+                                            &&  inventTransOrg.DatePhysical >= asOfDate - 60;
+            {
+                etgInventAgingTmp.Bucket02 = inventTransOrg.CostAmountPosted;
+                etgInventAgingTmp.Qty2     = inventTransOrg.Qty;
+            }
+
+            select sum(Qty), sum(CostAmountPosted) from inventTransOrg where inventTransOrg.ItemId == inventTrans.ItemId
+                                            &&  inventTransOrg.DatePhysical <= asOfDate - 61
+                                            &&  inventTransOrg.DatePhysical >= asOfDate - 90;
+            {
+                etgInventAgingTmp.Bucket03 = inventTransOrg.CostAmountPosted;
+                etgInventAgingTmp.Qty3     = inventTransOrg.Qty;
+            }
+
+            select sum(Qty), sum(CostAmountPosted) from inventTransOrg where inventTransOrg.ItemId == inventTrans.ItemId
+                                            &&  inventTransOrg.DatePhysical <= asOfDate - 91
+                                            &&  inventTransOrg.DatePhysical >= asOfDate - 120;
+            {
+                etgInventAgingTmp.Bucket04 = inventTransOrg.CostAmountPosted;
+                etgInventAgingTmp.Qty4     = inventTransOrg.Qty;
+            }
+
+            select sum(Qty), sum(CostAmountPosted) from inventTransOrg where inventTransOrg.ItemId == inventTrans.ItemId
+                                            &&  inventTransOrg.DatePhysical <= asOfDate - 121
+                                            &&  inventTransOrg.DatePhysical >= asOfDate - 180;
+            {
+                etgInventAgingTmp.Bucket05 = inventTransOrg.CostAmountPosted;
+                etgInventAgingTmp.Qty5     = inventTransOrg.Qty;
+            }
+
+            select sum(Qty), sum(CostAmountPosted) from inventTransOrg where inventTransOrg.ItemId == inventTrans.ItemId
+                                            &&  inventTransOrg.DatePhysical <= asOfDate - 181
+                                            &&  inventTransOrg.DatePhysical >= asOfDate - 365;
+            {
+                etgInventAgingTmp.Bucket06 = inventTransOrg.CostAmountPosted;
+                etgInventAgingTmp.Qty6     = inventTransOrg.Qty;
+            }
+
+            select sum(Qty), sum(CostAmountPosted) from inventTransOrg where inventTransOrg.ItemId == inventTrans.ItemId
+                                            &&  inventTransOrg.DatePhysical <= asOfDate - 366
+                                            &&  inventTransOrg.DatePhysical >= asOfDate - 1000;
+            {
+                etgInventAgingTmp.Bucket07 = inventTransOrg.CostAmountPosted;
+                etgInventAgingTmp.Qty7     = inventTransOrg.Qty;
+            }
+
+            etgInventAgingTmp.ItemId          = inventTrans.ItemId;
+            inventTable = InventTable::find(inventTrans.ItemId);
+            etgInventAgingTmp.ItemName        = inventTable.itemName();
+            etgInventAgingTmp.ItemGroupId     = inventTrans.itemGroupId();
+
+            etgInventAgingTmp.insert();
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

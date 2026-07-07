@@ -1,0 +1,485 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerAccrualJouralCreatePostMng</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The <c>ETGLedgerAccrualJouralCreatePostMng</c> class is used for actual logic
+/// </summary>
+class ETGLedgerAccrualJouralCreatePostMng
+{
+    TransDate               postingDate = systemDateGet();                                                      
+    int                     numLines;
+    LedgerJournalEngine     ledgerJournalEngine;
+    LedgerJournalTable      ledgerJournalTable;
+    LedgerJournalTrans      ledgerJournalTrans;
+    TransDate currentDate;
+    Voucher   currentVoucher;
+    LedgerAccrualId ledgerAccrualId;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Initialise class
+    /// </summary>
+    /// <returns>Insance of class ETGLedgerAccrualJouralCreatePostMng</returns>
+    public static ETGLedgerAccrualJouralCreatePostMng construct()
+    {
+        return new ETGLedgerAccrualJouralCreatePostMng();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// method to run the class logic
+    /// </summary>
+    public void run(TransDate asOnDate, ledgerAccrualId accrualId)
+    {
+        ETGLedgerJournalTransAccrualTrans   ledgerJournalTransAccrualTrans;
+        LedgerJournalTable                  ledgerJournaTableLoc;
+        int                                 loopNum = 1;
+
+        if(asOnDate)
+        {
+            postingDate = asOnDate;
+        }
+        if(accrualId)
+        {
+            ledgerAccrualId = accrualId;
+        }
+
+        this.WipeOutDeletedJournal();
+        this.updAccrualJournalPostedStatus();
+        this.postAlreadyCreatedJounral();
+
+        if (this.accrualTransactions())
+        {
+            try
+            {
+                ttsbegin;             
+                this.createJournalTabel();
+
+                if(ledgerAccrualId)
+                {
+                    while select forupdate ledgerJournalTransAccrualTrans order by JournalNumSource,RecId
+                    exists join ledgerJournaTableLoc
+                    where ledgerJournaTableLoc.JournalNum == ledgerJournalTransAccrualTrans.JournalNumSource
+                    && ledgerJournaTableLoc.Posted == NoYes::Yes
+                    && ledgerJournalTransAccrualTrans.TransDate <= postingDate
+                    && ledgerJournalTransAccrualTrans.Posted == NoYes::No
+                    && ledgerJournalTransAccrualTrans.AccrualId == ledgerAccrualId
+                    {
+                        numLines++;
+
+                        if (loopNum > 2)
+                        {
+                            if (ledgerJournalTrans.validateWrite())
+                            {
+                                ledgerJournalTrans.insert();
+                            }
+                            loopNum = 1;
+                        }
+
+                        ledgerJournalEngine = LedgerJournalEngine::construct(ledgerJournalTable.JournalType);
+                        ledgerJournalEngine.newJournalActive(ledgerJournalTable);
+
+                        this.createJournalLines(ledgerJournalTransAccrualTrans);
+                        loopNum++;
+
+                        ledgerJournalTransAccrualTrans.JournalNumPosted = ledgerJournalTable.JournalNum;
+                        //   ledgerJournalTransAccrualTrans.CurrentVoucher = ledgerJournalTrans.Voucher;
+                        ledgerJournalTransAccrualTrans.update();
+                        ledgerJournalTrans.ETGLedgerAccrualTransRecId = ledgerJournalTransAccrualTrans.RecId;
+                    }
+                
+                    if (numLines)
+                    {
+                        if (ledgerJournalTrans.validateWrite())
+                        {
+                            ledgerJournalTrans.insert();
+                        }
+                    }
+                }
+                else
+                {
+                    while select forupdate ledgerJournalTransAccrualTrans order by JournalNumSource,RecId
+                    exists join ledgerJournaTableLoc
+                    where ledgerJournaTableLoc.JournalNum == ledgerJournalTransAccrualTrans.JournalNumSource
+                    && ledgerJournaTableLoc.Posted == NoYes::Yes
+                    && ledgerJournalTransAccrualTrans.TransDate <= postingDate
+                    && ledgerJournalTransAccrualTrans.Posted == NoYes::No
+                    {
+                        numLines++;
+
+                        if (loopNum > 2)
+                        {
+                            if (ledgerJournalTrans.validateWrite())
+                            {
+                                ledgerJournalTrans.insert();
+                            }
+                            loopNum = 1;
+                        }
+
+                        ledgerJournalEngine = LedgerJournalEngine::construct(ledgerJournalTable.JournalType);
+                        ledgerJournalEngine.newJournalActive(ledgerJournalTable);
+
+                        this.createJournalLines(ledgerJournalTransAccrualTrans);
+                        loopNum++;
+
+                        ledgerJournalTransAccrualTrans.JournalNumPosted = ledgerJournalTable.JournalNum;
+                        //   ledgerJournalTransAccrualTrans.CurrentVoucher = ledgerJournalTrans.Voucher;
+                        ledgerJournalTransAccrualTrans.update();
+                        ledgerJournalTrans.ETGLedgerAccrualTransRecId = ledgerJournalTransAccrualTrans.RecId;
+                    }
+                
+                    if (numLines)
+                    {
+                        if (ledgerJournalTrans.validateWrite())
+                        {
+                            ledgerJournalTrans.insert();
+                        }
+                    }
+                }
+
+                
+                ttscommit;
+
+                ttsbegin;
+                if (numLines)
+                {
+                    if(ETGACFParameters::find().EnableAccrualSchemeAutoPost)
+                    {
+                        this.postJournal();
+                        this.updAccrualJournal();
+                    }
+                }
+                ttscommit;
+            }
+            catch
+            {
+                error("@ETG_New:ProcessTerminatedDueToAnError");
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postAlreadyCreatedJounral</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Post already already created but unposted jounrals.
+    /// </summary>
+    public void postAlreadyCreatedJounral()
+    {
+        ETGLedgerJournalTransAccrualTrans   ledgerJournalTransAccrualTrans;
+        boolean                             isPosted  = false;
+        int                                 i = 0;
+
+        try
+        {
+            ttsbegin;
+            while select forupdate ledgerJournalTable 
+                        exists join ledgerJournalTransAccrualTrans
+                        where ledgerJournalTable.JournalNum == ledgerJournalTransAccrualTrans.JournalNumPosted
+                        && ledgerJournalTable.Posted == NoYes::No
+                        && ledgerJournalTransAccrualTrans.TransDate <= postingDate
+                        && ledgerJournalTransAccrualTrans.Posted == NoYes::No
+            {
+                ledgerJournalTable.delete();
+                //this.postJournal();
+                //this.updAccrualJournal();
+            }
+         
+            ttscommit;
+        }
+        catch
+        {
+            error("@ETG_New:ProcessTerminatedDueToAnError");
+        }
+              
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>accrualTransactions</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// check if any transaction exists for process
+    /// </summary>
+    /// <returns>True if transaction exists otherwise false</returns>
+    public boolean accrualTransactions()
+    {
+        LedgerJournalTable                  ledgerJournaTableLoc;
+        ETGLedgerJournalTransAccrualTrans   ledgerJournalTransAccrualTrans;
+
+        select firstonly RecId from ledgerJournalTransAccrualTrans
+            exists join ledgerJournaTableLoc
+            where ledgerJournaTableLoc.JournalNum == ledgerJournalTransAccrualTrans.JournalNumSource
+            && ledgerJournaTableLoc.Posted == NoYes::Yes
+            && ledgerJournalTransAccrualTrans.TransDate <= postingDate                              
+            && ledgerJournalTransAccrualTrans.Posted == NoYes::No;
+
+        return ledgerJournalTransAccrualTrans.RecId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createJournalTabel</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// create LedgerJournalTable
+    /// </summary>
+    public void createJournalTabel()
+    {
+        //Often journal name from parameters is specified here
+        LedgerJournalName   ledgerJournalName = LedgerJournalName::find(ETGACFParameters::find().AccrualSchemeJournalName);
+
+        ledgerJournalTable.clear();
+        ledgerJournalTable.initValue();
+        ledgerJournalTable.JournalName = ledgerJournalName.JournalName;
+        ledgerJournalTable.initFromLedgerJournalName();
+        ledgerJournalTable.JournalNum = JournalTableData::newTable(ledgerJournalTable).nextJournalId();
+        ledgerJournalTable.insert();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createJournalLines</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// create LedgerJournalLine
+    /// </summary>
+    /// <param name = "_ledgerJournalTransAccrualTrans">Instance of table ETGLedgerJournalTransAccrualTrans</param>
+    public void createJournalLines(ETGLedgerJournalTransAccrualTrans    _ledgerJournalTransAccrualTrans)
+    {
+        ETGLedgerJournalTransAccrual    ledgerJournalTransAccrual = ETGLedgerJournalTransAccrual::find(_ledgerJournalTransAccrualTrans.RefTableid,_ledgerJournalTransAccrualTrans.RefRecid);
+        LedgerAccrualTable              ledgerAccrualTable = LedgerAccrualTable::find(ledgerJournalTransAccrual.AccrualId);
+
+       
+
+    
+
+        if (!ledgerJournalTrans.JournalNum)
+        {
+            ledgerJournalTrans.clear();
+            ledgerJournalTrans.initValue();
+
+            ledgerJournalEngine.initValue(ledgerJournalTrans);
+            ledgerJournalTrans.JournalNum           =   ledgerJournalTable.JournalNum;
+            ledgerJournalTrans.TransDate            =   _ledgerJournalTransAccrualTrans.TransDate;
+          //  ledgerJournalTrans.Voucher = NumberSeq::newGetVoucherFromId(ledgerAccrualTable.NumberSequenceTable, false).voucher();
+            ledgerJournalTrans.Txt                  = _ledgerJournalTransAccrualTrans.TransTxt;
+
+            LedgerJournalTrans.SkipBlockedForManualEntryCheck = true;  
+        }
+
+        if (_ledgerJournalTransAccrualTrans.AmountCur > 0)
+        {
+            ledgerJournalTrans.AccountType          =   LedgerJournalACType::Ledger;
+            ledgerJournalTrans.LedgerDimension      = _ledgerJournalTransAccrualTrans.LedgerDimension;
+            if (!ledgerJournalTrans.LedgerDimension)
+            {
+                throw error("@ETG_New:ErrorInvalidLedgerDimension");
+            }
+            ledgerJournalTrans.modifiedField(fieldNum(LedgerJournalTrans, LedgerDimension));
+            ledgerJournalEngine.accountModified(LedgerJournalTrans);
+            LedgerJournalTrans.AmountCurDebit       =   abs(_ledgerJournalTransAccrualTrans.AmountCur);
+            LedgerJournalTrans.CurrencyCode         = LedgerJournalTrans::findByRef(_ledgerJournalTransAccrualTrans.DataAreaId,_ledgerJournalTransAccrualTrans.RefRecid).CurrencyCode;//this.GetCurrencyCodeFromSource(_ledgerJournalTransAccrualTrans);  //New line  added --Task242.Amalviya.Date:16/04/22
+            ledgerJournalTrans.TransDate            =   _ledgerJournalTransAccrualTrans.TransDate;
+            LedgerRecId ledgerRecIdLocal            = Ledger::primaryLedger(CompanyInfo::findDataArea(ledgerJournalTrans.company()).RecId);
+            ledgerJournalTrans.ExchRate             = ExchangeRateHelper::getExchangeRate1_Static(ledgerRecIdLocal, LedgerJournalTrans.CurrencyCode, ledgerJournalTrans.TransDate);
+            ExchangeRateCalculation exchangeRateCalculation = ExchangeRateCalculation::newExchangeDate(Ledger::reportingCurrencyExchangeRateType(), ledgerJournalTrans.CurrencyCode, Ledger::reportingCurrency(), ledgerJournalTrans.TransDate);
+
+            ledgerJournalTrans.ReportingCurrencyExchRate = exchangeRateCalculation.getExchangeRate1();
+            ledgerJournalTrans.Txt                       = _ledgerJournalTransAccrualTrans.TransTxt;
+        }
+
+        if (_ledgerJournalTransAccrualTrans.AmountCur < 0)
+        {
+            ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+            ledgerJournalTrans.modifiedField(fieldNum(LedgerJournalTrans, OffsetAccountType));
+            ledgerJournalTrans.OffsetLedgerDimension = _ledgerJournalTransAccrualTrans.LedgerDimension;
+            ledgerJournalTrans.modifiedField(fieldNum(LedgerJournalTrans, OffsetLedgerDimension));
+            ledgerJournalEngine.offsetAccountModified(ledgerJournalTrans);
+            ledgerJournalTrans.Txt   = _ledgerJournalTransAccrualTrans.TransTxt;
+            ledgerJournalTrans.TransDate            =   _ledgerJournalTransAccrualTrans.TransDate;
+        }
+
+        if(currentDate != _ledgerJournalTransAccrualTrans.TransDate)
+        {
+            currentVoucher = NumberSeq::newGetVoucherFromId(LedgerParameters::numRefLedgerTempVoucher().numberSequenceTable().RecId, false).voucher();
+           // currentVoucher = NumberSeq::newGetVoucherFromId(ledgerAccrualTable.NumberSequenceTable, false).voucher();
+        }
+        //else
+        //{
+        //    currentVoucher =
+        //    ledgerJournalTrans.Voucher = currentVoucher
+        //}
+        ledgerJournalTrans.Voucher = currentVoucher;
+        currentDate = _ledgerJournalTransAccrualTrans.TransDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postJournal</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// post journal
+    /// </summary>
+    public void postJournal()
+    {
+        LedgerJournalCheckPost ledgerJournalCheckPost;
+        LedgerJournalTrans     ledgerJournalTransUpd;
+        ETGLedgerJournalTransAccrualTrans ledgerJournalTransAccrualTrans;
+
+        if (ledgerJournalTable.RecId)
+        {
+            ledgerJournalCheckPost = ledgerJournalCheckPost::newLedgerJournalTable(ledgerJournalTable,  NoYes::Yes);
+            ledgerJournalCheckPost.runOperation();
+        }
+
+        while select Voucher, TransDate, ETGLedgerAccrualTransRecId from ledgerJournalTransUpd
+            where ledgerJournalTransUpd.JournalNum == ledgerJournalTable.JournalNum
+        {
+            while select forupdate ledgerJournalTransAccrualTrans
+                where ledgerJournalTransAccrualTrans.JournalNumPosted == ledgerJournalTable.JournalNum
+                    && ledgerJournalTransAccrualTrans.TransDate == ledgerJournalTransUpd.TransDate
+                    && ledgerJournalTransAccrualTrans.DataAreaId == ledgerJournalTransUpd.DataAreaId
+            {
+                if(ledgerJournalTransAccrualTrans)
+                {
+                    ledgerJournalTransAccrualTrans.CurrentVoucher = ledgerJournalTransUpd.Voucher;
+                    ledgerJournalTransAccrualTrans.doUpdate();
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updAccrualJournal</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Update related accrual records
+    /// </summary>
+    public void updAccrualJournal()
+    {
+        ETGLedgerJournalTransAccrualTrans ledgerJournalTransAccrualTransUpd;
+
+        if(ledgerAccrualId)
+        {
+            ttsbegin;
+            update_recordset ledgerJournalTransAccrualTransUpd
+            setting Posted = NoYes::Yes
+            where ledgerJournalTransAccrualTransUpd.JournalNumPosted == ledgerJournalTable.JournalNum
+            &&    ledgerJournalTransAccrualTransUpd.Posted           == NoYes::No
+            &&    ledgerJournalTransAccrualTransUpd.AccrualId == ledgerAccrualId;
+            ttscommit;
+        }
+        else
+        {
+            ttsbegin;
+            update_recordset ledgerJournalTransAccrualTransUpd
+            setting Posted = NoYes::Yes
+            where ledgerJournalTransAccrualTransUpd.JournalNumPosted == ledgerJournalTable.JournalNum
+            &&    ledgerJournalTransAccrualTransUpd.Posted           == NoYes::No;
+            ttscommit;
+        }
+       
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updAccrualJournalPostedStatus</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///Auto update the posted status , for manually posted journals.
+    /// </summary>    
+    public void updAccrualJournalPostedStatus()
+    {
+        ETGLedgerJournalTransAccrualTrans ledgerJournalTransAccrualTransUpd;
+        LedgerJournalTable                  ledgerJournaTableLoc;
+
+        ttsbegin;
+        update_recordset ledgerJournalTransAccrualTransUpd
+            setting Posted = NoYes::Yes
+            exists join ledgerJournaTableLoc
+            where ledgerJournaTableLoc.JournalNum == ledgerJournalTransAccrualTransUpd.JournalNumPosted
+            && ledgerJournaTableLoc.Posted == NoYes::Yes
+            && ledgerJournalTransAccrualTransUpd.Posted == NoYes::No ;
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>GetCurrencyCodeFromSource</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// get currency for the journal lines
+    /// </summary>
+    /// <param name = "_ledgerJournalTransAccrualTrans">Instance of table ETGLedgerJournalTransAccrualTrans</param>
+    public CurrencyCode GetCurrencyCodeFromSource(ETGLedgerJournalTransAccrualTrans _LedgerJournalTransAccrualTrans)
+    {      
+      LedgerJournalTrans ledgerJournalTransLoc;
+
+        select firstonly  ledgerJournalTransLoc
+          where ledgerJournalTransLoc.JournalNum == _LedgerJournalTransAccrualTrans.JournalNumSource          
+            && ledgerJournalTransLoc.DataAreaId  == _LedgerJournalTransAccrualTrans.DataAreaId;      
+
+        return ledgerJournalTransLoc.CurrencyCode;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>WipeOutDeletedJournal</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Remove deleted journals from the history table records.
+    /// </summary>
+    public void WipeOutDeletedJournal()
+    {
+        ETGLedgerJournalTransAccrualTrans ledgerJournalTransAccrualTransUpd;
+        LedgerJournalTable                ledgerJournaTableLoc;
+        int countnum = 0;
+
+        ttsbegin;
+
+        while select  forupdate ledgerJournalTransAccrualTransUpd           
+            where ledgerJournalTransAccrualTransUpd.JournalNumPosted != '' &&
+            ledgerJournalTransAccrualTransUpd.Posted == NoYes::No
+        {        
+            select firstonly ledgerJournaTableLoc
+            where ledgerJournaTableLoc.JournalNum == ledgerJournalTransAccrualTransUpd.JournalNumPosted;
+
+            if(!ledgerJournaTableLoc)
+            {
+                ledgerJournalTransAccrualTransUpd.JournalNumPosted = '';
+                ledgerJournalTransAccrualTransUpd.doUpdate();
+                countnum ++ ;
+            }        
+        }     
+     
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

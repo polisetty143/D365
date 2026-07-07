@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>InventJournalCheckPost_MovementETGSPAIN_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the <c>InventJournalCheckPost_Movement</c> class for the ETGSPAIN model.
+/// </summary>
+[ExtensionOf(classStr(InventJournalCheckPost_Movement))]
+final class InventJournalCheckPost_MovementETGSPAIN_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>checkTrans</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>checkTrans</c> method.
+    /// </summary>
+    /// <param name="_journalTransData">
+    /// The line to validate.
+    /// </param>
+    /// <returns>
+    /// True if valid, otherwise false.
+    /// </returns>
+    protected boolean checkTrans(JournalTransData _journalTransData)
+    {
+        boolean                             ret                 = next checkTrans(_journalTransData);
+        InventJournalTrans                  inventJournalTrans  = _journalTransData.journalTrans();
+        InventJournalTable                  inventJournalTable  = _journalTransData.journalTableData().journalTable();
+        ETGSPAINInventTransApplication           ETGSPAINInventTransApplicationOrigin;
+        boolean                             isFromSales;
+        boolean                             isFromPurch;
+        boolean                             isToSales;
+        boolean                             isToPurch;
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            if (InventJournalName::find(inventJournalTable.JournalNameId).JournalType == InventJournalType::Transfer && inventJournalTrans.ETGSPAINInventAppliedQty < 0)
+            {
+                isFromSales = SalesTable::exist(inventJournalTrans.inventDim().InventDimension1);
+                isFromPurch = PurchTable::exist(inventJournalTrans.inventDim().InventDimension1);
+
+                if (isFromSales)
+                {
+                    // Buscamos la transacción aplicada de origen (Venta : Cantidad Negativa)
+                    select firstonly forupdate  ETGSPAINInventTransApplicationOrigin
+                    where                   ETGSPAINInventTransApplicationOrigin.ItemId              == inventJournalTrans.ItemId
+                    &&                      ETGSPAINInventTransApplicationOrigin.inventDimId         == inventJournalTrans.InventDimId
+                    &&                      ETGSPAINInventTransApplicationOrigin.SalesApplicationQty <= inventJournalTrans.ETGSPAINInventAppliedQty;
+                }
+                else if (isFromPurch)
+                {
+                    // Buscamos la transacción aplicada de origen (Compra : Cantidad Positiva)
+                    select firstonly forupdate  ETGSPAINInventTransApplicationOrigin
+                    where                   ETGSPAINInventTransApplicationOrigin.ItemId              == inventJournalTrans.ItemId
+                    &&                      ETGSPAINInventTransApplicationOrigin.inventDimId         == inventJournalTrans.InventDimId
+                    &&                      ETGSPAINInventTransApplicationOrigin.PurchApplicationQty >= abs(inventJournalTrans.ETGSPAINInventAppliedQty);
+                }
+
+                if (!ETGSPAINInventTransApplicationOrigin)
+                {
+                    return checkFailed("@ETGSPAINLabels:InventTransAppliedQtyNotFoundForDimensions");
+                }
+
+                isToSales = SalesTable::exist(inventJournalTrans.toInventDim().InventDimension1);
+                isToPurch = PurchTable::exist(inventJournalTrans.toInventDim().InventDimension1);
+
+                if (!isToSales && !isToPurch)
+                {
+                    return checkFailed(strFmt("@ETGSPAINLabels:NotFoundApplicationOrder", inventJournalTrans.toInventDim().InventDimension1));
+                }
+            }
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postJournal</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>postJournal</c> method.
+    /// </summary>
+    /// <param name="_journalTransList">
+    /// List of transactions to register.
+    /// </param>
+    protected void postJournal(JournalTransList _journalTransList)
+    {
+        next postJournal(_journalTransList);
+
+        JournalTransData        journalTransData   = _journalTransList.journalTransData();
+        InventJournalTable      inventJournalTable = journalTransData.journalTableData().journalTable();
+        InventJournalTrans      inventJournalTrans;
+        InventTransOrigin       inventTransOrigin;
+        ETGSPAINInventTrans     etgspainInventTrans;
+        InventTrans             inventTrans;
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            if (InventJournalName::find(inventJournalTable.JournalNameId).JournalType == InventJournalType::Transfer)
+            {
+                if (_journalTransList.first())
+                {
+                    do
+                    {
+                        inventJournalTrans = _journalTransList.journalTransData().journalTrans();
+
+                        ttsbegin;
+
+                        while select inventTrans
+                        exists join inventTransOrigin
+                            where inventTrans.InventTransOrigin             == inventTransOrigin.RecId
+                                && (inventTransOrigin.InventTransId         == inventJournalTrans.InventTransId
+                                        || inventTransOrigin.InventTransId  == inventJournalTrans.ToInventTransId)
+                        {
+                            select firstonly forupdate etgspainInventTrans
+                            where etgspainInventTrans.RefRecId == inventTrans.RecId;
+
+                            if (!etgspainInventTrans)
+                            {
+                                etgspainInventTrans.clear();
+                                etgspainInventTrans.initValue();
+                            
+                                etgspainInventTrans.RefRecId = inventTrans.RecId;
+                                etgspainInventTrans.InventLicensePlate              = inventJournalTrans.ETGSPAINInventLicensePlate;
+                                etgspainInventTrans.InventPackingSlipTransitId      = inventJournalTrans.ETGSPAINInventPackingSlipTransitId;
+                                etgspainInventTrans.CustSalesReference              = inventJournalTrans.ETGSPAINCustSalesReference;
+                                etgspainInventTrans.SalesCustomerWithdrawalDate     = inventJournalTrans.ETGSPAINSalesCustomerWithdrawalDate;
+
+
+                                etgspainInventTrans.insert();
+                            }
+                        }
+                   
+                        // Movemos cantidad aplicada
+                        ETGSPAINInventTransApplication::createMovementFromInventJournalTrans(inventJournalTrans);
+
+                        ttscommit;
+                    }
+                    while (_journalTransList.next());
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

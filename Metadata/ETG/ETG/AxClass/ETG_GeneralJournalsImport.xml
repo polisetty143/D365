@@ -1,0 +1,908 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_GeneralJournalsImport</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+using System.IO;
+using OfficeOpenXml;
+using OfficeOpenXml.ExcelPackage;
+using OfficeOpenXml.ExcelRange;
+class ETG_GeneralJournalsImport extends RunBaseBatch
+{
+    Filename        ItemFileName;
+    Filename        filename;
+    DialogField     dialogFilename;
+ 
+    System.IO.Stream    stream;
+    FileUploadTemporaryStorageResult fileUploadResult;
+    OfficeOpenXml.ExcelRange    range;
+    CommaTextStreamIo   commaIo;
+    RecordInsertList    rsl;
+    boolean             newIteration;
+    int                 line,
+                      lineimported,lineerror, lineskipped;
+    Counter             loop;
+    FileUploadBuild     dialogFileUpload;
+    FileUpload          fileUpload;
+    DialogRunbase       dialog;
+ 
+    #define.CurrentVersion(1)
+    #define.Version1(1)
+    #localmacro.CurrentList
+      fileName
+  #endmacro
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>create</Name>
+				<Source><![CDATA[
+    public void create(int row)
+    {
+        LedgerJournalTable ledgerJournalTable;
+        LedgerJournalTrans ledgerJournalTrans;
+        LedgerJournalName ledgerJournalName;
+     
+        VendTable vendTable;
+        CustTable custTable;
+        DimensionDynamicAccount ledgerDim, offsetLedgerDim;
+        Voucher voucher;
+        DimensionDisplayValue offsetValue;
+        str journalNumber;
+     
+        DimensionDynamicAccount ledgerDimension, ledgerDimensionOrg;
+        LedgerJournalEngine ledgerJournalEngine;
+     
+        journalNumber = range.get_Item(row, 28).Value;
+        
+        //select * from ledgerJournalTable
+        //  where ledgerJournalTable.JournalNum == journalNumber;
+
+        container cont = [range.get_Item(row, 29).Value, range.get_Item(row, 30).Value, range.get_Item(row, 31).Value, range.get_Item(row, 32).Value,
+                  range.get_Item(row, 33).Value, range.get_Item(row, 34).Value, range.get_Item(row, 35).Value, range.get_Item(row, 36).Value, range.get_Item(row, 37).Value,
+                  range.get_Item(row, 38).Value,range.get_Item(row, 39).Value,range.get_Item(row, 40).Value, range.get_Item(row, 41).Value, range.get_Item(row, 55).Value,
+                  range.get_Item(row, 56).Value, range.get_Item(row, 57).Value, range.get_Item(row, 59).Value];
+
+        if(journalNumber)
+        {
+            str docDateStr, transDateStr, dueDateStr, accountType, offsetAccountType;
+            int docDateInt, dueDateInt, transDateInt;
+            date docDate, dueDate, tansDate;
+            CustVendPaymStatus paymStatus;
+            Description itemWithHoldingTaxGroup;
+            TaxWithholdItemGroupHeading_TH taxWithholdItemGroupHeading_TH;
+            HcmPersonnelNumberId approverName;
+            Etg_LoaderStaging loaderStaging;
+
+            transDateStr = range.get_Item(row, 1).Text.ToString();
+            dueDateStr = range.get_Item(row, 21).Text.ToString();
+            docDateStr = range.get_Item(row, 24).Text.ToString();
+        
+            tansDate = str2Date(transDateStr, 213);
+            dueDate = str2Date(dueDateStr, 213);
+            docDate = str2Date(docDateStr, 213);
+
+            LedgerJournalACType ledgerJournalACType, offsetledgerJournalACType;
+
+           // select * from ledgerJournalName where ledgerJournalName.JournalName == ledgerJournalTable.JournalName;           
+
+            // voucher = new JournalVoucherNum(JournalTableData::newTable(ledgerJournalTable)).getNew(true);
+            loaderStaging = null;
+          //  loaderStaging = ledgerJournalTable.DataAreaId;
+            loaderStaging.JournalNum = journalNumber;
+            //  ledgerJournalTrans.Voucher = voucher;
+            loaderStaging.LineNum  = range.get_Item(row, 2).Value;
+            accountType = range.get_Item(row, 3).Value.ToString();
+
+            ledgerJournalACType = str2Enum(ledgerJournalACType, accountType);
+
+            if(ledgerJournalACType == LedgerJournalACType::Cust)
+            {
+                loaderStaging.AccountType = LedgerJournalACType::Cust;
+                ledgerDim = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(range.get_Item(row, 4).Value, LedgerJournalACType::Cust);
+         
+                loaderStaging.LedgerDimension = ledgerDim;
+                loaderStaging.DefaultDimension = this.createDefaultDimension(range.get_Item(row, 29).Value, range.get_Item(row, 30).Value, range.get_Item(row, 31).Value, range.get_Item(row, 32).Value,
+                  range.get_Item(row, 33).Value, range.get_Item(row, 34).Value, range.get_Item(row, 35).Value, range.get_Item(row, 36).Value, range.get_Item(row, 37).Value,
+                  range.get_Item(row, 38).Value,range.get_Item(row, 39).Value,range.get_Item(row, 40).Value, range.get_Item(row, 41).Value, range.get_Item(row, 55).Value,
+                    range.get_Item(row, 56).Value, range.get_Item(row, 57).Value, range.get_Item(row, 59).Value);
+                loaderStaging.OffsetDefaultDimension = this.createDefaultDimension(range.get_Item(row, 29).Value, range.get_Item(row, 30).Value, range.get_Item(row, 31).Value, range.get_Item(row, 32).Value,
+                  range.get_Item(row, 33).Value, range.get_Item(row, 34).Value, range.get_Item(row, 35).Value, range.get_Item(row, 36).Value, range.get_Item(row, 37).Value,
+                  range.get_Item(row, 38).Value,range.get_Item(row, 39).Value,range.get_Item(row, 40).Value, range.get_Item(row, 41).Value, range.get_Item(row, 55).Value,
+                    range.get_Item(row, 56).Value, range.get_Item(row, 57).Value, range.get_Item(row, 59).Value);
+            }
+
+            if(ledgerJournalACType == LedgerJournalACType::Vend)
+            {
+                loaderStaging.AccountType = LedgerJournalACType::Vend;
+                ledgerDim = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(range.get_Item(row, 4).Value, LedgerJournalACType::Vend);
+         
+                loaderStaging.LedgerDimension = ledgerDim;
+                loaderStaging.DefaultDimension = this.createDefaultDimension(range.get_Item(row, 29).Value, range.get_Item(row, 30).Value, range.get_Item(row, 31).Value, range.get_Item(row, 32).Value,
+                  range.get_Item(row, 33).Value, range.get_Item(row, 34).Value, range.get_Item(row, 35).Value, range.get_Item(row, 36).Value, range.get_Item(row, 37).Value,
+                  range.get_Item(row, 38).Value,range.get_Item(row, 39).Value,range.get_Item(row, 40).Value, range.get_Item(row, 41).Value, range.get_Item(row, 55).Value,
+                    range.get_Item(row, 56).Value, range.get_Item(row, 57).Value, range.get_Item(row, 59).Value);
+                loaderStaging.OffsetDefaultDimension = this.createDefaultDimension(range.get_Item(row, 29).Value, range.get_Item(row, 30).Value, range.get_Item(row, 31).Value, range.get_Item(row, 32).Value,
+                  range.get_Item(row, 33).Value, range.get_Item(row, 34).Value, range.get_Item(row, 35).Value, range.get_Item(row, 36).Value, range.get_Item(row, 37).Value,
+                  range.get_Item(row, 38).Value,range.get_Item(row, 39).Value,range.get_Item(row, 40).Value, range.get_Item(row, 41).Value, range.get_Item(row, 55).Value,
+                    range.get_Item(row, 56).Value, range.get_Item(row, 57).Value, range.get_Item(row, 59).Value);
+            }
+
+            if(ledgerJournalACType == LedgerJournalACType::Ledger)
+            {
+                loaderStaging.AccountType = LedgerJournalACType::Ledger;
+                // ledgerDim = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(range.get_Item(row, 4).Value, LedgerJournalACType::Ledger);
+                ledgerDimensionOrg = this.offsetLedgerDimensionValue(range.get_Item(row, 4).Value, cont);
+                loaderStaging.LedgerDimension = ledgerDimensionOrg;
+                loaderStaging.DefaultDimension = this.createDefaultDimension(range.get_Item(row, 29).Value, range.get_Item(row, 30).Value, range.get_Item(row, 31).Value, range.get_Item(row, 32).Value,
+                  range.get_Item(row, 33).Value, range.get_Item(row, 34).Value, range.get_Item(row, 35).Value, range.get_Item(row, 36).Value, range.get_Item(row, 37).Value,
+                  range.get_Item(row, 38).Value,range.get_Item(row, 39).Value,range.get_Item(row, 40).Value, range.get_Item(row, 41).Value, range.get_Item(row, 55).Value,
+                    range.get_Item(row, 56).Value, range.get_Item(row, 57).Value, range.get_Item(row, 59).Value);
+                loaderStaging.OffsetDefaultDimension = this.createDefaultDimension(range.get_Item(row, 29).Value, range.get_Item(row, 30).Value, range.get_Item(row, 31).Value, range.get_Item(row, 32).Value,
+                  range.get_Item(row, 33).Value, range.get_Item(row, 34).Value, range.get_Item(row, 35).Value, range.get_Item(row, 36).Value, range.get_Item(row, 37).Value,
+                  range.get_Item(row, 38).Value,range.get_Item(row, 39).Value,range.get_Item(row, 40).Value, range.get_Item(row, 41).Value, range.get_Item(row, 55).Value,
+                    range.get_Item(row, 56).Value, range.get_Item(row, 57).Value, range.get_Item(row, 59).Value);
+            }
+
+            if(ledgerJournalACType == LedgerJournalACType::Bank)
+            {
+                loaderStaging.AccountType = LedgerJournalACType::Bank;
+                ledgerDim = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(range.get_Item(row, 4).Value, LedgerJournalACType::Bank);
+         
+                loaderStaging.LedgerDimension = ledgerDim;
+                loaderStaging.DefaultDimension = this.createDefaultDimension(range.get_Item(row, 29).Value, range.get_Item(row, 30).Value, range.get_Item(row, 31).Value, range.get_Item(row, 32).Value,
+                  range.get_Item(row, 33).Value, range.get_Item(row, 34).Value, range.get_Item(row, 35).Value, range.get_Item(row, 36).Value, range.get_Item(row, 37).Value,
+                  range.get_Item(row, 38).Value,range.get_Item(row, 39).Value,range.get_Item(row, 40).Value, range.get_Item(row, 41).Value, range.get_Item(row, 55).Value,
+                    range.get_Item(row, 56).Value, range.get_Item(row, 57).Value, range.get_Item(row, 59).Value);
+                loaderStaging.OffsetDefaultDimension = this.createDefaultDimension(range.get_Item(row, 29).Value, range.get_Item(row, 30).Value, range.get_Item(row, 31).Value, range.get_Item(row, 32).Value,
+                  range.get_Item(row, 33).Value, range.get_Item(row, 34).Value, range.get_Item(row, 35).Value, range.get_Item(row, 36).Value, range.get_Item(row, 37).Value,
+                  range.get_Item(row, 38).Value,range.get_Item(row, 39).Value,range.get_Item(row, 40).Value, range.get_Item(row, 41).Value, range.get_Item(row, 55).Value,
+                    range.get_Item(row, 56).Value, range.get_Item(row, 57).Value, range.get_Item(row, 59).Value);
+            }
+         
+            loaderStaging.Txt =  range.get_Item(row, 6).Value;
+            loaderStaging.AmountCurDebit = range.get_Item(row, 7).Value;
+            loaderStaging.AmountCurCredit = range.get_Item(row, 8).Value;
+            loaderStaging.CurrencyCode = range.get_Item(row, 9).Value;
+            loaderStaging.TransDate = tansDate;
+            loaderStaging.ExchRate = any2Real(range.get_Item(row, 10).Value) * 100;
+
+            offsetAccountType = range.get_Item(row, 11).Value.ToString();
+
+            offsetledgerJournalACType = str2Enum(offsetledgerJournalACType, offsetAccountType);
+
+            DimensionAttributeValueCombination dimAttrValComb;
+      
+            if(offsetledgerJournalACType == LedgerJournalACType::Cust)
+            {
+                loaderStaging.OffsetAccountType = LedgerJournalACType::Cust;
+                if(range.get_Item(row, 12).Value)
+                {
+                    offsetLedgerDim = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(range.get_Item(row, 12).Value, LedgerJournalACType::Cust);
+                }
+                else
+                {
+                    offsetLedgerDim = str2Int64("");
+                }
+                loaderStaging.OffsetLedgerDimension = offsetLedgerDim;
+            }
+
+            if(offsetledgerJournalACType == LedgerJournalACType::Vend)
+            {
+                loaderStaging.OffsetAccountType = LedgerJournalACType::Vend;
+                if(range.get_Item(row, 12).Value)
+                {
+                    offsetLedgerDim = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(range.get_Item(row, 12).Value, LedgerJournalACType::Vend);
+                }
+                else
+                {
+                    offsetLedgerDim = str2Int64("");
+                }
+                loaderStaging.OffsetLedgerDimension = offsetLedgerDim;
+            }
+
+            if(offsetledgerJournalACType == LedgerJournalACType::Ledger)
+            {
+                loaderStaging.OffsetAccountType = LedgerJournalACType::Ledger;
+                if(range.get_Item(row, 12).Value)
+                {
+                    ledgerDimension = this.offsetLedgerDimensionValue(range.get_Item(row, 12).Value, cont);
+                }
+                else
+                {
+                    offsetLedgerDim = str2Int64("");
+                }
+                loaderStaging.OffsetLedgerDimension = ledgerDimension;
+            }
+
+            if(offsetledgerJournalACType == LedgerJournalACType::Bank)
+            {
+                loaderStaging.OffsetAccountType = LedgerJournalACType::Bank;
+                if(range.get_Item(row, 12).Value)
+                {
+                    offsetLedgerDim = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(range.get_Item(row, 12).Value, LedgerJournalACType::Bank);
+                }
+                else
+                {
+                    offsetLedgerDim = str2Int64("");
+                }
+                loaderStaging.OffsetLedgerDimension = offsetLedgerDim;
+            }
+            
+            loaderStaging.TaxItemGroup =  range.get_Item(row, 14).Value;
+            loaderStaging.TaxGroup =  range.get_Item(row, 15).Value;
+            loaderStaging.TaxCode =  range.get_Item(row, 16).Value;
+            NoYesError noYesOrg1;
+            loaderStaging.TaxWithholdCalculate_TH = str2Enum(noYesOrg1, range.get_Item(row, 17).Value);
+          
+            itemWithHoldingTaxGroup = range.get_Item(row, 18).Text;
+
+            select * from taxWithholdItemGroupHeading_TH
+              where TaxWithholdItemGroupHeading_TH.Name == itemWithHoldingTaxGroup;
+
+            loaderStaging.TaxWithholdItemGroupHeading_TH = taxWithholdItemGroupHeading_TH.RecId;
+            loaderStaging.TaxWithholdGroup =  range.get_Item(row, 19).Value;
+            NoYesError noYes;
+            loaderStaging.Prepayment = str2Enum(noYes, range.get_Item(row, 20).Value);
+          
+            loaderStaging.Invoice =  range.get_Item(row, 5).Value;
+            loaderStaging.Payment =  range.get_Item(row, 22).Value;
+            loaderStaging.DocumentDate = docDate;
+            date strDate = mkDate(01,01,1900);
+            if(dueDate)
+            {
+                loaderStaging.Due = dueDate;
+            }
+            else if(dueDate == strDate && !loaderStaging.Payment && dueDate == strDate)
+            {
+                loaderStaging.Due = dateNull();
+            }
+            else if(docDate == strDate && dueDate == strDate)
+            {
+                loaderStaging.Due = PaymTerm::find(loaderStaging.Payment).due(loaderStaging.TransDate);
+            }
+            else if(dueDate == strDate)
+            {
+                loaderStaging.Due = PaymTerm::find(loaderStaging.Payment).due(loaderStaging.DocumentDate);
+            }
+         
+            approverName = range.get_Item(row, 43).Value;
+            if(approverName)
+            {
+                loaderStaging.Approver = HcmWorker::findByPersonnelNumber(approverName).RecId;
+            }
+            else
+            {
+                loaderStaging.Approver = str2Int64("");
+            }
+            NoYesError noYesOrg;
+            // Approved approved = str2Enum(noYesOrg, range.get_Item(row, 42).Value);
+            if(range.get_Item(row, 42).Value)
+            {
+                loaderStaging.Approved = str2Enum(noYesOrg, range.get_Item(row, 42).Value);
+            }
+            else
+            {
+                loaderStaging.Approved = NoYes::No;
+            }
+            loaderStaging.PostingProfile =  range.get_Item(row, 13).Value;
+            loaderStaging.DocumentNum =  range.get_Item(row, 23).Value;
+            loaderStaging.PaymMode =  range.get_Item(row, 25).Value;
+            loaderStaging.PaymentStatus = str2Enum(paymStatus,  range.get_Item(row, 26).Value);
+            loaderStaging.BankTransType =  range.get_Item(row, 27).Value;
+            loaderStaging.PaymReference = range.get_Item(row, 44).Value;
+            loaderStaging.ActualSalesTaxAmount = range.get_Item(row, 45).Value;
+            loaderStaging.JournalName = range.get_Item(row, 46).Value;
+            loaderStaging.Qty = range.get_Item(row, 58).Value;
+            if(range.get_Item(row, 47).Value)
+            {
+                loaderStaging.FeeId = range.get_Item(row, 47).Value;
+                loaderStaging.FeeValueAmount = range.get_Item(row, 48).Value;
+                loaderStaging.FeeCurrency = range.get_Item(row, 49).Value;
+                loaderStaging.FeeTaxGroup = range.get_Item(row, 50).Value;
+                loaderStaging.FeeTaxItemGroup = range.get_Item(row, 51).Value;
+                ModuleCustVend feeModuleCustVend;
+                str feeModule;
+                feeModule = range.get_Item(row, 52).Value.ToString();
+                feeModuleCustVend = str2Enum(feeModuleCustVend, feeModule);
+
+                if(feeModuleCustVend == ModuleCustVend::Cust)
+                {
+                    loaderStaging.FeeModule = ModuleCustVend::Cust;
+                }
+                else if(feeModuleCustVend == ModuleCustVend::Vend)
+                {
+                    loaderStaging.FeeModule = ModuleCustVend::Vend;
+                }
+                else
+                {
+                    loaderStaging.FeeModule = str2Enum("", feeModule);
+                }
+                str feeAccountType;
+                LedgerJournalACType feeLedgerJournalACType;
+                DimensionDynamicAccount feeLedgerDim, feeLedgerDimOrg;
+                feeAccountType = range.get_Item(row, 53).Value.ToString();
+                feeLedgerJournalACType = str2Enum(feeLedgerJournalACType, feeAccountType);
+
+                if(feeLedgerJournalACType == LedgerJournalACType::Cust)
+                {
+                    loaderStaging.FeeAccountType = LedgerJournalACType::Cust;
+                    feeLedgerDim = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(range.get_Item(row, 54).Value, LedgerJournalACType::Cust);
+         
+                    loaderStaging.FeeAccount = feeLedgerDim;
+                    loaderStaging.FeeDefaultDimension = this.createDefaultDimension(range.get_Item(row, 29).Value, range.get_Item(row, 30).Value, range.get_Item(row, 31).Value, range.get_Item(row, 32).Value,
+                  range.get_Item(row, 33).Value, range.get_Item(row, 34).Value, range.get_Item(row, 35).Value, range.get_Item(row, 36).Value, range.get_Item(row, 37).Value,
+                  range.get_Item(row, 38).Value,range.get_Item(row, 39).Value,range.get_Item(row, 40).Value, range.get_Item(row, 41).Value, range.get_Item(row, 55).Value,
+                        range.get_Item(row, 56).Value, range.get_Item(row, 57).Value, range.get_Item(row, 59).Value);
+                }
+                if(feeLedgerJournalACType == LedgerJournalACType::Vend)
+                {
+                    loaderStaging.FeeAccountType = LedgerJournalACType::Vend;
+                    feeLedgerDim = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(range.get_Item(row, 54).Value, LedgerJournalACType::Vend);
+         
+                    loaderStaging.FeeAccount = feeLedgerDim;
+                    loaderStaging.FeeDefaultDimension = this.createDefaultDimension(range.get_Item(row, 29).Value, range.get_Item(row, 30).Value, range.get_Item(row, 31).Value, range.get_Item(row, 32).Value,
+                  range.get_Item(row, 33).Value, range.get_Item(row, 34).Value, range.get_Item(row, 35).Value, range.get_Item(row, 36).Value, range.get_Item(row, 37).Value,
+                  range.get_Item(row, 38).Value,range.get_Item(row, 39).Value,range.get_Item(row, 40).Value, range.get_Item(row, 41).Value, range.get_Item(row, 55).Value,
+                        range.get_Item(row, 56).Value, range.get_Item(row, 57).Value, range.get_Item(row, 59).Value);
+                   
+                }
+                if(feeLedgerJournalACType == LedgerJournalACType::Ledger)
+                {
+                    loaderStaging.FeeAccountType = LedgerJournalACType::Ledger;
+                    // ledgerDim = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(range.get_Item(row, 4).Value, LedgerJournalACType::Ledger);
+                    feeLedgerDimOrg = this.offsetLedgerDimensionValue(range.get_Item(row, 54).Value, cont);
+                    loaderStaging.FeeAccount = feeLedgerDimOrg;
+                    loaderStaging.FeeDefaultDimension = this.createDefaultDimension(range.get_Item(row, 29).Value, range.get_Item(row, 30).Value, range.get_Item(row, 31).Value, range.get_Item(row, 32).Value,
+                  range.get_Item(row, 33).Value, range.get_Item(row, 34).Value, range.get_Item(row, 35).Value, range.get_Item(row, 36).Value, range.get_Item(row, 37).Value,
+                  range.get_Item(row, 38).Value,range.get_Item(row, 39).Value,range.get_Item(row, 40).Value, range.get_Item(row, 41).Value, range.get_Item(row, 55).Value,
+                        range.get_Item(row, 56).Value, range.get_Item(row, 57).Value, range.get_Item(row, 59).Value);
+                   
+                }
+                if(feeLedgerJournalACType == LedgerJournalACType::Bank)
+                {
+                    loaderStaging.FeeAccountType = LedgerJournalACType::Bank;
+                    feeLedgerDim = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(range.get_Item(row, 54).Value, LedgerJournalACType::Bank);
+         
+                    loaderStaging.FeeAccount = feeLedgerDim;
+                    loaderStaging.FeeDefaultDimension = this.createDefaultDimension(range.get_Item(row, 29).Value, range.get_Item(row, 30).Value, range.get_Item(row, 31).Value, range.get_Item(row, 32).Value,
+                  range.get_Item(row, 33).Value, range.get_Item(row, 34).Value, range.get_Item(row, 35).Value, range.get_Item(row, 36).Value, range.get_Item(row, 37).Value,
+                  range.get_Item(row, 38).Value,range.get_Item(row, 39).Value,range.get_Item(row, 40).Value, range.get_Item(row, 41).Value, range.get_Item(row, 55).Value,
+                        range.get_Item(row, 56).Value, range.get_Item(row, 57).Value, range.get_Item(row, 59).Value);
+                }               
+            }
+            lineimported++;
+            loaderStaging.insert();
+        }
+       
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createJournal</Name>
+				<Source><![CDATA[
+    public void createJournal(Etg_LoaderStaging _loaderStaging)
+    {
+        str jourNum = _loaderStaging.JournalNum;
+        LedgerJournalTrans ledgerJournalTransOrig;
+        LedgerJournalTrans ledgerJournalTrans;
+        ledgerJournalTable ledgerJournalTable, ledgerJournalTableOrg;
+        ledgerJournalTable _ledgerJournalTableOrig;
+        LedgerJournalName ledgerJournalName;
+        LedgerJournalEngine ledgerJournalEngine;
+        Etg_LoaderStaging  Etg_LoaderStagingGj;
+        int numLines;
+        str docDateStr, transDateStr, dueDateStr, accountType, offsetAccountType;
+        int docDateInt, dueDateInt, transDateInt;
+        date docDate, dueDate, tansDate;
+
+        select * from ledgerJournalTableOrg where ledgerJournalTableOrg.JournalNum == jourNum;
+        select * from ledgerJournalName where ledgerJournalName.JournalName == ledgerJournalTableOrg.JournalName;
+
+            while select Etg_LoaderStagingGj
+    order by RecId
+            where Etg_LoaderStagingGj.JournalNum == jourNum
+        {
+            numLines++;
+            if (!ledgerJournalTable.RecId)
+            {
+                //Often journal name from parameters is specified here
+                // DEV::validateCursorField(ledgerJournalName, fieldNum(LedgerJournalName, JournalName));
+
+                ledgerJournalTable.clear();
+                ledgerJournalTable.initValue();
+                ledgerJournalTable.JournalName = ledgerJournalName.JournalName;
+                ledgerJournalTable.initFromLedgerJournalName();
+                ledgerJournalTable.JournalNum = JournalTableData::newTable(ledgerJournalTable).nextJournalId();
+                ledgerJournalTable.Name = strFmt("Copy of %1, Date %2", _ledgerJournalTableOrig.JournalNum, today());
+                ledgerJournalTable.insert();
+
+                info(strFmt("Journal %1 created", ledgerJournalTable.JournalNum));
+
+                ledgerJournalEngine = LedgerJournalEngine::construct(ledgerJournalTable.JournalType);
+                ledgerJournalEngine.newJournalActive(ledgerJournalTable);
+            }
+
+            ledgerJournalTrans.clear();
+            ledgerJournalTrans.initValue();
+            ledgerJournalEngine.initValue(ledgerJournalTrans);
+            ledgerJournalTrans.JournalNum           =   ledgerJournalTable.JournalNum;
+            ledgerJournalTrans.TransDate            =   today();
+            ledgerJournalTrans.AccountType          =   ledgerJournalTransOrig.AccountType;
+            ledgerJournalTrans.modifiedField(fieldNum(LedgerJournalTrans, AccountType));
+
+            ledgerJournalTrans.LedgerDimension = ledgerJournalTransOrig.LedgerDimension;
+            if (!ledgerJournalTrans.LedgerDimension)
+            {
+                throw error("Missing or invalid ledger dimension for journal process");
+            }
+            ledgerJournalTrans.modifiedField(fieldNum(LedgerJournalTrans, LedgerDimension));
+            ledgerJournalEngine.accountModified(LedgerJournalTrans);
+            ledgerJournalTrans.OffsetAccountType = ledgerJournalTransOrig.OffsetAccountType;
+            ledgerJournalTrans.modifiedField(fieldNum(LedgerJournalTrans, OffsetAccountType));
+            ledgerJournalTrans.OffsetLedgerDimension = ledgerJournalTransOrig.OffsetLedgerDimension;
+            ledgerJournalTrans.modifiedField(fieldNum(LedgerJournalTrans, OffsetLedgerDimension));
+            ledgerJournalEngine.offsetAccountModified(ledgerJournalTrans);
+
+            //amounts
+            LedgerJournalTrans.CurrencyCode         =   ledgerJournalTransOrig.CurrencyCode;
+            ledgerJournalEngine.currencyModified(LedgerJournalTrans);
+            LedgerJournalTrans.AmountCurCredit      =   ledgerJournalTransOrig.AmountCurCredit;
+            LedgerJournalTrans.AmountCurDebit       =   ledgerJournalTransOrig.AmountCurDebit;
+
+            //additional fields
+            LedgerJournalTrans.Approver           = HcmWorker::userId2Worker(curuserid());
+            LedgerJournalTrans.Approved           = NoYes::Yes;
+            ledgerJournalTrans.Txt                = ledgerJournalTransOrig.Txt;
+            LedgerJournalTrans.SkipBlockedForManualEntryCheck = true;
+
+            // DEV::validateWriteRecordCheck(ledgerJournalTrans);
+            ledgerJournalTrans.insert();
+            ledgerJournalEngine.write(ledgerJournalTrans);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createDefaultDimension</Name>
+				<Source><![CDATA[
+    public DimensionDefault createDefaultDimension(str vertical, str businessUnit, str line_of_Businesss, str product_Service, str plant_Warehouse_Office, str department,
+                                                       str intercompany,str contract,str profitCenter,str project, str vessel, str trader_Employee, str costCenter, str trip, str mainCommodity,str subCommodity, str item)
+    {
+        DimensionAttributeValueSetStorage   valueSetStorage = new DimensionAttributeValueSetStorage();
+        DimensionDefault                    result;
+        int                     i;
+        DimensionAttribute      dimensionAttribute;
+        DimensionAttributeValue dimensionAttributeValue;
+    
+        //Change the dimension names. Use the dimension name which are open and active in the system
+    
+        container               conAttr = ["Vertical","BusinessUnit","Line_of_Businesss", "Product_Service", "Plant_Warehouse_Office", "Department","Intercompany",
+                                              "Contract", "ProfitCenter", "Project", "Vessel", "Trader_Employee", "CostCenter", "Trip", "MainCommodity", "SubCommodity", "Item"];
+    
+        container               conValue = [vertical, businessUnit, line_of_Businesss, product_Service, plant_Warehouse_Office, department,
+                                              intercompany, contract, profitCenter, project, vessel,trader_Employee, costCenter, trip, mainCommodity, subCommodity, item];
+    
+        str                     dimValue;
+    
+        for (i = 1; i <= conLen(conAttr); i++)
+        {
+            dimensionAttribute = dimensionAttribute::findByName(conPeek(conAttr,i));
+            if (dimensionAttribute.RecId == 0)
+            {
+                continue;
+            }
+            dimValue = conPeek(conValue,i);
+            if (dimValue != "")
+            {
+                dimensionAttributeValue = dimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute,dimValue,false,true);
+                valueSetStorage.addItem(dimensionAttributeValue);
+            }
+        }
+    
+        result = valueSetStorage.save();
+        //It reutrns the value of type DimensionDefault
+        return result;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>offsetLedgerDimensionValue</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name = "_mainAccountId"></param>
+    /// <param name = "_conData"></param>
+    /// <returns></returns>
+    public DimensionDynamicAccount offsetLedgerDimensionValue(MainAccountNum _mainAccountId, container _conData)
+    {
+        #define.Vertical('VERTICALVALUE')
+        #define.BusinessUnit('BUSINESSUNITVALUE')
+        #define.LineOfBusiness('LINE_OF_BUSINESSSVALUE')
+        #define.ProductsServices('PRODUCT_SERVICEVALUE')
+        #define.PlantOfficeWarehouse('PLANT_WAREHOUSE_OFFICEVALUE')
+        #define.Department('DEPARTMENTVALUE')
+        #define.InterCompany('INTERCOMPANYVALUE')
+        #define.Contract('CONTRACTVALUE')
+        #define.ProfitCenter('PROFITCENTERVALUE')
+        #define.Project('PROJECTVALUE')
+        #define.Vessel('VESSELVALUE')
+        #define.TraderEmployee('TRADER_EMPLOYEEVALUE')
+        #define.CostCenter('COSTCENTERVALUE')
+        #define.Trip('TRIPVALUE')
+        #define.MainCommodity('MAINCOMMODITYVALUE')
+        #define.SubCommodity('SUBCOMMODITYVALUE')
+        #define.Item('ITEMVALUE')
+        
+        //#define.Customer('CUSTOMERVALUE')
+        //#define.Vendor('VENDORVALUE')
+        //#define.FixedAsset('FIXEDASSETVALUE')
+
+        RecId dimAttId_MainAccount;
+        MainAccount mainAccount;
+
+        DimensionAttribute dimensionAttribute;
+        DimensionAttributeValue dimensionAttributeValue;
+        DimensionSetSegmentName DimensionSet;
+        DimensionStorage dimStorage;
+
+        LedgerAccountContract ledgerAccountContract = new LedgerAccountContract();
+        DimensionAttributeValueContract valueContract;
+
+        List valueContracts = new List(Types::Class);
+
+        DimensionAttributeValueCombination dimensionAttributeValueCombination;
+
+        mainAccount = MainAccount::findByMainAccountId(_mainAccountId);
+
+        while select DimensionValueColumnName from dimensionAttribute
+            where dimensionAttribute.DimensionValueColumnName == #Vertical
+            || dimensionAttribute.DimensionValueColumnName == #BusinessUnit
+            || dimensionAttribute.DimensionValueColumnName == #LineOfBusiness
+            || dimensionAttribute.DimensionValueColumnName == #ProductsServices
+            || dimensionAttribute.DimensionValueColumnName == #PlantOfficeWarehouse
+            || dimensionAttribute.DimensionValueColumnName == #Department
+            || dimensionAttribute.DimensionValueColumnName == #InterCompany
+            || dimensionAttribute.DimensionValueColumnName == #Contract
+            || dimensionAttribute.DimensionValueColumnName == #ProfitCenter
+            || dimensionAttribute.DimensionValueColumnName == #Project
+            || dimensionAttribute.DimensionValueColumnName == #Vessel
+            || dimensionAttribute.DimensionValueColumnName == #TraderEmployee
+            || dimensionAttribute.DimensionValueColumnName == #CostCenter
+            || dimensionAttribute.DimensionValueColumnName == #Trip
+            || dimensionAttribute.DimensionValueColumnName == #MainCommodity
+            || dimensionAttribute.DimensionValueColumnName == #SubCommodity
+            || dimensionAttribute.DimensionValueColumnName == #Item
+            //|| dimensionAttribute.DimensionValueColumnName == #Customer
+            //|| dimensionAttribute.DimensionValueColumnName == #Vendor
+            //|| dimensionAttribute.DimensionValueColumnName == #FixedAsset
+
+        {
+            switch(dimensionAttribute.DimensionValueColumnName)
+            {
+                case #Vertical:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,1));
+                    break;
+
+                case #BusinessUnit:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,2));
+                    break;
+
+                case #LineOfBusiness:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,3));
+                    break;
+
+                case #ProductsServices:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,4));
+                    break;
+
+                case #PlantOfficeWarehouse:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,5));
+                    break;
+
+                case #Department:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,6));
+                    break;
+                case #InterCompany:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,7));
+                    break;
+
+                case #Contract:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,8));
+                    break;
+
+                case #ProfitCenter:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,9));
+                    break;
+
+                case #Project:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,10));
+                    break;
+
+                case #Vessel:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,11));
+                    break;
+
+                case #TraderEmployee:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,12));
+                    break;
+
+                case #CostCenter:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,13));
+                    break;
+
+                case #Trip:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,14));
+                    break;
+
+                case #MainCommodity:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,15));
+                    break;
+
+                case #SubCommodity:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,16));
+                    break;
+
+                case #Item:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,17));
+                    break;
+
+                //case #Customer:
+                //    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,14));
+                //    break;
+
+                //case #Vendor:
+                //    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,15));
+                //    break;
+
+                //case #FixedAsset:
+                //    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,16));
+                //    break;
+            }
+
+            if(dimensionAttributeValue)
+            {
+                valueContract = new DimensionAttributeValueContract();
+                valueContract.parmName(dimensionAttribute.Name);
+                valueContract.parmValue(dimensionAttributeValue.CachedDisplayValue);
+                valueContracts.addEnd(valueContract);
+            }
+        }
+
+        ledgerAccountContract.parmMainAccount(_mainAccountId);
+        ledgerAccountContract.parmValues(valueContracts);
+
+        dimStorage = DimensionServiceProvider::buildDimensionStorageForLedgerAccount(ledgerAccountContract);
+        dimensionAttributeValueCombination = DimensionAttributeValueCombination::find(dimStorage.save());
+
+        return dimensionAttributeValueCombination.RecId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>import</Name>
+				<Source><![CDATA[
+    void import()
+    {
+        Container               con;
+        InventTable             inventTable;
+        Etg_LoaderStaging Etg_LoaderStaginglocal;
+        LedgerJournalId journalID
+        ;
+        setPrefix("Import master data");
+       // delete_from Etg_LoaderStaginglocal;
+        if (this.openFile())
+        {
+            using (ExcelPackage Package = new ExcelPackage(stream))
+            {
+                int                         rowCount, i, endRow, startRow;
+                Package.Load(stream);
+                ExcelWorksheet  worksheet   = package.get_Workbook().get_Worksheets().get_Item(1);
+                range       = worksheet.Cells;
+                endRow      = worksheet.Dimension.End.Row;
+                startRow    = worksheet.Dimension.Start.Row;
+                rowCount    = endRow - startRow + 1;
+               // OfficeOpenXml.ExcelRange range1;
+
+                try
+                {
+                    delete_from Etg_LoaderStaginglocal
+                        where Etg_LoaderStaginglocal.ETGStatus == NoYes::No
+                            && Etg_LoaderStaginglocal.DataAreaId == curExt()
+                                && Etg_LoaderStaginglocal.CreatedBy == curUserId();
+                    
+                    for (i = 2; i<= rowCount; i++)
+                    {
+                        setPrefix(strFmt("Line %1", i));
+                        this.create(i);
+                        
+                    }
+                }
+                catch
+                {
+                    throw error("Error - Import template");
+                }
+            }
+        }
+      //  select firstonly Etg_LoaderStaginglocal;
+       
+       // this.createJournal(Etg_LoaderStaginglocal);
+        info(strfmt("%1 record(s) imported", lineimported));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>openFile</Name>
+				<Source><![CDATA[
+    boolean openFile()
+    {
+        boolean ret = false;
+ 
+        if (fileUploadResult != null && fileUploadResult.getUploadStatus())
+        {
+            stream = fileUploadResult.openResult();
+            ret = true;
+        }
+        else
+        {
+            throw error(strfmt("@SYS62207",filename));
+        }
+ 
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dialog</Name>
+				<Source><![CDATA[
+    public Object dialog()
+    {
+        dialog = super();
+         
+        DialogGroup dialogGroup = dialog.addGroup('Upload file');
+ 
+        FormBuildControl formBuildControl = dialog.formBuildDesign().control(dialogGroup.name());
+        dialogFileUpload = formBuildControl.addControlEx(classstr(FileUpload), 'FileUpload');
+        dialogFileUpload.style(FileUploadStyle::MinimalWithFilename);
+        dialogFileUpload.fileNameLabel("@SYS308842");
+        dialogFileUpload.fileTypesAccepted(".xlsx");
+         
+        return dialog;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dialogPostRun</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Disables the dialog Ok button until the file upload is complete.
+    /// </summary>
+    /// <param name="_dialog">The <c>Runbase</c> dialog object.</param>
+    public void dialogPostRun(DialogRunbase _dialog)
+    {
+        fileUpload = _dialog.formRun().control(_dialog.formRun().controlId('FileUpload'));
+        fileUpload.notifyUploadCompleted += eventhandler(this.uploadCompleted);
+        this.setDialogOkButtonEnabled(_dialog, false);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>uploadCompleted</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// After the file has been uploaded, the Ok button is enabled.
+    /// </summary>
+    public void uploadCompleted()
+    {
+        filename = fileUpload.fileName();
+ 
+        this.setDialogOkButtonEnabled(dialog, true);
+         
+        fileUploadResult = fileUpload.getFileUploadResult();
+ 
+        fileUpload.notifyUploadCompleted -= eventhandler(this.UploadCompleted);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setDialogOkButtonEnabled</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Enables or disables the dialog Ok button.
+    /// </summary>
+    /// <param name = "_dialog">The <c>Runbase</c> dialog object.</param>
+    /// <param name = "_isEnabled">Indicates to enable or disable the Ok button.</param>
+    protected void setDialogOkButtonEnabled(DialogRunbase _dialog, boolean _isEnabled)
+    {
+        FormControl okButtonControl = _dialog.formRun().control(_dialog.formRun().controlId('OkButton'));
+ 
+        if (okButtonControl)
+        {
+            okButtonControl.enabled(_isEnabled);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>pack</Name>
+				<Source><![CDATA[
+    public container pack()
+    {
+        return [#CurrentVersion,#CurrentList];
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>unpack</Name>
+				<Source><![CDATA[
+    public boolean unpack(container packedClass)
+    {
+        Version version = runbase::getVersion(packedClass);
+        ;
+        switch (version)
+        {
+            case #CurrentVersion:
+                [version,#CurrentList] = packedClass;
+                break;
+            default:
+                return false;
+        }
+        return true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    public void run()
+    {
+        this.import();
+        super();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    static void main(Args _args)
+    {
+        ETG_GeneralJournalsImport   import;
+        FormRun formRun;
+        Args    args;
+        ;
+        import = new ETG_GeneralJournalsImport();
+        if (import.prompt())
+        {
+            import.run();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caption</Name>
+				<Source><![CDATA[
+    public ClassDescription caption()
+    {
+        return 'Upload journal lines';
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ProdParmReportFinishedTableETG_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tableStr(ProdParmReportFinished))]
+final class ProdParmReportFinishedTableETG_Extension
+{
+
+
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>insert</Name>
+				<Source><![CDATA[
+    public void insert()
+    {
+        InventDim               inventDim, inventdimupd;
+        InventItemGroupItem     inventItemGroupItem, inventItemGroupItemloc;
+        int                     hour;
+        ProdParmReportFinished  prodParmReportFinished, prodParmReportFinishedloc;
+        ProdJournalBOM          prodJournalBOMLoc, prodJournalBOMLocc;
+        ProdJournalTable        prodJournalTable, prodJournalTableloc, prodJournalTableRAF;
+        ProdJournalProd         ProdJournalProd;
+        Qty                     proposal, consump;
+
+        select sum(QtyGood) from ProdJournalProd
+               where ProdJournalProd.ProdId == this.ProdId
+            && ProdJournalProd.InventTransId    ==  this.InventTransId;
+
+        this.PostedQty = ProdJournalProd.QtyGood;
+
+        select * from prodParmReportFinishedloc order by ParmId asc            //order by inventDimId asc
+            where prodParmReportFinishedloc.ProdId == this.ProdId
+                && prodParmReportFinishedloc.InventTransId == this.InventTransId;
+
+        if (prodParmReportFinishedloc.ETGBOMQty)
+        {
+            this.ETGBOMQty = prodParmReportFinishedloc.ETGBOMQty;
+        }
+        else
+        {
+            if (!this.ETGBOMQty)
+            {
+                this.ETGBOMQty = this.QtyGood;
+            }
+        }
+       
+        proposal = 0 ; consump = 0 ;
+
+        select firstonly JournalId from  prodJournalTable  where prodJournalTable.ProdId == this.ProdId && prodJournalTable.JournalType == ProdJournalType::ReportFinished;
+
+        if (this.PmfProductType == PmfProductType::Formula && prodJournalTable.JournalId)
+        {
+            select firstonly  BOMProposal from prodJournalBOMLoc order by prodJournalBOMLoc.JournalId asc
+                    join prodJournalTable
+                        where prodJournalTable.ProdId == prodJournalBOMLoc.ProdId
+                             && prodJournalTable.ProdId == this.ProdId
+                             && prodJournalTable.Posted == NoYes::Yes
+                    join inventItemGroupItem
+                        where  inventItemGroupItem.ItemId == prodJournalBOMLoc.ItemId
+                                 && (inventItemGroupItem.ItemGroupId == "RM" || inventItemGroupItem.ItemGroupId == "FG");
+                            
+            proposal = prodJournalBOMLoc.BOMProposal;
+
+            while select * from prodJournalBOMLocc
+                      where prodJournalBOMLocc.ProdId == this.ProdId && prodJournalBOMLocc.ItemId == inventItemGroupItem.ItemId
+            {
+                if (ProdJournalTable::find(prodJournalBOMLocc.JournalId).Posted == NoYes::Yes)
+                {
+                    if (InventItemGroupItem::itemGroupId(prodJournalBOMLocc.ItemId, prodJournalBOMLocc.DataAreaId) == "RM" || InventItemGroupItem::itemGroupId(prodJournalBOMLocc.ItemId, prodJournalBOMLocc.DataAreaId) == "FG" )
+                    {
+                        consump += prodJournalBOMLocc.BOMConsump;
+                    }
+                }
+            }
+
+            if ((proposal - consump) > 0)
+            {
+                this.ETGPendingQty = proposal - consump;
+            }
+            else
+            {
+                this.ETGPendingQty = 0;
+            }
+        }
+
+        select forupdate firstonly inventDim  where inventDim.inventDimId == this.InventDimId;
+        if (inventDim.RecId)
+        {
+            prodParmReportFinishedloc.clear();
+            select firstonly prodParmReportFinishedloc
+                where prodParmReportFinishedloc.ParmId == this.ParmId
+                    && prodParmReportFinishedloc.ProdId ==  this.ProdId
+                    && prodParmReportFinishedloc.PmfProductType == PmfProductType::Formula;
+
+            ttsbegin;
+            inventDim.inventBatchId = '';
+            if (prodParmReportFinishedloc)
+                inventDim.wMSLocationId = InventDim::find(prodParmReportFinishedloc.InventDimId).wMSLocationId;
+            inventdimupd = InventDim::findOrCreate(inventDim);
+            this.InventDimId = inventdimupd.inventDimId;
+            inventDim.update();
+            ttscommit;
+
+        }
+
+        
+
+       
+
+
+        next   insert();
+
+       
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>goodQtyTotal</Name>
+				<Source><![CDATA[
+    public display Qty goodQtyTotal()
+    {
+
+        Qty  goodQtyTotal;
+        ProdTable  prodTable;
+        queryRun qrTotal;
+
+        ProdParmReportFinished   prodParmReportFinished;
+        FormDatasource     prodParmReportFinished_ds;
+      //  prodParmReportFinished = element.dt;
+
+      while select sum(QtyGood) from prodParmReportFinished where prodParmReportFinished.ParmId == this.ParmId
+        {
+            goodQtyTotal = prodParmReportFinished.QtyGood;
+        }
+
+        return      goodQtyTotal;
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>bOMQtyTotal</Name>
+				<Source><![CDATA[
+    public display Qty bOMQtyTotal()
+    {
+
+        Qty  bOMQtyTotal;
+        ProdTable  prodTable;
+        queryRun qrTotal;
+
+        ProdParmReportFinished   prodParmReportFinished;
+        FormDatasource     prodParmReportFinished_ds;
+        //  prodParmReportFinished = element.dt;
+
+        while select sum(ETGBOMQty) from prodParmReportFinished where prodParmReportFinished.ParmId == this.ParmId
+        {
+            bOMQtyTotal = prodParmReportFinished.ETGBOMQty;
+        }
+
+        return      bOMQtyTotal;
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>rAFPostedQtyTotal</Name>
+				<Source><![CDATA[
+    public display Qty rAFPostedQtyTotal()
+    {
+
+        Qty  rAFPostedQtyTotal;
+        ProdTable  prodTable;
+        queryRun qrTotal;
+
+        ProdParmReportFinished   prodParmReportFinished;
+        FormDatasource     prodParmReportFinished_ds;
+        //  prodParmReportFinished = element.dt;
+
+        while select sum(PostedQty) from prodParmReportFinished where prodParmReportFinished.ParmId == this.ParmId
+        {
+            rAFPostedQtyTotal = prodParmReportFinished.PostedQty;
+        }
+
+        return      rAFPostedQtyTotal;
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,419 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerAccrualTrans_Calendar</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGLedgerAccrualTrans_Calendar extends ETGLedgerAccrualTrans
+{
+    TaxAmountCur taxInCostPriceAmountCurAccrued;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>allocate</Name>
+				<Source><![CDATA[
+    boolean allocate()
+    {
+        RecordSortedList                recordSortedList;
+        TransDate                       enddate;
+        Counter                         counter;
+        Counter                         curCounter;
+        boolean                         more;
+        AmountCur                       amountCurAccrued;
+        boolean                         ok;
+        TaxAmountCur                    taxInCostPriceAmountCur;
+        boolean                         useTaxInCostPrice = (TaxParameters::find().PurchTaxOnOperations == false);
+
+        ok = super();
+
+        if (ok)
+        {
+            recordSortedList = new RecordSortedList(tablenum(ETGLedgerJournalTransAccrualTrans));
+            recordSortedList.sortOrder(fieldnum(ETGLedgerJournalTransAccrualTrans, DocumentDate));
+
+            enddate = this.nextPeriodStart();
+
+            taxInCostPriceAmountCur = this.getTaxInCostPriceAmountCur(useTaxInCostPrice);
+
+            for (ledgerJournalTransAccrualTrans.DocumentDate = this.nextFreq(ledgerJournalTransAccrual.TransDate, true);
+                 ledgerJournalTransAccrualTrans.DocumentDate < enddate;
+                 ledgerJournalTransAccrualTrans.DocumentDate = this.nextFreq(ledgerJournalTransAccrualTrans.DocumentDate))
+            {
+                counter++;
+                ledgerJournalTransAccrualTrans.TransDate = ETGLedgerFiscalCalender::findFirstOpenStartDateInAnyYear(calendarRecId, ledgerJournalTransAccrualTrans.DocumentDate); //LedgerFiscalCalendar::findFirstOpenStartDateInAnyYear(calendarRecId,ledgerJournalTransAccrualTrans.DocumentDate);
+                this.setStartEnd(ledgerJournalTransAccrualTrans.DocumentDate);
+                this.setTransTxt();
+                recordSortedList.ins(ledgerJournalTransAccrualTrans);
+            }
+
+            ttsbegin;
+
+            for (more = recordSortedList.first(ledgerJournalTransAccrualTrans);
+                 more;
+                 more = recordSortedList.next(ledgerJournalTransAccrualTrans))
+            {
+                curCounter++;
+
+                amountCurAccrued = this.calcTaxInCostPrice(amountCurAccrued, curCounter, counter, enddate, taxInCostPriceAmountCur, useTaxInCostPrice);
+            }
+
+            ttscommit;
+        }
+
+        return ok;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calcTaxInCostPrice</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculates the tax in cost price.
+    /// </summary>
+    /// <param name = "_amountCurAccrued">
+    /// The Amount currency accrued.
+    /// </param>
+    /// <param name = "_curCounter">
+    /// Flag to track the count.
+    /// </param>
+    /// <param name = "_counter">
+    /// Flag to track the count.
+    /// </param>
+    /// <param name = "_enddate">
+    /// The End date.
+    /// </param>
+    /// <param name = "_taxInCostPriceAmountCur">
+    /// The Tax in cost price amount.
+    /// </param>
+    /// <param name = "_useTaxInCostPrice">
+    /// A boolean value for determining if use tax in cost price.
+    /// </param>
+    /// <returns>
+    /// The Amount currency accrued.
+    /// </returns>
+    protected AmountCur calcTaxInCostPrice(AmountCur _amountCurAccrued, Counter _curCounter, Counter _counter, TransDate _enddate, TaxAmountCur _taxInCostPriceAmountCur, boolean _useTaxInCostPrice)
+    {
+        real                            factor;
+        ETGLedgerJournalTransAccrualTrans  ledgerJournalTransAccrualTransTaxCost;
+
+        if (_useTaxInCostPrice)
+        {
+            ledgerJournalTransAccrualTransTaxCost.data(ledgerJournalTransAccrualTrans);
+        }
+
+        if (_curCounter != _counter)
+        {
+            if (ledgerAccrualTable.ValuePosted == LedgerAccrualEvenScale::Even ||
+                        ledgerAccrualTable.PostingFreq == DayWeekMonth::Day ||
+                        ledgerAccrualTable.PostingFreq == DayWeekMonth::Week)
+            {
+                factor = 1 / _counter;
+            }
+            else
+            {
+                switch (ledgerAccrualTable.PostingFreq)
+                {
+                    case DayWeekMonth::Month :
+                        factor = (dateMthFwd(dateStartMth(ledgerJournalTransAccrualTrans.DocumentDate), 1)
+                                    - max(dateStartMth(ledgerJournalTransAccrualTrans.DocumentDate), ledgerJournalTransAccrual.TransDate))
+                                    / (_enddate  - ledgerJournalTransAccrual.TransDate);
+                        break;
+
+                    case DayWeekMonth::Quarter :
+                        factor = (dateMthFwd(dateStartQtr(ledgerJournalTransAccrualTrans.DocumentDate), 3)
+                                    - max(dateStartQtr(ledgerJournalTransAccrualTrans.DocumentDate), ledgerJournalTransAccrual.TransDate))
+                                    / (_enddate  - ledgerJournalTransAccrual.TransDate);
+                        break;
+                }
+            }
+
+            ledgerJournalTransAccrualTrans.AmountCur = CurrencyExchangeHelper::amount(ledgerJournalTransAccrual.AmountCur * factor, baseCurrencyCode);
+
+            if (_useTaxInCostPrice)
+            {
+                ledgerJournalTransAccrualTransTaxCost.AmountCur = CurrencyExchangeHelper::amount(_taxInCostPriceAmountCur * factor, baseCurrencyCode);
+            }
+        }
+        else
+        {
+            ledgerJournalTransAccrualTrans.AmountCur = CurrencyExchangeHelper::amount(ledgerJournalTransAccrual.AmountCur - _amountCurAccrued, baseCurrencyCode);
+
+            if (_useTaxInCostPrice)
+            {
+                ledgerJournalTransAccrualTransTaxCost.AmountCur = CurrencyExchangeHelper::amount(_taxInCostPriceAmountCur - taxInCostPriceAmountCurAccrued, baseCurrencyCode);
+            }
+        }
+        
+        if (ledgerJournalTransAccrualTrans.AmountCur)
+        {
+            //this.setVoucher(); //Voucher will set durng posting
+            //ledgerJournalTransAccrualTrans.LedgerDimension = baseLedgerDimension;
+            //ledgerJournalTransAccrualTrans.insert();
+
+            DimensionAttributeValueCombination    dimensionAttributeValueCombination;
+            ETGCostDistributionsLines             eTGCostDistributionsLines;
+            ETGCostDistributionsHeader            etgcostDisttributionheader;
+            str                                   mainaccountloc;
+            DimensionFinancialTag                 dimensionfinancialtag;            
+
+            select * from dimensionAttributeValueCombination where DimensionAttributeValueCombination.RecId == baseLedgerDimension;
+
+            container    mainaccount        = str2con(dimensionAttributeValueCombination.DisplayValue, '|');
+            mainaccountloc                  = conPeek(mainaccount,1);
+            AmountCur amountorg             = ledgerJournalTransAccrualTrans.AmountCur;
+
+            select firstonly etgcostDisttributionheader where etgcostDisttributionheader.ETGCostAllocationRuleId == ledgerJournalTransAccrual.CostAllocationRuleId;
+
+            if(!etgcostDisttributionheader)
+                throw error('Rule Id not exists in Cost distribution');
+
+            while select eTGCostDistributionsLines 
+                where eTGCostDistributionsLines.ETGMainAccount == mainaccountloc
+                && eTGCostDistributionsLines.ETGRefRecId == etgcostDisttributionheader.RecId
+            {                
+               
+                DimensionDefault                    defaultDimension, defaultDimensionOffSet;
+                DimensionAttributeValueSetStorage   dimStorage = new DimensionAttributeValueSetStorage();
+                DimensionAttributeValueSetStorage   dimStorageOffset = new DimensionAttributeValueSetStorage();
+                DimensionAttribute                  dimAttribute1, dimAttribute2, dimAttribute1Offset,dimAttribute2Offset;
+                DimensionAttributeValue             dimAttributeValue1, dimAttributeValue2, dimAttributeValue1Offset,dimAttributeValue2Offset;
+                LedgerParameters                    LedgerParameters;
+
+                select firstonly LedgerParameters
+                                where LedgerParameters.DataAreaId == curExt();
+
+                    defaultDimension    = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(baseLedgerDimension);
+                    dimStorage          = DimensionAttributeValueSetStorage::find(defaultDimension);
+
+                if(eTGCostDistributionsLines.ETGFDVertical)
+                    {
+                        dimAttribute1        = DimensionAttribute::findByName(LedgerParameters.ETGCostDistributionVerticalDimension);
+                        dimAttributeValue1   = DimensionAttributeValue::findByDimensionAttributeAndValue(dimAttribute1,eTGCostDistributionsLines.ETGFDVertical, true, true);
+                        dimStorage.addItem(dimAttributeValue1);
+                    }
+
+                if(eTGCostDistributionsLines.ETGFDSubVertical)
+                    {
+                        dimAttribute2        = DimensionAttribute::findByName(LedgerParameters.ETGCostDistributionSubVerticalDimension);
+                        dimAttributeValue2   = DimensionAttributeValue::findByDimensionAttributeAndValue(dimAttribute2,eTGCostDistributionsLines.ETGFDSubVertical, true, true);
+                        dimStorage.addItem(dimAttributeValue2);
+                    }
+
+                    defaultDimension = dimStorage.save();
+                   ledgerJournalTransAccrualTrans.LedgerDimension = LedgerDimensionFacade::serviceCreateLedgerDimension(LedgerDefaultAccountHelper::getDefaultAccountFromMainAccountRecId(
+                                    MainAccount::findByMainAccountId(DIMENSIONATTRIBUTEVALUECOMBINATION.MainAccountValue).RecId), defaultDimension);
+
+                ledgerJournalTransAccrualTrans.AmountCur = amountorg * eTGCostDistributionsLines.ETGLinePercentage/100;
+                ledgerJournalTransAccrualTrans.insert();   
+                 this.saveOffsetloc(eTGCostDistributionsLines);
+            }       
+            _amountCurAccrued += amountorg;
+        }
+
+        if (ledgerJournalTransAccrualTransTaxCost.AmountCur)
+        {
+            if (ledgerJournalTransAccrualTrans.AmountCur == 0)
+            {
+                //this.setVoucher(); //Voucher will set durng posting
+            }
+
+            taxInCostPriceAmountCurAccrued += ledgerJournalTransAccrualTransTaxCost.AmountCur;
+
+            this.insertTaxInCostPriceForSourceLine(ledgerJournalTransAccrualTransTaxCost, ledgerJournalTransAccrualTrans.Voucher, baseLedgerDimension);
+        }
+
+        return _amountCurAccrued;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>endDate</Name>
+				<Source><![CDATA[
+    TransDate endDate(TransDate _transDate)
+    {
+        TransDate   ret;
+        TransDate   transDate;
+        TransDate   enddate = this.nextPeriodStart();
+
+        for (transDate = this.nextFreq(_transDate, true);
+             transDate < enddate;
+             transDate = this.nextFreq(transDate))
+        {
+            ret = transDate;
+        }
+
+        this.setStartEnd(ret);
+
+        return periodEndDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>nextFreq</Name>
+				<Source><![CDATA[
+    protected TransDate nextFreq(TransDate _baseTransdate, boolean _init = false)
+    {
+        if (_init)
+        {
+            switch (ledgerAccrualTable.PostingDate)
+            {
+                case PrimoMedioUltimo::Primo:
+                    switch (ledgerAccrualTable.PostingFreq)
+                    {
+                        case DayWeekMonth::Day:
+                            return _baseTransdate;
+                        case DayWeekMonth::Week:
+                            return DateTimeUtil::getStartOfWeekDate(new Session().preferredLocale(), _baseTransdate);
+                        case DayWeekMonth::Month:
+                            return dateStartMth(_baseTransdate);
+                        case DayWeekMonth::Quarter:
+                            return dateStartQtr(_baseTransdate);
+                    }
+                    break;
+                case PrimoMedioUltimo::Medio:
+                    switch (ledgerAccrualTable.PostingFreq)
+                    {
+                        case DayWeekMonth::Day:
+                            return _baseTransdate;
+                        case DayWeekMonth::Week:
+                            return DateTimeUtil::getStartOfWeekDate(new Session().preferredLocale(), _baseTransdate) + 2;
+                        case DayWeekMonth::Month:
+                            return dateStartMth(_baseTransdate) + 14;
+                        case DayWeekMonth::Quarter:
+                            return dateMthFwd(dateStartQtr(_baseTransdate),1) + 14;
+                    }
+                    break;
+                case PrimoMedioUltimo::Ultimo:
+                    switch (ledgerAccrualTable.PostingFreq)
+                    {
+                        case DayWeekMonth::Day:
+                            return _baseTransdate;
+                        case DayWeekMonth::Week:
+                            return DateTimeUtil::getStartOfWeekDate(new Session().preferredLocale(), _baseTransdate) + 4;
+                        case DayWeekMonth::Month:
+                            return dateEndMth(_baseTransdate);
+                        case DayWeekMonth::Quarter:
+                            return dateEndQtr(_baseTransdate);
+                    }
+                    break;
+            }
+        }
+        else
+        {
+            switch (ledgerAccrualTable.PostingFreq)
+            {
+                case DayWeekMonth::Day:
+                    return _baseTransdate + 1;
+                case DayWeekMonth::Week:
+                    return _baseTransdate + 7;
+                case DayWeekMonth::Month:
+                    switch (ledgerAccrualTable.PostingDate)
+                    {
+                        case PrimoMedioUltimo::Primo:
+                        case PrimoMedioUltimo::Medio:
+                            return dateMthFwd(_baseTransdate,1);
+                        case PrimoMedioUltimo::Ultimo:
+                            return dateEndMth(dateMthFwd(dateStartMth(_baseTransdate),1));
+                    }
+                case DayWeekMonth::Quarter:
+                    switch (ledgerAccrualTable.PostingDate)
+                    {
+                        case PrimoMedioUltimo::Primo:
+                        case PrimoMedioUltimo::Medio:
+                            return dateMthFwd(_baseTransdate,3);
+                        case PrimoMedioUltimo::Ultimo:
+                            return dateEndMth(dateMthFwd(dateStartMth(_baseTransdate),3));
+                    }
+            }
+        }
+        return super(_baseTransdate, _init);  // so it won't loop endlessly!
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>nextPeriodStart</Name>
+				<Source><![CDATA[
+    private TransDate nextPeriodStart()
+    {
+        switch (ledgerAccrualTable.PeriodType)
+        {
+            case AssetAccrual::Monthly:
+                return dateMthFwd(dateStartMth(ledgerJournalTransAccrual.TransDate), 1 * ledgerAccrualTable.PeriodLength);
+            case AssetAccrual::Quarterly:
+                return dateMthFwd(dateStartQtr(ledgerJournalTransAccrual.TransDate), 3 * ledgerAccrualTable.PeriodLength);
+            case AssetAccrual::HalfYearly:
+                if (mthofyr(ledgerJournalTransAccrual.TransDate) >= 7)
+                {
+                    return dateMthFwd(DateTimeUtil::getStartOfYearDate(new Session().preferredLocale(), ledgerJournalTransAccrual.TransDate), 6 * (ledgerAccrualTable.PeriodLength + 1));
+                }
+                return dateMthFwd(DateTimeUtil::getStartOfYearDate(new Session().preferredLocale(), ledgerJournalTransAccrual.TransDate), 6 * ledgerAccrualTable.PeriodLength);
+            case AssetAccrual::Yearly:
+                return dateMthFwd(DateTimeUtil::getStartOfYearDate(new Session().preferredLocale(), ledgerJournalTransAccrual.TransDate), 12 * ledgerAccrualTable.PeriodLength);
+        }
+        return ledgerJournalTransAccrual.TransDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setStartEnd</Name>
+				<Source><![CDATA[
+    protected void setStartEnd(TransDate _baseTransdate)
+    {
+        switch (ledgerAccrualTable.PostingFreq)
+        {
+            case DayWeekMonth::Day:
+                periodStartDate = _baseTransdate;
+                periodEndDate = _baseTransdate;
+                break;
+            case DayWeekMonth::Week:
+                periodStartDate = DateTimeUtil::getStartOfWeekDate(new Session().preferredLocale(), _baseTransdate);
+                periodEndDate = periodStartDate + 6;
+                break;
+            case DayWeekMonth::Month:
+                periodStartDate = dateStartMth(_baseTransdate);
+                periodEndDate = dateEndMth(_baseTransdate);
+                break;
+            case DayWeekMonth::Quarter:
+                periodStartDate = dateStartQtr(_baseTransdate);
+                periodEndDate = dateEndQtr(_baseTransdate);
+                break;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getTaxInCostPriceAmountCur</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Retrieves calculated Tax value based on taxation rules.
+    /// </summary>
+    /// <param name="_useTaxInCostPrice">
+    /// Boolean value to validate if taxation rules are applicable.
+    /// </param>
+    /// <returns>
+    /// Returns Tax amount based on taxation rules.
+    /// </returns>
+    protected TaxAmountCur getTaxInCostPriceAmountCur(boolean _useTaxInCostPrice)
+    {
+        TaxAmountCur taxInCostPriceAmountCur;
+
+        if (_useTaxInCostPrice)
+        {
+            taxInCostPriceAmountCur = this.calcTaxInCostPriceAmountCur();
+        }
+
+        return taxInCostPriceAmountCur;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

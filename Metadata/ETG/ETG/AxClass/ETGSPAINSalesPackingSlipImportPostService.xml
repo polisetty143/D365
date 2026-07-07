@@ -1,0 +1,364 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSPAINSalesPackingSlipImportPostService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// SysOperation service class to post packing slips through the
+/// ETGSPAINSalesPackingSlipImport table for the ETGSPAIN model.
+/// </summary>
+class ETGSPAINSalesPackingSlipImportPostService extends SysOperationServiceBase
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>packingSlipImportPost</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Main method of the class executed with a contract.
+    /// </summary>
+    /// <param name = "_contract">ETGSPAINSalesPackingSlipImportPostContract</param>
+    public void packingSlipImportPost(ETGSPAINSalesPackingSlipImportPostContract _contract)
+    {
+        Set                             recordCollection        = _contract.parmRecordCollection();
+        SetEnumerator                   collectionEnumerator    = recordCollection.getEnumerator();
+        RecId                           recordRecId;
+        ETGSPAINSalesPackingSlipImport  ETGSPAINSalesPackingSlipImport;
+        Query                           query                   = _contract.getQuery();
+        QueryRun                        queryRun                = new QueryRun(query);
+        guid                            executionId             = newGuid();
+        TransDate                       transDate               = _contract.parmTransDate();
+
+        // If a query filter is enabled, we iterate over the query results
+        if (_contract.parmDisplayQueryFilter())
+        {
+            while (queryRun.next())
+            {
+                if (queryRun.changed(tableNum(ETGSPAINSalesPackingSlipImport)))
+                {
+                    ETGSPAINSalesPackingSlipImport = queryRun.get(tableNum(ETGSPAINSalesPackingSlipImport));
+
+                    this.processRecord(ETGSPAINSalesPackingSlipImport,
+                                        transDate,
+                                        executionId);
+                }
+            }
+        }
+        // Otherwise, we process the selected records from the contract collection
+        else
+        {
+            while (collectionEnumerator.moveNext())
+            {
+                recordRecId = collectionEnumerator.current();
+                ETGSPAINSalesPackingSlipImport = ETGSPAINSalesPackingSlipImport::findRecId(recordRecId, true);
+    
+                this.processRecord(ETGSPAINSalesPackingSlipImport,
+                                    transDate,
+                                    executionId);
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processRecord</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method to process records from the <c>ETGSPAINSalesPackingSlipImport</c> table.
+    /// </summary>
+    /// <param name = "_ETGSPAINSalesPackingSlipImport">ETGSPAINSalesPackingSlipImport</param>
+    /// <param name = "_transDate">Transaction date</param>
+    /// <param name = "_executionId">Execution ID</param>
+    public void processRecord(ETGSPAINSalesPackingSlipImport _ETGSPAINSalesPackingSlipImport,
+                                TransDate               _transDate,
+                                guid                    _executionId)
+    {
+        infolog.clear();
+
+        // Process the record if it's in None or Error status and not Blocked
+        if ((_ETGSPAINSalesPackingSlipImport.Status == IFRUniversalInterfaceSystemStatus::None)
+            || (_ETGSPAINSalesPackingSlipImport.Status == IFRUniversalInterfaceSystemStatus::Error)
+            && !(_ETGSPAINSalesPackingSlipImport.Status == IFRUniversalInterfaceSystemStatus::Blocked))
+        {
+            this.blockETGSPAINSalesPackingSlipImport(_ETGSPAINSalesPackingSlipImport, _executionId);
+        }
+        else
+        {
+            throw Error(strFmt("@ETGSPAINLabels:ETGSPAINSalesPackingSlipImportPostBlockedByAnotherInstance", _ETGSPAINSalesPackingSlipImport.InventJournalId));
+        }
+
+        SalesLine salesLine;
+        Query query = new Query(queryStr(SalesUpdate));
+
+        salesLine = SalesLine::findRecId(_ETGSPAINSalesPackingSlipImport.SalesLineRefRecId, true);
+
+        if (salesLine)
+        {
+            if (salesLine.QtyOrdered == 0)
+            {
+                _ETGSPAINSalesPackingSlipImport.writeInfoLogErrorData(strFmt("@ETGSPAINLabels:SalesLineNoQtyOrderedError", _ETGSPAINSalesPackingSlipImport.ETGSPAINInventApplicationId));
+            }
+            else
+            {
+                try
+                {
+                    if (this.updateSalesLineData(salesLine, _ETGSPAINSalesPackingSlipImport))
+                    {
+                        ttsbegin;
+                        SalesFormLetter_PackingSlip salesFormLetter_PackingSlip = salesFormLetter::construct(DocumentStatus::PackingSlip);
+
+                        query.dataSourceTable(tablenum(SalesLine)).addRange(fieldnum(SalesLine, RecId)).value(queryValue(salesLine.RecId));
+                        SysQueryRun queryRun = new SysQueryRun(query);
+
+                        salesFormLetter_PackingSlip.chooseLinesQuery(queryRun);
+                        salesFormLetter_PackingSlip.transDate(_transDate);
+
+                        salesFormLetter_PackingSlip.specQty(salesLine.inventDim().inventBatchId == _ETGSPAINSalesPackingSlipImport.ETGSPAINPurchOperationId ?
+                                                            SalesUpdate::DeliverNow :
+                                                            SalesUpdate::PickingList);
+
+                        salesFormLetter_PackingSlip.printFormLetter(false);
+                        salesFormLetter_PackingSlip.chooseLines();
+                        salesFormLetter_PackingSlip.sumBy(AccountOrder::Account);
+                        salesFormLetter_PackingSlip.reArrangeNow(true);
+                        salesFormLetter_PackingSlip.proforma(false);
+
+                        salesFormLetter_PackingSlip.run();
+                        
+                        if (salesFormLetter_PackingSlip.parmJournalRecord().TableId == tableNum(custPackingSlipJour))
+                        {
+                            CustPackingSlipJour custPackingSlipJour = salesFormLetter_PackingSlip.parmJournalRecord();
+                    
+                            _ETGSPAINSalesPackingSlipImport.selectForUpdate(true);
+                    
+                            _ETGSPAINSalesPackingSlipImport.Status               = IFRUniversalInterfaceSystemStatus::Posted;
+                            _ETGSPAINSalesPackingSlipImport.PackingSlipId        = custPackingSlipJour.PackingSlipId;
+                            _ETGSPAINSalesPackingSlipImport.DeliveryDate         = custPackingSlipJour.DeliveryDate;
+                            _ETGSPAINSalesPackingSlipImport.ErrorLogContainer    = conNull();
+                            _ETGSPAINSalesPackingSlipImport.ErrorsLog            = '';
+                            _ETGSPAINSalesPackingSlipImport.RefRecId             = custPackingSlipJour.RecId;
+                            _ETGSPAINSalesPackingSlipImport.RefTableId           = custPackingSlipJour.TableId;
+                    
+                            _ETGSPAINSalesPackingSlipImport.update();
+
+                            this.updateInventTrans(_ETGSPAINSalesPackingSlipImport, custPackingSlipJour, _transDate);
+                        }
+                        else
+                        {
+                            _ETGSPAINSalesPackingSlipImport.writeInfoLogErrorData(strFmt("@ETGSPAINLabels:SalesPackingSlipPostError", _ETGSPAINSalesPackingSlipImport.PackingSlipSalesId));
+                        }
+                        
+                        ttscommit;
+                    }
+                }
+                catch (Exception::Error)
+                {
+                    _ETGSPAINSalesPackingSlipImport.writeInfoLogErrorData();
+                }
+            }
+        }
+        else
+        {
+            _ETGSPAINSalesPackingSlipImport.writeInfoLogErrorData("@ETGSPAINLabels:ETGSPAINSalesPackingSlipImportPostNoSalesLine");
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>blockETGSPAINSalesPackingSlipImport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method to block the <c>ETGSPAINSalesPackingSlipImport</c> table while processing.
+    /// </summary>
+    /// <param name = "_ETGSPAINSalesPackingSlipImport">ETGSPAINSalesPackingSlipImport</param>
+    /// <param name = "_executionId">Execution ID</param>
+    /// <remarks>This method ensures that two instances do not process the same record simultaneously.</remarks>
+    private void blockETGSPAINSalesPackingSlipImport(ETGSPAINSalesPackingSlipImport _ETGSPAINSalesPackingSlipImport,
+                                                    guid                    _executionId)
+    {
+        ttsbegin;
+        _ETGSPAINSalesPackingSlipImport.selectForUpdate(true);
+
+        _ETGSPAINSalesPackingSlipImport.Status               = IFRUniversalInterfaceSystemStatus::Blocked;
+        _ETGSPAINSalesPackingSlipImport.ExecutionId          = _executionId;
+        _ETGSPAINSalesPackingSlipImport.ErrorLogContainer    = conNull();
+        _ETGSPAINSalesPackingSlipImport.ErrorsLog            = '';
+
+        _ETGSPAINSalesPackingSlipImport.update();
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateSalesLineData</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method to update the <c>salesLine</c> table with changes from the
+    /// <c>ETGSPAINSalesPackingSlipImport</c> table.
+    /// </summary>
+    /// <param name = "_salesLine">SalesLine</param>
+    /// <param name = "_ETGSPAINSalesPackingSlipImport">ETGSPAINSalesPackingSlipImport</param>
+    /// <returns>boolean</returns>
+    /// <remarks>Returns false if there was an issue updating the table.</remarks>
+    private boolean updateSalesLineData(SalesLine _salesLine, ETGSPAINSalesPackingSlipImport _etgspainSalesPackingSlipImport)
+    {
+        boolean ret = true;
+
+        ttsbegin;
+
+        SalesLine::ETGSPAINupdateFromETGSPAINSalesPackingSlipImport(_etgspainSalesPackingSlipImport, _salesLine.RecId);
+
+        _salesLine = SalesLine::findRecId(_salesLine.RecId, true);
+
+        if (_salesLine.inventDim().inventBatchId != _etgspainSalesPackingSlipImport.ETGSPAINPurchOperationId)
+        {
+            if (!this.updateSalesLineSelection(_salesLine,
+                                                _etgspainSalesPackingSlipImport.ETGSPAINPurchOperationId,
+                                                _etgspainSalesPackingSlipImport.ETGSPAINSalesQtyWithdrawn))
+            {
+                ret = false;
+
+                error(strFmt("@ETGSPAINLabels:SalesLineUpdateError", _salesLine.LineNum, _salesLine.SalesId));
+                _etgspainSalesPackingSlipImport.writeInfoLogErrorData();
+            }
+        }
+        else
+        {
+            _salesLine.SalesDeliverNow = _etgspainSalesPackingSlipImport.ETGSPAINSalesQtyWithdrawn;
+
+            _salesLine.setInventDeliverNow();
+
+            if (_salesLine.validateField(fieldNum(SalesLine, SalesDeliverNow)))
+            {
+                _salesLine.modifiedField(fieldNum(SalesLine, SalesDeliverNow));
+
+                if (_salesLine.validateWrite())
+                {
+                    _salesLine.update();
+                    infolog.clear();
+                }
+                else
+                {
+                    ret = false;
+                    error(strFmt("@ETGSPAINLabels:SalesLineUpdateError", _salesLine.LineNum, _salesLine.SalesId));
+                    _etgspainSalesPackingSlipImport.writeInfoLogErrorData();
+                }
+            }
+            else
+            {
+                ret = false;
+                error(strFmt("@ETGSPAINLabels:SalesLineUpdateError", _salesLine.LineNum, _salesLine.SalesId));
+                _etgspainSalesPackingSlipImport.writeInfoLogErrorData();
+            }
+        }
+        
+        ttscommit;
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateSalesLineSelection</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method to update the sales line selection.
+    /// </summary>
+    /// <param name = "_salesLine">SalesLine object</param>
+    /// <param name = "_inventBatchId">Batch ID</param>
+    /// <param name = "_inventQtyPicked">Quantity picked</param>
+    /// <returns>boolean</returns>
+    private boolean updateSalesLineSelection(SalesLine _salesLine, InventBatchId _inventBatchId, InventQtyPicked _inventQtyPicked)
+    {
+        InventMov_Sales     movement;
+        InventDimParm       inventDimParm;
+        InventUpd_Picked    picked;
+        InventDim           inventDim = _salesLine.inventDim();
+        boolean             ret = true;
+
+        inventDim.inventBatchId = _inventBatchId;
+        inventDim = InventDim::findOrCreate(inventDim);
+
+        try
+        {
+            ttsBegin;
+
+            movement = InventMovement::construct(_salesLine);
+            movement.inventDimGroupSetup().inventDimParmActive(inventDimParm);
+
+            picked = InventUpd_Picked::newParameters(movement,
+                                             inventDim,
+                                             inventDimParm,
+                                             inventDim,
+                                             inventDimParm,
+                                             -_inventQtyPicked,
+                                             '',
+                                             0);
+
+            picked.updateNow();
+            ttsCommit;
+        }
+        catch (Exception::Error)
+        {
+            ttsAbort;
+            ret = false;
+        }
+        
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateInventTrans</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method to update the inventory transactions.
+    /// </summary>
+    /// <param name = "_etgspainSalesPackingSlipImport">ETGSPAINSalesPackingSlipImport</param>
+    /// <param name = "_custPackingSlipJour">CustPackingSlipJour</param>
+    /// <param name = "_transDate">Transaction date</param>
+    private void updateInventTrans(ETGSPAINSalesPackingSlipImport   _etgspainSalesPackingSlipImport,
+                                    CustPackingSlipJour             _custPackingSlipJour,
+                                    TransDate                       _transDate)
+    {
+        InventTrans             inventTrans;
+        InventTransOrigin       inventTransOrigin;
+        ETGSPAINInventTrans     etgspainInventTrans;
+
+        while select inventTrans
+            where inventTrans.PackingSlipId                == _custPackingSlipJour.PackingSlipId
+                && inventTrans.DatePhysical                 == _custPackingSlipJour.DeliveryDate
+                exists join inventTransOrigin
+                    where inventTrans.InventTransOrigin     == inventTransOrigin.RecId
+                        && inventTransOrigin.ReferenceId    == _etgspainSalesPackingSlipImport.PackingSlipSalesId
+        {
+            select firstonly forupdate etgspainInventTrans
+                where etgspainInventTrans.RefRecId == inventTrans.RecId;
+
+            if (!etgspainInventTrans)
+            {
+                etgspainInventTrans.clear();
+                etgspainInventTrans.initValue();
+
+                etgspainInventTrans.RefRecId                        = inventTrans.RecId;
+                etgspainInventTrans.InventLicensePlate              = _etgspainSalesPackingSlipImport.ETGSPAINInventLicensePlate;
+                etgspainInventTrans.InventPackingSlipTransitId      = _etgspainSalesPackingSlipImport.ETGSPAINInventPackingSlipTransitId;
+                etgspainInventTrans.CustSalesReference              = _etgspainSalesPackingSlipImport.ETGSPAINCustSalesReference;
+                etgspainInventTrans.SalesCustomerWithdrawalDate     = _etgspainSalesPackingSlipImport.ETGSPAINSalesCustomerWithdrawalDate;
+
+                etgspainInventTrans.insert();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,434 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGInventJournalBOM_EventHandler</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Click event handler for "ETGCreateFGMovementJournal" button.
+/// Creates a Movement Journal based on selected BOM Journal
+/// and posts it automatically.
+/// </summary>
+class ETGInventJournalBOM_EventHandler
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>ETGCreateFGMovementJournal_OnClicked</Name>
+				<Source><![CDATA[
+    [FormControlEventHandler(formControlStr(InventJournalBOM, ETGCreateFGMovementJournal), FormControlEventType::Clicked)]
+    public static void ETGCreateFGMovementJournal_OnClicked(FormControl sender, FormControlEventArgs e)
+    {
+        FormRun formRun = sender.formRun();
+        FormDataSource journalTableDS  = formRun.dataSource(formDataSourceStr(InventJournalBOM, InventJournalTable));
+        FormDataSource journalTransDS  = formRun.dataSource(formDataSourceStr(InventJournalBOM,InventJournalTrans));
+        InventJournalTable journalTable= journalTableDS.cursor();
+
+        InventJournalName journalName;
+        InventJournalTable movementJournalTable;
+        InventJournalTrans sourceJournalTrans;
+        InventJournalTrans movementJournalTrans;
+        NumberSeq numberSeq;
+        ETGCanadaParameters parameters;
+        boolean booleanLine=false;
+        JournalTableData journalTableData;
+        JournalTransData journalTransData;
+
+        parameters = ETGCanadaParameters::find();
+
+        ttsbegin;
+
+        // Find Movement Journal Name with Production Consumption = Yes
+        select firstOnly journalName
+        where journalName.JournalType == InventJournalType::Movement
+           && journalName.ETGProductionConsumption == NoYes::Yes;
+
+        if (!journalName)
+        throw error("@ETG_New:ProductionConsumptionError");
+
+        // Create Movement Journal Header
+        numberSeq = NumberSeq::newGetNum(InventParameters::numRefInventJournalId());
+
+        movementJournalTable.clear();
+        movementJournalTable.initValue();
+        movementJournalTable.JournalId     = numberSeq.num();
+        movementJournalTable.JournalNameId = journalName.JournalNameId;
+        movementJournalTable.initFromInventJournalName(journalName);
+        movementJournalTable.LedgerDimension=journalName.LedgerDimension;
+        movementJournalTable.insert();
+
+
+        journalTableData = JournalTableData::newTable(movementJournalTable);
+        int lineCount=0;
+
+        //  Loop Source BOM Journal Lines
+        while select sourceJournalTrans
+        where sourceJournalTrans.JournalId == journalTable.JournalId
+            && sourceJournalTrans.ETGFGMovementJournalId==""
+           && sourceJournalTrans.BOMLine == NoYes::No
+        {
+            lineCount++;
+                
+            movementJournalTrans.clear();
+            movementJournalTrans.initValue();
+
+            movementJournalTrans.JournalId = movementJournalTable.JournalId;
+            movementJournalTrans.ItemId    = sourceJournalTrans.ItemId;
+            movementJournalTrans.LedgerDimension=journalName.LedgerDimension;
+
+
+            movementJournalTrans.initFromInventTable(InventTable::find(sourceJournalTrans.ItemId));
+
+            movementJournalTrans.DefaultDimension=movementJournalTrans.copyDimension(sourceJournalTrans.DefaultDimension);
+
+
+            // Make Quantity Negative
+            movementJournalTrans.Qty =-abs(sourceJournalTrans.Qty);
+            movementJournalTrans.UnitQty=-abs(sourceJournalTrans.UnitQty);
+
+            //  Copy Inventory Dimensions
+            movementJournalTrans.InventDimId =sourceJournalTrans.InventDimId;
+
+            // Save BOM Reference (Source Journal RecId)
+            movementJournalTrans.ETGBOMRecId =journalTable.journalid;
+
+            movementJournalTrans.insert();
+
+            sourceJournalTrans.selectForUpdate(true);
+            sourceJournalTrans.ETGFGMovementJournalId=movementJournalTrans.JournalId;
+            sourceJournalTrans.doUpdate();
+            booleanLine=true;
+        }
+       
+        ttscommit;
+
+         
+        ttsbegin;
+
+         InventJournalTable  movementJournalTable1;
+        select forupdate movementJournalTable1
+            where movementJournalTable1.JournalId == movementJournalTable.JournalId;
+
+        if(movementJournalTable1)
+        {
+            movementJournalTable1.NumOfLines = lineCount;
+            movementJournalTable1.update();
+        }
+        
+            ttscommit;
+
+
+
+
+        // Auto Post Movement Journal
+        JournalCheckPost journalCheckPost;
+
+        journalCheckPost =InventJournalCheckPost::newPostJournal(movementJournalTable);
+
+        journalCheckPost.run();
+
+        info(strFmt("@ETG_New:MovementJournalCreationMessage", movementJournalTable.JournalId));
+        journalTableDS.reread();
+        journalTableDS.refresh();
+        journalTransDS.reread();
+        journalTransDS.refresh();
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>InventJournalTable_ETGSalesId_OnLookup</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// CS,DLT,SB, Custom Lookup for sales if which are in open order status in same entity
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(InventJournalBOM, InventJournalTable_ETGSalesId), FormControlEventType::Lookup)]
+    public static void InventJournalTable_ETGSalesId_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        InventJournalTable           inventJournal    = sender.formRun().dataSource(formDataSourceStr(InventJournalBOM, InventJournalTable)).cursor();
+        Query query = new Query();
+        query.allowCrossCompany(true);
+        query.addCompanyRange(inventJournal.ETGParentEntity);
+
+        QueryBuildDataSource qbds = query.addDataSource(tableNum(SalesTable));
+        qbds.addRange(fieldNum(SalesTable, SalesStatus)) .value(queryValue(enum2Str(SalesStatus::Backorder)));
+        qbds.addSortField(fieldNum(SalesTable, CreatedDateTime), SortOrder::Descending);
+        SysTableLookup sysTableLookup = SysTableLookup::newParameters(tableNum(SalesTable), sender);
+
+        sysTableLookup.addLookupfield(fieldNum(SalesTable, SalesId), true);
+        sysTableLookup.addLookupfield(fieldNum(SalesTable, CustAccount));
+
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.performFormLookup();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>InventJournalTable_ETGItemId_OnLookup</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// CS,DLT,SB, Custom Lookup for sales lines if which are in open order status in same entity
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(InventJournalBOM, InventJournalTable_ETGItemId), FormControlEventType::Lookup)]
+    public static void InventJournalTable_ETGItemId_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        InventJournalTable           inventJournal    = sender.formRun().dataSource(formDataSourceStr(InventJournalBOM, InventJournalTable)).cursor();
+        InventJournalTrans           inventTrans;
+
+        select firstonly inventTrans
+            where inventTrans.JournalId == inventJournal.JournalId
+            && inventTrans.BOMLine == NoYes::No;
+
+        if (!inventJournal.ETGSalesId)
+        {
+            warning("Please select Sales Order first.");
+            return;
+        }
+        Query query = new Query();
+        query.allowCrossCompany(true);
+        query.addCompanyRange(inventJournal.ETGParentEntity);
+
+        QueryBuildDataSource qbdsSalesLine = query.addDataSource(tableNum(SalesLine));
+        qbdsSalesLine.addRange(fieldNum(SalesLine, SalesId)).value(queryValue(inventJournal.ETGSalesId));
+        qbdsSalesLine.addRange(fieldNum(SalesLine, ItemId)).value(queryValue(inventTrans.ItemId));
+        qbdsSalesLine.addRange(fieldNum(SalesLine, SalesStatus)).value(queryValue(enum2Str(SalesStatus::Backorder)));
+
+        SysTableLookup sysTableLookup = SysTableLookup::newParameters(tableNum(SalesLine), sender);
+        sysTableLookup.addLookupfield(fieldNum(SalesLine,InventTransId));
+        sysTableLookup.addLookupfield(fieldNum(SalesLine,LineNum));
+        sysTableLookup.addLookupfield(fieldNum(SalesLine, ItemId));
+        sysTableLookup.addLookupMethod(tableMethodStr(SalesLine,itemName));
+
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.performFormLookup();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>InventJournalTable_ETGSalesId_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// CS,DLT,SB, Making ItemId field blank if SO removed on Modified of BOM journal
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(InventJournalBOM, InventJournalTable_ETGSalesId), FormControlEventType::Modified)]
+    public static void InventJournalTable_ETGSalesId_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        FormRun                            formRun = sender.formRun();
+        FormDataSource                          ds = formRun.dataSource(formDataSourceStr(InventJournalBOM, InventJournalTable));
+        InventJournalTable      InventJournalTable = ds.cursor();
+
+        // Clear ItemId if SalesId changes
+        if (InventJournalTable.orig().ETGSalesId != InventJournalTable.ETGSalesId)
+        {
+            InventJournalTable.ETGItemId = '';
+            ds.refresh();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>InventJournalTable_ETGItemId_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// CS,DLT,SB, SO Marking code is written on Modified of BOM journal
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(InventJournalBOM, InventJournalTable_ETGItemId), FormControlEventType::Modified)]
+    public static void InventJournalTable_ETGItemId_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        FormRun                            formRun = sender.formRun();
+        FormDataSource                          ds = formRun.dataSource(formDataSourceStr(InventJournalBOM, InventJournalTable));
+        InventJournalTable      InventJournalBOM = ds.cursor();
+        InventJournalTable      InventJournalSubBOM;
+
+        if(InventJournalBOM.ETGSubcontractingBOMJournal && InventJournalBOM.Posted)
+        {
+            changecompany(InventJournalBOM.ETGParentEntity)
+            {
+                InventJournalSubBOM = InventJournalTable::find(InventJournalBOM.ETGSubcontractingBOMJournal);
+            }
+
+            SalesLine  markSalesline = ETGInventJournalBOM_EventHandler::findMatchingSalesLine(InventJournalSubBOM, InventJournalBOM.ETGParentEntity, InventJournalBOM.ETGSalesId, InventJournalBOM.ETGItemId);
+
+            if (markSalesline)
+            {
+                // Mark PO and SO
+                ETGInventJournalBOM_EventHandler::markPO(InventJournalBOM, markSalesline);
+
+                ttsbegin;
+                InventJournalBOM.selectForUpdate(true);
+                InventJournalBOM.ETGSalesId     =   markSalesline.SalesId;
+                InventJournalBOM.ETGItemId      =   markSalesline.ItemId;
+                InventJournalBOM.update();
+                ttscommit;
+
+                //update Salesid on Parent ProdId as well
+                changecompany(InventJournalBOM.ETGParentEntity)
+                {
+                    ttsbegin;
+                    InventJournalSubBOM.reread();
+                    InventJournalSubBOM.selectForUpdate(true);
+                    InventJournalSubBOM.ETGSalesId       = markSalesline.SalesId;
+                    InventJournalSubBOM.ETGItemId        = markSalesline.ItemId;
+                    InventJournalSubBOM.update();
+                    ttscommit;
+                }
+            }
+            else
+            {
+                checkFailed(strFmt("Matching salesline doesn't exist for sales order %1. Please reassign & retry", InventJournalBOM.ETGSalesId));
+                ttsbegin;
+                InventJournalBOM.selectForUpdate(true);
+                InventJournalBOM.ETGSalesId        = "";
+                InventJournalBOM.ETGItemId         = "";
+                InventJournalBOM.update();
+                ttscommit;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>findMatchingSalesLine</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// CS,DLT,SB, Finding matching SO according to the BOM journal created on parent entity
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    public static SalesLine findMatchingSalesLine(InventJournalTable _inventJourBOMParent, LegalEntityDataAreaId  _comp,SalesId  _salesId,InventTransId _inventTransId)
+    {
+        changecompany(_comp)
+        {
+            SalesLine        salesLine, matchedLine;
+            InventDim        inventTransBOMDim, salesDim;
+            InventJournalTrans      inventTransBOMParent;
+
+            select firstonly inventTransBOMParent
+                where inventTransBOMParent.JournalId == _inventJourBOMParent.JournalId
+                && inventTransBOMParent.BOMLine == NoYes::No;
+
+            // 1. Get inventTransBOMParent InventDim
+            inventTransBOMDim = InventDim::find(inventTransBOMParent.InventDimId);
+
+            // 3. Loop SalesLines for same SalesId + ItemId
+            while select salesLine
+                where salesLine.SalesId == _salesId
+                && salesLine.InventTransId == _inventTransId
+            {
+                salesDim = InventDim::find(salesLine.InventDimId);
+                if(InventDim::isInventDimEqual(salesDim, inventTransBOMDim))
+                {
+
+                    matchedLine = salesLine;
+                    break;
+                }
+            }
+
+            return matchedLine;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>markPO</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// CS,DLT,SB, SO Marking code from a specific BOM journal
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    public static void markPO(InventJournalTable _inventJourBOM, SalesLine   _markSalesline)
+    {
+        changecompany(_inventJourBOM.ETGParentEntity)
+        {
+            InventTransId           issueInventTransId, receiptInventTransId;
+            InventJournalTable      inventJourBOMParent  = InventJournalTable::find(_inventJourBOM.ETGSubcontractingBOMJournal);
+            InventJournalTrans      inventTransBOMParent;
+
+            select firstonly inventTransBOMParent
+                where inventTransBOMParent.JournalId == inventJourBOMParent.JournalId
+                && inventTransBOMParent.BOMLine == NoYes::No;
+
+            issueInventTransId      = _markSalesline.InventTransId;
+            receiptInventTransId    = inventTransBOMParent.InventTransId;
+ 
+            InventTransOriginId receiptInventTransOriginId = InventTransOrigin::findByInventTransId(receiptInventTransId).RecId;
+            InventTrans         receiptInventTrans         = InventTrans::findByInventTransOrigin(receiptInventTransOriginId);
+            InventTransOriginId issueInventTransOriginId = InventTransOrigin::findByInventTransId(issueInventTransId).RecId;
+            InventTrans         issueInventTrans ;
+            InventTransOrigin   inventTransOrigin_loc;
+
+            select firstonly issueInventTrans
+                join inventTransOrigin_loc
+                where inventTransOrigin_loc.RecId         ==  issueInventTrans.InventTransOrigin
+                    && inventTransOrigin_loc.InventTransId == issueInventTransId
+                    && issueInventTrans.StatusIssue  == StatusIssue::OnOrder;
+
+            if (!issueInventTrans.RecId)
+            {
+                throw error("@ETG_New:BOMMarkingFail");
+            }
+
+            TmpInventTransMark      tmpInventTransMark;
+
+            InventTransMarkCollection   collection = TmpInventTransMark::markingCollection(
+            InventTransOrigin::find(receiptInventTransOriginId),
+            receiptInventTrans.inventDim(), receiptInventTrans.Qty);
+
+            collection.insertCollectionToTmpTable(tmpInventTransMark);
+ 
+            select firstonly tmpInventTransMark
+                where tmpInventTransMark.InventTransOrigin == issueInventTrans.InventTransOrigin
+                && tmpInventTransMark.InventDimId       == issueInventTrans.InventDimId;
+ 
+            if (tmpInventTransMark.RecId != 0)
+            {
+                Qty receiptQty = abs(receiptInventTrans.Qty);
+                Qty issueQty   = abs(issueInventTrans.Qty);
+                Qty qtyToMark = min(receiptQty, issueQty);
+
+                tmpInventTransMark.Qty = -qtyToMark;
+                tmpInventTransMark.QtyMarkNow =  -qtyToMark;
+
+                if(receiptQty >= issueQty)
+                {
+                    tmpInventTransMark.QtyRemain -= tmpInventTransMark.QtyMarkNow;
+                }
+                else
+                {
+                    tmpInventTransMark.QtyRemain = abs(receiptInventTrans.Qty) - abs(tmpInventTransMark.QtyRemain);
+                }
+
+                Map mapUpdated = new Map(Types::Int64, Types::Record);
+                mapUpdated.insert(tmpInventTransMark.RecId, tmpInventTransMark);
+
+                TmpInventTransMark::updateTmpMark(
+                receiptInventTransOriginId,
+                receiptInventTrans.inventDim(),
+                receiptInventTrans.Qty,
+                mapUpdated.pack());
+
+                info(strfmt("@ETG_New:BOMMarkingSuccess", _markSalesline.SalesId, inventJourBOMParent.JournalId));
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

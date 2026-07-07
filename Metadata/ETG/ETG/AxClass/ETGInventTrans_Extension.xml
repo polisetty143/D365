@@ -1,0 +1,382 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGInventTrans_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// extension of table <c>InventTrans</c>
+/// </summary>
+[ExtensionOf(tablestr(InventTrans))]
+internal final class ETGInventTrans_Extension
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getDefaultDimensionETG</Name>
+				<Source><![CDATA[
+    public static DimensionDefault getDefaultDimensionETG(InventTransOrigin inventTransOrigin)
+    {
+        DimensionDefault  dimDefault;
+        InventJournalTrans inventJournalTrans;
+
+        if(!inventTransOrigin)
+        {
+            return 0;
+        }
+        switch(inventTransOrigin.ReferenceCategory)
+        {
+            case InventTransType::Purch:
+                dimDefault = PurchLine::findInventTransId(inventTransOrigin.InventTransId).DefaultDimension;
+                break;
+            case InventTransType::Sales:
+                dimDefault = SalesLine::findInventTransId(inventTransOrigin.InventTransId).DefaultDimension;
+                break;
+            case InventTransType::InventTransfer:
+                inventJournalTrans=InventJournalTrans::findInventTransId(inventTransOrigin.InventTransId);
+                //dimDefault = InventJournalTrans::findInventTransId(inventTransOrigin.InventTransId).DefaultDimension;
+                dimDefault=inventJournalTrans.DefaultDimension;
+
+                if(!dimDefault)
+                {
+                    select * from inventJournalTrans where inventJournalTrans.ToInventTransId == inventTransOrigin.InventTransId;
+
+                    dimDefault = inventJournalTrans.DefaultDimension;
+                }
+
+                InventJournalTable inventJournalTable = inventJournalTrans.inventJournalTable();
+                if(InventTrans::findByInventTransOrigin(inventTransOrigin.RecId).StatusReceipt == StatusReceipt::Purchased &&
+                 inventJournalTable.inventJournalName().ETGTransferJournalFDChange == NoYes::Yes)
+                {
+                    dimDefault = inventJournalTrans.ETGToDefaultDimension;
+                }
+                break;
+            case InventTransType::TransferOrderShip:
+                dimDefault = InventTransferLine::findTransIdShip(inventTransOrigin.InventTransId).ETGDefaultDimension;
+                break;
+            case InventTransType::TransferOrderReceive:
+                dimDefault = InventTransferLine::findTransIdReceive(inventTransOrigin.InventTransId).ETGDefaultDimension;
+                break;
+            case InventTransType::TransferOrderScrap:
+                dimDefault = InventTransferLine::findTransIdScrap(inventTransOrigin.InventTransId).ETGDefaultDimension;
+                break;
+            case InventTransType::InventTransaction:
+                dimDefault = InventJournalTrans::findInventTransId(inventTransOrigin.InventTransId).DefaultDimension;
+                break;
+            case InventTransType::InventLossProfit:
+                dimDefault = InventJournalTrans::findInventTransId(inventTransOrigin.InventTransId).DefaultDimension;
+                break;
+            case InventTransType::InventCounting:
+                dimDefault = InventJournalTrans::findInventTransId(inventTransOrigin.InventTransId).DefaultDimension;
+                break;
+
+            //for BOM & production
+            case InventTransType::BOMMain:
+                dimDefault = InventJournalTrans::findInventTransId(InventTransOrigin.InventTransId).DefaultDimension;
+                break;
+            case InventTransType::BOMLine:
+                dimDefault = InventJournalTrans::findInventTransId(InventTransOrigin.InventTransId).DefaultDimension;
+                break;
+            case InventTransType::Production:
+                dimDefault = ProdTable::find(InventTransOrigin.ReferenceId).DefaultDimension;
+                break;
+            case InventTransType::ProdLine:
+                dimDefault = ProdTable::find(InventTransOrigin.ReferenceId).DefaultDimension;
+                break;
+            case InventTransType::PmfProdCoBy:
+                dimDefault = ProdTable::find(InventTransOrigin.ReferenceId).DefaultDimension;
+                break;
+            case InventTransType::ProdRelease_RU:
+                dimDefault = ProdTable::find(InventTransOrigin.ReferenceId).DefaultDimension;
+                break;
+
+        }
+
+        return dimDefault;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getUnitPriceETG</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// get unit price inventory transaction
+    /// </summary>
+    /// <param name = "_inventTrans">InventTrans _inventTrans</param>
+    /// <returns>CostPrice</returns>
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display CostPrice getUnitPriceETG(InventTrans _inventTrans)
+    {
+        if(_inventTrans.Qty == 0)
+        {
+            return 0;
+        }
+        else
+        {
+            return _inventTrans.costValue() / _inventTrans.Qty;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getSalesPriceETG</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// get sales price of sales line 
+    /// </summary>
+    /// <param name = "_inventTrans">InventTrans _inventTrans</param>
+    /// <returns>SalesPrice</returns>
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display SalesPrice getSalesPriceETG(InventTrans _inventTrans)
+    {
+        InventTransOrigin inventTransOriginETG = _inventTrans.inventTransOrigin();
+        if(inventTransOriginETG.ReferenceCategory == InventTransType::Sales)
+        {
+            return SalesLine::findInventTransId(inventTransOriginETG.InventTransId).SalesPrice;
+        }
+        else
+        {
+            return 0;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getVerticalETG</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// get vertical from financial dimesnions of transactions
+    /// </summary>
+    /// <param name = "_inventTrans">InventTrans _inventTrans</param>
+    /// <returns>ETGVertical</returns>
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display ETGVertical getVerticalETG(InventTrans _inventTrans)
+    {
+        if(ETGACFParameters::find().EnableVerticalSubVerticalFields == NoYes::No)
+        {
+            return "";
+        }
+
+        try
+        {
+            InventTransOrigin inventTransOrigin = _inventTrans.inventTransOrigin();
+            if(!inventTransOrigin)
+            {
+                return "";
+            }
+
+            DimensionDefault  dimDefault = InventTrans::getDefaultDimensionETG(inventTransOrigin);
+            
+            if(dimDefault)
+            {
+                return ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(dimDefault, ETGACFParameters::find().Vertical);
+            }
+            else
+            {
+                return "";
+            }
+        }
+        catch(Exception::Error)
+        {
+            return "";
+        }
+        catch
+        {
+            return "";
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getMainCommodityETG</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// get vertical from financial dimesnions of transactions
+    /// </summary>
+    /// <param name = "_inventTrans">InventTrans _inventTrans</param>
+    /// <returns>ETGVertical</returns>
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display ETGVertical getMainCommodityETG(InventTrans _inventTrans)
+    {
+        if(ETGACFParameters::find().EnableVerticalSubVerticalFields == NoYes::No)
+        {
+            return "";
+        }
+
+        try
+        {
+            InventTransOrigin inventTransOrigin = _inventTrans.inventTransOrigin();
+            if(!inventTransOrigin)
+            {
+                return "";
+            }
+
+            DimensionDefault  dimDefault = InventTrans::getDefaultDimensionETG(inventTransOrigin);
+            
+            if(dimDefault)
+            {
+                return ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(dimDefault, ETGACFParameters::find().MainCommodity);
+            }
+            else
+            {
+                return "";
+            }
+        }
+        catch(Exception::Error)
+        {
+            return "";
+        }
+        catch
+        {
+            return "";
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getSubCommodityETG</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// get vertical from financial dimesnions of transactions
+    /// </summary>
+    /// <param name = "_inventTrans">InventTrans _inventTrans</param>
+    /// <returns>ETGVertical</returns>
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display ETGVertical getSubCommodityETG(InventTrans _inventTrans)
+    {
+        if(ETGACFParameters::find().EnableVerticalSubVerticalFields == NoYes::No)
+        {
+            return "";
+        }
+
+        try
+        {
+            InventTransOrigin inventTransOrigin = _inventTrans.inventTransOrigin();
+            if(!inventTransOrigin)
+            {
+                return "";
+            }
+
+            DimensionDefault  dimDefault = InventTrans::getDefaultDimensionETG(inventTransOrigin);
+            
+            if(dimDefault)
+            {
+                return ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(dimDefault, ETGACFParameters::find().SubCommodity);
+            }
+            else
+            {
+                return "";
+            }
+        }
+        catch(Exception::Error)
+        {
+            return "";
+        }
+        catch
+        {
+            return "";
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getSubVerticalETG</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// get vertical from financial dimesnions of transactions
+    /// </summary>
+    /// <param name = "_inventTrans">InventTrans _inventTrans</param>
+    /// <returns>ETGVertical</returns>
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display ETGVertical getSubVerticalETG(InventTrans _inventTrans)
+    {
+        if(ETGACFParameters::find().EnableVerticalSubVerticalFields == NoYes::No)
+        {
+            return "";
+        }
+
+        try
+        {
+            InventTransOrigin inventTransOrigin = _inventTrans.inventTransOrigin();
+            if(!inventTransOrigin)
+            {
+                return "";
+            }
+
+            DimensionDefault  dimDefault = InventTrans::getDefaultDimensionETG(inventTransOrigin);
+            
+            if(dimDefault)
+            {
+                return ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(dimDefault, ETGACFParameters::find().SubVertical);
+            }
+            else
+            {
+                return "";
+            }
+        }
+        catch(Exception::Error)
+        {
+            return "";
+        }
+        catch
+        {
+            return "";
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>displayInvoiceId</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Invoice Number field added on Inventotory management transaction form.
+    /// </summary>
+    /// <returns></returns>
+    public display InvoiceId displayInvoiceId()
+    {
+        InvoiceId invoiceId = '';
+
+        InventTransOrigin inventTransOrigin;
+        VendInvoiceTrans vendInvoiceTrans;
+        CustInvoiceTrans custInvoiceTrans;
+
+        select firstonly inventTransOrigin
+            where inventTransOrigin.RecId == this.InventTransOrigin;
+
+        if (this.StatusReceipt == StatusReceipt::Purchased)
+        {
+            select firstonly InvoiceId
+                from vendInvoiceTrans
+                where vendInvoiceTrans.InventTransId == inventTransOrigin.InventTransId;
+
+            invoiceId = vendInvoiceTrans.InvoiceId;
+        }
+        else if (this.StatusIssue == StatusIssue::Sold)
+        {
+            select firstonly InvoiceId
+                from custInvoiceTrans
+                where custInvoiceTrans.InventTransId == inventTransOrigin.InventTransId;
+
+            invoiceId = custInvoiceTrans.InvoiceId;
+        }
+
+        return invoiceId;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

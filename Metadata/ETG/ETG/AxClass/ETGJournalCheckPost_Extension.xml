@@ -1,0 +1,281 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGJournalCheckPost_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(JournalCheckPost))]
+internal final class ETGJournalCheckPost_Extension
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>validateJournalTable</Name>
+				<Source><![CDATA[
+    public boolean validateJournalTable(JournalTableMap _journalTable)
+    {
+        boolean ret = next validateJournalTable(_journalTable);
+
+        if(SalesParameters::find().ETGEnableCylinderTracking)
+        {
+            InventJournalTable InventJournalTableLoc = InventJournalTable::find(_journalTable.JournalId);
+
+            if(ret && InventJournalName::find(InventJournalTableLoc.JournalNameId).ETGManualAdditionorDeletion == NoYes::Yes)
+            {
+                InventJournalTrans inventJournalTrans;
+                //cost price of all issue lines
+                select ItemId, InventDimId, Qty from inventJournalTrans
+                where inventJournalTrans.JournalId == InventJournalTableLoc.JournalId
+                && inventJournalTrans.ETGIssueReceive == ETGIssueReceive::Issue;
+
+                Amount costPrice;
+                Amount issueAmt = ETGGlobal::getItemCostPrice(inventJournalTrans.ItemId, InventDim::find(inventJournalTrans.InventDimid));
+                costPrice = issueAmt;
+                issueAmt  = abs(inventJournalTrans.Qty * issueAmt);
+                //Cost price of all receive lines
+                select sum(CostAmount) from inventJournalTrans
+                where inventJournalTrans.JournalId == InventJournalTableLoc.JournalId
+                && inventJournalTrans.ETGIssueReceive == ETGIssueReceive::Receive;
+
+                Amount receiveAmt = inventJournalTrans.CostAmount;
+
+                if(issueAmt == 0 && receiveAmt == 0)
+                {
+                    return ret;
+                }
+                if(abs(issueAmt - receiveAmt) > InventParameters::find().ETGIssueRcvPriceDifferenceToleranceLimit)
+                {
+                    throw error(strFmt("@ETG_New:IssueReceiveValidation", costPrice, issueAmt, receiveAmt));
+                }
+            }
+        }
+
+        if (ret && ETGCanadaParameters::find().EnableBINValidation == NoYes::Yes)
+        {
+            InventDim inventdim,dimInner;
+            InventJournalTrans inventJournalTrans,inventJournalTransLoc;
+            InventJournalTable InventJournalTableCheck = InventJournalTable::find(_journalTable.JournalId);
+
+            if(InventJournalTableCheck.JournalType == InventJournalType::Transfer)
+            {
+                InventTable inventTable;
+
+                while select sum(Qty) from inventJournalTrans
+                    group by inventDim.InventLocationId, inventDim.wMSLocationId
+                where inventJournalTrans.JournalId == _journalTable.JournalId
+                join inventDim
+                    where inventDim.InventDimId == inventJournalTrans.ToInventDimId
+                join inventTable
+                    where inventTable.ItemId == inventJournalTrans.ItemId
+                       && inventTable.GrossDepth > 0
+                       && inventTable.grossHeight > 0
+                       && inventTable.grossWidth > 0
+                {
+                    WMSLocation wmsLocation = WMSLocation::find(inventdim.WmsLocationid ,inventdim.inventLocationId);
+ 
+                    if((abs(inventJournalTrans.Qty) * inventTable.UnitVolume) > wmsLocation.freeVolume())
+                    {
+                        ret = checkFailed(strFmt("@ETG_New:BInQtyValidationMovement",inventdim.wMSLocationId));
+                    }
+                }
+            }
+            else if(InventJournalTableCheck.JournalType == InventJournalType::Movement || InventJournalTableCheck.JournalType == InventJournalType::BOM || InventJournalTableCheck.JournalType == InventJournalType::LossProfit)
+            {
+                InventTable inventTable;
+
+                while select sum(Qty) from inventJournalTrans
+                    group by inventDim.InventLocationId, inventDim.wMSLocationId
+                where inventJournalTrans.JournalId == _journalTable.JournalId
+                join inventDim
+                    where inventDim.InventDimId == inventJournalTrans.InventDimId
+                join inventTable
+                    where inventTable.ItemId == inventJournalTrans.ItemId
+                       && inventTable.GrossDepth > 0
+                       && inventTable.grossHeight > 0
+                       && inventTable.grossWidth > 0
+                {
+                    WMSLocation wmsLocation = WMSLocation::find(inventdim.WmsLocationid ,inventdim.inventLocationId);
+ 
+                    if((abs(inventJournalTrans.Qty) * inventTable.UnitVolume) > wmsLocation.freeVolume())
+                    {
+                        ret = checkFailed(strFmt("@ETG_New:BInQtyValidationMovement",inventdim.wMSLocationId));
+                    }
+                }
+            }
+        }
+        return ret;
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>runPostEnd</Name>
+				<Source><![CDATA[
+    protected Integer runPostEnd()
+    {
+        #define.runEnd(8)
+
+        next runPostEnd();
+ 
+        ETGGeneralJournalCreateTransferFD::createGeneralJournal(journalId);
+
+        //CS - Abhinav 
+        if (ETGCanadaParameters::find().EnableAutoCreateBOM == NoYes::Yes)
+        {
+            InventJournalTable                      InventJournalTableCheck = InventJournalTable::find(journalId);
+            InventJournalTrans                      inventJournalTrans,inventJournalTransBomLine;
+            str                                     currCompany = curExt();
+            InventJournalTable                      inventJournalTableNew;
+            InventJournalTrans                      inventJournalTransNew;
+
+            if(InventJournalTableCheck.JournalType == InventJournalType::BOM)
+            {
+                if(InventJournalName::find(InventJournalTableCheck.JournalNameId).ETGAutoCreateBOMJournal && InventJournalTableCheck.ETGParentEntity)
+                {
+                    changecompany(InventJournalTableCheck.ETGParentEntity)
+                    {
+                        ttsbegin;
+                        inventJournalTableNew.clear();
+                        buf2Buf(InventJournalTableCheck,inventJournalTableNew);
+
+                        journalTableData = new InventJournalTableData(inventJournalTableNew);
+                        inventJournalTableNew.initValue();
+                        inventJournalTableNew.JournalId = journalTableData.nextJournalId();
+                        inventJournalTableNew.ETGSalesId = "";
+                        inventJournalTableNew.ETGItemId = "";
+
+                        InventJournalName inventJournalName;
+                        select firstonly inventJournalName where inventJournalName.ETGSelectJournalForAutoCreation == NoYes::Yes;
+                        if(inventJournalName)
+                        {
+                            inventJournalTableNew.initFromInventJournalName(inventJournalName);
+                        }
+                        inventJournalTableNew.Posted = NoYes::No;
+                        inventJournalTableNew.PostedDateTime = dateNull();
+                        inventJournalTableNew.PostedUserId = '';
+                        inventJournalTableNew.ETGProductionEntityBOMJournal = InventJournalTableCheck.JournalId;
+                        inventJournalTableNew.SystemBlocked = false;
+                        inventJournalTableNew.insert();
+                        ttscommit;
+
+                        if(inventJournalTableNew.JournalId)
+                        {
+                            Info(strFmt("@ETG_New:BOMJournalcreated",inventJournalTableNew.JournalId,InventJournalTableCheck.ETGParentEntity));
+                        }
+
+                        changecompany(currCompany)
+                        {
+                            
+                            while select inventJournalTrans
+                                order by BOMLine asc
+                                where inventJournalTrans.JournalId == InventJournalTableCheck.JournalId
+                            {
+                                InventDim inventDim = InventDim::find(inventJournalTrans.InventDimId);
+
+                                changecompany(InventJournalTableCheck.ETGParentEntity)
+                                {
+                                    InventDim inventDimNew;
+
+                                    ttsbegin;
+                                    inventJournalTransNew.clear();
+
+                                    buf2Buf(inventJournalTrans,inventJournalTransNew);
+
+                                    inventJournalTransNew.initFromInventJournalTable(inventJournalTableNew);
+                                    inventJournalTransNew.initFromInventTable(InventTable::find(inventJournalTransNew.ItemId));
+                                    
+                                    
+                                    //buf2Buf(inventDim,inventDimNew);
+                                    inventDimNew.initFromInventTable(InventTable::find(inventJournalTransNew.ItemId));
+                                    inventDimNew.InventLocationId = InventJournalTableCheck.ETGParentrawMaterialWareHouse;
+                                    inventDimNew.InventSiteId     = InventLocation::find(inventDimNew.InventLocationId).InventSiteId;
+                                   
+                                   
+                                    inventDimNew.wMSLocationId = '';
+
+                                    inventJournalTransNew.InventDimId = InventDim::findOrCreate(inventDimNew).inventDimId;
+
+                                    // RESTORE QTY AFTER INIT 
+                                    inventJournalTransNew.Qty     = inventJournalTrans.Qty;
+                                    inventJournalTransNew.UnitQty = inventJournalTrans.UnitQty;
+
+                                    inventJournalTransNew.insert();
+                                    ttscommit;
+                                }
+                            }
+                        }
+                    }
+                    ttsbegin;
+                    InventJournalTableCheck.selectForUpdate(true);
+                    InventJournalTableCheck.ETGSubcontractingBOMJournal = inventJournalTableNew.journalId;
+                    InventJournalTableCheck.update();
+                    ttscommit;
+
+                    ttsbegin;
+                    changecompany(InventJournalTableCheck.ETGParentEntity)
+                    {
+                        select firstonly inventJournalTransBomLine
+                                where inventJournalTransBomLine.JournalId == inventJournalTableNew.JournalId
+                                && inventJournalTransBomLine.BOMLine == NoYes::No;
+
+                        update_recordset inventJournalTransNew
+                            setting InventTransIdFather = inventJournalTransBomLine.InventTransId
+                        where inventJournalTransNew.JournalId == inventJournalTableNew.JournalId
+                            && inventJournalTransNew.BOMLine == NoYes::Yes;
+                    }
+                    ttscommit;
+
+                    //CS,DLT,SB, Marking BOM Journal with Salesline
+                    if(InventJournalTableCheck.ETGSalesId && InventJournalTableCheck.ETGItemId && ETGCanadaParameters::find().EnableBOMJournalMarking == NoYes::Yes)
+                    {
+                        SalesLine  markSalesline = ETGInventJournalBOM_EventHandler::findMatchingSalesLine(inventJournalTableNew, InventJournalTableCheck.ETGParentEntity, InventJournalTableCheck.ETGSalesId, InventJournalTableCheck.ETGItemId);
+
+                        if (markSalesline)
+                        {
+                            // Mark PO and SO
+                            ETGInventJournalBOM_EventHandler::markPO(InventJournalTableCheck, markSalesline);
+
+                            ttsbegin;
+                            InventJournalTableCheck.selectForUpdate(true);
+                            InventJournalTableCheck.ETGSalesId     =   markSalesline.SalesId;
+                            InventJournalTableCheck.ETGItemId      =   markSalesline.ItemId;
+                            InventJournalTableCheck.update();
+                            ttscommit;
+
+                            //update Salesid on Parent ProdId as well
+                            changecompany(InventJournalTableCheck.ETGParentEntity)
+                            {
+                                ttsbegin;
+                                //prodParent.selectForUpdate(true);
+                                inventJournalTableNew.reread();
+                                inventJournalTableNew.ETGSalesId       = markSalesline.SalesId;
+                                inventJournalTableNew.ETGItemId        = markSalesline.ItemId;                    
+                                inventJournalTableNew.update();
+                                ttscommit;
+                            }
+                        }
+                        else
+                        {
+                            checkFailed(strFmt("@ETG_New:BOMMarkingWarning", InventJournalTableCheck.ETGSalesId));
+                            ttsbegin;
+                            InventJournalTableCheck.selectForUpdate(true);
+                            InventJournalTableCheck.ETGSalesId        = "";
+                            InventJournalTableCheck.ETGItemId         = "";
+                            InventJournalTableCheck.update();
+                            ttscommit;
+                        }
+                    }
+                }
+            }
+        }
+        //CE
+        return #runEnd;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

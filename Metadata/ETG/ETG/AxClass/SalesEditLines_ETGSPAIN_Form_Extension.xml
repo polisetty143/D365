@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>SalesEditLines_ETGSPAIN_Form_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the <c>SalesEditLines</c> form for the ETGSPAIN model.
+/// </summary>
+[ExtensionOf(formStr(SalesEditLines))]
+final class SalesEditLines_ETGSPAIN_Form_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>canClose</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>canClose</c> method.
+    /// </summary>
+    /// <returns>
+    /// Returns a boolean value indicating whether the form can close.
+    /// </returns>
+    public boolean canClose()
+    {
+        boolean ret = next canClose();
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            if (ret)
+            {
+                if (this.closedOk())
+                {
+                    if (this.SalesParmUpdate.DocumentStatus == DocumentStatus::PackingSlip && this.SalesParmUpdate.Proforma == NoYes::No)
+                    {
+                        SalesParmLine   salesParmLineUnsold;
+                        SalesLine       salesLine;
+                        SalesParmTable  salesParmTable  = this.SalesParmTable;
+                    
+                        while select forupdate salesParmLineUnsold
+                        where salesParmLineUnsold.ParmId        == salesParmTable.ParmId
+                            && salesParmLineUnsold.TableRefId   == salesParmTable.TableRefId
+                            && salesParmLineUnsold.DeliverNow   >  salesParmLineUnsold.salesLine().SalesQty
+                        join salesLine
+                            where salesLine.RecId               == salesParmLineUnsold.SalesLineRecId
+                                && salesLine.OverDeliveryPct    > 0
+                        {
+                            if (Box::okCancel("@ETGSPAINLabels:ETGSPAINUnsoldInventTransModifyControllerUpdateOverloadAuto", DialogButton::Cancel) == DialogButton::Ok)
+                            {
+                                ttsbegin;
+                                salesParmLineUnsold.ETGSPAINUnsoldQtyModify = NoYes::Yes;
+                                salesParmLineUnsold.update();
+                                ttscommit;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+ 
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

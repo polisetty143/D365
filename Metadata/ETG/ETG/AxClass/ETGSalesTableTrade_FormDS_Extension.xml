@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesTableTrade_FormDS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///     extension class of form <c>SalesTable</c> datasource <c>ETG_SalesTableTrade</c>
+/// </summary>
+[ExtensionOf(formDataSourceStr(SalesTable, ETG_SalesTableTrade))] 
+internal final class ETGSalesTableTrade_FormDS_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>write</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///     update port of loading and discharge details on lines
+    /// </summary>
+    public void write()
+    {
+        boolean flowPortDetailsToLines, checkLinesUpdateReqPortLoading, checkLinesUpdateReqPortDischarge;
+        ETG_SalesTableTrade         salesTableTrade;
+        FormDataSource              salesTableTradeDS;
+
+        if(ETGACFParameters::find().EnablePortLoadingDetailsHeaderToLine == NoYes::Yes)
+        {
+            flowPortDetailsToLines = true;
+        }
+        if(flowPortDetailsToLines)
+        {
+            salesTableTradeDS = this;
+            salesTableTrade   = salesTableTradeDS.cursor();
+
+            if(salesTableTrade.orig().PortOfDischarge != salesTableTrade.PortOfDischarge && salesTableTrade.orig().PortOfLoading != salesTableTrade.PortOfLoading)
+            {
+                checkLinesUpdateReqPortDischarge = true;
+                checkLinesUpdateReqPortLoading   = true;
+            }
+            else if(salesTableTrade.orig().PortOfLoading != salesTableTrade.PortOfLoading)
+            {
+                checkLinesUpdateReqPortLoading = true;
+            }
+            else if(salesTableTrade.orig().PortOfDischarge != salesTableTrade.PortOfDischarge)
+            {
+                checkLinesUpdateReqPortDischarge = true;
+            }
+        }
+
+        next write();
+
+        if (flowPortDetailsToLines && (checkLinesUpdateReqPortLoading || checkLinesUpdateReqPortDischarge))
+        {
+            this.updateLinesETG(salesTableTrade, checkLinesUpdateReqPortLoading, checkLinesUpdateReqPortDischarge);
+            FormDataSource lineDS = salesTableTradeDS.formRun().dataSource(formDataSourceStr(SalesTable,ETG_SalesLineTrade));
+            lineDS.research();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateLinesETG</Name>
+				<Source><![CDATA[
+    public void updateLinesETG(ETG_SalesTableTrade salesTableTrade, boolean changePortLoading, boolean changePortDischarge)
+    {
+        SalesTable            salesTable;
+        ETG_SalesLineTrade    salesLineTrade;
+        DialogButton          diagBut;
+        str strMessage    =  "@ETG_New:CopyPortDetailsToLines";
+        str strTitle      =  "@ETG_New:UpdatePortDetails";
+        diagBut           =   Box::yesNoCancel(strMessage,DialogButton::No,strTitle);
+
+        if (diagBut == DialogButton::No)
+        {
+            return;
+        }
+        else if(diagBut == DialogButton::Yes)
+        {
+            ttsbegin;
+            if(changePortLoading && changePortDischarge)
+            {
+                update_recordset salesLineTrade
+                setting
+                PortOfDischarge     = salesTableTrade.PortOfDischarge,
+                PortOfDischargeDesc = salesTableTrade.PortOfDischargeDesc,
+                PortOfLoading       = salesTableTrade.PortOfLoading,
+                PortOfLoadingDesc   = salesTableTrade.PortOfLoadingDesc
+                where salesLineTrade.SalesId == salesTableTrade.SalesId;
+                Info("@ETG_New:PortLoadingDischargeDetailsCopied");
+            }
+            else if(changePortLoading)
+            {
+                update_recordset salesLineTrade
+                setting
+                PortOfLoading       = salesTableTrade.PortOfLoading,
+                PortOfLoadingDesc   = salesTableTrade.PortOfLoadingDesc
+                where salesLineTrade.SalesId == salesTableTrade.SalesId;
+                Info("@ETG_New:PortOfLoadingDetailsCopied");
+            }
+            else if(changePortDischarge)
+            {
+                update_recordset salesLineTrade
+                setting
+                PortOfDischarge     = salesTableTrade.PortOfDischarge,
+                PortOfDischargeDesc = salesTableTrade.PortOfDischargeDesc
+                where salesLineTrade.SalesId == salesTableTrade.SalesId;
+                Info("@ETG_New:PortOfDischargeDetailsCopied");
+            }
+            ttscommit;
+        }
+        else
+        {
+            info(strFmt("@SYS105413"));
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

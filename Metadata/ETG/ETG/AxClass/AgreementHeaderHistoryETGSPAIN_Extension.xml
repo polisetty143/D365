@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>AgreementHeaderHistoryETGSPAIN_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the <c>AgreementHeaderHistory</c> table for the ETGSPAIN model.
+/// </summary>
+[ExtensionOf(tableStr(AgreementHeaderHistory))]
+public final class AgreementHeaderHistoryETGSPAIN_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initFromAgreementHeader</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the standard <c>initFromAgreementHeader</c> method.
+    /// </summary>
+    /// <param name="_header">AgreementHeader</param>
+    public void initFromAgreementHeader(AgreementHeader _header)
+    {
+        next initFromAgreementHeader(_header);
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            this.ETGSPAINDefaultAgreementLineEffectiveDate   = _header.DefaultAgreementLineEffectiveDate;
+            this.ETGSPAINCreationDate                        = DateTimeUtil::date(_header.CreatedDateTime);
+            this.ETGSPAINPurchExecutionDueDate               = _header.ETGSPAINPurchExecutionDueDate;
+            this.ETGSPAINPurchExecutionFromDate              = _header.ETGSPAINPurchExecutionFromDate;
+            this.ETGSPAINPurchPlateDaysNumber                = _header.ETGSPAINPurchPlateDaysNumber;
+            this.ETGSPAINDefaultAgreementLineEffectiveDate   = _header.DefaultAgreementLineEffectiveDate;
+
+            AgreementLine           agreementLine;
+            ETGSPAINPurchLoadPortTable   ETGSPAINPurchLoadPortTable;
+            ETGSPAINPurchUnloadPortTable ETGSPAINPurchUnloadPortTable;
+
+            select firstonly agreementLine
+            order by ETGSPAINPurchLoadPortId desc
+            where agreementLine.Agreement                       == _header.RecId
+                outer join ETGSPAINPurchLoadPortTable
+                    where ETGSPAINPurchLoadPortTable.LoadPortId      == agreementLine.ETGSPAINPurchLoadPortId;
+
+            this.ETGSPAINLoadCity                            = ETGSPAINPurchLoadPortTable.AdressCity;
+
+            select firstonly agreementLine
+            order by ETGSPAINPurchUnloadPortId desc
+            where agreementLine.Agreement                       == _header.RecId
+                outer join ETGSPAINPurchUnloadPortTable
+                    where ETGSPAINPurchUnloadPortTable.UnloadPortId  == agreementLine.ETGSPAINPurchUnloadPortId;
+        
+            this.ETGSPAINUnloadCity                          = ETGSPAINPurchUnloadPortTable.AdressCity;
+
+            SalesAgreementHeader salesAgreementHeader = SalesAgreementHeader::find(_header.RecId);
+
+            if (salesAgreementHeader)
+            {
+                SalesAgreementHeaderDefault salesAgreementHeaderDefault = SalesAgreementHeaderDefault::findSalesAgreementHeader(_header.RecId);
+
+                this.ETGSPAINSalesVendGroup      = salesAgreementHeader.custTable().CustGroup;
+                this.ETGSPAINMethodOfPayment     = salesAgreementHeaderDefault.CustomerMethodOfPayment;
+                this.ETGSPAINPurchIntermediary   = salesAgreementHeaderDefault.CommissionSalesGroup;
+            
+                AgreementHeaderDefault  agreementHeaderDefault = salesAgreementHeader.agreementHeaderDefault();
+                PaymTerm                paymTerm;
+
+                select firstonly paymTerm
+                where paymTerm.DataAreaId == agreementHeaderDefault.PaymentTermsDataAreaId
+                    && paymTerm.PaymTermId == agreementHeaderDefault.PaymentTerms;
+
+                this.ETGSPAINPaymTermsDescription                 = paymTerm.Description;
+            }
+            else
+            {
+                PurchAgreementHeader purchAgreementHeader = PurchAgreementHeader::find(_header.RecId);
+            
+                PurchAgreementHeaderDefault purchAgreementHeaderDefault = PurchAgreementHeaderDefault::findPurchAgreementHeader(_header.RecId);
+                HcmWorker                   HcmWorker = HcmWorker::find(purchAgreementHeader.PrimaryResponsibleWorker);
+
+
+                this.ETGSPAINSalesVendGroup                       = purchAgreementHeader.vendTable().VendGroup;
+                this.ETGSPAINMethodOfPayment                      = purchAgreementHeaderDefault.MethodOfPayment;
+                this.ETGSPAINPurchIntermediary                    = HcmWorker.name();
+
+                AgreementHeaderDefault  agreementHeaderDefault = purchAgreementHeader.agreementHeaderDefault();
+                PaymTerm                paymTerm;
+
+                select firstonly paymTerm
+                where paymTerm.DataAreaId == agreementHeaderDefault.PaymentTermsDataAreaId
+                    && paymTerm.PaymTermId == agreementHeaderDefault.PaymentTerms;
+
+                this.ETGSPAINPaymTermsDescription                 = paymTerm.Description;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

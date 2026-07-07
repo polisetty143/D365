@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>LedgerJournalEntity_ETG_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tableStr(LedgerJournalEntity))]
+final class LedgerJournalEntity_ETG_Extension
+{
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getTermsOfPayment</Name>
+				<Source><![CDATA[
+    public static server str getTermsOfPayment()
+    {
+        return SysComputedColumn::returnField(
+            tableStr(LedgerJournalEntity),
+            dataEntityDataSourceStr(LedgerJournalEntity, LedgerJournalTrans),
+            fieldStr(LedgerJournalTrans, Payment));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createJournalLines</Name>
+				<Source><![CDATA[
+    protected static int64 createJournalLines(
+        DMFDefinitionGroupExecution _dmfDefinitionGroupExecution,
+        DimensionDataEntitySFKCacheTmp _dimCacheTmp,
+        DimensionDataEntitySFKCacheTmp _dimCacheTmpRef,
+        DimensionDataEntitySFKCacheTmp _defaultDimCacheTmp,
+        DimensionDataEntitySFKCacheTmp _defaultDimCacheTmpRef,
+        boolean _delayTaxCalculation)
+    {
+        // 1. Let the standard Microsoft logic create the lines first
+        int64 ret = next createJournalLines(_dmfDefinitionGroupExecution, _dimCacheTmp, _dimCacheTmpRef, _defaultDimCacheTmp, _defaultDimCacheTmpRef, _delayTaxCalculation);
+
+        LedgerJournalTrans ledgerJournalTrans;
+        LedgerJournalEntityStaging staging;
+
+        // 2. Bulk update the newly created lines with your unmapped field from the staging table
+        update_recordset ledgerJournalTrans
+            setting Payment = staging.TermsOfPayment
+        join staging
+            where staging.JournalBatchNumber == ledgerJournalTrans.JournalNum
+               && staging.LineNumber == ledgerJournalTrans.LineNum
+               && staging.DefinitionGroup == _dmfDefinitionGroupExecution.DefinitionGroup
+               && staging.ExecutionId == _dmfDefinitionGroupExecution.ExecutionId
+               && staging.TransferStatus == DMFTransferStatus::NotStarted;
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateExistingJournalLines</Name>
+				<Source><![CDATA[
+    protected static int64 updateExistingJournalLines(
+        DMFDefinitionGroupExecution _dmfDefinitionGroupExecution,
+        DimensionDataEntitySFKCacheTmp _dimCacheTmp,
+        DimensionDataEntitySFKCacheTmp _dimCacheTmpRef,
+        DimensionDataEntitySFKCacheTmp _defaultDimCacheTmp,
+        DimensionDataEntitySFKCacheTmp _defaultDimCacheTmpRef,
+        boolean _delayTaxCalculation)
+    {
+        // 1. Let the standard Microsoft logic update the lines first
+        int64 ret = next updateExistingJournalLines(_dmfDefinitionGroupExecution, _dimCacheTmp, _dimCacheTmpRef, _defaultDimCacheTmp, _defaultDimCacheTmpRef, _delayTaxCalculation);
+
+        LedgerJournalTrans ledgerJournalTrans;
+        LedgerJournalEntityStaging staging;
+
+        // 2. Bulk update the existing lines with your unmapped field from the staging table
+        update_recordset ledgerJournalTrans
+            setting Payment = staging.TermsOfPayment
+        join staging
+            where staging.JournalBatchNumber == ledgerJournalTrans.JournalNum
+               && staging.LineNumber == ledgerJournalTrans.LineNum
+               && staging.DefinitionGroup == _dmfDefinitionGroupExecution.DefinitionGroup
+               && staging.ExecutionId == _dmfDefinitionGroupExecution.ExecutionId
+               && staging.TransferStatus == DMFTransferStatus::NotStarted;
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

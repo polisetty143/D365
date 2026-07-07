@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>PurchEditLines_ETGSPAIN_Form_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the <c>PurchEditLines</c> form for the ETGSPAIN model.
+/// </summary>
+[ExtensionOf(formStr(PurchEditLines))]
+final class PurchEditLines_ETGSPAIN_Form_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>canClose</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>canClose</c> method.
+    /// </summary>
+    /// <returns>
+    /// Returns a boolean value indicating whether the form can close.
+    /// </returns>
+    public boolean canClose()
+    {
+        boolean ret = next canClose();
+ 
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            if (ret)
+            {
+                if (this.closedOk())
+                {
+                    if (this.PurchParmUpdate.DocumentStatus == DocumentStatus::PackingSlip && this.PurchParmUpdate.Proforma == NoYes::No)
+                    {
+                        PurchParmLine   purchParmLineUnsold;
+                        PurchLine       purchLine;
+                        PurchParmTable  purchParmTable  = this.PurchParmTable;
+                    
+                        while select forupdate purchParmLineUnsold
+                        where purchParmLineUnsold.ParmId            == purchParmTable.ParmId
+                            && purchParmLineUnsold.TableRefId       == purchParmTable.TableRefId
+                            && purchParmLineUnsold.ReceiveNow       > purchParmLineUnsold.purchLine().PurchQty
+                            join purchLine
+                                where purchLine.RecId               == purchParmLineUnsold.PurchLineRecId
+                                    && purchLine.OverDeliveryPct    > 0
+                        {
+                            if (Box::okCancel("@ETGSPAINLabels:ETGSPAINUnsoldInventTransModifyControllerUpdateOverloadAuto", DialogButton::Cancel) == DialogButton::Ok)
+                            {
+                                ttsbegin;
+                                purchParmLineUnsold.ETGSPAINUnsoldQtyModify = NoYes::Yes;
+                                purchParmLineUnsold.update();
+                                ttscommit;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+ 
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

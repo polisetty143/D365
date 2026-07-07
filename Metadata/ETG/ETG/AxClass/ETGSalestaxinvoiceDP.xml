@@ -1,0 +1,373 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalestaxinvoiceDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// this class is extends for sales invoice dp class for adding the new customization fields.
+/// </summary>
+[SRSReportParameterAttribute(classStr(ETGSalesTaxinvoiceContract))]
+class ETGSalestaxinvoiceDP extends SalesInvoiceDPBase
+{
+    SalesInvoiceHeaderFooterTmp     salesInvoiceHeaderFooterTmp;
+    SalesInvoiceTmp                 salesInvoiceTmp;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>GetsalesInvoiceHeaderFooterTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(SalesInvoiceHeaderFooterTmp))]
+    public SalesInvoiceHeaderFooterTmp GetsalesInvoiceHeaderFooterTmp()
+    {
+        select firstonly salesInvoiceHeaderFooterTmp;
+        return salesInvoiceHeaderFooterTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>GetsalesInvoiceTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(SalesInvoiceTmp))]
+    public SalesInvoiceTmp GetsalesInvoiceTmp()
+    {
+        select firstonly salesInvoiceTmp;
+        return salesInvoiceTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    [SysEntryPointAttribute(true)]
+    public void processReport()
+    {
+        SalesId                     salesId;
+        InvoiceId                   invoiceId;
+        LogisticsElectronicAddress  electronicAddress;
+        CompanyInfo                 companyInfoLoc = CompanyInfo::find();
+        ETG_SalesTableTrade         salesTableTrade;
+        CustInvoiceTrans            custInvoiceTransLoc;
+        SalesTable                  salesTableloc;
+        DirPartyTable               dirPartyTable;
+        DirPartyLocation            dirPartyLocation;
+        TaxRegistration             taxRegistration;
+        Name                        AmountinTxt,teleFax;
+        ETGSalesTaxinvoiceContract  contract = this.parmDataContract() as ETGSalesTaxinvoiceContract;
+        salesId                              = contract.parmSalesId();
+        invoiceId                            = contract.parmInvoiceId();
+        select firstonly custInvoiceJour 
+            where custInvoiceJour.SalesId   == salesId
+            && custInvoiceJour.InvoiceId    == invoiceId;
+        select firstonly salesTableTrade
+            where salesTableTrade.SalesId   == custInvoiceJour.SalesId;
+        select firstonly RegistrationNumber from taxRegistration
+               exists join dirPartyLocation
+               where dirPartyLocation.RecId  == taxRegistration.DirPartyLocation
+               exists join dirPartyTable
+               where dirPartyTable.RecId     == dirPartyLocation.Party;
+        LogisticsElectronicAddress                       electronicAddressLoc;
+        salesTableloc                                  = SalesTable::find(salesId, false); 
+        electronicAddress                              = DirParty::primaryElectronicAddress(companyInfoLoc.RecId, LogisticsElectronicAddressMethodType::Phone);
+        salesInvoiceHeaderFooterTmp.InvoiceDate        = custInvoiceJour.InvoiceDate;
+        teleFax                                        = 'Tel : ' + CompanyInfo::find().phone() + '   Fax :' + CompanyInfo::find().teleFax();
+        salesInvoiceHeaderFooterTmp.ETGTeleFax         =  TeleFax;
+        salesInvoiceHeaderFooterTmp.JournalRecId       = custInvoiceJour.RecId;
+        salesInvoiceHeaderFooterTmp.CompanyLogo        = FormLetter::companyLogo();
+        salesInvoiceHeaderFooterTmp.CompanyPhone       = electronicAddressLoc.LocatorExtension + ' ' + electronicAddress.Locator;
+        electronicAddress                              = DirParty::primaryElectronicAddress(companyInfoLoc.RecId, LogisticsElectronicAddressMethodType::Fax);
+        salesInvoiceHeaderFooterTmp.CompanyTeleFax     = electronicAddressLoc.LocatorExtension + ' ' + electronicAddress.Locator;
+        salesInvoiceHeaderFooterTmp.CompanyAddress     = companyInfoLoc.postalAddress().Address;
+        salesInvoiceHeaderFooterTmp.CompanyAddress     = strReplace(salesInvoiceHeaderFooterTmp.CompanyAddress,'\n',' ');
+        salesInvoiceHeaderFooterTmp.CompanyGiro        = companyInfoLoc.Giro;
+        salesInvoiceHeaderFooterTmp.CompanyName        = companyInfoLoc.Name;
+        salesInvoiceHeaderFooterTmp.CompanyCoRegNum    = taxRegistration.RegistrationNumber;
+        salesInvoiceHeaderFooterTmp.ETGWeb             = CompanyInfo::find().url();
+        salesInvoiceHeaderFooterTmp.CompanyEmail       = strFmt('Email : %1  Web : %2',CompanyInfo::find().email(),CompanyInfo::find().url());
+        salesInvoiceHeaderFooterTmp.CompanyCoRegNum    = CompanyInfo::find().CoRegNum;
+        salesInvoiceHeaderFooterTmp.CompanyRegNum      = CompanyInfo::find().RegNum;
+        salesInvoiceHeaderFooterTmp.CompanyAddress     = strReplace(salesInvoiceHeaderFooterTmp.CompanyAddress,'/n',' ');
+        salesInvoiceHeaderFooterTmp.ETGConsigne        = salesTableTrade.Consignee;
+        salesInvoiceHeaderFooterTmp.InvoiceAccount     = custInvoiceJour.InvoiceAccount;
+        salesInvoiceHeaderFooterTmp.ETGDlvMode         = custInvoiceJour.DlvMode;
+        salesInvoiceHeaderFooterTmp.ETGDlvTerm         = custInvoiceJour.DlvTerm;
+        salesInvoiceHeaderFooterTmp.ETGBuyer           = CustTable::find(salesTableloc.CustAccount).name();
+        salesInvoiceHeaderFooterTmp.ETGSupplieeRef     = custInvoiceJour.CustomerRef;
+        salesInvoiceHeaderFooterTmp.SalesId            = custInvoiceJour.SalesId;
+        AmountinTxt                                    = numeralsToTxt_EN(custInvoiceJour.InvoiceAmount);
+        AmountinTxt                                    = strReplace(AmountinTxt,'***',' ');
+       // AmountinTxt                                    = strReplace(AmountinTxt,'and 00/100',' ');
+        salesInvoiceHeaderFooterTmp.ETGAmountInwords   = numeralsToTxt_EN(custInvoiceJour.InvoiceAmount);
+        salesInvoiceHeaderFooterTmp.ETGAmountInwords   = AmountinTxt;
+        SalesInvoiceHeaderFooterTmp.ETGVAT             = custInvoiceJour.InvoiceAmount - custInvoiceJour.SalesBalance;
+        SalesInvoiceHeaderFooterTmp.insert();
+        while select custInvoiceTransLoc
+            where custInvoiceTransLoc.SalesId           == custInvoiceJour.SalesId
+            && custInvoiceTransLoc.InvoiceId            == custInvoiceJour.InvoiceId
+        {
+            salesInvoiceTmp.ItemId                      =  custInvoiceTransLoc.ItemId;
+            salesInvoiceTmp.Name                        =  custInvoiceTransLoc.Name;
+            salesInvoiceTmp.Qty                         =  custInvoiceTransLoc.Qty;
+            salesInvoiceTmp.SalesPrice                  =  custInvoiceTransLoc.SalesPrice;
+            salesInvoiceTmp.LineAmountInclTax           =  custInvoiceTransLoc.lineAmountInclTax();
+            salesInvoiceTmp.CurrencyCode                =  custInvoiceTransLoc.CurrencyCode;
+            salesInvoiceTmp.SalesUnitTxt                =  custInvoiceTransLoc.SalesUnit;
+            salesInvoiceTmp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setTableConnections</Name>
+				<Source><![CDATA[
+    //<summary>
+     //Sets the user connection to use on table.
+     //</summary>
+     //<remarks>
+     //This is required to guarantee that the <c>createdTransactionId</c> ID of inserted record differs
+     //from default transaction.
+     //</remarks>
+    public void setTableConnections()
+    {
+        salesInvoiceTmp.setConnection(this.parmUserConnection());
+        salesInvoiceHeaderFooterTmp.setConnection(this.parmUserConnection());
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getDataFromContract</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Initializes data from the contract class.
+    /// </summary>
+    public void getDataFromContract()
+    {
+        SalesInvoiceContract contract =     this.parmDataContract() as SalesInvoiceContract;
+        formLetterRecId               =     contract.parmFormLetterRecordId();
+        this.parmCustInvoiceJour(CustInvoiceJour::findRecId(contract.parmRecordId()));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertInvoiceHeaderInformation</Name>
+				<Source><![CDATA[
+    //<summary>
+     //Inserts the invoice header information.
+     //</summary>
+     //<param name="_custInvoiceJour">
+     //A <c>CustInvoiceJour</c> record that has the invoice header information.
+     //</param>
+     //<param name="_companyInfo">
+     //A <c>CompanyInfo</c> record that has the company information.
+     //</param>
+     //<remarks>
+     //The method will insert the invoice header information. It should be overridden in the sub classes
+     //to insert the data into the right temporary tables.
+     //</remarks>
+    public void insertInvoiceHeaderInformation(CustInvoiceJour _custInvoiceJour, CompanyInfo _companyInfo)
+    {
+        this.insertIntoSalesInvoiceHeaderFooterTmp(_custInvoiceJour, _companyInfo);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertIntoSalesInvoiceHeaderFooterTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// insert method is used for the company info.
+    /// </summary>
+    /// <param name = "_custInvoiceJour">_custInvoiceJour</param>
+    /// <param name = "_companyInfo">_custInvoiceJour</param>
+    protected void insertIntoSalesInvoiceHeaderFooterTmp(CustInvoiceJour _custInvoiceJour, CompanyInfo _companyInfo)
+    {
+        this.populateSalesInvoiceHeaderFooterTmp(_custInvoiceJour, _companyInfo);
+        salesInvoiceHeaderFooterTmp.insert();
+        salesInvoiceHeaderFooterTmp.clear();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>populateSalesInvoiceHeaderFooterTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// this method is used for the sales tax invoice report for company info.
+    /// </summary>
+    /// <param name = "_custInvoiceJour">_custInvoiceJour</param>
+    /// <param name = "_companyInfo">_custInvoiceJour</param>
+    protected void populateSalesInvoiceHeaderFooterTmp(CustInvoiceJour _custInvoiceJour, CompanyInfo _companyInfo)
+    {
+        salesInvoiceHeaderFooterTmp.CompanyRegNum               = _companyInfo.RegNum;
+        salesInvoiceHeaderFooterTmp.SalesAdministrator          =  cachedSalesAdministratorName;
+        salesInvoiceHeaderFooterTmp.SalesAdministratorPhone     =  cachedSalesAdministratorPhone;
+        salesInvoiceHeaderFooterTmp.SalesAdministratorEmail     =  cachedSalesAdministratorEmail;
+        salesInvoiceHeaderFooterTmp.JournalRecId                = _custInvoiceJour.RecId;
+        salesInvoiceHeaderFooterTmp.InvoiceDate                 = _custInvoiceJour.InvoiceDate;
+        salesInvoiceHeaderFooterTmp.DocumentDate                = _custInvoiceJour.DocumentDate;
+        salesInvoiceHeaderFooterTmp.CompanyCurrencyCode         =  Ledger::accountingCurrency();
+        salesInvoiceHeaderFooterTmp.CompanyName                 =  cachedCompanyInfoName;
+        salesInvoiceHeaderFooterTmp.CompanyAddress              =  cachedCompanyInfoAddress;
+        salesInvoiceHeaderFooterTmp.CompanyPhone                =  cachedCompanyInfoPhone;
+        salesInvoiceHeaderFooterTmp.CompanyTeleFax              =  cachedCompanyInfoTeleFax;
+        salesInvoiceHeaderFooterTmp.CompanyCoRegNum             = _companyInfo.CoRegNum;
+        salesInvoiceHeaderFooterTmp.CompanyLogo                 =  companyLogo;
+        salesInvoiceHeaderFooterTmp.CompanyDebitDirectId        =  BankAccountTable::findByCompany(_companyInfo.DataArea, _companyInfo.Bank).DebitDirectId;
+        salesInvoiceHeaderFooterTmp.InvoicingName               = _custInvoiceJour.InvoicingName;
+        salesInvoiceHeaderFooterTmp.InvoicingAddress            =  cachedInvoicingAddress;
+        salesInvoiceHeaderFooterTmp.ContactPersonName           =  cachedContactPersonName;
+        salesInvoiceHeaderFooterTmp.SalesId                     = _custInvoiceJour.SalesId;
+        salesInvoiceHeaderFooterTmp.PurchaseOrder               = _custInvoiceJour.PurchaseOrder;
+        salesInvoiceHeaderFooterTmp.CustomerRef                 = _custInvoiceJour.CustomerRef;
+        salesInvoiceHeaderFooterTmp.PaymentCondition            =  cachedPaymentCondition;
+        salesInvoiceHeaderFooterTmp.InvoiceAccount              = _custInvoiceJour.InvoiceAccount;
+        salesInvoiceHeaderFooterTmp.PrintFreeTextInvoiceVATNum  =  custFormLetterParameters.PrintInvoiceVATNum;
+        salesInvoiceHeaderFooterTmp.CompanyGiro                 =  companyInfo.Giro;
+        salesInvoiceHeaderFooterTmp.CompanyEnterpriseNumber     =  companyInfo.getPrimaryRegistrationNumber(TaxRegistrationTypesList::UID, _custInvoiceJour.InvoiceDate);
+        salesInvoiceHeaderFooterTmp.Listcode                    = _custInvoiceJour.Listcode;
+        salesInvoiceHeaderFooterTmp.CustInvoiceRefNum_FI        =  custParameters.CustInvoiceRefNum_FI;
+        salesInvoiceHeaderFooterTmp.InvoiceReferenceNumber      = _custInvoiceJour.invoiceReferenceNumberFI();
+        salesInvoiceHeaderFooterTmp.InvoiceDate                 = _custInvoiceJour.InvoiceDate;
+        salesInvoiceHeaderFooterTmp.SalesId                     = _custInvoiceJour.SalesId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertInvoiceDetailsInformation</Name>
+				<Source><![CDATA[
+    public void insertInvoiceDetailsInformation(CustInvoiceJour _custInvoiceJour,
+        CustInvoiceTrans  _custInvoiceTrans,
+        CustPaymSchedLine _custPaymSchedLine,
+        CustTrans         _prepaymentCustTrans,
+        TaxTrans          _prepaymentTaxTrans)
+    {
+        this.insertIntoSalesInvoiceTmp(_custInvoiceJour, _custInvoiceTrans, null, _custPaymSchedLine, _prepaymentCustTrans
+            , _prepaymentTaxTrans
+            );
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertIntoSalesInvoiceTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name = "_custInvoiceJour"></param>
+    /// <param name = "_custInvoiceTrans"></param>
+    /// <param name = "_taxSpec"></param>
+    /// <param name = "_custPaymSchedLine"></param>
+    /// <param name = "_prepaymentCustTrans"></param>
+    /// <param name = "_prepaymentTaxTrans"></param>
+    protected void insertIntoSalesInvoiceTmp(
+        CustInvoiceJour    _custInvoiceJour,
+        CustInvoiceTrans   _custInvoiceTrans,
+        TaxSpec            _taxSpec,
+        CustPaymSchedLine  _custPaymSchedLine,
+        CustTrans          _prepaymentCustTrans,
+        TaxTrans _prepaymentTaxTrans)
+    {
+        this.populateSalesInvoiceTmp(_custInvoiceJour, _custInvoiceTrans, _taxSpec, _custPaymSchedLine, _prepaymentCustTrans, _prepaymentTaxTrans);
+
+        salesInvoiceTmp.insert();
+        salesInvoiceTmp.clear();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>populateSalesInvoiceTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Populates the invoice detail information into the <c>SalesInvoiceTmp</c> table buffer.
+    /// </summary>
+    /// <param name="_custInvoiceJour">
+    /// The <c>CustInvoiceJour</c> record that has the invoice header information.
+    /// </param>
+    /// <param name="_custInvoiceTrans">
+    /// The <c>CustInvoiceTrans</c> record that has the invoice details information.
+    /// </param>
+    /// <param name="_taxSpec">
+    /// The <c>TaxSpec</c> class instance that has the taxes information.
+    /// </param>
+    /// <param name="_custPaymSchedLine">
+    /// The <c>CustPaymSchedLine</c> record that has the payment schedules information.
+    /// </param>
+    /// <param name="_prepaymentCustTrans">
+    /// The <c>CustTrans</c> record that has the prepayment information.
+    /// </param>
+    /// <param name="_prepaymentTaxTrans">
+    /// The <c>TaxTrans</c> record that has the prepayment taxes information.
+    /// </param>
+    protected void populateSalesInvoiceTmp(CustInvoiceJour _custInvoiceJour,
+        CustInvoiceTrans   _custInvoiceTrans,
+        TaxSpec            _taxSpec,
+        CustPaymSchedLine  _custPaymSchedLine,
+        CustTrans          _prepaymentCustTrans,
+        TaxTrans _prepaymentTaxTrans)
+    {
+        salesInvoiceTmp.JournalRecId                 =   _custInvoiceJour.RecId;
+        salesInvoiceTmp.LineAmount                   =   _custInvoiceTrans.LineAmount;
+        salesInvoiceTmp.TaxWriteCode                 =   _custInvoiceTrans.TaxWriteCode;
+        salesInvoiceTmp.SalesUnitTxt                 =   _custInvoiceTrans.salesUnitTxt();
+        salesInvoiceTmp.CorrectiveReasonLines        =    correctiveReason_lines;
+        salesInvoiceTmp.LineAmountInclTax            =   _custInvoiceTrans.LineAmount + _custInvoiceTrans.LineAmountTax ;
+        salesInvoiceTmp.DiscPercent                  =   _custInvoiceTrans.DiscPercent;
+        salesInvoiceTmp.DiscountAmount               =   _custInvoiceTrans.DiscAmount;
+        salesInvoiceTmp.InvoiceAmount                =   _custInvoiceJour.InvoiceAmount;
+        salesInvoiceTmp.PrepaidAmount                =    cachedPrepaidAmount;
+        salesInvoiceTmp.RemainAmountToBePaid         =   _custInvoiceJour.InvoiceAmount - cachedPrepaidAmount;
+        salesInvoiceTmp.CustInvoiceJourCurrencyCode  =   _custInvoiceJour.CurrencyCode;
+        salesInvoiceTmp.CurrencySymbol               =    Currency::find(_custInvoiceJour.CurrencyCode).Symbol;
+        salesInvoiceTmp.InvoiceAmountEuro            =    cachedInvoiceAmountEuro;
+        salesInvoiceTmp.PrepaidAmountEuro            =    cachedPrepaidAmountEuro;
+        salesInvoiceTmp.RemainAmountToBePaidEuro     =    cachedRemainAmountToBePaidEuro;
+        salesInvoiceTmp.EuroCurrencyCode             =    Currency::findEuroCurrencyCode();
+        salesInvoiceTmp.SalesBalance                 =   _custInvoiceJour.SalesBalance;
+        salesInvoiceTmp.EndDisc                      =   _custInvoiceJour.EndDisc;
+        salesInvoiceTmp.SumMarkup                    =   _custInvoiceJour.SumMarkup;
+        salesInvoiceTmp.SumTax                       =   _custInvoiceJour.SumTax;
+        salesInvoiceTmp.InvoiceRoundOff              =   _custInvoiceJour.InvoiceRoundOff;
+        salesInvoiceTmp.SalesBalanceEuro             =    cachedSalesBalanceEuro;
+        salesInvoiceTmp.EndDiscEuro                  =    cachedEndDiscEuro;
+        salesInvoiceTmp.SumMarkupEuro                =    cachedSumMarkupEuro;
+        salesInvoiceTmp.SumTaxEuro                   =    cachedSumTaxEuro;
+        salesInvoiceTmp.InvoiceRoundOffEuro          =    cachedInvoiceRoundOffEuro;
+        salesInvoiceTmp.NetAmount                    =    cachedNetAmount;
+        salesInvoiceTmp.NetAmountEuro                =    cachedNetAmountEuro;
+        salesInvoiceTmp.TaxableBalanceEuro           =    cachedTaxableBalanceEuro;
+        salesInvoiceTmp.TaxFreeBalanceEuro           =    cachedTaxFreeBalanceEuro;
+        salesInvoiceTmp.TaxableBalance               =    cachedTaxableBalance;
+        salesInvoiceTmp.TaxFreeBalance               =    cachedTaxFreeBalance;
+        salesInvoiceTmp.StandardCurrency             =    Ledger::accountingCurrency(CompanyInfo::find().RecId);
+        salesInvoiceTmp.ExchRate                     =    cachedExchRate;
+        salesInvoiceTmp.SalesBalanceMST              =   _custInvoiceJour.SalesBalanceMST;
+        salesInvoiceTmp.SumTaxMST                    =   _custInvoiceJour.SumTaxMST;
+        salesInvoiceTmp.CustInvoiceJourDueDate       =   _custInvoiceJour.DueDate;
+        salesInvoiceTmp.ItemId                       =   _custInvoiceTrans.itemId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertTaxes</Name>
+				<Source><![CDATA[
+    //</summary>
+     //<param name = "_custInvoiceJour"></param>
+    protected void insertTaxes(CustInvoiceJour _custInvoiceJour)
+    {
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

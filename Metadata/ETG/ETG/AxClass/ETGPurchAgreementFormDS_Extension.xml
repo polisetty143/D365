@@ -1,0 +1,270 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchAgreementFormDS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formdatasourcestr(PurchAgreement, PurchAgreementHeader))]
+internal final class ETGPurchAgreementFormDS_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {
+        int ret = next active();
+       
+        if (ETGACFParameters::find().EnableMandatoryFields == NoYes::Yes)
+        {
+            FormDataSource purchAgreement_ds = any2Object(this) as FormDataSource;
+            if (purchAgreement_ds)
+            {
+                purchAgreement_ds.object(fieldNum(PurchAgreementHeader, AgreementClassification)).mandatory(true);
+                purchAgreement_ds.object(fieldNum(PurchAgreementHeader, DocumentExternalReference)).mandatory(true);
+            }
+        }
+        //NS, DLT, 25052025, Confirm button enable and disable as per condition
+        PurchAgreementHeader purchAgreementHeader = this.cursor();
+        if (purchAgreementHeader)
+        {
+            formRun             formRun                         = this.formRun();
+            FormControl buttonConfirmation = formRun.design().controlName(formControlStr(PurchAgreement, ButtonConfirmationETG));
+            FormControl                 buttoncontrol             = formRun.design().controlName(formControlStr(PurchAgreement, ButtonReleaseOrderCreate));
+
+            // NS DLT 27/05/2023 Check if workflow for this document is not active
+            boolean isWorkflowActive;
+            if(ETGACFParameters::find().EnablePurchaseAgreementWF)
+            {
+                isWorkflowActive = WorkflowTable::findActiveTemplate(workflowTypeStr(ETGPurchAgreementType)).RecId != 0;
+            }
+            if(!isWorkflowActive)
+            {
+                isWorkflowActive = WorkflowTable::findActiveTemplate(workflowTypeStr(PurchAgreementType)).RecId != 0;
+            }
+            if (!isWorkflowActive)
+            {
+                // Set workflow status to Approved
+                purchAgreementHeader.WorkflowStatus_PSN = PurchAgreementWorkflowStatus::Approved;
+ 
+                // Enable confirmation button
+                buttonConfirmation.enabled(true);
+            }
+            // NE DLT 27/05/2023 Check if workflow for this document is not active
+
+            if (purchAgreementHeader.WorkflowStatus_PSN == PurchAgreementWorkflowStatus::Approved)
+            {
+                buttonConfirmation.enabled(true);
+            }
+            else
+            {
+                buttonConfirmation.enabled(false);
+            }
+
+            if (purchAgreementHeader.AgreementState == AgreementState::ETGTerminated || purchAgreementHeader.AgreementState == AgreementState::ETGForceClosed)
+            {
+                buttoncontrol.enabled(false);
+                buttonConfirmation.enabled(false);
+            }
+            else if (purchAgreementHeader.WorkflowStatus_PSN == PurchAgreementWorkflowStatus::Approved && purchAgreementHeader.AgreementState == AgreementState::OnHold)
+            {
+                buttonConfirmation.enabled(true);
+                buttoncontrol.enabled(false);
+            }
+            else if (purchAgreementHeader.WorkflowStatus_PSN == PurchAgreementWorkflowStatus::Approved && purchAgreementHeader.AgreementState == AgreementState::Effective)
+            {
+                buttonConfirmation.enabled(false);
+                buttoncontrol.enabled(true);
+            }
+            else if (purchAgreementHeader.WorkflowStatus_PSN == PurchAgreementWorkflowStatus::NotSubmitted && purchAgreementHeader.AgreementState == AgreementState::OnHold)
+            {
+                buttonConfirmation.enabled(false);
+                buttoncontrol.enabled(false);
+            }
+            else if (purchAgreementHeader.WorkflowStatus_PSN == PurchAgreementWorkflowStatus::Submitted && purchAgreementHeader.AgreementState == AgreementState::OnHold)
+            {
+                buttonConfirmation.enabled(false);
+                buttoncontrol.enabled(false);
+            }
+            else if (purchAgreementHeader.WorkflowStatus_PSN == PurchAgreementWorkflowStatus::Rejected && purchAgreementHeader.AgreementState == AgreementState::OnHold)
+            {
+                buttonConfirmation.enabled(false);
+                buttoncontrol.enabled(false);
+            }
+            else if (purchAgreementHeader.WorkflowStatus_PSN == PurchAgreementWorkflowStatus::PendingApproval && purchAgreementHeader.AgreementState == AgreementState::OnHold)
+            {
+                buttonConfirmation.enabled(false);
+                buttoncontrol.enabled(false);
+            }
+        }
+        //NE, DLT, 25052025, Confirm button enable and disable as per condition
+
+        if(ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+        {
+            formRun             formRun                         = this.formRun();
+            FormDataSource      purchAgreementHeaderDefault_ds  = formRun.dataSource(formDataSourceStr(PurchAgreement, PurchAgreementHeaderDefault)) as FormDataSource;
+            FormDataSource      aline_ds                        = formRun.dataSource(formDataSourceStr(PurchAgreement, ALine)) as FormDataSource;
+            FormDataSource      purchAgreementHeader_ds         = formRun.dataSource(formDataSourceStr(PurchAgreement, PurchAgreementHeader)) as FormDataSource;
+            FormDataSource      agreementHeaderDefault_ds       = formRun.dataSource(formDataSourceStr(PurchAgreement, AgreementHeaderDefault)) as FormDataSource;
+            FormDataSource      qualityGrp_ds                   = formRun.dataSource(formDataSourceStr(PurchAgreement, ETG_AgreementLineQualityGrp)) as FormDataSource;
+            FormDataSource      tmsSalesAgreement_ds            = formRun.dataSource(formDataSourceStr(PurchAgreement, TMSPurchAgreementHeader)) as FormDataSource;
+            FormDataSource      aLineQtyCommitmentPurch_ds      = formRun.dataSource(formDataSourceStr(PurchAgreement, ALine_AgreementLineQuantityCommitment )) as FormDataSource;
+            FormDataSource      aLineVolCommitmentPurch_ds      = formRun.dataSource(formDataSourceStr(PurchAgreement, ALine_AgreementLineVolumeCommitment  )) as FormDataSource;
+            FormDataSource      agreementLineDefaultSales_ds    = formRun.dataSource(formDataSourceStr(PurchAgreement, AgreementLineDefault)) as FormDataSource;
+            FormDataSource      inventDimSales_ds               = formRun.dataSource(formDataSourceStr(PurchAgreement, InventDim)) as FormDataSource;
+            
+            boolean isEditable;
+            
+            if(purchAgreementHeader.AgreementState == AgreementState::OnHold)
+            {
+                element.design(ViewEditMode::Edit);
+                isEditable = true;
+            }
+            else
+            {
+                element.design(ViewEditMode::View);
+            }
+            purchAgreementHeaderDefault_ds.allowEdit(isEditable);
+            purchAgreementHeader_ds.allowEdit(isEditable);
+            agreementHeaderDefault_ds.allowEdit(isEditable);
+            qualityGrp_ds.allowEdit(isEditable);
+            tmsSalesAgreement_ds.allowEdit(isEditable);
+
+            aline_ds.allowCreate(isEditable);
+            aline_ds.allowDelete(isEditable);
+            aline_ds.allowEdit(isEditable);
+            inventDimSales_ds.allowEdit(isEditable);
+            aLineQtyCommitmentPurch_ds.allowEdit(isEditable);
+            aLineQtyCommitmentPurch_ds.allowCreate(isEditable);
+            aLineQtyCommitmentPurch_ds.allowDelete(isEditable);
+            aLineVolCommitmentPurch_ds.allowEdit(isEditable);
+            aLineVolCommitmentPurch_ds.allowCreate(isEditable);
+            aLineVolCommitmentPurch_ds.allowDelete(isEditable);
+            agreementLineDefaultSales_ds.allowCreate(isEditable);
+            agreementLineDefaultSales_ds.allowEdit(isEditable);
+            agreementLineDefaultSales_ds.allowDelete(isEditable);
+
+            FormControl         LineViewLineDetailsctrl    = element.design().controlName('LineViewLineDetails');
+            LineViewLineDetailsctrl.allowEdit(isEditable);
+            LineViewLineDetailsctrl.enabled(isEditable);
+
+            FormControl         OverDeliveryPctCtrl    = element.design().controlName('OverDeliveryPct');
+            OverDeliveryPctCtrl.allowEdit(isEditable);
+            OverDeliveryPctCtrl.enabled(isEditable);
+            FormControl         UnderDeliveryPctCtrl    = element.design().controlName('UnderDeliveryPct');
+            UnderDeliveryPctCtrl.allowEdit(isEditable);
+            UnderDeliveryPctCtrl.enabled(isEditable);
+        }
+        //NE, DLT ,27/05/2025 Shreelekha Line items should be enable when change request button is clicked
+
+        //Canada entity details new 9 fields code for diabling enabling - DMS Integration
+        /*FormDataSource purchAgreement_ds = any2Object(this) as FormDataSource;
+
+        if(ETGACFParameters::find().EnableDMSIntegration == NoYes::Yes && LedgerParameters::find().EnableCanadaDetails == NoYes::Yes)
+        {
+            purchAgreement_ds.object(fieldNum(PurchAgreementHeader, ETGDMSPurchCropYear)).visible(true);
+            purchAgreement_ds.object(fieldNum(PurchAgreementHeader, ETGDMSPurchExchangeRate)).visible(true);
+            purchAgreement_ds.object(fieldNum(PurchAgreementHeader, ETGDMSPurchHedgingRate)).visible(true);
+            purchAgreement_ds.object(fieldNum(PurchAgreementHeader, ETGDMSPurchOfferDate)).visible(true);
+            purchAgreement_ds.object(fieldNum(PurchAgreementHeader, ETGDMSPurchPackageType)).visible(true);
+            purchAgreement_ds.object(fieldNum(PurchAgreementHeader, ETGDMSPurchShippingEndDate)).visible(true);
+            purchAgreement_ds.object(fieldNum(PurchAgreementHeader, ETGDMSPurchShippingStartDate)).visible(true);
+            purchAgreement_ds.object(fieldNum(PurchAgreementHeader, ETGDMSPurchSource)).visible(true);
+            purchAgreement_ds.object(fieldNum(PurchAgreementHeader, ETGDMSPurchType)).visible(true);
+        }
+        else
+        {
+            purchAgreement_ds.object(fieldNum(PurchAgreementHeader, ETGDMSPurchCropYear)).visible(false);
+            purchAgreement_ds.object(fieldNum(PurchAgreementHeader, ETGDMSPurchExchangeRate)).visible(false);
+            purchAgreement_ds.object(fieldNum(PurchAgreementHeader, ETGDMSPurchHedgingRate)).visible(false);
+            purchAgreement_ds.object(fieldNum(PurchAgreementHeader, ETGDMSPurchOfferDate)).visible(false);
+            purchAgreement_ds.object(fieldNum(PurchAgreementHeader, ETGDMSPurchPackageType)).visible(false);
+            purchAgreement_ds.object(fieldNum(PurchAgreementHeader, ETGDMSPurchShippingEndDate)).visible(false);
+            purchAgreement_ds.object(fieldNum(PurchAgreementHeader, ETGDMSPurchShippingStartDate)).visible(false);
+            purchAgreement_ds.object(fieldNum(PurchAgreementHeader, ETGDMSPurchSource)).visible(false);
+            purchAgreement_ds.object(fieldNum(PurchAgreementHeader, ETGDMSPurchType)).visible(false);
+        }*/
+        //Canada entity details new 9 fields code for diabling enabling - DMS Integration
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateWrite</Name>
+				<Source><![CDATA[
+    public boolean validateWrite()
+    {
+        boolean ret = next validateWrite();
+        ETGACFParameters acfParameters = ETGACFParameters::find();
+
+        if (acfParameters.EnableMandatoryFields == NoYes::Yes)
+        {
+            str dimensionName, label;
+            str dimensionValue;
+            VendTable   vendtable;
+            VendGroup   vendGroup;
+
+            PurchAgreementHeader purchAgreementHeader = this.cursor();
+           
+            FormDataSource      agrHeaders         = any2Object(this) as FormDataSource;
+            formRun             formRun                         = agrHeaders.formRun();
+          
+            PurchAgreementHeader purchAgrHeader = this.cursor();
+            AgreementLine agreementLine;
+            select RecId from agreementLine
+                where agreementLine.Agreement == purchAgrHeader.RecId;
+
+            container mandatoryDims = [
+            [acfParameters.BusinessUnit, "BusinessUnit"],
+            [acfParameters.Department, "Department"],
+            [acfParameters.InterCompany, "InterCompany"],
+            [acfParameters.ItemId, "Items"],
+            [acfParameters.LineofBusinesss, "Line_of_Business"],
+            [acfParameters.MainCommodity, "MainCommodity"],
+            [acfParameters.PlantWarehouseOffice, "Plant_Warehouse_Officee"],
+            [acfParameters.SubCommodity, "SubCommodity"],
+            [acfParameters.TraderEmployee, "Trader_Employee"],
+            [acfParameters.Vertical, "Vertical"]
+            ];
+            
+
+            select firstonly vendtable where
+                            vendtable.AccountNum == purchAgrHeader.VendAccount
+                        &&  vendtable.DataAreaId == purchAgrHeader.VendorDataAreaId;
+
+            select firstonly vendGroup from  vendGroup where  vendGroup.VendGroup == vendtable.VendGroup;
+
+
+            for (int i = 1; i <= conLen(mandatoryDims); i++)
+            {
+                container dimEntry = conPeek(mandatoryDims, i);
+                dimensionName = conPeek(dimEntry, 1);
+                label = conPeek(dimEntry, 2);
+
+                dimensionValue = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(purchAgreementHeader.DefaultDimension, dimensionName);
+                
+                if (!dimensionValue && agreementLine.RecId)
+                {
+                    if(dimensionName == "InterCompany" && vendGroup.VendGroup != '40')
+                    { 
+                        // Dimension is NOT mandatory here - do nothing
+                    }
+                    else
+                    {
+                        checkFailed(strFmt("Financial dimension %1 is mandatory.", label));
+                        ret = false;
+                    }
+                }
+            }
+        }
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

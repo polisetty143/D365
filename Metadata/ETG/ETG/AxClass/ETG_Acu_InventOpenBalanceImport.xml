@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_Acu_InventOpenBalanceImport</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Inventory balance import
+/// </summary>
+public class ETG_Acu_InventOpenBalanceImport extends ETG_Acu_DataImportBase
+{
+    InventJournalTable      inventJournalTable;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args args)
+    {
+        ETG_Acu_InventOpenBalanceImport  inventOpenBalanceImport;
+
+        inventOpenBalanceImport = ETG_Acu_InventOpenBalanceImport::construct();
+
+        if (inventOpenBalanceImport.prompt())
+        {
+            inventOpenBalanceImport.runOperation();
+
+            
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static ETG_Acu_InventOpenBalanceImport construct()
+    {
+        return new ETG_Acu_InventOpenBalanceImport();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>canRunInNewSession</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Describes whether the class is designed for execution in a new session.
+    /// </summary>
+    /// <returns>
+    /// true if the class is designed for execution the operation in a new session; otherwise, false.
+    /// </returns>
+    protected boolean canRunInNewSession()
+    {
+        return false;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>readFile</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Reads the file
+    /// </summary>
+    protected void readFile()
+    {
+        container con;
+
+        boolean header = true;
+
+        this.openFile();
+
+        while ((importFile.status() == IO_Status::Ok))
+        {
+            currentLine++;
+
+            con = importFile.read();
+
+            if (conLen(con))
+            {
+                if (header)
+                {
+                    header = false;
+                    continue;
+                }
+
+                this.processData(con);
+            }
+        }
+
+        if (inventJournalTable)
+        {
+            inventJournalTable.reread();
+            inventJournalTable.selectForUpdate(true);
+            InventJournalTable::initTotal(inventJournalTable);
+            inventJournalTable.doUpdate();
+        }
+
+        info("@SYS112337");
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processData</Name>
+				<Source><![CDATA[
+    protected void processData(container _con)
+    {
+        InventInventoryMovementJournalEntryV4Entity     inventMovJournal;
+        NumberSeq                                       numberSeq;
+
+        if (!inventJournalTable)
+        {
+            numberSeq = NumberSeq::newGetNum(InventParameters::numRefInventJournalId());
+
+            inventJournalTable = InventInventoryJournalEntryMap::createJournalHeader(conpeek(_con, 12), InventJournalType::Movement);
+        }
+
+        inventMovJournal.JournalNumber                      = inventJournalTable.JournalId;
+        inventMovJournal.ItemNumber                         = conpeek(_con, 2);
+        inventMovJournal.ProductConfigurationId             = conpeek(_con, 3);
+        inventMovJournal.ProductColorId                     = conpeek(_con, 4);
+        inventMovJournal.ProductSizeId                      = conpeek(_con, 5);
+        inventMovJournal.ProductStyleId                     = conpeek(_con, 6);
+        inventMovJournal.InventorySiteId                    = conpeek(_con, 7);
+        inventMovJournal.InventoryWarehouseId               = conpeek(_con, 8);
+        inventMovJournal.LineNumber                         = conpeek(_con, 9);
+        inventMovJournal.CostAmount                         = conpeek(_con, 10);
+        inventMovJournal.InventoryQuantity                  = conpeek(_con, 11);
+        inventMovJournal.JournalNameId                      = inventJournalTable.JournalNameId;
+        inventMovJournal.OffsetMainAccountIdDisplayValue    = conpeek(_con, 13);
+        inventMovJournal.UnitCost                           = conpeek(_con, 14);
+        inventMovJournal.UnitCostQuantity                   = conpeek(_con, 15);
+        inventMovJournal.TransactionDate                    = str2Date(conPeek(_con, 16), 123);
+        inventMovJournal.WarehouseLocationId                = conpeek(_con, 17);
+
+        // BusinessUnit (18)	Contract (19)	Department (20)	Intercompany (21)	Plant_Warehouse_Office (22)	Product_Service (23)	Trader_Employee (24)
+        // |Plant_Warehouse_Office|Department|Trader_Employee|Product_Service|BusinessUnit|Intercompany|Contract
+
+        inventMovJournal.DefaultLedgerDimensionDisplayValue  = conPeek(_con, 22) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                                + conPeek(_con, 20) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                                + conPeek(_con, 24) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                                + conPeek(_con, 23) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                                + conPeek(_con, 18) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                                + conPeek(_con, 21) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                                + conPeek(_con, 19);
+        inventMovJournal.insert();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caption</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///Import inventory site
+    /// </summary>
+    /// <returns>Caption</returns>
+    public ClassDescription caption()
+    {
+        ClassDescription ret;
+    
+        ret = "@ETG_ENG_Labels:ImpOpenInvBalance";
+    
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

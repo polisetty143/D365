@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_PurchAgreementHeader_DS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///     extension class of form <c>PurchAgreement</c> datasource <c>ETG_PurchaseAgreementHeader</c>
+/// </summary>
+[ExtensionOf(formDataSourceStr(PurchAgreement, ETG_PurchaseAgreementHeader))] 
+internal final class ETG_PurchAgreementHeader_DS_Extension
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>write</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///     update port of loading and discharge details on lines
+    /// </summary>
+    public void write()
+    {
+        boolean flowPortDetailsToLines, checkLinesUpdateReqPortLoading, checkLinesUpdateReqPortDischarge;
+        ETG_PurchaseAgreementHeader purchaseAgreementHeader;
+        FormDataSource              purchaseAgreementHeaderDS;
+
+        if(ETGACFParameters::find().EnablePortLoadingDetailsHeaderToLine == NoYes::Yes)
+        {
+            flowPortDetailsToLines = true;
+        }
+        if(flowPortDetailsToLines)
+        {
+            purchaseAgreementHeaderDS = this;
+            purchaseAgreementHeader   = purchaseAgreementHeaderDS.cursor();
+
+            if(purchaseAgreementHeader.orig().PortOfLoading != purchaseAgreementHeader.PortOfLoading && purchaseAgreementHeader.orig().PortOfDischarge != purchaseAgreementHeader.PortOfDischarge)
+            {
+                checkLinesUpdateReqPortLoading = true;
+                checkLinesUpdateReqPortDischarge = true;
+            }
+            else if (purchaseAgreementHeader.orig().PortOfLoading != purchaseAgreementHeader.PortOfLoading)
+            {
+                checkLinesUpdateReqPortLoading = true;
+            }
+            else if (purchaseAgreementHeader.orig().PortOfDischarge != purchaseAgreementHeader.PortOfDischarge)
+            {
+                checkLinesUpdateReqPortDischarge = true;
+            }
+        }
+    
+        next write();
+
+        if(flowPortDetailsToLines && (checkLinesUpdateReqPortDischarge || checkLinesUpdateReqPortLoading))
+        {
+            this.updateLinesETG(purchaseAgreementHeader, checkLinesUpdateReqPortLoading, checkLinesUpdateReqPortDischarge);
+            FormDataSource lineDS = purchaseAgreementHeaderDS.formRun().dataSource(formDataSourceStr(PurchAgreement, ALine));
+            lineDS.research();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateLinesETG</Name>
+				<Source><![CDATA[
+    public void updateLinesETG(ETG_PurchaseAgreementHeader header, boolean changePortLoading, boolean changePortDischarge)
+    {
+        PurchAgreementHeader purchAgreementHeader;
+        DialogButton         diagBut;
+        AgreementLine        aLine;
+
+        str strMessage = "@ETG_New:CopyPortDetailsToLines";
+        str strTitle   = "@ETG_New:UpdatePortDetails";
+        diagBut        = Box::yesNoCancel(strMessage, DialogButton::No, strTitle);
+
+        if (diagBut == DialogButton::No)
+        {
+            return;
+        }
+        else if(diagBut == DialogButton::Yes)
+        {
+            select firstonly RecId from purchAgreementHeader 
+                where purchAgreementHeader.PurchNumberSequence == header.PurchAgreementId;
+
+            ttsbegin;
+
+            if(changePortLoading && changePortDischarge)
+            {
+                update_recordset aLine
+                setting
+                ETGPortOfDischarge     = header.PortOfDischarge,
+                ETGPortOfDischargeDesc = header.PortOfDischargeDesc,
+                ETGPortOfLoading       = header.PortOfLoading,
+                ETGPortOfLoadingDesc   = header.PortOfLoadingDesc
+                where aLine.Agreement == purchAgreementHeader.RecId;
+                Info("@ETG_New:PortLoadingDischargeDetailsCopied");
+            }
+            else if(changePortLoading)
+            {
+                update_recordset aLine
+                setting
+                ETGPortOfLoading       = header.PortOfLoading,
+                ETGPortOfLoadingDesc   = header.PortOfLoadingDesc
+                where aLine.Agreement == purchAgreementHeader.RecId;
+                Info("@ETG_New:PortOfLoadingDetailsCopied");
+            }
+            else if(changePortDischarge)
+            {
+                update_recordset aLine
+                setting
+                ETGPortOfDischarge     = header.PortOfDischarge,
+                ETGPortOfDischargeDesc = header.PortOfDischargeDesc
+                where aLine.Agreement == purchAgreementHeader.RecId;
+                Info("@ETG_New:PortOfDischargeDetailsCopied");
+            }
+            ttscommit;
+        }
+        else
+        {
+            info("@SYS105413");
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {
+        int ret = next active();
+        if(ETGACFParameters::find().EnableMandatoryFields == NoYes::Yes)
+        {
+            FormDataSource      etgPurchAgreement_ds         = any2Object(this) as FormDataSource;
+            etgPurchAgreement_ds.object(fieldNum(ETG_PurchaseAgreementHeader, ToDatePort)).mandatory(true);
+            etgPurchAgreement_ds.object(fieldNum(ETG_PurchaseAgreementHeader, PortOfLoading)).mandatory(true);
+            etgPurchAgreement_ds.object(fieldNum(ETG_PurchaseAgreementHeader, PortOfDischarge)).mandatory(true);
+            etgPurchAgreement_ds.object(fieldNum(ETG_PurchaseAgreementHeader, BuyerAccountNum)).mandatory(true);
+            etgPurchAgreement_ds.object(fieldNum(ETG_PurchaseAgreementHeader, SellerAccountNum)).mandatory(true);
+            etgPurchAgreement_ds.object(fieldNum(ETG_PurchaseAgreementHeader, FromDatePort)).mandatory(true);
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initValue</Name>
+				<Source><![CDATA[
+    public void initValue()
+    {
+        next initValue();
+       
+        if(ETGACFParameters::find().EnableMandatoryFields == NoYes::Yes)
+        {
+            ETG_PurchaseAgreementHeader purchAgreementHeader = this.cursor();
+            if (!purchAgreementHeader.BuyerAccountNum)
+            {
+                purchAgreementHeader.BuyerAccountNum = "o001";
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateWrite</Name>
+				<Source><![CDATA[
+    public boolean validateWrite()
+    {
+        boolean ret = next validateWrite();
+
+        if (ret && ETGACFParameters::find().EnableMandatoryFields == NoYes::Yes)
+        {
+            ret = ETGPurchAgreementMandatoryValidation::validateFormHeaders(this.formRun());
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesAgreementForm_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(SalesAgreementForm))]
+final class ETG_SalesAgreementForm_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>enableHeaderButtons</Name>
+				<Source><![CDATA[
+    public void enableHeaderButtons(AgreementHeader _agreementHeader)
+    {
+        PurchAgreementId            purchAgreementId;
+        SalesAgreementHeader        salesAgreementHeader = _agreementHeader as SalesAgreementHeader;
+        next enableHeaderButtons(_agreementHeader);
+        container relatedObjectsExistanceFlags         = _agreementHeader.relatedObjectExistanceFlags();
+        boolean   canConfirmAgreement;
+
+        FormDesign design = formRun.design();
+     
+       
+        purchAgreementId = salesAgreementHeader.ETG_PurchAgreementIdTP;
+
+        design.controlName(formControlStr(SalesAgreement, ButtonPurchAgreementTP)).enabled(false);
+        design.controlName(formControlStr(SalesAgreement, Generatesalesagreement)).enabled(false);
+        
+        if(purchAgreementId)
+        {
+            design.controlName(formControlStr(SalesAgreement, ButtonPurchAgreementTP)).enabled(true);
+            
+        }
+        else
+        {
+            design.controlName(formControlStr(SalesAgreement, Generatesalesagreement)).enabled(true);
+        }
+        if(salesAgreementHeader.ETG_TradingStatusSales != ETG_TradingStatus::None)
+        {
+            design.controlName(formControlStr(SalesAgreement, ButtonConfirmationETG)).enabled(false);
+        }
+
+        //NS, DLT ,05/03/2025 After the confirmation & Release order should be disappeared or grayed out
+        if(ETGACFParameters::find().EnableSalesAgreementWorkflow == NoYes::Yes)
+        {
+            AgreementLine                   agreementLine;
+            AgreementHeader                 agreementHeader;
+            AgreementLineQuantityCommitment qtyCommitment;
+            real                            remainingQty = 0;
+            FormControl                     buttoncontrol, shippingInstructions;
+
+            while select RecId from agreementLine
+            where agreementLine.Agreement == salesAgreementHeader.RecId
+            {
+                while select qtyCommitment
+                where qtyCommitment.RecId == agreementLine.RecId
+                {
+                    remainingQty += qtyCommitment.quantityRemainingRelease();
+                    if(remainingQty != 0)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            buttoncontrol = design.controlName(formControlStr(SalesAgreement, ButtonReleaseOrderCreate));
+
+            if (remainingQty == 0)
+            {
+                buttoncontrol.enabled(false);
+            }
+            else if (salesAgreementHeader.AgreementState == AgreementState::Effective && salesAgreementHeader.ETGWorkflowStatus == VersioningDocumentState::Approved)
+            {
+                buttoncontrol.enabled(true);
+            }
+            
+            FormControl  buttoncontrolconfirmationETG = formRun.design().controlName(formControlStr(SalesAgreement, ButtonConfirmationETG));
+
+            // NS DLT 28/05/2023 Shreelekha Check if workflow for this document is not active
+            boolean isWorkflowActive = WorkflowTable::findActiveTemplate(workflowTypeStr(ETGSalesAgreementWFType)).RecId != 0;
+
+            if (!isWorkflowActive)
+            {
+                // Set workflow status to Approved
+                salesAgreementHeader.ETGWorkflowStatus = VersioningDocumentState::Approved;
+
+                // Enable confirmation button
+                buttoncontrolconfirmationETG.enabled(true);
+            }
+            // NE DLT 28/05/2023 Shreelekha Check if workflow for this document is not active
+
+            if (salesAgreementHeader.AgreementState == AgreementState::Effective && salesAgreementHeader.ETGWorkflowStatus == VersioningDocumentState::Approved)
+            {
+                buttoncontrolconfirmationETG.enabled(false);
+            }
+            else if (salesAgreementHeader.ETGWorkflowStatus == VersioningDocumentState::Approved)
+            {
+                buttoncontrolconfirmationETG.enabled(true);
+            }
+
+            //shippingInstructions = design.controlName(formcontrolstr(SalesAgreement, ETG_ShippingInstructions));
+            //if(salesAgreementHeader.ETGWorkflowStatus == VersioningDocumentState::Approved)
+            //{
+            //    shippingInstructions.enabled(true);
+            //}
+            //else
+            //{
+            //    shippingInstructions.enabled(false);
+            //}
+        }
+        //NE, DLT ,05/03/2025 After the confirmation & Release order should be disappeared or grayed out
+
+        //NS, DLT , 17/03/2025 Header/Line items should be frozen once P/S agreement/order is confirmed by user. It cannot be edited.
+        //if(ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+        //{
+        //    if(salesAgreementHeader.AgreementState == AgreementState::Effective)
+        //    {
+        //        formRun.design().viewEditMode(ViewEditMode::View);
+        //    }
+        //    else
+        //    {
+        //        formRun.design().viewEditMode(ViewEditMode::Edit);
+        //    }
+        //}
+        //NE, DLT , 17/03/2025 Header/Line items should be frozen once P/S agreement/order is confirmed by user if status is effective. It cannot be edited.
+
+
+
+        //NS, DLT , 28/05/2025 Header/Line items should be frozen once P/S agreement/order is confirmed by user if status is effective. It cannot be edited.
+        
+        if(ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+        {
+
+            // Use the datasource to get the FormRun properly
+            FormDataSource headerDS = salesAgreementHeader.dataSource() as FormDataSource;
+            FormRun formRun = headerDS.formRun() as FormRun;
+
+            if (formRun)
+            {
+                FormDataSource lineDS = formRun.dataSource(formDataSourceStr(SalesAgreement, ALine));
+
+                boolean isEditable = (salesAgreementHeader.AgreementState != AgreementState::Effective);
+
+                formRun.design().viewEditMode(isEditable ? ViewEditMode::Edit : ViewEditMode::View);
+
+                headerDS.allowEdit(isEditable);
+                lineDS.allowEdit(isEditable);
+                lineDS.allowCreate(isEditable);
+                lineDS.allowDelete(isEditable);
+            }
+        }
+        //NE, DLT , 28/05/2025 Header/Line items should be frozen once P/S agreement/order is confirmed by user if status is effective. It cannot be edited.
+
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>AgreementLineDefault_ETGRefSalesAgreementId_OnLookup</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// lookup method for reference Sales agreement
+    /// </summary>
+    [FormControlEventHandler(formControlStr(SalesAgreement, AgreementLineDefault_ETGRefSalesAgreementId), FormControlEventType::Lookup)]
+    public static void AgreementLineDefault_ETGRefSalesAgreementId_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        Query query = new Query();
+        QueryBuildDataSource queryBuildDataSource;
+        QueryBuildRange queryBuildRange,qbr;
+        FormRun formRun = sender.formRun();
+        SalesAgreementHeader    salesAgreementHeader = formRun.dataSource(1).cursor();
+
+        SysTableLookup sysTableLookup = SysTableLookup::newParameters(tableNum(SalesAgreementHeader), sender);
+ 
+        sysTableLookup.addLookupField(fieldNum(SalesAgreementHeader, SalesNumberSequence));
+        sysTableLookup.addLookupField(fieldNum(SalesAgreementHeader, CustAccount));
+ 
+        queryBuildDataSource = query.addDataSource(tableNum(SalesAgreementHeader));
+
+        qbr = queryBuildDataSource.addRange(fieldNum(SalesAgreementHeader, CustAccount));
+        qbr.value(salesAgreementHeader.CustAccount);
+        qbr.status(RangeStatus::Locked);
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.performFormLookup();
+
+        FormControlCancelableSuperEventArgs ce = e as FormControlCancelableSuperEventArgs;
+        ce.CancelSuperCall();
+        
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

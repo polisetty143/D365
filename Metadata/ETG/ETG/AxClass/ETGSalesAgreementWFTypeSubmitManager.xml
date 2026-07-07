@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesAgreementWFTypeSubmitManager</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The ETGSalesAgreementWFTypeSubmitManager menu item action event handler.
+/// </summary>
+public class ETGSalesAgreementWFTypeSubmitManager 
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args _args)
+	{
+        boolean isValid = true;
+        SalesAgreementHeader salesAgreementHeader = _args.record();
+        
+        if (ETGACFParameters::find().EnableMandatoryFields == NoYes::Yes)
+        {
+            isValid = ETGSalesAgreementWFTypeSubmitManager::validateIsValid(salesAgreementHeader, _args);
+        }
+
+        if (isValid)
+        {
+            WorkflowSubmitDialog workflowSubmitDialog = WorkflowSubmitDialog::construct(_args.caller().getActiveWorkflowConfiguration());
+            workflowSubmitDialog.run();
+
+            if (workflowSubmitDialog.parmIsClosedOK())
+            {
+                WorkflowComment comment = workflowSubmitDialog.parmWorkflowComment();
+                try
+                {
+                    if(ETGACFParameters::find().EnableTradeLimit == NoYes::Yes)
+                    {
+                        ETGSalesAgreementWFTypeSubmitManager::validateTradeLimit(salesAgreementHeader);
+                    }
+                    ttsbegin;
+                    SalesAgreementHeader::updateWorkflowStatus(salesAgreementHeader.RecId, VersioningDocumentState::InReview);
+                    Workflow::activateFromWorkflowType(workflowTypeStr(ETGSalesAgreementWFType), salesAgreementHeader.RecId, comment, NoYes::No);
+                    ttscommit;
+                }
+
+                catch(exception::Error)
+                {
+                    info("Error");
+                }
+
+                FormDataSource callerDS = FormDataUtil::getFormDataSource(_args.record());
+                callerDS.refresh();
+                callerDS.research(true);
+                _args.caller().updateWorkflowControls();
+            }
+        }
+
+        if (ETGACFParameters::find().EnableDMSIntegration 
+            && BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGDMSRevereSalesAgreementIntegrationEventClass)))
+        {
+            AgreementHeaderHistory   agreementHeaderHistory;
+
+            select firstonly agreementHeaderHistory
+                        order by RecId desc
+                          where agreementHeaderHistory.AgreementHeader == salesAgreementHeader.RecId;
+
+            str confirmationnumber  = strFmt("%1-%2", salesAgreementHeader.SalesNumberSequence, agreementHeaderHistory.ConfirmationNumber);
+            str formattedDateTime = DateTimeUtil::toStr(agreementHeaderHistory.CreatedDateTime);
+
+            ETGDMSRevereSalesAgreementIntegrationContract contract = new ETGDMSRevereSalesAgreementIntegrationContract();
+
+            contract.parmDealNumber(salesAgreementHeader.ETGDMSDealNumber);
+            contract.parmDataAreaId(curExt());
+            contract.parmOperationType("Agreement Workflow Submit");
+            contract.parmActivityName("Sales Agreement Workflow Submit");
+            contract.parmDocumentNumber(confirmationnumber);
+            contract.parmDocumentDate(formattedDateTime);
+            contract.parmActivityOwner(salesAgreementHeader.CreatedBy);
+            contract.parmActivityRemarks(strFmt("The Sale agreement %1 is submitted to workflow",salesAgreementHeader.SalesNumberSequence));
+
+            ETGDMSRevereSalesAgreementIntegrationEventClass eventClass = ETGDMSRevereSalesAgreementIntegrationEventClass::newFromContract(contract);
+            eventClass.send();
+        }
+     }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateTradeLimit</Name>
+				<Source><![CDATA[
+        public static void validateTradeLimit(SalesAgreementHeader salesAgreementHeader)
+        {
+            if(salesAgreementHeader.custTable().ETGApplicableTradeLimit == NoYes::Yes)
+            {
+                ETGACFTradeLimitHelper::processTradeLimitSales(salesAgreementHeader);
+            }
+        }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateIsValid</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// checks mandatory fields before wf begins
+    /// </summary>
+    /// <param name = "salesAgreementHeader"></param>
+    /// <param name = "_args"></param>
+    /// <returns></returns>
+        public static boolean validateIsValid(SalesAgreementHeader salesAgreementHeader, Args _args)
+        {
+                AgreementLine agreementLine;
+                boolean allValid = true;
+                FormRun formRun = _args.caller() as FormRun;
+                boolean isValid = true;
+
+                 select RecId,  ETG_UnderDeliveryPct, ETG_OverDeliveryPct from agreementLine where agreementLine.Agreement == salesAgreementHeader.RecId;
+
+                if(!salesAgreementHeader || !agreementLine.RecId)
+                {
+                    throw Error(strFmt("Sales agreement %1 can not be submitted since no lines exists", salesAgreementHeader.SalesNumberSequence));
+                     isValid = false;
+                    return isValid;
+                }
+
+                allValid = ETGSalesAgreementMandatoryValidation::validateFormHeaders(formRun) && ETGSalesAgreementMandatoryValidation::validateFormLines(formRun);
+                if(!allValid)
+                {
+                     isValid = false;
+                       return isValid;
+                 }
+
+            if(agreementLine.ETG_UnderDeliveryPct == 0 && agreementLine.ETG_OverDeliveryPct == 0)
+            {
+                DialogButton         diagBut;
+                str strMessage = "@ETG_New:UnderOverDeliveryDialog";
+                str strTitle   = "@ETG_New:OverUnderDeliveryTitle";
+
+                diagBut        = Box::yesNo(strMessage, DialogButton::Yes, strTitle);
+
+                if (diagBut == DialogButton::No)
+                {
+                    isValid = true;
+                    return isValid;
+                }
+                else if(diagBut == DialogButton::Yes)
+                {
+                    isValid = false;
+                    return isValid;
+                }
+             }
+            return isValid;
+         }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGInventJournalLossProfit_postJournal_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// extension class for inventory adjustment post
+/// update IsPosted flag for fixed asset number after inv adj journal posting
+/// </summary>
+[ExtensionOf(formControlStr(InventJournalLossProfit, postJournal))]
+internal final class ETGInventJournalLossProfit_postJournal_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>clicked</Name>
+				<Source><![CDATA[
+    public void clicked()
+    {
+        next clicked();
+
+        if(SalesParameters::find().ETGEnableCylinderTracking == NoYes::Yes)
+        {
+            InventJournalTable  inventJournalTable;
+            AssetTable          assetTable;
+            InventJournalTrans  inventJournalTrans;
+            FormControl         control              = this;
+            FormRun             formRunLoc           = control.formRun();
+            FormDataSource      inventJournalTableDS = formRunLoc.dataSource(formDataSourceStr(InventJournalLossProfit, InventJournalTable));
+            
+            inventJournalTable = inventJournalTableDS.cursor();
+
+            if (inventJournalTable && inventJournalTable.Posted == NoYes::Yes)
+            {
+                ttsbegin;
+
+                while select ETGAssetId from inventJournalTrans
+                    where inventJournalTrans.JournalId == inventJournalTable.JournalId
+                        && inventJournalTrans.ETGAssetId != ""
+                {
+                    select forupdate assetTable where assetTable.AssetId == inventJournalTrans.ETGAssetId;
+
+                    if (assetTable)
+                    {
+                        assetTable.ETGIsPosted = NoYes::Yes;
+                        assetTable.doUpdate();
+                    }
+                }
+
+                ttscommit;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

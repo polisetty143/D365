@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>EtgbankbalancereportRDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(EtgBankBalanceContract))]
+class EtgbankbalancereportRDP extends SRSReportDataProviderBase
+{
+    ETG_BankBalanceTableTmp bankbalancetmp;
+ 
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETG_BankBalanceTableTmp))]
+    public ETG_BankBalanceTableTmp getTmp()
+    {
+        select bankbalancetmp;
+        return bankbalancetmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        EtgBankBalanceContract contract =
+        this.parmDataContract() as EtgBankBalanceContract;
+        BANKACCOUNTTABLE     BankTable;
+        TransDate    fromdate = contract.parmfromDate();
+        TransDate    todate = contract.parmtoDate();
+        Map   map,mapAll;
+        MapEnumerator           mapEnum, mapEnumAll;
+        mapAll          = new Map(Types::String, Types::Real);
+        CurrencyCode            currency, currency_1;
+        BankAccountId           bankAccount;
+        BankAccount             bankAccountNum;
+        Name                    bankName;
+        AmountCur   credit,debit,openingbal,closingbal;
+        AmountMST   creditmst,debitmst,openingbalmst,closingbalmst,totalMSt;
+        Ledger    ledger;
+
+        // --- NEW: Accumulator variables for Final Totals ---
+        AmountCur   sumOpeningBal;
+        AmountCur   sumDebit;
+        AmountCur   sumCredit;
+        AmountCur   sumTotal;
+        AmountCur   sumClosingBal;
+        AmountCur   sumClosingBalTB;
+        AmountMST   sumClosingBalLocal;
+        AmountMST   sumClosingBalReporting;
+        // ---------------------------------------------------
+
+        while select BankTable
+        {
+            map     = this.getCurrencies(BankTable.AccountID);
+ 
+            mapEnum = map.getEnumerator();
+ 
+            while (mapEnum.moveNext())
+            {
+                BankAccountTrans     banktransopen,banktranscredit,banktransdebit,banktransmst,banktranslocal;
+                currency_1 = mapEnum.currentValue();
+ 
+                bankAccount     =   BankTable.AccountID;
+                bankName        =   BankTable.Name;
+                bankAccountNum  =   BankTable.AccountNum;
+                ExchRate exchRateloca;
+                currency        =   currency_1;
+                exchRateloca = this.validateExchRate(currency,todate);
+ 
+                credit = 0.00;
+                debit = 0.00;
+                openingbal = 0.00;
+                closingbal = 0.00;
+ 
+                creditmst  = 0.00;
+                debitmst  = 0.00;
+                openingbalmst = 0.00;
+                closingbalmst = 0.00;
+                totalMSt = 0.00;
+ 
+                select sum(AmountCur),sum(AmountMST) from banktransopen
+                           where banktransopen.AccountId == bankAccount
+                            && banktransopen.CurrencyCode == currency
+                            && banktransopen.TransDate < fromdate;
+                if(banktransopen)
+                {
+                    openingbal   = banktransopen.AmountCur;
+                    openingbalmst   = banktransopen.AmountMST;
+                }
+                
+                select sum(AmountCur),sum(AmountMST) from banktranscredit
+                where banktranscredit.AccountId == bankAccount
+                && (banktranscredit.TransDate >= fromdate
+                &&  banktranscredit.TransDate <= todate)
+                && banktranscredit.CurrencyCode == currency
+                && (banktranscredit.AmountCur <  0  || banktranscredit.AmountMST <  0);
+                if(banktranscredit)
+                {
+                    credit     =  banktranscredit.AmountCur;
+                    creditmst  =  banktranscredit.AmountMST;
+                }
+ 
+                select sum(AmountCur),sum(AmountMST) from banktransdebit
+                where banktransdebit.AccountId == bankAccount
+                && (banktransdebit.TransDate >= fromdate
+                && banktransdebit.TransDate <= todate)
+                && banktransdebit.CurrencyCode == currency
+                && (banktransdebit.AmountCur > 0 || banktransdebit.AmountMST > 0);
+                if(banktransdebit)
+                {
+                    debit     = banktransdebit.AmountCur;
+                    debitmst  =  banktransdebit.AmountMST;
+                }
+                
+                totalMSt = abs(debitmst) - abs(creditmst);
+                
+                bankbalancetmp.clear();
+                bankbalancetmp.BankAccountID       = bankAccount;
+                bankbalancetmp.BankName            = bankName;
+                bankbalancetmp.CurrencyCode        = currency;
+
+                bankbalancetmp.OpeningBalance  = openingbal;
+                bankbalancetmp.Debit           = abs(debit);
+                bankbalancetmp.Credit          = abs(credit);
+                bankbalancetmp.Total               = bankbalancetmp.Debit - bankbalancetmp.Credit;
+                bankbalancetmp.ClosingBalance      = openingbal +  bankbalancetmp.Debit - bankbalancetmp.Credit;
+                bankbalancetmp.ClosingBalanceLocal = openingbalmst + totalMSt;
+
+                select firstonly ledger where ledger.Name  == curExt();
+
+                if(bankbalancetmp.CurrencyCode == "USD" && ledger.AccountingCurrency != "USD")
+                {
+                    bankbalancetmp.ClosingBalanceReporting = bankbalancetmp.ClosingBalance ;
+                }
+                else if(bankbalancetmp.CurrencyCode != "USD")
+                {
+                    bankbalancetmp.ClosingBalanceReporting = bankbalancetmp.ClosingBalance * exchRateloca;
+                }
+               
+                bankbalancetmp.insert();
+                
+                // --- NEW: Accumulating Running Totals ---
+                sumOpeningBal           += bankbalancetmp.OpeningBalance;
+                sumDebit                += bankbalancetmp.Debit;
+                sumCredit               += bankbalancetmp.Credit;
+                sumTotal                += bankbalancetmp.Total;
+                sumClosingBal           += bankbalancetmp.ClosingBalance;
+                sumClosingBalTB         += bankbalancetmp.ClosingBalanceTB;
+                sumClosingBalLocal      += bankbalancetmp.ClosingBalanceLocal;
+                sumClosingBalReporting  += bankbalancetmp.ClosingBalanceReporting;
+                // ----------------------------------------
+            }
+        }
+        
+        // --- NEW: Insert Grand Total row as the execution wraps up ---
+        bankbalancetmp.clear();
+        bankbalancetmp.BankAccountID           = "TOTAL";
+        bankbalancetmp.BankName                = "Grand Total";
+        bankbalancetmp.CurrencyCode            = "";
+        bankbalancetmp.OpeningBalance          = sumOpeningBal;
+        bankbalancetmp.Debit                   = sumDebit;
+        bankbalancetmp.Credit                  = sumCredit;
+        bankbalancetmp.Total                   = sumTotal;
+        bankbalancetmp.ClosingBalance          = sumClosingBal;
+        bankbalancetmp.ClosingBalanceTB        = sumClosingBalTB;
+        bankbalancetmp.ClosingBalanceLocal     = sumClosingBalLocal;
+        bankbalancetmp.ClosingBalanceReporting = sumClosingBalReporting;
+        
+        bankbalancetmp.insert();
+        // -------------------------------------------------------------
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getCurrencies</Name>
+				<Source><![CDATA[
+    Map getCurrencies(CompanyBankAccountId   _accountId)
+    {
+        BankAccountTrans   bankAccountTransmap;
+        Map         mapCurrency = new Map(Types::String, Types::String);
+        ;
+ 
+        while select bankAccountTransmap group by CurrencyCode where bankAccountTransmap.AccountId == _accountId
+        {
+            mapCurrency.insert(bankAccountTransmap.CurrencyCode, bankAccountTransmap.CurrencyCode);
+        }
+ 
+        return mapCurrency;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateExchRate</Name>
+				<Source><![CDATA[
+    public ExchRate validateExchRate(str _cur,TransDate _todate)
+    {
+        ExchangeRateCurrencyPair exchangeRateCurrencyPair;
+        ExchangeRate exchangeRate;
+        ExchRate exchRate;
+        Ledger ledgerOrg;
+        ledger   ledgerlocal;
+ 
+        select firstonly ledgerlocal where ledgerlocal.Name  == curExt();
+
+        select firstonly exchangeRateCurrencyPair where
+            exchangeRateCurrencyPair.ExchangeRateType == Ledger::find(Ledger::current()).DefaultExchangeRateType
+                && exchangeRateCurrencyPair.FromCurrencyCode == "USD"
+            && exchangeRateCurrencyPair.ToCurrencyCode == ledgerlocal.AccountingCurrency;
+ 
+        if(exchangeRateCurrencyPair)
+        {
+            exchRate = ExchangeRate::findByDate(exchangeRateCurrencyPair.RecId,
+                _todate).ExchangeRate;
+        }
+        return exchRate / 100;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

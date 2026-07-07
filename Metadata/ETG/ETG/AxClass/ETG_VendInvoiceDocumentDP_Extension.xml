@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_VendInvoiceDocumentDP_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classstr(VendInvoiceDocumentDP))]
+final class ETG_VendInvoiceDocumentDP_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>populateVendInvoiceDocumentTmp</Name>
+				<Source><![CDATA[
+    protected void populateVendInvoiceDocumentTmp(NoYes _purchInvoiceTransOrTaxTrans, NoYes _vendPaymSched)
+    {
+        ETG_PurchTableTrade         ETG_PurchTableTrade;
+
+        PurchTable                  purchTableLoc;
+        PurchLine                   purchline;
+        VendTable                   vendTable;
+        PurchAgreementHeader        purchAgreementHeader;
+        ETG_VendPackingQualityGrp   vendPackingQualityGrp;
+        VendPackingSlipTrans        vendPackingslipTrans;
+        InventTransOrigin           inventTransOriginLoc;
+        InventTrans                 inventTransLoc;
+        str                         specifications;
+        str                         AmountinTxt;
+        TaxRegistration             taxRegistrationLoc;
+        TaxRegistrationTypeApplicabilityRule taxRegistrationRule;
+        TaxRegistrationType         taxRegistrationType;
+        DirPartyLocation            dirPartyLocationLoc;
+
+        next populateVendInvoiceDocumentTmp(_purchInvoiceTransOrTaxTrans, _vendPaymSched);
+
+        if(curExt() == "C003" || curExt() == "S004")
+        {
+            vendInvoiceDocumentTmp.CompanyAddress            = CompanyInfo::find().postalAddress().Street;
+        }
+        else
+        {
+            vendInvoiceDocumentTmp.CompanyAddress            = CompanyInfo::find().postalAddress().Address;
+            vendInvoiceDocumentTmp.CompanyAddress            = strReplace(vendInvoiceDocumentTmp.CompanyAddress,'\n','');
+        }
+        if(curExt() == "O014")
+        {
+            vendInvoiceDocumentTmp.ETGTeleFax            = 'Tel : ' + CompanyInfo::find().phone() + '   Fax ' + CompanyInfo::find().teleFax();  
+        }
+        else
+        {
+            vendInvoiceDocumentTmp.ETGTeleFax            = companyInfo.teleFax();
+        }
+        vendInvoiceDocumentTmp.ETGWeb                    = companyInfo.url();
+        vendInvoiceDocumentTmp.CompanyEmail              = companyInfo.email();
+        vendInvoiceDocumentTmp.CompanyName               = CompanyInfo::find().Name;
+        vendInvoiceDocumentTmp.ETGCompanyBranchAddress   = companyInfo.invoiceAddress().Street;
+        vendInvoiceDocumentTmp.ETGNuitNumber             = strFmt('NUIT Number : %1', companyInfo.ETGNuitNumber);
+        while select vendPackingQualityGrp
+            group by SubGroupDescription
+            exists join vendPackingslipTrans
+            where vendPackingslipTrans.InventTransId    == vendPackingQualityGrp.InventTransId
+            && vendPackingslipTrans.InventTransId       == vendInvoiceTrans.InventTransId
+            exists join inventTransOriginLoc
+            where inventTransOriginLoc.InventTransId    == vendPackingslipTrans.InventTransId
+            exists join inventTransLoc
+            where inventTransLoc.InventTransOrigin      == inventTransOriginLoc.RecId &&
+            inventTransLoc.PackingSlipId                == vendPackingslipTrans.PackingSlipId &&
+            inventTransLoc.InvoiceId                    == vendInvoiceJour.InvoiceId
+        {
+            specifications                              = specifications + '\n' + strFmt('%1', vendPackingQualityGrp.SubGroupDescription);
+        }
+        select  firstonly vendPackingslipTrans
+            where vendPackingslipTrans.InventTransId == vendInvoiceTrans.InventTransId;
+       // vendInvoiceDocumentTmp.ETGGRNNumber = vendPackingslipTrans.vendPackingslipJour().PackingSlipId;
+        vendInvoiceDocumentTmp.ETGSpecifications    = specifications;
+        select firstonly ETG_PurchTableTrade
+            where ETG_PurchTableTrade.purchId   == vendInvoiceDocumentTmp.PurchNum;
+        purchTableLoc   = PurchTable::find(vendInvoiceDocumentTmp.PurchNum);
+
+          select firstonly taxRegistrationLoc
+                 join taxRegistrationRule
+            where taxRegistrationRule.RecId ==  taxRegistrationLoc.TaxRegistrationTypeApplicabilityRule
+              join taxRegistrationType
+              where taxRegistrationType.RecId == taxRegistrationRule.TaxRegistrationType
+            && taxRegistrationType.TaxRegstrationType == 'TPIN'
+              join dirPartyLocationLoc where taxRegistrationLoc.dirPartyLocation == dirPartyLocationLoc.RecId
+              join vendTable where  vendTable.Party == dirPartyLocationLoc.Party
+            && vendTable.AccountNum == purchTableLoc.OrderAccount;
+ 
+        vendInvoiceDocumentTmp.ETGTPIN = taxRegistrationLoc.RegistrationNumber;
+
+        select * from purchAgreementHeader
+    where purchAgreementHeader.RecId == purchTableLoc.MatchingAgreement;
+
+        select * from purchline 
+            where purchline.PurchId == purchTableLoc.PurchId && 
+            purchline.ItemId == vendInvoiceDocumentTmp.ItemId ;
+
+        vendInvoiceDocumentTmp.ETGTaxGroup = purchline.TaxGroup;
+ 
+        vendInvoiceDocumentTmp.ETGContractNo = purchAgreementHeader.PurchNumberSequence;
+        vendInvoiceDocumentTmp.ETGContarctDate = purchAgreementHeader.DefaultAgreementLineEffectiveDate;
+
+
+
+        vendInvoiceDocumentTmp.ETGPortPlaceOfLoading    = ETG_PurchTableTrade.PortOfLoadingDesc;
+        vendInvoiceDocumentTmp.ETGPortPlaceOfDischarge  = ETG_PurchTableTrade.PortOfDischargeDesc;
+        vendInvoiceDocumentTmp.ETGRemarks               = ETG_PurchTableTrade.Remarks;
+        vendInvoiceDocumentTmp.OrderType                = ETG_PurchTableTrade.OrderType;
+        vendInvoiceDocumentTmp.ETGModeofDelivery        = purchTableLoc.DlvMode;
+        vendInvoiceDocumentTmp.ETGVendorRef             = purchTableLoc.VendorRef;
+        vendInvoiceDocumentTmp.ETGInventSiteId          = purchTableLoc.InventLocationId;
+        vendInvoiceDocumentTmp.ETGDeliveryTerms         = purchTableLoc.DlvTerm;
+        vendInvoiceDocumentTmp.ETGTermsOfPayment        = purchTableLoc.Payment;
+        vendInvoiceDocumentTmp.ETGPurchaseOrder         = purchTableLoc.PurchId;
+        vendInvoiceDocumentTmp.InvoiceAccount           = purchTableLoc.OrderAccount;
+
+        vendInvoiceDocumentTmp.ETGPurchaseOrder         = purchTable::find(vendInvoiceDocumentTmp.PurchNum).PurchId;
+        vendInvoiceDocumentTmp.InvoiceNum               = vendInvoiceJour.InvoiceId;
+        vendInvoiceDocumentTmp.InvoiceDueDate           = vendInvoiceJour.DueDate;        
+        AmountinTxt                                     =  numeralsToTxt_EN(vendInvoiceDocumentTmp.IntracomInvoiceAmount);
+        AmountinTxt                                     = strReplace(AmountinTxt,'***','');
+        AmountinTxt                                     = strReplace(AmountinTxt,'and 00/100','');
+        vendInvoiceDocumentTmp.AmountInWords            = AmountinTxt;
+        AmountinTxt                                     =  numeralsToTxt_FR(decRound(vendInvoiceDocumentTmp.IntracomInvoiceAmount, 0));
+        AmountinTxt                                     = strReplace(AmountinTxt,'***','');
+        AmountinTxt                                     = strReplace(AmountinTxt,'Et 00/100','');
+        vendInvoiceDocumentTmp.ETGAmountInWordsFrench   = strLRTrim(AmountinTxt);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

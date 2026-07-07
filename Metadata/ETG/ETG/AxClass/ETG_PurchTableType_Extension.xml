@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_PurchTableType_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(PurchTableType))]
+final class ETG_PurchTableType_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>updateBackStatus</Name>
+				<Source><![CDATA[
+    void  updateBackStatus()
+    {
+        PurchAgreementHeader        purchAgreementHeader;
+        PurchTable                  purchTableMatchAgreement;
+        NoYesid                     purchStatusOpen,purchStatusReceived,purchStatusInv;
+
+        next updateBackStatus();
+
+        if(purchTable.MatchingAgreement)
+        {
+            while select PurchStatus from purchTableMatchAgreement
+                where purchTableMatchAgreement.MatchingAgreement == purchTable.MatchingAgreement
+            {
+                if(purchTableMatchAgreement.PurchStatus == PurchStatus::Backorder)
+                    purchStatusOpen = NoYes::Yes;
+
+                else if(purchTableMatchAgreement.PurchStatus == PurchStatus::Received)
+                    purchStatusReceived = NoYes::Yes;
+
+                else if(purchTableMatchAgreement.PurchStatus == PurchStatus::Invoiced)
+                    purchStatusInv = NoYes::Yes;
+            }
+              
+            if(purchStatusReceived && !purchStatusOpen && !purchStatusInv)
+            {
+                select firstonly forupdate ETG_DocumentStatusPurch from purchAgreementHeader
+                    where purchAgreementHeader.RecId == purchTable.MatchingAgreement;
+              
+                purchAgreementHeader.ETG_DocumentStatusPurch = ETG_DocumentStatus::Shipped;
+                purchAgreementHeader.update();
+            
+            }
+
+            else if(purchStatusReceived && !purchStatusOpen && purchStatusInv)
+            {
+                select firstonly forupdate ETG_DocumentStatusPurch from purchAgreementHeader
+                    where purchAgreementHeader.RecId == purchTable.MatchingAgreement;
+        
+                purchAgreementHeader.ETG_DocumentStatusPurch = ETG_DocumentStatus::Shipped;
+                purchAgreementHeader.update();
+            
+            }
+
+            else if(!purchStatusReceived && !purchStatusOpen && purchStatusInv)
+            {
+                select firstonly forupdate ETG_DocumentStatusPurch from purchAgreementHeader
+                    where purchAgreementHeader.RecId == purchTable.MatchingAgreement;
+        
+                purchAgreementHeader.ETG_DocumentStatusPurch = ETG_DocumentStatus::Invoice;
+                purchAgreementHeader.update();
+            
+            }
+        }        
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

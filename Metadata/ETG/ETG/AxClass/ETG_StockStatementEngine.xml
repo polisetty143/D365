@@ -1,0 +1,877 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_StockStatementEngine</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_StockStatementEngine
+{
+    FromDate                    fromDate;
+    ToDate                      toDate;
+    ItemId                      itemId;
+    InventDim                   inventDimCriteria;
+    InventDimParm               inventDimParm;
+    boolean                     site,warehouse,location,batch,serial;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>parmFromDate</Name>
+				<Source><![CDATA[
+    public FromDate parmFromDate(FromDate _fromDate = fromDate)
+    {
+        fromDate = _fromDate;
+        return fromDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmToDate</Name>
+				<Source><![CDATA[
+    public ToDate parmToDate(ToDate _toDate = toDate)
+    {
+        toDate = _toDate;
+        return toDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmItemId</Name>
+				<Source><![CDATA[
+    public ItemId parmItemId(ItemId _itemId = itemId)
+    {
+        itemId = _itemId;
+        return itemId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmIsSite</Name>
+				<Source><![CDATA[
+    public boolean parmIsSite(boolean _site = site)
+    {
+        site = _site;
+        return site;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmIsWarehouse</Name>
+				<Source><![CDATA[
+    public boolean parmIsWarehouse(boolean _warehouse = warehouse)
+    {
+        warehouse = _warehouse;
+        return warehouse;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmIsLocation</Name>
+				<Source><![CDATA[
+    public boolean parmIsLocation(boolean _location = location)
+    {
+        location = _location;
+        return location;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmIsBatch</Name>
+				<Source><![CDATA[
+    //NS, DLT ,10/03/2025 To update the Product Batch and Sr Numbes.
+    public boolean parmIsBatch(boolean _batch = batch)
+    {
+        batch = _batch;
+        return batch;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmIsSerial</Name>
+				<Source><![CDATA[
+    public boolean parmIsSerial(boolean _serial = serial)
+    {
+        serial = _serial;
+        return serial;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>populateStockStatementTmp</Name>
+				<Source><![CDATA[
+    //NE, DLT ,04/03/2025 To update the Product Batch and Sr Numbes.
+
+    public static server ETg_StockStatementTmp populateStockStatementTmp(FromDate _fromdate,ToDate _todate,
+        boolean     _site, boolean      _warehouse, boolean     _Location, boolean  _batch , boolean _serial)
+    {
+        ETg_StockStatementTmp       stockStatementTmp;
+        InventTrans                 inventTrans;
+        InventDim                   inventDim, inventDimLoc;
+        InventSum                   inventSum;
+        InventTrans                 openInventTrans, grnInventTrans, transitInventTrans, transferJourTrans,salesInventTrans, closingInventTrans,
+                                    countingInventTrans;
+        InventTransOrigin           inventTransOrigin;
+        InventTransferJour          inventTransferJour;
+        InventTransferJourLine      inventTransferJourLine;
+        ProdJournalBOM              prodJournalBOM;
+        ProdJournalTable            prodJournalTable;
+        ProdCalcTrans               prodCalcTrans;
+        ProdTable                   prodTable;
+        ProdBOM                     prodBom;
+        ProdJournalProd             prodJournalProd;
+        EcoResProductTranslation    productTranslation;
+        InventTable                 inventTable;
+        InventTableModule           inventTableModule;
+        Query                       query   = new Query();
+        QueryRun                    qr;
+        QueryBuildDataSource        qbdsInventTrans, qbdsInventDim;
+
+        qbdsInventTrans = query.addDataSource(tableNum(InventTrans));       
+        qbdsInventTrans.addGroupByField(fieldNum(InventTrans, ItemId));
+        if (_fromdate && _todate)
+        {
+            query.dataSourceTable( tableNum (InventTrans)).addRange( fieldNum (InventTrans, DatePhysical)).value(SysQuery::range(_fromdate, _todate));
+        }
+        
+        qbdsInventDim   = qbdsInventTrans.addDataSource(tableNum(InventDim));
+        qbdsInventDim.addLink(fieldNum(InventTrans, inventDimId), fieldNum(InventDim, inventDimId));
+        if (_site)
+        {
+            qbdsInventDim.addGroupByField(fieldNum(InventDim, InventSiteId));
+        }
+        if (_warehouse)
+        {
+            qbdsInventDim.addGroupByField(fieldNum(InventDim, InventLocationId));
+        }
+        if (_Location)
+        {
+            qbdsInventDim.addGroupByField(fieldNum(InventDim, WMSLocationId));
+        }
+        if (_batch)
+        {
+            qbdsInventDim.addGroupByField(fieldNum(InventDim,inventBatchId));
+        }
+        if (_serial)
+        {
+            qbdsInventDim.addGroupByField(fieldNum(InventDim, inventSerialId));
+        }
+             
+        qr = new QueryRun(query);
+        while (qr.next() )
+        {
+            inventTrans = qr.get(tableNum(InventTrans));
+            inventDim   = qr.get(tableNum(InventDim));
+
+            stockStatementTmp.clear();
+            stockStatementTmp.ItemId            = inventTrans.ItemId;
+            stockStatementTmp.inventDimId       = inventTrans.inventDimId;
+            //stockStatementTmp.configId          = inventDim.configId;
+            //stockStatementTmp.InventSizeId      = inventDim.InventSizeId;
+            //stockStatementTmp.InventColorId     = inventDim.InventColorId;
+            //stockStatementTmp.InventStyleId     = inventDim.InventStyleId;
+            stockStatementTmp.InventSiteId      = inventDim.InventSiteId;
+            stockStatementTmp.InventLocationId  = inventDim.InventLocationId;
+            stockStatementTmp.wMSLocationId     = inventDim.wMSLocationId;
+            stockStatementTmp.inventBatchId     = inventDim.inventBatchId;
+            stockStatementTmp.inventSerialId    = inventDim.inventSerialId;
+
+            stockStatementTmp.ItemName          = InventTable::find(inventTrans.ItemId).itemName();
+            stockStatementTmp.UnitId            = InventTable::find(inventTrans.ItemId).inventUnitId();
+         
+            select sum(Qty), sum(CostAmountPosted), sum(CostAmountAdjustment), sum(CostAmountPhysical) from openInventTrans
+                where openInventTrans.DatePhysical < _fromdate
+                && openInventTrans.ItemId == inventTrans.ItemId
+            exists join inventDimLoc
+                where openInventTrans.inventDimId == inventDimLoc.inventDimId
+                && (inventDimLoc.InventLocationId == inventDim.InventLocationId || !_warehouse)
+                && (inventDimLoc.wMSLocationId == inventDim.wMSLocationId || !_Location)
+                && (inventDimLoc.InventSiteId == inventDim.InventSiteId || !_site);
+                
+
+            stockStatementTmp.OpenQty           = abs(openInventTrans.Qty);
+            stockStatementTmp.OpenLineAmount    = abs(openInventTrans.CostAmountPosted + openInventTrans.CostAmountAdjustment + openInventTrans.CostAmountPhysical);
+        
+            select sum(Qty), sum(CostAmountPosted), sum(CostAmountAdjustment), sum(CostAmountPhysical) from grnInventTrans
+                where grnInventTrans.DatePhysical >= _fromdate
+                && grnInventTrans.DatePhysical <= _todate
+                && grnInventTrans.ItemId == inventTrans.ItemId
+            exists join inventTransOrigin
+                where inventTransOrigin.RecId == grnInventTrans.InventTransOrigin
+                && inventTransOrigin.ReferenceCategory == InventTransType::Purch
+            exists join inventDimLoc
+                where grnInventTrans.inventDimId == inventDimLoc.inventDimId
+                && (inventDimLoc.InventLocationId == inventDim.InventLocationId || !_warehouse)
+                && (inventDimLoc.wMSLocationId == inventDim.wMSLocationId || !_Location)
+                && (inventDimLoc.InventSiteId == inventDim.InventSiteId || !_site);
+               
+
+            stockStatementTmp.PurchGRNQty           = grnInventTrans.Qty;
+            stockStatementTmp.PurchGRNLineAmount    = grnInventTrans.CostAmountPosted + grnInventTrans.CostAmountAdjustment + grnInventTrans.CostAmountPhysical;
+
+            select sum(BOMConsump) from prodJournalBOM
+                where prodJournalBOM.ItemId == inventTrans.ItemId
+            exists join prodTable
+                where prodJournalBOM.prodId == prodTable.prodId
+                && prodTable.CreatedDateTime >= DateTimeUtil::newDateTime(_fromdate, 0)
+                && prodTable.CreatedDateTime <= DateTimeUtil::newDateTime(_todate, 86400)
+            exists join prodJournalTable
+                where prodJournalTable.JournalId == prodJournalBOM.JournalId
+                && prodJournalTable.JournalType == ProdJournalType::Picklist
+                && prodJournalTable.Posted == NoYes::Yes
+            exists join inventDimLoc
+                where prodJournalBOM.inventDimId == inventDimLoc.inventDimId
+                && (inventDimLoc.InventLocationId == inventDim.InventLocationId || !_warehouse)
+                && (inventDimLoc.wMSLocationId == inventDim.wMSLocationId || !_Location)
+                && (inventDimLoc.InventSiteId == inventDim.InventSiteId || !_site);
+
+            stockStatementTmp.Consumptionqty    = prodJournalBOM.BOMConsump;
+
+            select firstonly inventSum
+                where inventSum.ItemId == inventTrans.ItemId
+            exists join inventDimLoc
+                where inventSum.inventDimId == inventDimLoc.inventDimId
+                && (inventDimLoc.InventLocationId == inventDim.InventLocationId || !_warehouse)
+                && (inventDimLoc.wMSLocationId == inventDim.wMSLocationId || !_Location)
+                && (inventDimLoc.InventSiteId == inventDim.InventSiteId || !_site);
+       
+
+            stockStatementTmp.consumptionvalue    = stockStatementTmp.Consumptionqty * inventSum.averageCostPrice();
+            //select sum(RealCostAmount) from prodCalcTrans
+            //    where prodCalcTrans.Resource == inventTrans.ItemId
+            //    && prodCalcTrans.InventDimId == inventTrans.inventDimId
+            //exists join prodBom
+            //    where prodBom.RecId == prodCalcTrans.IdRefRecId
+            //    && prodBom.InventTransId == prodJournalBOM.InventTransId
+            //    && prodCalcTrans.CalcType == ItemCalcType::Item
+            //exists join prodTable
+            //    where prodTable.ProdId == prodCalcTrans.CollectRefProdId
+            //    && prodTable.CreatedDateTime >= DateTimeUtil::newDateTime(_fromdate, 0)
+            //    && prodTable.CreatedDateTime <= DateTimeUtil::newDateTime(_todate, 86400);
+            //stockStatementTmp.consumptionvalue    = prodCalcTrans.RealCostAmount;
+
+            select sum(QtyGood) from prodJournalProd
+                where prodJournalProd.ItemId ==  inventTrans.ItemId
+            exists join prodTable
+                where prodTable.ProdId == prodJournalProd.ProdId
+                && prodTable.CreatedDateTime >= DateTimeUtil::newDateTime(_fromdate, 0)
+                && prodTable.CreatedDateTime <= DateTimeUtil::newDateTime(_todate, 86400)
+            exists join prodJournalTable
+                where prodJournalTable.JournalId == prodJournalProd.JournalId
+                && prodJournalTable.JournalType == ProdJournalType::ReportFinished
+                && prodJournalTable.Posted == NoYes::Yes
+            exists join inventDimLoc
+                where prodJournalProd.inventDimId == inventDimLoc.inventDimId
+                && (inventDimLoc.InventLocationId == inventDim.InventLocationId || !_warehouse)
+                && (inventDimLoc.wMSLocationId == inventDim.wMSLocationId || !_Location)
+                && (inventDimLoc.InventSiteId == inventDim.InventSiteId || !_site);
+    
+
+            stockStatementTmp.ProdQty    = prodJournalProd.QtyGood;
+            stockStatementTmp.ProdLineAmount    = stockStatementTmp.ProdQty * inventSum.averageCostPrice();
+
+            //select sum(RealCostAmount), sum(RealCostAdjustment) from prodCalcTrans
+            //    where prodCalcTrans.Resource == inventTrans.ItemId
+            //    && prodCalcTrans.InventDimId == inventTrans.inventDimId
+            //    && prodCalcTrans.CalcType == ItemCalcType::Production
+            //exists join prodTable
+            //    where prodTable.ProdId == prodCalcTrans.CollectRefProdId
+            //    && prodTable.CreatedDateTime >= DateTimeUtil::newDateTime(_fromdate, 0)
+            //    && prodTable.CreatedDateTime <= DateTimeUtil::newDateTime(_todate, 86400)
+            //exists join prodBom
+            //    where prodBom.RecId == prodCalcTrans.IdRefRecId;
+            //stockStatementTmp.ProdLineAmount    = prodCalcTrans.RealCostAmount + prodCalcTrans.RealCostAdjustment;
+
+            select sum(Qty), sum(CostAmountPosted), sum(CostAmountAdjustment), sum(CostAmountPhysical) from transferJourTrans
+                where transferJourTrans.DatePhysical >= _fromdate
+                && transferJourTrans.DatePhysical <= _todate
+                && transferJourTrans.ItemId == inventTrans.ItemId
+            exists join inventTransferJour
+                where inventTransferJour.TransDate == transferJourTrans.DateFinancial
+                && inventTransferJour.VoucherId == transferJourTrans.Voucher
+                && inventTransferJour.UpdateType == InventTransferUpdateType::Shipment
+            exists join inventTransferJourLine
+                where inventTransferJourLine.VoucherId == inventTransferJour.VoucherId
+                && inventTransferJourLine.TransferId == inventTransferJour.TransferId
+            exists join inventDimLoc
+                where transferJourTrans.inventDimId == inventDimLoc.inventDimId
+                && (inventDimLoc.InventLocationId == inventDim.InventLocationId || !_warehouse)
+                && (inventDimLoc.wMSLocationId == inventDim.wMSLocationId || !_Location)
+                && (inventDimLoc.InventSiteId == inventDim.InventSiteId || !_site);
+  
+
+            stockStatementTmp.StockTransferOUTQty   = abs(transferJourTrans.Qty);
+            stockStatementTmp.StockTransferOUTValue = abs(transferJourTrans.CostAmountPosted + transferJourTrans.CostAmountAdjustment + transferJourTrans.CostAmountPhysical);
+
+            select sum(Qty), sum(CostAmountPosted), sum(CostAmountAdjustment), sum(CostAmountPhysical) from salesInventTrans
+                where salesInventTrans.DatePhysical >= _fromdate
+                && salesInventTrans.DatePhysical <= _todate
+                && salesInventTrans.ItemId == inventTrans.ItemId
+            exists join inventTransOrigin
+                where inventTransOrigin.RecId == salesInventTrans.InventTransOrigin
+                && inventTransOrigin.ReferenceCategory == InventTransType::Sales
+            exists join inventDimLoc
+                where salesInventTrans.inventDimId == inventDimLoc.inventDimId
+                && (inventDimLoc.InventLocationId == inventDim.InventLocationId || !_warehouse)
+                && (inventDimLoc.wMSLocationId == inventDim.wMSLocationId || !_Location)
+                && (inventDimLoc.InventSiteId == inventDim.InventSiteId || !_site);
+
+            stockStatementTmp.SalesQty   = abs(salesInventTrans.Qty);
+            stockStatementTmp.SalesValue = abs(salesInventTrans.CostAmountPosted + salesInventTrans.CostAmountAdjustment + salesInventTrans.CostAmountPhysical);
+
+            select sum(Qty), sum(CostAmountPosted), sum(CostAmountAdjustment), sum(CostAmountPhysical) from countingInventTrans
+                where countingInventTrans.DatePhysical >= _fromdate
+                && countingInventTrans.DatePhysical <= _todate
+                && countingInventTrans.ItemId == inventTrans.ItemId
+                && countingInventTrans.Qty < 0
+            exists join inventTransOrigin
+                where inventTransOrigin.RecId == countingInventTrans.InventTransOrigin
+                && inventTransOrigin.ReferenceCategory == InventTransType::InventCounting
+            exists join inventDimLoc
+                where countingInventTrans.inventDimId == inventDimLoc.inventDimId
+                && (inventDimLoc.InventLocationId == inventDim.InventLocationId || !_warehouse)
+                && (inventDimLoc.wMSLocationId == inventDim.wMSLocationId || !_Location)
+                && (inventDimLoc.InventSiteId == inventDim.InventSiteId || !_site);
+               
+            stockStatementTmp.WeightLossQty   = countingInventTrans.Qty;
+            stockStatementTmp.WeightLossValue = countingInventTrans.CostAmountPosted + countingInventTrans.CostAmountAdjustment + countingInventTrans.CostAmountPhysical;
+
+            select sum(Qty), sum(CostAmountPosted), sum(CostAmountAdjustment), sum(CostAmountPhysical) from countingInventTrans
+                where countingInventTrans.DatePhysical >= _fromdate
+                && countingInventTrans.DatePhysical <= _todate
+                && countingInventTrans.ItemId == inventTrans.ItemId
+                && countingInventTrans.Qty > 0
+            exists join inventTransOrigin
+                where inventTransOrigin.RecId == countingInventTrans.InventTransOrigin
+                && inventTransOrigin.ReferenceCategory == InventTransType::InventCounting
+            exists join inventDimLoc
+                where countingInventTrans.inventDimId == inventDimLoc.inventDimId
+                && (inventDimLoc.InventLocationId == inventDim.InventLocationId || !_warehouse)
+                && (inventDimLoc.wMSLocationId == inventDim.wMSLocationId || !_Location)
+                && (inventDimLoc.InventSiteId == inventDim.InventSiteId || !_site);
+
+            stockStatementTmp.WeightGainQty   = countingInventTrans.Qty;
+            stockStatementTmp.WeightGainValue = countingInventTrans.CostAmountPosted + countingInventTrans.CostAmountAdjustment + countingInventTrans.CostAmountPhysical;
+
+            select sum(Qty), sum(CostAmountPosted), sum(CostAmountAdjustment), sum(CostAmountPhysical) from closingInventTrans
+                where closingInventTrans.DatePhysical <= _todate
+                && closingInventTrans.ItemId == inventTrans.ItemId
+            exists join inventDimLoc
+                where closingInventTrans.inventDimId == inventDimLoc.inventDimId
+                && (inventDimLoc.InventLocationId == inventDim.InventLocationId || !_warehouse)
+                && (inventDimLoc.wMSLocationId == inventDim.wMSLocationId || !_Location)
+                && (inventDimLoc.InventSiteId == inventDim.InventSiteId || !_site);
+
+            stockStatementTmp.ClosingQty    = closingInventTrans.Qty;
+            stockStatementTmp.ClosingValue  = closingInventTrans.CostAmountPosted + closingInventTrans.CostAmountAdjustment + closingInventTrans.CostAmountPhysical;
+
+            select sum(Qty), sum(CostAmountPosted), sum(CostAmountAdjustment), sum(CostAmountPhysical) from transitInventTrans
+                where transitInventTrans.DatePhysical >= _fromdate
+                && transitInventTrans.DatePhysical <= _todate
+                && transitInventTrans.ItemId == stockStatementTmp.ItemId
+            exists join inventTransOrigin
+                where inventTransOrigin.RecId == transitInventTrans.InventTransOrigin
+                && (inventTransOrigin.ReferenceCategory == InventTransType::TransferOrderReceive || inventTransOrigin.ReferenceCategory  == InventTransType::TransferOrderShip)
+            exists join inventDimLoc
+                where transitInventTrans.inventDimId == inventDimLoc.inventDimId
+                && (inventDimLoc.InventLocationId == inventDim.InventLocationId || !_warehouse)
+                && (inventDimLoc.wMSLocationId == inventDim.wMSLocationId || !_Location)
+                && (inventDimLoc.InventSiteId == inventDim.InventSiteId || !_site);
+
+            stockStatementTmp.TransitQty        = abs(transitInventTrans.Qty);
+            stockStatementTmp.TransitLineAmount = abs(transitInventTrans.CostAmountPosted + transitInventTrans.CostAmountAdjustment + transitInventTrans.CostAmountPhysical);
+
+            stockStatementTmp.insert();
+        }
+
+        return stockStatementTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insStockMovementTmp</Name>
+				<Source><![CDATA[
+    public static server ETg_StockStatementTmp insStockMovementTmp(ETG_StockStatementEngine _stockStatementEngine)
+    {
+        ETg_StockStatementTmp       stockStatementTmp;
+        InventTrans                 inventTrans; 
+        InventDim                   inventDim;
+        Query                       query   = new Query();
+        QueryRun                    qr;
+        QueryBuildDataSource        qbdsInventTrans, qbdsInventDim;
+        ETG_StockStatementEngine    stockStatementEngine = _stockStatementEngine;
+        container                   conPurchReceived,conSales;
+        CostPriceAverage            costprice;
+        TransDate                   fromDate,toDate;
+
+        fromDate = stockStatementEngine.parmFromDate();
+        toDate   = stockStatementEngine.parmToDate();
+        
+        qbdsInventTrans = query.addDataSource(tableNum(InventTrans));
+        qbdsInventTrans.addGroupByField(fieldNum(InventTrans, ItemId));
+        if (fromdate && todate)
+        {
+            qbdsInventTrans.addRange( fieldNum (InventTrans, DatePhysical)).value(SysQuery::range(fromdate, todate));
+            if(stockStatementEngine.parmItemId())
+            {
+                qbdsInventTrans.addRange(fieldNum (InventTrans, ItemId)).value(stockStatementEngine.parmItemId());
+            }
+        }
+        
+        qbdsInventDim   = qbdsInventTrans.addDataSource(tableNum(InventDim));
+        qbdsInventDim.addLink(fieldNum(InventTrans, inventDimId), fieldNum(InventDim, inventDimId));
+       // qbdsInventDim.addRange(fieldNum(InventDim, WMSLocationId)).value('!""');
+        qbdsInventDim.addGroupByField(fieldNum(InventDim, configId));
+        qbdsInventDim.addGroupByField(fieldNum(InventDim, InventSizeId));
+        qbdsInventDim.addGroupByField(fieldNum(InventDim, InventColorId));
+        qbdsInventDim.addGroupByField(fieldNum(InventDim, InventStyleId));
+        if (stockStatementEngine.parmIsSite())
+        {
+            qbdsInventDim.addGroupByField(fieldNum(InventDim, InventSiteId));
+        }
+        if (stockStatementEngine.parmIsWarehouse())
+        {
+            qbdsInventDim.addGroupByField(fieldNum(InventDim, InventLocationId));
+        }
+        if (stockStatementEngine.parmIsLocation())
+        {
+            qbdsInventDim.addGroupByField(fieldNum(InventDim, WMSLocationId));
+        }
+        if (stockStatementEngine.parmIsBatch())
+        {
+            qbdsInventDim.addGroupByField(fieldNum(InventDim, inventBatchId));
+
+        }
+        if (stockStatementEngine.parmIsSerial())
+        {
+            qbdsInventDim.addGroupByField(fieldNum(InventDim, inventSerialId));
+
+        }
+        
+        qbdsInventTrans.addSelectionField(fieldNum(InventTrans, Qty),SelectionField::Sum);
+     
+        qr = new QueryRun(query);
+        while (qr.next() )
+        {
+            inventTrans = qr.get(tableNum(InventTrans));
+            inventDim   = qr.get(tableNum(InventDim));
+            stockStatementEngine.parmItemId(inventTrans.ItemId);
+            stockStatementTmp.clear();
+            stockStatementTmp.ItemId            = inventTrans.ItemId;
+            stockStatementTmp.inventDimId       = inventTrans.inventDimId;
+            stockStatementTmp.configId          = inventDim.configId;
+            stockStatementTmp.InventSizeId      = inventDim.InventSizeId;
+            stockStatementTmp.InventColorId     = inventDim.InventColorId;
+            stockStatementTmp.InventStyleId     = inventDim.InventStyleId;
+            stockStatementTmp.InventSiteId      = inventDim.InventSiteId;
+            stockStatementTmp.InventLocationId  = inventDim.InventLocationId;
+            stockStatementTmp.wMSLocationId     = inventDim.wMSLocationId;
+            stockStatementTmp.inventBatchId     = inventDim.inventBatchId;
+            stockStatementTmp.inventSerialId    = inventDim.inventSerialId;
+
+            stockStatementTmp.ItemName          = InventTable::find(inventTrans.ItemId).itemName();
+            stockStatementTmp.UnitId            = InventTable::find(inventTrans.ItemId).inventUnitId();
+            stockStatementEngine.setInventDimCriteria(stockStatementTmp);
+            costprice           = stockStatementEngine.findAverageCost();
+            conPurchReceived    = stockStatementEngine.getPurchReceivedQty();
+            conSales            = stockStatementEngine.getSalesQty();
+
+            stockStatementTmp.OpenQty            = stockStatementEngine.findStock() + stockStatementEngine.getPurchOpenQty();
+            stockStatementTmp.OpenLineAmount     = stockStatementTmp.OpenQty * costprice;            
+            stockStatementTmp.ClosingQty         = inventTrans.Qty + stockStatementEngine.getPurchClosedQty();
+            stockStatementTmp.ClosingValue       = stockStatementTmp.ClosingQty * costprice;            
+            stockStatementTmp.PurchGRNQty        = conPeek(conPurchReceived,1);
+            stockStatementTmp.PurchGRNLineAmount = conPeek(conPurchReceived,2);            
+            stockStatementTmp.SalesQty           = conPeek(conSales,1);
+            stockStatementTmp.SalesValue         = conPeek(conSales,2);
+            stockStatementTmp.TransitQty         = stockStatementEngine.getTransferInQty();
+            stockStatementTmp.TransitLineAmount  = stockStatementTmp.TransitQty * costprice;
+            stockStatementTmp.StockTransferOUTQty   = stockStatementEngine.getTransferOutQty();
+            stockStatementTmp.StockTransferOUTValue = stockStatementTmp.StockTransferOUTQty * costprice;
+
+            stockStatementTmp.WeightLossQty    = stockStatementEngine.getWeightLossQty();
+            stockStatementTmp.WeightLossValue  = stockStatementTmp.WeightLossQty * costprice;
+            stockStatementTmp.WeightGainQty    = stockStatementEngine.getWeightGainQty();
+            stockStatementTmp.WeightGainValue  = stockStatementTmp.WeightGainQty * costprice; 
+            stockStatementTmp.ConsumptionQty   = stockStatementEngine.getConsumptionQty();
+            stockStatementTmp.ConsumptionValue = stockStatementTmp.ConsumptionQty * costprice;
+            stockStatementTmp.ProdQty          = stockStatementEngine.getProductionQty();
+            stockStatementTmp.ProdLineAmount   = stockStatementTmp.ProdQty * costprice;
+            stockStatementTmp.insert();
+        }
+
+        return stockStatementTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getPurchOpenQty</Name>
+				<Source><![CDATA[
+    public PurchQty getPurchOpenQty()
+    {
+        PurchLine   purchline;
+        InventDim   inventDim;
+        SalesLine   salesLine;
+        InventDim   inventDimSales;
+        InventQty   purchQty,salesQty;
+      
+        while select RemainPurchPhysical from purchline
+            where purchline.CreatedDateTime < DateTimeUtil::newDateTime(fromdate, 0)
+                && purchline.PurchStatus  == PurchStatus::Backorder
+                && purchline.ItemId  == itemId
+        #inventDimExistsJoin(purchline.InventDimId, inventDim, inventDimCriteria, inventDimParm)
+        {
+            purchQty += purchline.RemainPurchPhysical;
+        }
+
+        while select RemainSalesPhysical from salesLine
+            where salesLine.CreatedDateTime < DateTimeUtil::newDateTime(fromdate, 0)
+                && salesLine.SalesStatus  == SalesStatus::Backorder
+                && salesLine.ItemId  == itemId
+        #inventDimExistsJoin(salesline.InventDimId, inventDimSales, inventDimCriteria, inventDimParm)
+        {
+            salesQty += salesLine.RemainSalesPhysical;
+        }
+
+        return purchQty - salesQty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getPurchClosedQty</Name>
+				<Source><![CDATA[
+    public PurchQty getPurchClosedQty()
+    {
+        PurchLine   purchline;
+        InventDim   inventDim;
+        SalesLine   salesLine;
+        InventDim   inventDimSales;
+        InventQty   purchQty,salesQty;
+      
+        while select RemainPurchPhysical from purchline           
+            where purchline.CreatedDateTime >= DateTimeUtil::newDateTime(fromdate, 0)
+                && purchline.CreatedDateTime <= DateTimeUtil::newDateTime(toDate, 86400)
+                && purchline.PurchStatus  == PurchStatus::Backorder
+                && purchline.ItemId  == itemId
+         #inventDimExistsJoin(purchline.InventDimId, inventDim, inventDimCriteria, inventDimParm)
+        {
+            purchQty += purchline.RemainPurchPhysical;
+        }
+
+        while select sum(RemainSalesPhysical) from salesLine
+            where salesLine.CreatedDateTime >= DateTimeUtil::newDateTime(fromdate, 0)
+                && salesLine.CreatedDateTime <= DateTimeUtil::newDateTime(toDate, 86400)
+                && salesLine.SalesStatus  == SalesStatus::Backorder
+                && salesLine.ItemId  == itemId
+        #inventDimExistsJoin(salesline.InventDimId, inventDimSales, inventDimCriteria, inventDimParm)
+        {
+            salesQty += salesLine.RemainSalesPhysical;
+        }
+
+        return purchQty - salesQty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getPurchReceivedQty</Name>
+				<Source><![CDATA[
+    public container getPurchReceivedQty()
+    {
+        VendPackingSlipTrans vendPackingSlipTrans;
+        PurchLine            purchline;
+        InventDim            inventDim;
+        container            con;
+        PurchQty             purchQty;
+        LineAmount           lineAmount;
+                   
+        while select Qty,ValueMST from vendPackingSlipTrans           
+            where vendPackingSlipTrans.DeliveryDate >= fromdate
+                && vendPackingSlipTrans.DeliveryDate <= toDate
+                && vendPackingSlipTrans.ItemId  == itemId  
+                && vendPackingSlipTrans.Qty != 0
+        #inventDimExistsJoin(vendPackingSlipTrans.InventDimId, inventDim, inventDimCriteria, inventDimParm)
+        {
+            purchQty   += vendPackingSlipTrans.Qty;
+            lineAmount += vendPackingSlipTrans.ValueMST;
+        }
+
+        con = conIns(con,1,purchQty);
+        con = conIns(con,2,lineAmount);
+
+        return con;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getSalesQty</Name>
+				<Source><![CDATA[
+    public container getSalesQty()
+    {
+        InventTrans     inventTrans;
+        InventDim       inventDim;
+        container       con;
+        SalesQty        salesQty;
+        LineAmount      lineAmount;
+        InventTransOrigin inventTransOrigin;
+        CustInvoiceTrans  custInvoiceTrans;
+
+        while select Qty from inventTrans
+            where inventTrans.DateFinancial >= fromdate
+                && inventTrans.DateFinancial <= toDate
+                && inventTrans.ItemId  == itemId
+        join LineAmount from custInvoiceTrans
+            where custInvoiceTrans.InvoiceId == inventTrans.InvoiceId
+        exists join inventTransOrigin
+            where inventTransOrigin.RecId == inventTrans.InventTransOrigin
+                && inventTransOrigin.ReferenceCategory == InventTransType::Sales       
+        #inventDimExistsJoin(inventTrans.InventDimId, inventDim, inventDimCriteria, inventDimParm)
+        {
+            salesQty   += abs(inventTrans.Qty);
+            lineAmount += custInvoiceTrans.LineAmount;
+        }
+
+        con = conIns(con,1,salesQty);
+        con = conIns(con,2,lineAmount);
+
+        return con;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getTransferOutQty</Name>
+				<Source><![CDATA[
+    public Qty getTransferOutQty()
+    {     
+        InventTransferJourLine   inventTransferJourLine;
+        InventTransferJour       inventTransferJour;
+        InventDim                inventDim;
+        InventQty                inventQty;
+      
+        while select VoucherId from inventTransferJour
+            where inventTransferJour.UpdateType == InventTransferUpdateType::Shipment
+                && inventTransferJour.CreatedDateTime >= DateTimeUtil::newDateTime(fromdate, 0)
+                && inventTransferJour.CreatedDateTime <= DateTimeUtil::newDateTime(toDate, 86400)
+        join QtyShipped from inventTransferJourLine
+           //group by inventTransferJourLine.ItemId,inventDim.InventSizeId,inventDim.InventColorId,inventDim.configId,inventDim.InventStyleId,
+           //     inventDim.InventSiteId,inventDim.InventLocationId,inventDim.wMSLocationId
+            where inventTransferJourLine.VoucherId == inventTransferJour.VoucherId
+                && inventTransferJourLine.ItemId  == itemId
+        #inventDimExistsJoin(inventTransferJourLine.InventDimId, inventDim, inventDimCriteria, inventDimParm)
+        {
+            inventQty += inventTransferJourLine.QtyShipped;
+        }
+       
+        return  inventQty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getTransferInQty</Name>
+				<Source><![CDATA[
+    public Qty getTransferInQty()
+    {
+        InventTransferJourLine   inventTransferJourLine;
+        InventTransferJour       inventTransferJour;
+        InventDim                inventDim;
+        InventQty                inventQty;
+      
+        while select VoucherId from inventTransferJour
+            where inventTransferJour.UpdateType == InventTransferUpdateType::Receive
+                && inventTransferJour.CreatedDateTime >= DateTimeUtil::newDateTime(fromdate, 0)
+                && inventTransferJour.CreatedDateTime <= DateTimeUtil::newDateTime(toDate, 86400)
+        join QtyReceived from inventTransferJourLine
+            where inventTransferJourLine.VoucherId == inventTransferJour.VoucherId
+                && inventTransferJourLine.ItemId  == itemId
+        #inventDimExistsJoin(inventTransferJourLine.InventDimId, inventDim, inventDimCriteria, inventDimParm)
+        {
+            inventQty += inventTransferJourLine.QtyReceived;
+        }
+       
+        return  inventQty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getWeightLossQty</Name>
+				<Source><![CDATA[
+    public Qty getWeightLossQty()
+    {
+        InventJournalTable   inventJournalTable;
+        InventJournalTrans   inventJournalTrans;
+        InventDim            inventDim;
+        InventQty            inventQty;
+      
+        while select JournalId from inventJournalTable
+            where inventJournalTable.JournalType == InventJournalType::Count
+                && inventJournalTable.CreatedDateTime >= DateTimeUtil::newDateTime(fromdate, 0)
+                && inventJournalTable.CreatedDateTime <= DateTimeUtil::newDateTime(toDate, 86400)
+        join Qty from inventJournalTrans
+            //group by inventJournalTrans.ItemId,inventDim.InventSizeId,inventDim.InventColorId,inventDim.configId,inventDim.InventStyleId,
+               // inventDim.InventSiteId,inventDim.InventLocationId,inventDim.wMSLocationId
+            where inventJournalTrans.JournalId == inventJournalTable.JournalId
+                && inventJournalTrans.ItemId  == itemId
+                && inventJournalTrans.Qty < 0
+        #inventDimExistsJoin(inventJournalTrans.InventDimId, inventDim, inventDimCriteria, inventDimParm)
+        {
+            inventQty += inventJournalTrans.Qty;
+        }
+     
+        return  inventQty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getWeightGainQty</Name>
+				<Source><![CDATA[
+    public Qty getWeightGainQty()
+    {
+        InventJournalTable   inventJournalTable;
+        InventJournalTrans   inventJournalTrans;
+        InventDim            inventDim;
+        InventQty            inventQty;
+
+        while select JournalId from inventJournalTable
+            where inventJournalTable.JournalType == InventJournalType::Count
+                && inventJournalTable.CreatedDateTime >= DateTimeUtil::newDateTime(fromdate, 0)
+                && inventJournalTable.CreatedDateTime <= DateTimeUtil::newDateTime(toDate, 86400)
+        join Qty from inventJournalTrans
+            where inventJournalTrans.JournalId == inventJournalTable.JournalId
+                && inventJournalTrans.ItemId  == itemId
+                && inventJournalTrans.Qty > 0
+        #inventDimExistsJoin(inventJournalTrans.InventDimId, inventDim, inventDimCriteria, inventDimParm)
+        {
+            inventQty += inventJournalTrans.Qty;
+        }
+     
+        return  inventQty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getProductionQty</Name>
+				<Source><![CDATA[
+    public Qty getProductionQty()
+    {
+        ProdJournalTable   prodJournalTable;
+        ProdJournalProd    prodJournalProd;
+        InventDim            inventDim;
+        InventQty            inventQty;
+
+        while select JournalId from prodJournalTable
+            where prodJournalTable.JournalType == ProdJournalType::ReportFinished
+        join QtyGood from prodJournalProd
+            where prodJournalProd.JournalId == prodJournalTable.JournalId
+                && prodJournalProd.TransDate >= fromDate
+                && prodJournalProd.TransDate <= toDate
+        #inventDimExistsJoin(prodJournalProd.InventDimId, inventDim, inventDimCriteria, inventDimParm)
+        {
+            inventQty += prodJournalProd.QtyGood;
+        }
+
+        return  inventQty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getConsumptionQty</Name>
+				<Source><![CDATA[
+    public Qty getConsumptionQty()
+    {
+        ProdJournalTable   prodJournalTable;
+        ProdJournalBOM     prodJournalBOM;
+        InventDim          inventDim;
+        InventQty          inventQty;
+
+        while select JournalId from prodJournalTable
+            where prodJournalTable.JournalType == ProdJournalType::Picklist
+        join BOMConsump from prodJournalBOM
+            where prodJournalBOM.JournalId == prodJournalTable.JournalId
+                && prodJournalBOM.TransDate >= fromDate
+                && prodJournalBOM.TransDate <= toDate
+        #inventDimExistsJoin(prodJournalBOM.InventDimId, inventDim, inventDimCriteria, inventDimParm)
+        {
+            inventQty += prodJournalBOM.BOMConsump;
+        }
+
+        return  inventQty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>findStock</Name>
+				<Source><![CDATA[
+    public InventQty findStock()
+    {
+        InventSumDateDim inventSumDateDim;
+        InventQty inventQty;
+        ;
+
+        inventSumDateDim = inventSumDateDim::newParameters(fromDate - 1,itemId, inventDimCriteria, inventDimParm);
+        inventQty =  inventSumDateDim.receivedQty()-InventSumDateDim.deductedQty()+InventSumDateDim.postedQty();
+ 
+        return inventQty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>findAverageCost</Name>
+				<Source><![CDATA[
+    public CostPriceAverage findAverageCost()
+    {
+        CostPriceAverage costprice;        
+        date             perDate =systemDateGet();
+        InventOnHand     inventOnHand;
+        ;
+       
+        inventOnHand  = InventOnhand::newParameters(itemId, inventDimCriteria, inventDimParm);
+        costprice     = inventOnHand.costPricePcs(false, perDate);
+
+        return costprice;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setInventDimCriteria</Name>
+				<Source><![CDATA[
+    public void setInventDimCriteria(ETg_StockStatementTmp  _stockStatementTmp)
+    {         
+        inventDimCriteria.configId          = _stockStatementTmp.configId;
+        inventDimCriteria.InventSizeId      = _stockStatementTmp.InventSizeId;
+        inventDimCriteria.InventColorId     = _stockStatementTmp.InventColorId;
+        inventDimCriteria.InventStyleId     = _stockStatementTmp.InventStyleId;
+        inventDimCriteria.InventSiteId      = _stockStatementTmp.InventSiteId;
+        inventDimCriteria.InventLocationId  = _stockStatementTmp.InventLocationId;
+        inventDimCriteria.wMSLocationId     = _stockStatementTmp.wMSLocationId;
+        inventDimCriteria.inventBatchId     = _stockStatementTmp.inventBatchId;
+        inventDimCriteria.inventSerialId    = _stockStatementTmp.inventSerialId;
+
+        inventDimCriteria = InventDim::findOrCreate(inventDimCriteria);
+        inventDimParm.initFromInventDim(inventDimCriteria);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

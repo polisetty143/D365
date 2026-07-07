@@ -1,0 +1,365 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGITMCreatorCreateShipmentWithinSameCompanyOut</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGITMCreatorCreateShipmentWithinSameCompanyOut extends ETGITMCreatorCreateShipmentOut
+{
+    RecordInsertList shipLines;
+    Set inventTransTypeSet;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static ETGITMCreatorCreateShipmentWithinSameCompanyOut construct()
+    {
+        return new ETGITMCreatorCreateShipmentWithinSameCompanyOut();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>preRunOperation</Name>
+				<Source><![CDATA[
+    protected void preRunOperation()
+    {
+        super();
+
+        shipLines = new RecordInsertList(tableNum(ITMLine), true);
+        inventTransTypeSet = new Set(Types::Enum);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    protected boolean run()
+    {
+        using (var activityContext = ITMInstrumentationLogger::newFromName(classStr(ETGITMCreatorCreateShipmentOut)).getActivities().getCreateShipment())
+        {
+            ITMTmpCreatorLine tmpShipCreatorLineLocal;
+            Counter numOfLines;
+            boolean ret;
+    
+            setPrefix("@InboundTransportationManagement:ShipmentCreator");
+    
+            this.preRunValidation();
+            this.preRunOperation();
+    
+            ttsBegin;
+    
+            tmpShipCreatorLineLocal.setTmpData(tmpShipCreatorLine);
+            companyFolioMap = new Map(Types::Container, Types::String);
+
+            ITMTTSTable::createTTSOutETG();
+    
+            while select sum(TransferQty), sum(InventQty), InventTransId, Close, InventTransType from tmpShipCreatorLineLocal
+                group by InventTransId, Close, InventTransType
+                where tmpShipCreatorLineLocal.Selected      == NoYes::Yes
+                   && tmpShipCreatorLineLocal.AddedToBucket == NoYes::Yes
+                   && tmpShipCreatorLineLocal.TransferQty   >  0
+            {
+                if (!headersCreated)
+                {
+                    this.createHeaders();
+                }
+    
+                numOfLines += this.createShipLine(tmpShipCreatorLineLocal);
+            }
+    
+            this.postShipLineCreation();
+
+            ITMTTSTable::deleteTTSOutETG();
+    
+            ret = this.postRunValidation(numOfLines);
+            this.postRunOperation();
+
+            ttsCommit;
+    
+            return ret;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postShipLineCreation</Name>
+				<Source><![CDATA[
+    protected void postShipLineCreation()
+    {
+        ttsbegin;
+
+        if (shipLines != null)
+        {
+            shipLines.insertDatabase();
+        }
+        
+        SetEnumerator inventTransTypeSetEnum = inventTransTypeSet.getEnumerator();
+        while(inventTransTypeSetEnum.moveNext())
+        {
+            ITMLineCreate shipLineCreate = ETGITMLineCreateFactoryOut::newLineCreateFromInventTransTypeOutETG(inventTransTypeSetEnum.current());
+            // ShipTable and ShipId is shared across all lines
+            // FolioTable and FolioId could be multiple records due to folioSetup
+            shipLineCreate.parmShipId(shipTable.ShipId);
+            shipLineCreate.parmShipTable(shipTable);
+
+            if (inventTransTypeSetEnum.current() == InventTransType::Sales)
+            {
+                shipLineCreate.parmStatusId(ITMStatusTable::firstStatusOutETG(ITMCostArea::Item));
+            }
+            else if (inventTransTypeSetEnum.current() == InventTransType::TransferOrderShip)
+            {
+                shipLineCreate.parmStatusId(ITMStatusTable::firstStatusOutETG(ITMCostArea::TransferOrderLine));
+            }
+
+            // 1. Update sourceLines with sourceLine.ITMId = shipId, and ITMStatus
+            shipLineCreate.updateSourceLinesWithShipIdAndStatus();
+
+            // 2. Validate ITMLines - refer to ITMLine.validateWrite()
+            boolean isValid = true;
+            // 2.1 check ToleranceForMultiFolioVendor from ITMLine.checkShipFolioId to here for purchase only
+            isValid = isValid && shipLineCreate.checkMultiFolioVendor();
+            // 2.2 check dlvMode
+            isValid = isValid && shipLineCreate.checkDlvMode();
+            // 2.3 check inventLocation
+            isValid = isValid && shipLineCreate.checkInventLocation();
+            // 2.4 check VoyageStatus modification
+            // for newly created shipline, there is no need to check VoyageStatus
+        }
+
+        // ITMLine validation without inventTransType consideration
+        // 2.5 Check Rentals, pending and locked is executed in createHeaders()
+
+        // 3. Update related info due to ITMLine Insert, refers to ITMLine.insert
+        this.updateContainerNumberOfCartons();
+        this.updateShipPurchStatus();
+        // updatePurchLineShipStatus and UpdateInventTransferLineShipStatus is covered in updateSourceLinesWithShipIdAndStatus()
+        this.insertLinksFromShipLines();
+
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createShipLine</Name>
+				<Source><![CDATA[
+    protected int createShipLine(ITMTmpCreatorLine _tmpShipCreatorLine)
+    {
+        ITMFolioId shipFolioId;
+    
+        if (addToExistingFolio)
+        {
+            shipFolioId = shipFolioTable.ShipFolioId;
+        }
+        else
+        {
+            shipFolioId = this.findOrCreateFolio(_tmpShipCreatorLine.InventTransType, _tmpShipCreatorLine.InventTransId);
+        }
+    
+        ITMLineCreate lineCreate = ITMLineCreate::newLineCreateObject(
+            shipTable.ShipId,
+            shipContainers.ShipContainerId,
+            shipFolioTable,
+            _tmpShipCreatorLine.InventTransId,
+            _tmpShipCreatorLine.InventTransType,
+            _tmpShipCreatorLine.TransferQty,
+            _tmpShipCreatorLine.Close,
+            0,
+            0,
+            0,
+            ITMMeasurementUnit::None,
+            true,
+            true);
+
+        if (!inventTransTypeSet.in(_tmpShipCreatorLine.InventTransType))
+        {
+            inventTransTypeSet.add(_tmpShipCreatorLine.InventTransType);
+        }
+
+        shipLines.add(lineCreate.parmShipLine());
+
+        return 1;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createHeaders</Name>
+				<Source><![CDATA[
+    protected void createHeaders()
+    {
+        super();
+
+        if (!this.checkRental()
+            || !this.checkPending()
+            || !this.checkLocked())
+        {
+            headersCreated = false;
+            throw error("@SYS18447");
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>checkRental</Name>
+				<Source><![CDATA[
+    protected boolean checkRental()
+    {
+        boolean ret = true;
+    
+        if (shipContainers.Recid && shipContainers.ShipRental)
+        {
+            ret = checkFailed("@InboundTransportationManagement:RentalContainersCannotContainAnyItemsDot");
+        }
+    
+        if (ret && shipTable.RecId && shipTable.ShipRental)
+        {
+            ret = checkFailed("@InboundTransportationManagement:RentalShipmentsCannotContainAnyItemsDot");
+        }
+    
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>checkPending</Name>
+				<Source><![CDATA[
+    protected boolean checkPending()
+    {
+        boolean ret = true;
+    
+        if (shipTable.RecId && shipTable.ShipPending)
+        {
+            ret = checkFailed("@InboundTransportationManagement:PendingShipmentsCannotContainAnyItemsDot");
+        }
+    
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>checkLocked</Name>
+				<Source><![CDATA[
+    protected boolean checkLocked()
+    {
+        return shipTable.checkLocked();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateContainerNumberOfCartons</Name>
+				<Source><![CDATA[
+    protected void updateContainerNumberOfCartons()
+    {
+        if (shipContainers.RecId && ITMParameters::find().UpdateContainerCartons)
+        { 
+            ITMLine shipmentLine;
+
+            select sum(ShipNoOfCartons) from shipmentLine
+                where shipmentLine.ShipId          == shipTable.ShipId
+                   && shipmentLine.ShipContainerId == shipContainers.ShipContainerId;
+
+            shipContainers.selectForUpdate(true);
+            shipContainers.ShipNoOfCartons = shipmentLine.ShipNoOfCartons;
+            shipContainers.update();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateShipPurchStatus</Name>
+				<Source><![CDATA[
+    protected void updateShipPurchStatus()
+    {
+        if (inventTransTypeSet.in(InventTransType::Sales))
+        {
+            SalesLine   salesLine;
+            ITMLine     shipLine;
+            SalesStatus salesStatus;
+
+            select firstonly minOf(SalesStatus) from salesLine
+            where salesLine.SalesStatus != SalesStatus::None
+            exists join shipLine
+                where shipLine.RefRecId   == salesLine.RecId
+                   && shipLine.RefTableId == salesLine.TableId
+                   && shipLine.ShipId     == shipTable.ShipId;
+    
+            shipTable.selectForUpdate(true);
+            shipContainers.selectForUpdate(true);
+
+            if (salesLine.RecId)
+            {
+                salesStatus = min(salesLine.SalesStatus, SalesStatus::Canceled);
+            }
+            else
+            {
+                salesStatus = SalesStatus::Backorder;
+            }
+
+            shipTable.ETGITMSalesStatusOutbound = salesStatus;
+            shipContainers.ETGShipSalesStatusOut = salesStatus;
+
+            shipTable.update();
+            shipContainers.update();
+
+            MapEnumerator mapEnum = companyFolioMap.getEnumerator();
+            while (mapEnum.moveNext())
+            {
+                if (shipFolioTable.ShipFolioId == mapEnum.currentValue()
+                 && shipFolioTable.ShipId == shipTable.ShipId)
+                {
+                    shipFolioTable.selectForUpdate(true);
+                    shipFolioTable.ETGShipSalesStatusOut = salesStatus;
+                    shipFolioTable.update();
+                }
+                else
+                {
+                    ITMFolioTable folioTableLocal = ITMFolioTable::find(mapEnum.currentValue(), true);
+                    folioTableLocal.ETGShipSalesStatusOut = salesStatus;
+                    folioTableLocal.update();
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertLinksFromShipLines</Name>
+				<Source><![CDATA[
+    protected void insertLinksFromShipLines()
+    {
+        ETGITMLineCostTransLinkClassOut costTransLinkHelper = ETGITMLineCostTransLinkClassOut::construct();
+
+        costTransLinkHelper.createShipTableLinkFromShipId(shipTable.ShipId);
+        costTransLinkHelper.createShipContainersLinkFromShipIdAndContainerId(shipTable.ShipId, shipContainers.ShipContainerId);
+        costTransLinkHelper.createShipCostTransLinkFromShipId(shipTable.ShipId);
+
+        MapEnumerator mapEnum = companyFolioMap.getEnumerator();
+        while (mapEnum.moveNext())
+        {
+            costTransLinkHelper.createShipFolioTableLinkFromShipIdAndFolioId(shipTable.ShipId, mapEnum.currentValue());
+        }
+
+        if (inventTransTypeSet.in(InventTransType::Sales))
+        {
+            costTransLinkHelper.createSalesTableLinkFromShipId(shipTable.ShipId);
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

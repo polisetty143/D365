@@ -1,0 +1,339 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_VendAccountStatementBalanceDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[
+SRSReportParameterAttribute(classStr(ETG_VendAccountStatementBalanceContract))
+]
+public class ETG_VendAccountStatementBalanceDP extends SRSReportDataProviderBase
+{
+    ETG_VendAccountStatementBalanceTmp     eTG_VendAccountStatementBalanceTmp;
+   
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETG_VendAccountStatementBalanceTmp</Name>
+				<Source><![CDATA[
+    [
+        SRSReportDataSetAttribute(tableStr(ETG_VendAccountStatementBalanceTmp))
+    ]
+    public ETG_VendAccountStatementBalanceTmp getETG_VendAccountStatementBalanceTmp()
+    {
+        select * from eTG_VendAccountStatementBalanceTmp;
+        return eTG_VendAccountStatementBalanceTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETG_VendAccountStatementBalanceContract            contract = this.parmDataContract() as ETG_VendAccountStatementBalanceContract;
+        
+        TransDate       fromDate = contract.parmFromDate();
+        TransDate       toDate   = contract.parmToDate();
+        VendAccount     vendorAccount = contract.parmVendorAccount();
+        VendTable       vendtable = VendTable::find(vendorAccount);
+        VendTrans       vendTrans;
+        VendTransOpen   vendTransOpen; // Added for Outstanding Invoices
+        AmountCur       debit,credit,debitlocal,creditlocal;
+        VendInvoiceJour vendInvoiceJour;
+
+        str SubCommodity = "SubCommodity";
+        str Vertical  = "Vertical";
+        
+        Map map;
+        MapEnumerator mapEnum;
+        CurrencyCode currency_1;
+        AmountCur openingdebit, openingcredit;
+        AmountMST openingdebitlocal, openingcreditlocal;
+        VendTrans vendTransSumDebit, vendTransSumCredit;
+
+        // CORRECTED: Running accumulated total that follows the Excel pattern
+        AmountMST globalAccumulatedTotal = 0;
+        
+        // Get all currencies for opening balances
+        map = this.getCurrencies(vendorAccount, fromDate);
+        mapEnum = map.getEnumerator();
+
+        // STEP 1: Process Opening Balances
+        while (mapEnum.moveNext())
+        {
+            currency_1 = mapEnum.currentValue();
+
+            select sum(AmountCur), sum(AmountMST), AccountNum, CurrencyCode from vendTransSumDebit
+             group by vendTransSumDebit.AccountNum, vendTransSumDebit.CurrencyCode
+             where vendTransSumDebit.AccountNum == vendorAccount
+                && vendTransSumDebit.CurrencyCode == currency_1
+                && vendTransSumDebit.TransDate < fromDate
+                && vendTransSumDebit.AmountCur > 0;
+
+            if (vendTransSumDebit)
+            {
+                openingdebit = vendTransSumDebit.AmountCur;
+                openingdebitlocal = vendTransSumDebit.AmountMST;
+            }
+            else
+            {
+                openingdebit = 0;
+                openingdebitlocal = 0;
+            }
+
+            select sum(AmountCur), sum(AmountMST), AccountNum, CurrencyCode from vendTransSumCredit
+             group by vendTransSumCredit.AccountNum, vendTransSumCredit.CurrencyCode
+             where vendTransSumCredit.AccountNum == vendorAccount
+                && vendTransSumCredit.CurrencyCode == currency_1
+                && vendTransSumCredit.TransDate < fromDate
+                && vendTransSumCredit.AmountCur < 0;
+
+            if (vendTransSumCredit)
+            {
+                openingcredit = vendTransSumCredit.AmountCur;
+                openingcreditlocal = vendTransSumCredit.AmountMST;
+            }
+            else
+            {
+                openingcredit = 0;
+                openingcreditlocal = 0;
+            }
+
+           
+            // This represents the net amount owed to/by the vendor
+            AmountMST openingNetBalance = abs(openingdebitlocal) - abs(openingcreditlocal);
+            globalAccumulatedTotal += openingNetBalance;
+            
+            eTG_VendAccountStatementBalanceTmp.clear();
+            eTG_VendAccountStatementBalanceTmp.VendCode = vendorAccount;
+            eTG_VendAccountStatementBalanceTmp.VendName = vendtable.name();
+            eTG_VendAccountStatementBalanceTmp.Currency = currency_1;
+            eTG_VendAccountStatementBalanceTmp.TransactionDate = fromDate;
+            eTG_VendAccountStatementBalanceTmp.Vocher = "";
+            eTG_VendAccountStatementBalanceTmp.InvoiceNumber = "";
+            eTG_VendAccountStatementBalanceTmp.TransactionText = "Opening Balance";
+            eTG_VendAccountStatementBalanceTmp.AmountCredit = abs(openingcredit);
+            eTG_VendAccountStatementBalanceTmp.AmountDebit = abs(openingdebit);
+            eTG_VendAccountStatementBalanceTmp.Total = eTG_VendAccountStatementBalanceTmp.AmountDebit - eTG_VendAccountStatementBalanceTmp.AmountCredit;
+            eTG_VendAccountStatementBalanceTmp.AccumulatedBalance = abs(openingcreditlocal);
+            eTG_VendAccountStatementBalanceTmp.Amount = abs(openingdebitlocal);
+            eTG_VendAccountStatementBalanceTmp.AccumulatedTotal = globalAccumulatedTotal;
+            eTG_VendAccountStatementBalanceTmp.Commodity = "";
+            eTG_VendAccountStatementBalanceTmp.BOLNumber = "";
+            eTG_VendAccountStatementBalanceTmp.Quantity = 0;
+            eTG_VendAccountStatementBalanceTmp.insert();
+        }
+        
+        // STEP 2: Process Transactions
+        while select vendTrans order by TransDate, RecId
+         where vendTrans.AccountNum == vendorAccount
+          && (vendTrans.TransDate >= fromDate && vendTrans.TransDate <= toDate)
+        {
+            debit = 0.00;
+            credit = 0.00;
+            debitlocal = 0.00;
+            creditlocal = 0.00;
+        
+            if(vendTrans.AmountCur > 0)
+            {
+                debit = vendTrans.AmountCur;
+                debitlocal = vendTrans.AmountMST;
+                
+                // CORRECTED: For vendors, debit transactions (payments) decrease the accumulated total
+                globalAccumulatedTotal += abs(debitlocal);
+            }
+            
+            if(vendTrans.AmountCur < 0)
+            {
+                credit = vendTrans.AmountCur;
+                creditlocal = vendTrans.AmountMST;
+                
+                
+                globalAccumulatedTotal -= abs(creditlocal);
+            }
+
+            eTG_VendAccountStatementBalanceTmp.clear();
+            eTG_VendAccountStatementBalanceTmp.VendCode = vendTrans.AccountNum;
+            eTG_VendAccountStatementBalanceTmp.VendName = vendTrans.vendTableName();
+            eTG_VendAccountStatementBalanceTmp.Currency = vendTrans.CurrencyCode;
+            eTG_VendAccountStatementBalanceTmp.TransactionDate = vendTrans.TransDate;
+            eTG_VendAccountStatementBalanceTmp.Vocher = vendTrans.Voucher;
+            eTG_VendAccountStatementBalanceTmp.InvoiceNumber = vendTrans.Invoice;
+            eTG_VendAccountStatementBalanceTmp.TransactionText = vendTrans.Txt;
+            eTG_VendAccountStatementBalanceTmp.AmountDebit = abs(debit);
+            eTG_VendAccountStatementBalanceTmp.AmountCredit = abs(credit);
+            eTG_VendAccountStatementBalanceTmp.Total = 0; // Transaction rows show 0 for Total
+            eTG_VendAccountStatementBalanceTmp.Amount = abs(debitlocal);
+            eTG_VendAccountStatementBalanceTmp.AccumulatedBalance = abs(creditlocal);
+            eTG_VendAccountStatementBalanceTmp.AccumulatedTotal = globalAccumulatedTotal;
+
+            select * from vendInvoiceJour where vendInvoiceJour.LEDGERVOUCHER == vendTrans.Voucher;
+            eTG_VendAccountStatementBalanceTmp.Quantity = vendInvoiceJour.Qty;
+            eTG_VendAccountStatementBalanceTmp.BOLNumber = vendInvoiceJour.ETG_BLnumber;
+            eTG_VendAccountStatementBalanceTmp.BusinessUnit = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, Vertical);
+            eTG_VendAccountStatementBalanceTmp.Commodity = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, SubCommodity);
+            
+            eTG_VendAccountStatementBalanceTmp.insert();
+        }
+
+        // STEP 3: Process Closing Balances
+        map = this.getCurrenciesForClosing(vendorAccount, toDate);
+        mapEnum = map.getEnumerator();
+        
+        while (mapEnum.moveNext())
+        {
+            currency_1 = mapEnum.currentValue();
+
+            select sum(AmountCur), sum(AmountMST), AccountNum, CurrencyCode from vendTransSumDebit
+             group by vendTransSumDebit.AccountNum, vendTransSumDebit.CurrencyCode
+             where vendTransSumDebit.AccountNum == vendorAccount
+                && vendTransSumDebit.CurrencyCode == currency_1
+                && vendTransSumDebit.TransDate <= toDate
+                && vendTransSumDebit.AmountCur > 0;
+
+            if (vendTransSumDebit)
+            {
+                openingdebit = vendTransSumDebit.AmountCur;
+                openingdebitlocal = vendTransSumDebit.AmountMST;
+            }
+            else
+            {
+                openingdebit = 0;
+                openingdebitlocal = 0;
+            }
+   
+
+            select sum(AmountCur), sum(AmountMST), AccountNum, CurrencyCode from vendTransSumCredit
+             group by vendTransSumCredit.AccountNum, vendTransSumCredit.CurrencyCode
+             where vendTransSumCredit.AccountNum == vendorAccount
+                && vendTransSumCredit.CurrencyCode == currency_1
+                && vendTransSumCredit.TransDate <= toDate
+                && vendTransSumCredit.AmountCur < 0;
+
+            if (vendTransSumCredit)
+            {
+                openingcredit = vendTransSumCredit.AmountCur;
+                openingcreditlocal = vendTransSumCredit.AmountMST;
+            }
+            else
+            {
+                openingcredit = 0;
+                openingcreditlocal = 0;
+            }
+            AmountMST openingNetBalance = abs(openingdebitlocal) - abs(openingcreditlocal);
+            globalAccumulatedTotal += openingNetBalance;
+            
+            eTG_VendAccountStatementBalanceTmp.clear();
+            eTG_VendAccountStatementBalanceTmp.VendCode = vendorAccount;
+            eTG_VendAccountStatementBalanceTmp.VendName = vendtable.name();
+            eTG_VendAccountStatementBalanceTmp.Currency = currency_1;
+            eTG_VendAccountStatementBalanceTmp.TransactionDate = toDate;
+            eTG_VendAccountStatementBalanceTmp.Vocher = "";
+            eTG_VendAccountStatementBalanceTmp.InvoiceNumber = "";
+            eTG_VendAccountStatementBalanceTmp.TransactionText = "Closing Balance";
+            eTG_VendAccountStatementBalanceTmp.AmountCredit = abs(openingcredit);
+            eTG_VendAccountStatementBalanceTmp.AmountDebit = abs(openingdebit);
+            eTG_VendAccountStatementBalanceTmp.Total = eTG_VendAccountStatementBalanceTmp.AmountDebit - eTG_VendAccountStatementBalanceTmp.AmountCredit;
+            eTG_VendAccountStatementBalanceTmp.AccumulatedBalance = abs(openingcreditlocal);
+            eTG_VendAccountStatementBalanceTmp.Amount = abs(openingdebitlocal);
+            // CORRECTED: Closing balance shows the final accumulated total
+            eTG_VendAccountStatementBalanceTmp.AccumulatedTotal = globalAccumulatedTotal;
+            eTG_VendAccountStatementBalanceTmp.Commodity = "";
+            eTG_VendAccountStatementBalanceTmp.BOLNumber = "";
+            eTG_VendAccountStatementBalanceTmp.Quantity = 0;
+            eTG_VendAccountStatementBalanceTmp.insert();
+        }
+
+        // Process Outstanding Invoices
+        
+        if (curExt() == 'o014')
+        {
+            // This fetches records that remain open (unsettled) in VendTransOpen
+            while select vendTrans
+                order by vendTrans.TransDate
+                where vendTrans.AccountNum == vendorAccount
+                   && vendTrans.TransDate <= toDate 
+                join vendTransOpen
+                where vendTransOpen.RefRecId == vendTrans.RecId
+                   && vendTransOpen.AccountNum == vendTrans.AccountNum
+            {
+                eTG_VendAccountStatementBalanceTmp.clear();
+                eTG_VendAccountStatementBalanceTmp.VendCode = vendTrans.AccountNum;
+                eTG_VendAccountStatementBalanceTmp.VendName = vendtable.name();
+                eTG_VendAccountStatementBalanceTmp.Currency = vendTrans.CurrencyCode;
+                eTG_VendAccountStatementBalanceTmp.TransactionDate = vendTrans.TransDate; // Invoice Date
+                
+                eTG_VendAccountStatementBalanceTmp.Vocher = vendTrans.Voucher;
+                eTG_VendAccountStatementBalanceTmp.InvoiceNumber = vendTrans.Invoice;
+                
+                
+                eTG_VendAccountStatementBalanceTmp.TransactionText = "Outstanding Invoice | Due: " + date2Str(vendTransOpen.DueDate, 123, DateDay::Digits2, DateSeparator::Hyphen, DateMonth::Digits2, DateSeparator::Hyphen, DateYear::Digits4);
+                
+                // VendTransOpen stores the open amount in AmountCur/AmountMST
+                if (vendTransOpen.AmountCur > 0)
+                {
+                    eTG_VendAccountStatementBalanceTmp.AmountDebit = vendTransOpen.AmountCur;
+                    eTG_VendAccountStatementBalanceTmp.AmountCredit = 0;
+                }
+                else
+                {
+                    eTG_VendAccountStatementBalanceTmp.AmountDebit = 0;
+                    eTG_VendAccountStatementBalanceTmp.AmountCredit = abs(vendTransOpen.AmountCur);
+                }
+                
+                eTG_VendAccountStatementBalanceTmp.Amount = abs(vendTransOpen.AmountMST);
+                eTG_VendAccountStatementBalanceTmp.AccumulatedBalance = 0;
+                eTG_VendAccountStatementBalanceTmp.AccumulatedTotal = 0; 
+                
+                eTG_VendAccountStatementBalanceTmp.insert();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getCurrencies</Name>
+				<Source><![CDATA[
+    Map getCurrencies(AccountNum _accountId, TransDate _fromDate)
+    {
+        VendTrans vendTransmap;
+        Map mapCurrency = new Map(Types::String, Types::String);
+        
+        while select vendTransmap group by CurrencyCode
+         where vendTransmap.AccountNum == _accountId
+            && vendTransmap.TransDate < _fromDate
+        {
+            mapCurrency.insert(vendTransmap.CurrencyCode, vendTransmap.CurrencyCode);
+        }
+
+        return mapCurrency;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getCurrenciesForClosing</Name>
+				<Source><![CDATA[
+    Map getCurrenciesForClosing(AccountNum _accountId, TransDate _toDate)
+    {
+        VendTrans vendTransmap;
+        Map mapCurrency = new Map(Types::String, Types::String);
+        
+        while select vendTransmap group by CurrencyCode
+         where vendTransmap.AccountNum == _accountId
+            && vendTransmap.TransDate <= _toDate
+        {
+            mapCurrency.insert(vendTransmap.CurrencyCode, vendTransmap.CurrencyCode);
+        }
+
+        return mapCurrency;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

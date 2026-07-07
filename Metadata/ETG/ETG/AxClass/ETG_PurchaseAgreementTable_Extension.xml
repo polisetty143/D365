@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_PurchaseAgreementTable_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tableStr(PurchAgreementHeader))]
+final class ETG_PurchaseAgreementTable_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>intercompanySync</Name>
+				<Source><![CDATA[
+    public void intercompanySync(boolean _forceIntercompanySync)
+    {  
+        ETG_PurchaseAgreementHeader         tradeDetailsHeaderSource;
+        ETG_SalesAgreementHeader            tradeDetailsHeaderDes;
+        VendTable                           vendTable;
+        InterCompanyCompanyId               vendTableInterCompanyTradingPartnerCompanyId;
+        AgreementHeaderDefault              agreementHeaderDefault;
+        ETG_PurchAgreementNotes             purchAgreementNotes;
+        ETG_SalesAgreementNotes             salesAgreementNotes;
+        ETG_PurchaseAgreementQualityGrp     PurchaseAgreementQualityGrp;
+        ETG_SalesAgreementQualityGrp        SalesAgreementQualityGrp;
+        DataAreaId                          srcLE;
+        CustBankAccount                     buyerBank;
+                
+        next intercompanySync(_forceIntercompanySync);
+
+        SalesAgreementHeader        salesAgreementHeaderInter = this.salesAgreementHeader(true);
+
+       /* select firstonly SalesAgreementId from tradeDetailsHeaderDes
+            where tradeDetailsHeaderDes.SalesAgreementId == salesAgreementHeaderInter.SalesNumberSequence;*/
+
+        if(!this.ETG_SalesAgreementIdIC)
+        {
+            this.ETG_SalesAgreementIdIC     = salesAgreementHeaderInter.SalesNumberSequence;
+            this.doUpdate();
+
+            srcLE       = curext();
+
+            select firstonly * from tradeDetailsHeaderSource
+                where tradeDetailsHeaderSource.PurchAgreementId == this.PurchNumberSequence;
+
+            vendTable                                    = this.vendTable();
+            vendTableInterCompanyTradingPartnerCompanyId = vendTable.interCompanyTradingPartnerCompanyID();
+   
+            changecompany(vendTableInterCompanyTradingPartnerCompanyId)
+            {
+                tradeDetailsHeaderDes = null;
+                //select firstonly DeliveryPostalAddress from agreementHeaderDefault
+                //    where agreementHeaderDefault.AgreementHeader == salesAgreementHeaderInter.RecId;
+
+                tradeDetailsHeaderDes.SalesAgreementId                  = salesAgreementHeaderInter.SalesNumberSequence;
+                tradeDetailsHeaderDes.AdvanceDue                        = tradeDetailsHeaderSource.AdvanceDue;
+                tradeDetailsHeaderDes.BuyerAccountNum                   = salesAgreementHeaderInter.CustAccount;
+                tradeDetailsHeaderDes.BuyerDeliveryAddress              = CustTable::find(salesAgreementHeaderInter.CustAccount).postalAddress().RecId;
+                tradeDetailsHeaderDes.BuyerBank                         = CustTable::find(salesAgreementHeaderInter.CustAccount).BankAccount;
+                tradeDetailsHeaderDes.SellerAccountNum                  = curExt();
+              //  tradeDetailsHeaderDes.SellerBank                        = tradeDetailsHeaderSource.BuyerBank;
+                tradeDetailsHeaderDes.SellerDeliveryAddress             = CompanyInfo::findDataArea(curExt()).postalAddress().RecId;
+                tradeDetailsHeaderDes.CommissionType                    = tradeDetailsHeaderSource.CommissionType;
+                tradeDetailsHeaderDes.Consignee                         = tradeDetailsHeaderSource.Consignee;
+                tradeDetailsHeaderDes.CustomImport                      = tradeDetailsHeaderSource.CustomImport;
+                tradeDetailsHeaderDes.DeliveryDescription               = tradeDetailsHeaderSource.DeliveryDescription;
+                tradeDetailsHeaderDes.DisplayTotalCalculatedCommission  = tradeDetailsHeaderSource.DisplayTotalCalculatedCommission;
+                tradeDetailsHeaderDes.FromDatePort                      = tradeDetailsHeaderSource.FromDatePort;
+                tradeDetailsHeaderDes.Future                            = tradeDetailsHeaderSource.Future;
+                tradeDetailsHeaderDes.ImportDate                        = tradeDetailsHeaderSource.ImportDate;
+                tradeDetailsHeaderDes.Notes                             = tradeDetailsHeaderSource.Notes;
+                tradeDetailsHeaderDes.Notifytodifferentparty            = tradeDetailsHeaderSource.Notifytodifferentparty;
+                tradeDetailsHeaderDes.Number                            = tradeDetailsHeaderSource.Number;
+                tradeDetailsHeaderDes.OnAccountOf                       = tradeDetailsHeaderSource.OnAccountOf;
+                tradeDetailsHeaderDes.PortOfDischarge                   = tradeDetailsHeaderSource.PortOfDischarge;
+                tradeDetailsHeaderDes.PortOfLoading                     = tradeDetailsHeaderSource.PortOfLoading;
+                tradeDetailsHeaderDes.PricingFromDate                   = tradeDetailsHeaderSource.PricingFromDate;
+                tradeDetailsHeaderDes.PricingMonth                      = tradeDetailsHeaderSource.PricingMonth;
+                tradeDetailsHeaderDes.PricingTodate                     = tradeDetailsHeaderSource.PricingTodate;
+                tradeDetailsHeaderDes.SalesPoolId                       = salesAgreementHeaderInter.SalesPoolId;
+                tradeDetailsHeaderDes.TermPaymDescription               = tradeDetailsHeaderSource.TermPaymDescription;
+                tradeDetailsHeaderDes.TermsOfDelDescription             = tradeDetailsHeaderSource.TermsOfDelDescription;
+                tradeDetailsHeaderDes.Through                           = tradeDetailsHeaderSource.Through;
+                tradeDetailsHeaderDes.ToDatePort                        = tradeDetailsHeaderSource.ToDatePort;
+                tradeDetailsHeaderDes.TypeValue                         = tradeDetailsHeaderSource.TypeValue;
+                tradeDetailsHeaderDes.Name                              = tradeDetailsHeaderSource.Name;
+                tradeDetailsHeaderDes.Address                           = tradeDetailsHeaderSource.Address;
+                tradeDetailsHeaderDes.PermitNumber                      = tradeDetailsHeaderSource.PermitNumber;
+                tradeDetailsHeaderDes.AgreementType                     = tradeDetailsHeaderSource.AgreementType;
+                tradeDetailsHeaderDes.PackingGroup                      = tradeDetailsHeaderSource.PackingGroup;
+                tradeDetailsHeaderDes.QuantityConditions                = tradeDetailsHeaderSource.QuantityConditions;
+                tradeDetailsHeaderDes.PortOfDischargeDesc               = tradeDetailsHeaderSource.PortOfDischargeDesc;
+                tradeDetailsHeaderDes.PortOfLoadingDesc                 = tradeDetailsHeaderSource.PortOfLoadingDesc;
+                tradeDetailsHeaderDes.ShipperBuyer                      = tradeDetailsHeaderSource.ShipperBuyer;
+
+                buyerBank     = CustBankAccount::find(tradeDetailsHeaderDes.BuyerAccountNum,tradeDetailsHeaderDes.BuyerBank);
+                if(buyerBank)
+                    tradeDetailsHeaderDes.BuyerSecondaryBank = buyerBank.AccountNum + '\n'+buyerBank.SWIFTNo+'\n'+LogisticsPostalAddress::findByLocation(buyerBank.location).Address;
+
+                tradeDetailsHeaderDes.insert();
+
+                while select crosscompany EnumNotes,Description from purchAgreementNotes
+                    where purchAgreementNotes.PurchAgreementId == this.PurchNumberSequence
+                        && purchAgreementNotes.DataAreaId      == srcLE
+                {
+                    salesAgreementNotes.SalesAgreementId     = salesAgreementHeaderInter.SalesNumberSequence;
+                    salesAgreementNotes.EnumNotes            = purchAgreementNotes.EnumNotes;
+                    salesAgreementNotes.Description          = purchAgreementNotes.Description;
+                    salesAgreementNotes.PrintNotesInContract = purchAgreementNotes.PrintNotesInContract;
+                    salesAgreementNotes.insert();
+                }
+
+                salesAgreementHeaderInter.ETG_PurchAgreementIdIC     = this.PurchNumberSequence;
+                salesAgreementHeaderInter.DefaultDimension           = CustTable::find(salesAgreementHeaderInter.CustAccount).DefaultDimension;
+
+                salesAgreementHeaderInter.doUpdate();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETG_findByParentDealNumber</Name>
+				<Source><![CDATA[
+    ///SB, DLT, 10/04/2026
+    /// <summary>
+    /// Method to find purchase agreement based on parent deal number.
+    /// </summary>
+    /// <returns>
+    /// Purchase agreement based on parent deal number.
+    /// </returns>
+    public static PurchAgreementHeader ETG_findByParentDealNumber(str _parentDealNumber,
+                                            boolean              _forUpdate = false)
+    {
+        PurchAgreementHeader PurchAgreementHeader;
+
+        if (_parentDealNumber)
+        {
+            if (_forUpdate)
+            {
+                PurchAgreementHeader.selectForUpdate(_forUpdate);
+            }
+
+            select PurchAgreementHeader
+                where PurchAgreementHeader.ETGDMSDealNumbers== _parentDealNumber;
+        }
+
+        return PurchAgreementHeader;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

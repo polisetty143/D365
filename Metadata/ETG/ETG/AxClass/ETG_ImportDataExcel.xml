@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_ImportDataExcel</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+Using System.IO;
+Using OfficeOpenXml;
+Using OfficeOpenXml.ExcelPackage;
+Using OfficeOpenXml.ExcelRange;
+
+public class ETG_ImportDataExcel
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getImportExcel</Name>
+				<Source><![CDATA[
+    public static FileUploadTemporaryStorageResult getImportExcel()
+    {
+        FileUploadBuild                     fileUploadBuild;
+        DialogGroup                         dialogUploadGroup;
+        FormBuildControl                    formBuildControl;
+        Dialog                              dialog;
+        FileUpload                          fileUploadControl;
+        FileUploadTemporaryStorageResult    fileUploadResult;
+
+        dialog              =   new Dialog("Excel Import");
+        dialogUploadGroup   =   dialog.addGroup("@SYS54759");
+        formBuildControl    =   dialog.formBuildDesign().control(dialogUploadGroup.name());
+        fileUploadBuild     =   formBuildControl.addControlEx(classStr(fileUpload),"UploadExcel");
+
+        fileUploadBuild.style(FileUploadStyle::MinimalWithFilename);
+        fileUploadBuild.fileTypesAccepted(".xlsx");
+
+        fileUploadResult    =   file::GetFileFromUser(classStr(FileUploadTemporaryStorageStrategy));
+
+        return fileUploadResult;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getInsertDataSalesContarct</Name>
+				<Source><![CDATA[
+    public static void getInsertDataSalesContarct(FileUploadTemporaryStorageResult    _fileUploadResult, SalesAgreementId _currSalesAgreementId)
+    {
+        Args args;
+        FormRun formRun;
+        SalesAgreementId excelSalesAgreementId;
+
+        int                                 rowCount;
+        int                                 iterator;
+        boolean                             ret = true;
+        ExcelWorksheet                      worksheet;
+        System.IO.Stream                    stream;
+        OfficeOpenXml.ExcelRange            range;
+        ETG_BOLContainerSalesAgreement      salesContarctBOLTable;
+        SalesAgreementHeader                salesAgreementHeader;
+
+        if (_fileUploadResult!= null && _fileUploadResult.getUploadStatus())
+        {
+            stream  =   _fileUploadResult.openResult();
+
+            using (ExcelPackage package = new ExcelPackage(stream))
+            {
+                package.Load(stream);
+
+                worksheet   =   package.get_workbook().get_worksheets().get_Item(1);
+                range       =   worksheet.Cells;
+                rowCount    =   worksheet.Dimension.End.Row - worksheet.Dimension.Start.Row + 1;
+
+                for (iterator=2; iterator <= rowCount; iterator++)
+                {
+                    select firstonly salesAgreementHeader
+                        where salesAgreementHeader.SalesNumberSequence == range.get_Item(iterator,1).Value;
+
+                    salesContarctBOLTable.SalesAgreementId          =   range.get_Item(iterator,1).Value;
+                    salesContarctBOLTable.LineNum                   =   str2Num(range.get_Item(iterator,2).Value);
+                    salesContarctBOLTable.CarrierNum                =   range.get_Item(iterator,3).Value;
+                    salesContarctBOLTable.SealId                    =   range.get_Item(iterator,4).Value;
+                    salesContarctBOLTable.NetWeight                 =   str2Num(range.get_Item(iterator,5).Value);
+                    salesContarctBOLTable.GrossWeight               =   str2Num(range.get_Item(iterator,6).Value);
+                    salesContarctBOLTable.Bags                      =   str2Num(range.get_Item(iterator,7).Value);
+                    salesContarctBOLTable.CustAccount               =   salesAgreementHeader.CustAccount;
+                    salesContarctBOLTable.SalesAgreementHeaderRecId =   salesAgreementHeader.RecId;
+
+                    excelSalesAgreementId = range.get_Item(iterator,1).Value;
+
+                    if (salesContarctBOLTable.validateWrite() && excelSalesAgreementId == _currSalesAgreementId)
+                    {
+                        ttsbegin;
+                        salesContarctBOLTable.insert();
+                        ttscommit;
+                    }
+                    else
+                    {
+                        error("Selected agreement Id and imported agreement Id doesn't match");
+                        ret = false;
+                    }
+                }
+
+                if(ret)
+                {
+                    args = new args(formstr(ETG_BOLCarrierSalesContractForm));
+                    args.parm(excelSalesAgreementId);
+                    formrun = classfactory.formrunclass(args);
+                    if(formRun.dataSource(formdatasourcestr(ETG_BOLCarrierSalesContractForm, BOLContainerSalesAgreement)))
+                    {
+                        formRun.dataSource(formdatasourcestr(ETG_BOLCarrierSalesContractForm, BOLContainerSalesAgreement)).research(true);
+                    }
+
+                    info("@SYS112337");
+                }
+            }
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getInsertDataSalesPackingSlip</Name>
+				<Source><![CDATA[
+    public static void getInsertDataSalesPackingSlip(FileUploadTemporaryStorageResult    _fileUploadResult, SalesIdOrig _currSalesId)
+    {
+        int                                 rowCount;
+        int                                 iterator;
+        boolean                             ret = true;
+        ExcelWorksheet                      worksheet;
+        System.IO.Stream                    stream;
+        OfficeOpenXml.ExcelRange            range;
+        ETG_BOLContainerTable               contarctBOLTable;
+        SalesTable                          salesTable;
+
+        Args args;
+        FormRun formRun;
+        SalesIdOrig excelSalesId;
+
+        if (_fileUploadResult!= null && _fileUploadResult.getUploadStatus())
+        {
+            stream  =   _fileUploadResult.openResult();
+
+            using (ExcelPackage package = new ExcelPackage(stream))
+            {
+                package.Load(stream);
+
+                worksheet   =   package.get_workbook().get_worksheets().get_Item(1);
+                range       =   worksheet.Cells;
+                rowCount    =   worksheet.Dimension.End.Row - worksheet.Dimension.Start.Row + 1;
+
+                for (iterator=2; iterator <= rowCount; iterator++)
+                {
+                    contarctBOLTable.SalesId                    =   range.get_Item(iterator,1).Value;
+                    contarctBOLTable.LineNum                    =   str2Num(range.get_Item(iterator,2).Value);
+                    contarctBOLTable.CarrierNum                 =   range.get_Item(iterator,3).Value;
+                    contarctBOLTable.SealId                     =   range.get_Item(iterator,4).Value;
+                    contarctBOLTable.NetWeight                  =   str2Num(range.get_Item(iterator,5).Value);
+                    contarctBOLTable.GrossWeight                =   str2Num(range.get_Item(iterator,6).Value);
+                    contarctBOLTable.Bags                       =   str2Num(range.get_Item(iterator,7).Value);
+
+                    excelSalesId = range.get_Item(iterator,1).Value;
+
+                    if (contarctBOLTable.validateWrite() && excelSalesId == _currSalesId)
+                    {
+                        ttsbegin;
+                        contarctBOLTable.insert();
+                        ttscommit;
+                    }
+                    else if(excelSalesId != _currSalesId)
+                    {
+                        error("Imported sales Id doesn't match with the current sales Id.");
+                        ret = false;
+                    }
+                    else
+                    {
+                        Error("container details import failed.");
+                        ret = false;
+                    }
+                }
+
+                if(ret)
+                {
+                    args = new args(formstr(ETG_BOLContainerForm));
+                    args.parm(excelSalesId);
+                    formrun = classfactory.formrunclass(args);
+
+                    if(formRun.dataSource(formdatasourcestr(ETG_BOLContainerForm, BOLContainerTable)))
+                    {
+                        formRun.dataSource(formdatasourcestr(ETG_BOLContainerForm, BOLContainerTable)).research(true);
+                    }
+
+                    info("@SYS112337");
+                }
+            }
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

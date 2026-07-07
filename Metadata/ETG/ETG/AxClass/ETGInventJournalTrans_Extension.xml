@@ -1,0 +1,270 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGInventJournalTrans_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This class is an extension of table InventJournalTrans.
+/// </summary>
+[ExtensionOf(tableStr(InventJournalTrans))]
+internal final class ETGInventJournalTrans_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>validateWrite</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// calling etgIssueReceive()
+    /// </summary>
+    /// <returns>boolean.</returns>
+    public boolean validateWrite()
+    {
+        boolean ret = next validateWrite();
+        ret         = ret && this.etgIssueReceiveUpdate();
+        ret         = ret && this.checkFDQty();
+        ret         = ret && this.checkFDTotalQty();
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>checkFDQty</Name>
+				<Source><![CDATA[
+    public boolean checkFDQty()
+    {
+        boolean isValid = true;
+
+        if(ETGACFParameters::find().EnablefinancialdimensionVertical == NoYes::Yes)
+        {
+            InventJournalName inventJournalName = InventJournalName::find(this.inventJournalTable().JournalNameId);
+            if(inventJournalName && inventJournalName.ETGTransferJournalFDChange == NoYes::Yes)
+            {
+                VendInvoiceTrans vendInvoiceTrans;
+
+                select firstonly Qty from vendInvoiceTrans
+                    where vendInvoiceTrans.InventTransId == this.ETGTransferJournalInvoicetransid
+                    && vendInvoiceTrans.DataAreaId == this.DataAreaId;
+
+                if(abs(this.Qty) > abs(vendInvoiceTrans.Qty))
+                {
+                    isValid = checkFailed(strFmt("Transfer qauntity %1 can not be greater than invoice quantity %2", abs(this.Qty), vendInvoiceTrans.Qty));
+                }
+            }
+        }
+
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>checkFDTotalQty</Name>
+				<Source><![CDATA[
+    public boolean checkFDTotalQty()
+    {
+        boolean isValid = true;
+
+        if(ETGACFParameters::find().EnablefinancialdimensionVertical == NoYes::Yes)
+        {
+            //InventJournalName inventJournalName = InventJournalName::find(this.inventJournalTable().JournalNameId);
+            //if(inventJournalName && inventJournalName.ETGTransferJournalFDChange == NoYes::Yes)
+            //{
+            //    InventJournalTrans inventJournalTrans;
+            //    VendInvoiceTrans vendInvoiceTrans;
+            //    InventJournalTable inventJournalTable;
+
+            //    select firstonly Qty from vendInvoiceTrans
+            //        where vendInvoiceTrans.InventTransId == this.ETGTransferJournalInvoicetransid
+            //        && vendInvoiceTrans.DataAreaId == this.DataAreaId;
+
+            //    select sum (Qty) from inventJournalTrans
+            //        exists join inventJournalTable
+            //        where inventJournalTable.JournalId == this.JournalId
+            //        && inventJournalTable.DataAreaId == this.DataAreaId
+            //        && inventJournalTable.Posted == NoYes::Yes
+            //        && inventJournalTrans.InventTransId == this.ETGTransferJournalInvoicetransid
+            //        && inventJournalTrans.DataAreaId == this.DataAreaId;
+
+            //    if(abs(this.Qty) > (abs(vendInvoiceTrans.Qty) - abs(inventJournalTrans.Qty)))
+            //    {
+            //        isValid = checkFailed(strFmt("Transfer qauntity %1 can not be greater than remaining quantity %2", this.Qty, (abs(vendInvoiceTrans.Qty) - abs(inventJournalTrans.Qty))));
+            //    }
+            //}
+        }
+
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>modifiedField</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// When fields are modified related logic will be performed
+    /// </summary>
+    /// <param name = "_fieldId">FieldId</param>
+    public void modifiedField(FieldId _fieldId)
+    {
+        next modifiedField(_fieldId);
+
+        switch (_fieldId)
+        {
+            case fieldNum(InventJournalTrans, ETGIssueReceive):
+                this.etgQtyValidation();
+                break;
+
+            case fieldNum(InventJournalTrans, ItemId):
+                this.etgUOMValues();
+                break;
+
+            case fieldNum(InventJournalTrans, Qty):
+                this.etgUOMValues();
+                this.etgQtyValidation();
+                break;
+        }
+
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>etgUOMValues</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This is a new method created for getting the values for
+    /// Alternate UOM and Alternate quantity fields based on UnitConversion
+    /// </summary>
+    public void etgUOMValues()
+    {
+        if(SalesParameters::find().ETGEnableCylinderTracking)
+        {
+            InventJournalTable  inventJournalTable = InventJournalTable::find(this.JournalId);
+            InventJournalName   inventJournalName  = InventJournalName::find(inventJournalTable.JournalNameId);
+            if(inventJournalName.ETGManualAdditionorDeletion == NoYes::Yes)
+            {
+                UnitOfMeasureConversion  unitOfMeasureConversion;
+                InventTable              inventTable    = InventTable::find(this.ItemId);
+                UnitOfMeasureRecId       fromUnitId     = UnitOfMeasure::unitOfMeasureIdBySymbol(inventTable.inventUnitId());
+                select firstonly  unitOfMeasureConversion
+                   where      unitOfMeasureConversion.Product           == inventTable.Product
+                   &&         unitOfMeasureConversion.FromUnitOfMeasure == fromUnitId;
+
+                this.ETGAlternateUOM      = UnitOfMeasure::find(unitOfMeasureConversion.ToUnitOfMeasure).Symbol;
+                this.ETGAlternateQuantity = this.Qty * unitOfMeasureConversion.Factor;
+            }
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>etgIssueReceiveUpdate</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This is the new method created for validating the line
+    /// which should have only single issue related record.
+    /// </summary>
+    /// <returns>boolean.</returns>
+    public boolean etgIssueReceiveUpdate()
+    {
+        boolean ret = true;
+        if(SalesParameters::find().ETGEnableCylinderTracking)
+        {
+            InventJournalTrans inventJournaltrans, inventJournaltransRecId;
+            InventJournalTable  inventJournalTable = InventJournalTable::find(this.JournalId);
+            InventJournalName   inventJournalName  = InventJournalName::find(inventJournalTable.JournalNameId);
+
+            if(inventJournalName.ETGManualAdditionorDeletion == NoYes::Yes && this.ETGIssueReceive == ETGIssueReceive::Issue)
+            {
+                select count(RecId) from inventJournaltrans
+                where inventJournaltrans.JournalId       == inventJournalTable.JournalId
+                &&    inventJournaltrans.ETGIssueReceive == ETGIssueReceive::Issue;
+
+                select firstonly RecId from inventJournaltransRecId
+                where inventJournaltransRecId.JournalId       == inventJournalTable.JournalId
+                &&    inventJournaltransRecId.ETGIssueReceive == ETGIssueReceive::Issue;
+
+                if(this.ETGIssueReceive == ETGIssueReceive::Issue 
+                    && inventJournaltrans.RecId > 0 
+                    && inventJournaltransRecId.RecId != this.RecId)
+                {
+                    ret = checkFailed("@ETG_New:Issueshouldnothavemorethanoneline");
+                }
+            }
+        }
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>etgQtyValidation</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method is for validating qty field, if user selects issue it should have negative qty
+    /// if user selects receive, qty should be positive.
+    /// </summary>
+    public void etgQtyValidation()
+    {
+        if(SalesParameters::find().ETGEnableCylinderTracking)
+        {
+
+            InventJournalTable  inventJournalTable    = InventJournalTable::find(this.JournalId);
+            InventJournalName   inventJournalName     = InventJournalName::find(inventJournalTable.JournalNameId);
+
+            if(inventJournalName.ETGManualAdditionorDeletion == NoYes::Yes)
+            {
+                if(this.ETGIssueReceive == ETGIssueReceive::Issue && this.Qty >= 0)
+                {
+                    throw Error ("@ETG_New:QuantityforIssue");
+                }
+
+                else if(this.ETGIssueReceive == ETGIssueReceive::Receive && this.Qty <= 0 )
+                {
+                    throw Error ("@ETG_New:QuantityforReceive");
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insert</Name>
+				<Source><![CDATA[
+    ///SB, DLT, 30/04/2026
+    /// <summary>
+    /// COC of standard method to add custom BatchId
+    /// </summary>
+    public void insert(NoYes _dropEstimated)
+    {
+        InventDim inventDim;
+
+        if(ETGCanadaParameters::find().EnableDefaultBatchNumber == NoYes::Yes)
+        {
+            if (this.JournalType == InventJournalType::Transfer)
+            {
+                if (this.ToInventDimId)
+                {
+                    inventDim = InventDim::find(this.ToInventDimId);
+                }
+                inventDim.inventBatchId = InventTable::find(this.ItemId).ETGDefaultBatchNumber;
+
+                this.ToInventDimId = InventDim::findOrCreate(inventDim).InventDimId;
+            }
+        }
+
+        next insert(_dropEstimated);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

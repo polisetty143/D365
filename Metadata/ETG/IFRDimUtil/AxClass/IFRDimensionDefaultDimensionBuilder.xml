@@ -1,0 +1,259 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>IFRDimensionDefaultDimensionBuilder</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Clase para construir / manejar un DimensionDefault. Anteriormente las funciones relacionadas estaban en IFRDimensionHelper.
+/// </summary>
+class IFRDimensionDefaultDimensionBuilder
+{
+    DimensionDefault defaultDimension;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>new</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Método new, instancia la clase.
+    /// </summary>
+    /// <param name = "_defaultDimension">DimensionDefault sobre el cual es trabajará.</param>
+    protected void new(DimensionDefault _defaultDimension)
+    {
+        defaultDimension = _defaultDimension;
+	}
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Método construct, instancia la clase.
+    /// </summary>
+    /// <param name = "_defaultDimension">DimensionDefault sobre el cual es trabajará.</param>
+    /// <returns>IFRDimensionDefaultDimensionBuilder</returns>
+    public static IFRDimensionDefaultDimensionBuilder construct(DimensionDefault _defaultDimension = 0)
+    {
+        return new IFRDimensionDefaultDimensionBuilder(_defaultDimension);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addDimensionValue</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Asigna el valor de una dimensión a un DimensionDefault.
+    /// </summary>
+    /// <param name = "_dimensionName">Nombre de la dimensión</param>
+    /// <param name = "_dimensionValue">Valor de la dimensión a asignar</param>
+    /// <returns>IFRDimensionDefaultDimensionBuilder</returns>
+    [SuppressBPWarning("BPUnusedStrFmtArgument", "Falso positivo.")]
+
+    public IFRDimensionDefaultDimensionBuilder addDimensionValue(Name _dimensionName, DimensionValue _dimensionValue)
+    {
+        DimensionAttributeValueSetStorage   dimensionAttributeValueSetStorage;
+        DimensionAttributeValue             dimensionAttributeValue;
+        DimensionAttribute					dimensionAttribute;
+
+        dimensionAttributeValueSetStorage = DimensionAttributeValueSetStorage::find(defaultDimension);
+
+        dimensionAttribute = DimensionAttribute::findByName(_dimensionName);
+
+        if (!dimensionAttribute)
+        {
+            throw Error (strFmt("@IFRDimensionUtil:DimensionNameDoesNotExistInCompany", _dimensionName, curExt()));
+        }
+
+        if (_dimensionValue)
+        {
+            dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, _dimensionValue, false, true);
+        }
+
+        if (dimensionAttributeValue)
+        {
+            dimensionAttributeValueSetStorage.addItem(dimensionAttributeValue);
+        }
+        else
+        {
+            dimensionAttributeValueSetStorage.removeDimensionAttribute(dimensionAttribute.RecId);
+        }
+  
+        defaultDimension = dimensionAttributeValueSetStorage.save();
+
+        return this;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>removeDimensionValue</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Elimina el valor de una dimensión a un DimensionDefault.
+    /// </summary>
+    /// <param name = "_dimensionName">Nombre de la dimensión</param>
+    /// <returns>IFRDimensionDefaultDimensionBuilder</returns>
+    public IFRDimensionDefaultDimensionBuilder removeDimensionValue(Name _dimensionName)
+    {
+        return this.addDimensionValue(_dimensionName, '');
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getDimensionValueForDimensionName</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Obtiene el valor de una dimension en un defaultDimension.
+    /// </summary>
+    /// <param name = "_dimensionName">Nombre de la dimensión para la cual se obtendrá el valor.</param>
+    /// <returns>Valor de la dimensión</returns>
+    [SuppressBPWarning("BPUnusedStrFmtArgument", "Falso positivo.")]
+    public DimensionValue getDimensionValueForDimensionName(Name _dimensionName)
+    {
+        DimensionAttributeValueSetStorage dimensionAttributeValueSetStorage = DimensionAttributeValueSetStorage::find(defaultDimension);
+        
+        DimensionAttribute dimensionAttribute = DimensionAttribute::findByName(_dimensionName);
+
+        if (!dimensionAttribute)
+        {
+            throw Error (strFmt("@IFRDimensionUtil:DimensionNameDoesNotExistInCompany", _dimensionName, curExt()));
+        }
+
+        return dimensionAttributeValueSetStorage.getDisplayValueByDimensionAttribute(dimensionAttribute.RecId);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>isDimensionValueEmpty</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Comprueba si una dimensión está vacía.
+    /// </summary>
+    /// <param name = "_dimensionName">Nombre de la dimensión a comprobar</param>
+    /// <returns>Devuelve true en caso de que esté vacía, false en caso contrario.</returns>
+    public boolean isDimensionValueEmpty(Name _dimensionName)
+    {
+        return this.getDimensionValueForDimensionName(_dimensionName) ? false : true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getDefaultDimension</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Obtiene el RecId del DimensionDefault.
+    /// </summary>
+    /// <returns>DimensionDefault</returns>
+    public DimensionDefault getDefaultDimension()
+    {
+        return defaultDimension;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ToString</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Convierte un DimensionDefault a una cadena de texto separada por un separador (-).
+    /// </summary>
+    /// <returns>Cadena de texto con las dimensiones separadas por guión,</returns>
+    [SuppressBPWarning("BPErrorLabelIsText", "Permitimos texto para el separador.")]
+    public str ToString()
+    {
+        DimensionEnumeration        dimensionSetId = DimensionCache::getDimensionAttributeSetForLedger();
+        DimensionAttribute          dimensionAttribute;
+        DimensionAttributeSetItem   dimensionAttributeSetItem;
+
+		#IFRDimUtil
+
+        boolean isFirst = true;
+        str ret;
+
+        while select /*RecId
+                from*/ dimensionAttribute
+                order by Name
+               where dimensionAttribute.Type != DimensionAttributeType::MainAccount
+                join RecId
+                from dimensionAttributeSetItem
+               where dimensionAttributeSetItem.DimensionAttribute    == dimensionAttribute.RecId
+                  && dimensionAttributeSetItem.DimensionAttributeSet == dimensionSetId
+        {
+            if (!isFirst)
+            {
+                ret += #DimensionSeparator;
+            }
+            else
+            {
+                isFirst = false;
+            }
+
+            ret += this.getDimensionValueForDimensionName(dimensionAttribute.Name);
+        }
+        
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>copyDimensionValue</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Reemplaza el valor de una dimensión.
+    /// </summary>
+    /// <param name = "_defaultDimension">DimensionDefault con el valor a reemplazar</param>
+    /// <param name = "_dimensionName">Nombre de la dimensión a reemplazar</param>
+    /// <returns>IFRDimensionDefaultDimensionBuilder</returns>
+    [SuppressBPWarning("BPUnusedStrFmtArgument", "Falso positivo.")]
+    public IFRDimensionDefaultDimensionBuilder copyDimensionValue(Name _dimensionName, DimensionDefault _defaultDimensionOrig)
+    {
+		DimensionAttribute dimensionAttribute = DimensionAttribute::findByName(_dimensionName);
+
+        if (!dimensionAttribute)
+        {
+            throw Error (strFmt("@IFRDimensionUtil:DimensionNameDoesNotExistInCompany", _dimensionName, curExt()));
+        }
+
+        defaultDimension = DimensionDefaultFacade::serviceReplaceAttributeValue(defaultDimension, _defaultDimensionOrig, dimensionAttribute.RecId);
+ 
+        return this;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>mergeDimensions</Name>
+				<Source><![CDATA[
+	/// <summary>
+    /// Fusiona las dimensiones del parámetro con la que estamos construyendo.
+    /// </summary>
+    /// <param name = "_defaultDimension">DimensionDefault a fusionar.</param>
+    /// <param name = "_baseDefaultDimensionThenParameter">Indica si se fusionan las dimensiones base sobre las que pasamos por parámetro (o al revés).</param>
+    /// <returns>IFRDimensionDefaultDimensionBuilder</returns>
+	public IFRDimensionDefaultDimensionBuilder mergeDimensions(DimensionDefault _defaultDimension, boolean _baseDefaultDimensionThenParameter = true)
+    {
+        if (_baseDefaultDimensionThenParameter)
+        {
+            defaultDimension = DimensionDefaultFacade::serviceMergeDefaultDimensions(defaultDimension, _defaultDimension);
+        }
+		else
+        {
+            defaultDimension = DimensionDefaultFacade::serviceMergeDefaultDimensions(_defaultDimension, defaultDimension);
+		}
+
+        return this;
+	}
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

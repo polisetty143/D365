@@ -1,0 +1,235 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_CreatePostLedgerJournal</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_CreatePostLedgerJournal
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>CreateGeneralJournalPO</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="args"></param>
+    public static void CreateGeneralJournalPO(VendPackingSlipJour   _vendPackingSlipJour)
+    {
+        MCRLedgerJournal        journalTable;
+        LedgerJournalTable      ledgerJournalTable;
+        LedgerJournalTrans      ledgerJournalTrans;
+        Counter                 recordsInserted;
+        AmountMST               amountcredit;
+        LedgerDimensionAccount  ledgerAccount,offsetAccount;
+        Voucher                 voucher;
+        ETG_InTransit           inTransit;
+        CustPackingSlipJour     custPackingSlipJour;
+        VendPackingSlipJour     vendPackingSlipJour;
+        PurchTable              purchTable = _vendPackingSlipJour.purchTable();
+        PurchLine               purchLine;
+        str                     packingslipId,productReceiptNo;
+        ETG_Parameters          parameters;
+        str                     infoMsg;
+        ETG_ChargeCodes         chargecodes;
+        AgreementHeader         agreementHeader;
+        PurchAgreementHeader    purchAgreementHeader;
+        SalesAgreementHeader    salesAgreementHeader;
+        VendPackingSlipTrans    vendPackingSlipTrans;
+
+        select firstonly purchTable
+            where purchTable.PurchId == _vendPackingSlipJour.PurchId;
+        packingslipId ='';
+        productReceiptNo ='';
+        if(purchTable.InterCompanyCompanyId)
+        {
+            select firstonly parameters;
+            select firstonly purchLine
+                where purchLine.PurchId == purchTable.PurchId;
+            
+            ttsbegin;
+            journalTable                            = new MCRLedgerJournal_Daily(LedgerJournalType::Daily,parameters.Actualledgerjournalname);
+            ledgerJournalTable                      = journalTable.createLedgerJournalTable(parameters.Actualledgerjournalname);
+            journalTable.parmLedgerJournalTable(ledgerJournalTable);
+            voucher                                 = NumberSeq::newGetNum(LedgerParameters::numRefJournalNum()).num();
+            journalTable.parmMCRCCGeneralLedgerId(voucher);
+            journalTable.parmLedgerAccountType(LedgerJournalACType::Ledger);
+            journalTable.parmLedgerOffsetAccountType(LedgerJournalACType::Ledger);
+            journalTable.parmCurrencyCode(purchTable.CurrencyCode);
+            journalTable.parmLineNum();
+            ledgerAccount                           = LedgerDimensionFacade::serviceCreateLedgerDimension(parameters.Intercompanygoodsintransitaccount,purchTable.DefaultDimension);
+            offsetAccount                           = LedgerDimensionFacade::serviceCreateLedgerDimension(parameters.Intercompanygoodsintransitoffsetaccount,purchTable.DefaultDimension);
+            journalTable.parmLedgerAccount(ledgerAccount);
+            journalTable.parmledgerOffsetAccount(offsetAccount);
+            journalTable.parmTransDate(DateTimeUtil::getToday(DateTimeUtil::getUserPreferredTimeZone()));
+            journalTable.parmTransTxt(parameters.Actualledgerjournalname);
+
+            select firstonly vendPackingSlipTrans
+                where vendPackingSlipTrans.VendPackingSlipJour == _vendPackingSlipJour.RecId;
+
+            amountcredit                        = vendPackingSlipTrans.ValueMST;
+            journalTable.createLedgerJournalTrans(abs(amountcredit),0,LedgerJournalACType::Ledger);
+            recordsInserted++;
+            ttscommit;
+
+            select firstonly forupdate LedgerJournalTrans
+                where LedgerJournalTrans.JournalNum == ledgerJournalTable.JournalNum;
+            select firstonly  agreementHeader
+                where agreementHeader.RecId == purchTable.MatchingAgreement;
+            select firstonly  purchAgreementHeader
+                where purchAgreementHeader.RecId == agreementHeader.RecId;
+            select firstonly  chargeCodes
+                where chargeCodes.PurchNumberSequence == purchAgreementHeader.PurchNumberSequence;
+            select firstonly crosscompany salesAgreementHeader
+                where salesAgreementHeader.SalesNumberSequence == purchAgreementHeader.ETG_SalesAgreementIdIC;
+
+            ttsbegin;
+            LedgerJournalTrans.ETG_Estimation       = chargeCodes.ETG_Estimation;
+            LedgerJournalTrans.ETGAgreementno       = purchAgreementHeader.PurchNumberSequence;
+            LedgerJournalTrans.ETGSalesAgreementno  = salesAgreementHeader.SALESNUMBERSEQUENCE;
+            LedgerJournalTrans.update();
+            ttscommit; 
+
+            select firstonly crosscompany inTransit
+                where inTransit.SalesOrderNo  == purchTable.InterCompanySalesId;
+            inTransit.JournalNum                = ledgerJournalTrans.JournalNum;
+            inTransit.RefVoucher                = inTransit.RefVoucher;
+            inTransit.ReversalVoucher           = ledgerJournalTrans.Voucher;
+            inTransit.OriginCompany             = purchTable.interCompanySalesTable().company();
+            inTransit.DestinationCompany        = purchTable.company();
+            inTransit.Price                     = amountcredit;
+            inTransit.PurchaseOrderNo           = purchTable.PurchId;
+            inTransit.SalesOrderNo              = purchTable.InterCompanySalesId;
+            inTransit.Quantity                  = vendPackingSlipTrans.Qty;
+            while  select crosscompany custPackingSlipJour
+                    where custPackingSlipJour.SalesId == purchTable.InterCompanySalesId
+                        && custPackingSlipJour.DataAreaId == purchTable.interCompanySalesTable().company()
+            {
+                packingslipId                   = packingslipId  + strFmt('%1,', custPackingSlipJour.PackingSlipId);
+            }
+            packingslipId                       = subStr(packingslipId,1, strLen(packingslipId)-1);
+            inTransit.PackingSlip               = packingslipId;
+            while select vendPackingSlipJour
+                    where vendPackingSlipJour.PurchId == purchTable.PurchId
+            {
+                productReceiptNo                = productReceiptNo + strFmt('%1,', vendPackingSlipJour.PackingSlipId);
+            }
+            productReceiptNo                    = subStr(productReceiptNo,1, strLen(productReceiptNo)-1);
+            inTransit.ProductReceiptNo          =  productReceiptNo;
+            inTransit.insert();
+            journalTable.post(LedgerJournalTable);
+            infoMsg = strFmt('The corresponding voucher no: %1 is created for Purchase Order %2', ledgerJournalTable.JournalNum , purchTable.PurchId);
+            info(infoMsg);
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>CreateGeneralJournalSO</Name>
+				<Source><![CDATA[
+    public static void CreateGeneralJournalSO(CustInvoiceJour   _custInvoiceJour)
+    {
+        MCRLedgerJournal        journalTable;
+        LedgerJournalTable      ledgerJournalTable;
+        LedgerJournalTrans      ledgerJournalTrans;
+        Counter                 recordsInserted;
+        AmountMST               amountdebit;
+        LedgerDimensionAccount  ledgerAccount,offsetAccount;
+        Voucher                 voucher;
+        ETG_InTransit           inTransit;
+        CustPackingSlipJour     custPackingSlipJour;
+        SalesTable              salesTable = _custInvoiceJour.salesTable();
+        str                     packingslipId;
+        ETG_Parameters          parameters;
+        str                     infoMsg;
+        ETG_ChargeCodes         chargeCodes;
+        AgreementHeader         agreementHeader;
+        SalesAgreementHeader    salesAgreementHeader;
+        PurchAgreementHeader    purchAgreementHeader;
+
+        packingslipId  ='';
+
+        if(salesTable.InterCompanyCompanyId)
+        {
+            ttsbegin;
+            
+            select firstonly parameters;
+            changecompany(salesTable.InterCompanyCompanyId)
+            {
+                journalTable                            = new MCRLedgerJournal_Daily(LedgerJournalType::Daily,parameters.Actualledgerjournalname);
+                ledgerJournalTable                      = journalTable.createLedgerJournalTable(parameters.Actualledgerjournalname);
+                journalTable.parmLedgerJournalTable(ledgerJournalTable);
+                voucher                                 = NumberSeq::newGetNum(LedgerParameters::numRefJournalNum()).num();
+                journalTable.parmMCRCCGeneralLedgerId(voucher);
+                journalTable.parmLedgerAccountType(LedgerJournalACType::Ledger);
+                journalTable.parmLedgerOffsetAccountType(LedgerJournalACType::Ledger);
+                journalTable.parmCurrencyCode(_custInvoiceJour.CurrencyCode);
+                journalTable.parmLineNum();
+                ledgerAccount                           = LedgerDimensionFacade::serviceCreateLedgerDimension(parameters.Intercompanygoodsintransitaccount,salesTable.DefaultDimension);
+                offsetAccount                           = LedgerDimensionFacade::serviceCreateLedgerDimension(parameters.Intercompanygoodsintransitoffsetaccount,salesTable.DefaultDimension);
+                journalTable.parmLedgerAccount(ledgerAccount);
+                journalTable.parmledgerOffsetAccount(offsetAccount);
+                journalTable.parmTransDate(DateTimeUtil::getToday(DateTimeUtil::getUserPreferredTimeZone()));
+                journalTable.parmTransTxt(parameters.Actualledgerjournalname);
+                amountdebit                             = _custInvoiceJour.InvoiceAmount;
+                journalTable.createLedgerJournalTrans(abs(0),abs(amountdebit),LedgerJournalACType::Ledger);
+                recordsInserted++;
+                ttscommit;
+
+                select firstonly forupdate LedgerJournalTrans
+                             where LedgerJournalTrans.JournalNum == ledgerJournalTable.JournalNum;
+                select firstonly crosscompany agreementHeader
+                    where agreementHeader.RecId == salesTable.MatchingAgreement;
+                select firstonly crosscompany salesAgreementHeader
+                    where salesAgreementHeader.RecId == agreementHeader.RecId;
+                select firstonly crosscompany chargeCodes
+                    where chargeCodes.PurchNumberSequence == salesAgreementHeader.SalesNumberSequence;
+
+                select firstonly purchAgreementHeader
+                    where purchAgreementHeader.ETG_SalesAgreementIdIC == salesAgreementHeader.SalesNumberSequence;
+                
+
+                ttsbegin;
+                LedgerJournalTrans.ETG_Estimation       = chargeCodes.ETG_Estimation;
+                LedgerJournalTrans.ETGSalesAgreementno  = salesAgreementHeader.SALESNUMBERSEQUENCE;
+                LedgerJournalTrans.ETGAgreementno       = purchAgreementHeader.PurchNumberSequence;
+                LedgerJournalTrans.update();
+                ttscommit; 
+
+                select firstonly ledgerJournalTrans
+                where ledgerJournalTrans.JournalNum  == ledgerJournalTable.JournalNum;
+                inTransit.initValue();
+                inTransit.JournalNum                = ledgerJournalTrans.JournalNum;
+                inTransit.RefVoucher                = ledgerJournalTrans.Voucher;
+                inTransit.OriginCompany             = salesTable.company();
+                inTransit.DestinationCompany        = salesTable.interCompanyPurchTable().company();
+                inTransit.SalesInvoiceNo            = _custInvoiceJour.InvoiceId;
+                inTransit.Price                     = _custInvoiceJour.InvoiceAmount;
+                inTransit.PurchaseOrderNo           = salesTable.InterCompanyPurchId;
+                inTransit.SalesOrderNo              =  _custInvoiceJour.SalesId;
+                inTransit.Quantity                  = _custInvoiceJour.Qty;
+
+                while select crosscompany custPackingSlipJour
+                where custPackingSlipJour.SalesId  == salesTable.SalesId
+                {
+                    packingslipId                     = packingslipId + strFmt('%1,', custPackingSlipJour.PackingSlipId);
+                }
+                packingslipId                       = subStr(packingslipId,1, strLen(packingslipId)-1);
+                inTransit.PackingSlip               = packingslipId;
+                inTransit.insert();
+                journalTable.post(ledgerJournalTable);
+                infoMsg = strFmt('The corresponding voucher no: %1 is created for Sales Order %2', ledgerJournalTable.JournalNum, salesTable.SalesId);
+                info(infoMsg);
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

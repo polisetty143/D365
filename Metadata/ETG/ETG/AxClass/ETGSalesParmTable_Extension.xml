@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesParmTable_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///     extension class for table <c>SalesParmTable</c>
+/// </summary>
+[ExtensionOf(tableStr(SalesParmTable))]
+internal final class ETGSalesParmTable_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>modifiedField</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method auto populates fields based on TERMO Number selected
+    /// </summary>
+    /// <param name = "_fieldId">FieldId</param>
+    public void modifiedField(FieldId _fieldId)
+    {
+        next modifiedField(_fieldId);
+
+        switch (_fieldId)
+        {
+            case fieldNum(SalesParmTable, ETGTERMONumber):
+                if(VendParameters::find().ETGEnableTermoNumberFeature 
+                    && this.Ordering == DocumentStatus::Invoice 
+                    && this.ETGTERMONumber)
+                {
+                    this.ETGRemainingTermoValueReal = ETGTERMONumberTable::findFromTermoNumber(this.ETGTERMONumber).RemainingTermoValueReal;
+                    this.updateTermoNumberRefETG();
+                    this.updateTermoValueUsage();
+                }
+                break;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateTermoNumberRefETG</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method populates remaining termo value and mother termo number when termo number is selected
+    /// </summary>
+    public void updateTermoNumberRefETG()
+    {
+        ETGTERMONumberTable termoNumberTable;
+
+        select firstonly RemainingTermoValueReal, MotherTERMOReference
+            from termoNumberTable
+            where termoNumberTable.TERMONumber == this.ETGTERMONumber;
+
+        this.ETGRemainingTermoValueReal = termoNumberTable.RemainingTermoValueReal;
+        this.ETGMotherTERMONumber       = termoNumberTable.MotherTERMOReference;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateTermoValueUsage</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method updates the TERMO value usage and handles its validation
+    /// </summary>
+       public void updateTermoValueUsage()
+        {
+            SalesParmLine salesParmLine;
+            ETGTERMONumberTable termoNumberTable;
+            ETGTERMONumberTable termoNumberMother;
+            select sum(LineAmount) from salesParmLine
+            where salesParmLine.ParmId == this.ParmId
+                && salesParmLine.TableRefId == this.TableRefId;
+        
+            termoNumberTable = ETGTERMONumberTable::findFromTermoNumber(this.ETGTERMONumber);
+            
+        if (termoNumberTable.TypeOfTERMO != ETGTypeOfTERMO::Child)
+            {
+                if((salesParmLine.LineAmount > termoNumberTable.RemainingTermoValueReal)
+                || (salesParmLine.LineAmount > termoNumberTable.TermoValueReal))
+                {
+                    throw error(strFmt("@ETG_New:TERMOValueUsageValidationRemainingTERMOValue", salesParmLine.LineAmount, this.ETGRemainingTermoValueReal, this.ETGTERMONumber));
+                }
+            }
+
+            if (termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Child)
+            {
+                termoNumberMother = ETGTERMONumberTable::findFromTermoNumber(termoNumberTable.MotherTERMOReference, true);
+                if((salesParmLine.LineAmount > termoNumberMother.RemainingTermoValueReal)
+                || (salesParmLine.LineAmount > termoNumberMother.TermoValueReal))
+                {
+                    throw error(strFmt("@ETG_New:ChildTERMOValueUsageValidationRemainingTERMOValue", salesParmLine.LineAmount, termoNumberMother.RemainingTermoValueReal, termoNumberMother.TERMONumber));
+                }
+            }
+        }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>editFixedDueDate</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method edits the due date by adding transit time (days)
+    /// </summary>
+    /// <param name = "_set">boolean _set</param>
+    /// <param name = "_fixedDueDate">SalesFixedDueDate _fixedDueDate</param>
+    /// <returns>SalesFixedDueDate</returns>
+    public edit SalesFixedDueDate editFixedDueDate(boolean _set, SalesFixedDueDate _fixedDueDate)
+    {
+        SalesFixedDueDate fixedDueDate = next editFixedDueDate(_set, _fixedDueDate);
+        if(ETGACFParameters::find().EnableDueDateCalcBLDate == NoYes::Yes)
+        {
+            ETG_SalesTableTrade salesTradeTable = ETG_SalesTableTrade::findFromSalesTrade(this.SalesId);
+            if(salesTradeTable)
+            {
+                fixedDueDate = fixedDueDate + salesTradeTable.ETGTransitTime;//Abhinav - 11-02-2025
+            }
+        }
+
+        return fixedDueDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateField</Name>
+				<Source><![CDATA[
+    public boolean validateField(FieldId _fieldIdToCheck)
+    {
+        boolean isValid = next validateField(_fieldIdToCheck);
+       
+        if(isValid)
+        {
+            switch(_fieldIdToCheck)
+            {
+                case fieldNum(SalesParmTable, ETG_BLnumber):
+                    if(this.ETG_BLnumber && this.Ordering != DocumentStatus::Invoice)
+                    {
+                        isValid = ETGBLNumberUniqueValidation::checkBLNum(this.ETG_BLnumber, this.DataAreaId, ModuleSalesPurch::Sales, this.SalesId);
+                    }
+                    break;
+            }
+        }
+
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateWrite</Name>
+				<Source><![CDATA[
+    public boolean validateWrite()
+    {
+        Boolean isValid = next validateWrite();
+
+        if (isValid)
+        {
+            if(this.ETG_BLnumber && this.Ordering != DocumentStatus::Invoice)
+            {
+                isValid = ETGBLNumberUniqueValidation::checkBLNum(this.ETG_BLnumber, this.DataAreaId, ModuleSalesPurch::Sales, this.SalesId);
+            }
+        }
+
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

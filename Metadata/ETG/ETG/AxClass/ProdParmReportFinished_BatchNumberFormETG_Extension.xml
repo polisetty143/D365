@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ProdParmReportFinished_BatchNumberFormETG_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formControlStr(ProdParmReportFinished,BatchNumber))]
+public final class ProdParmReportFinished_BatchNumberFormETG_Extension
+{
+
+
+
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>Clicked</Name>
+				<Source><![CDATA[
+    public void Clicked()
+    {
+        
+        InventBatch               inventBatch, inventBatchloc;
+        InventBatchId             batchId;
+        InventDim                 inventDim,inventDimLoc, inventdimupd;
+        NumberSequenceTable       numberSequenceTable;
+        InventNumGroup            inventNumGroup;
+        InventTable               inventTable;
+        ProdTable                  prodTable;
+        ProdParmReportFinished     prodParmReportFinished,prodParmReportFinishedLoc;
+        FormDataSource             prodParmReportFinished_ds,inventDim_ds;
+        int hour;
+        InventSum                 inventsum, inventsumloc;
+
+        next  Clicked();
+
+        inventDimLoc    = element.InventDim;
+
+        prodParmReportFinished = element.ProdParmReportFinished;
+
+        prodParmReportFinished_ds = prodParmReportFinished.dataSource();
+
+        inventDim_ds              = inventDimLoc.dataSource();
+
+        
+        prodTable = ProdTable::find(prodParmReportFinished.ProdId);
+
+        inventTable = InventTable::find(prodTable.ItemId);
+
+        inventNumGroup = InventNumGroup::find(inventTable.BatchNumGroupId);
+
+        numberSequenceTable = NumberSequenceTable::find(inventNumGroup.NumberSequenceTable);
+
+        batchId = inventNumGroup.buildNumberParameters(
+            today(),
+            prodTable.ProdId,
+            prodTable.InventTransId,
+            extendedTypeNum(InventBatchId));
+
+        //inventBatch.inventBatchId = batchId;
+        //inventBatch.itemId = prodTable.ItemId;
+        //inventBatch.prodDate = today();
+        //inventBatch.doInsert();
+
+        //batchId = NumberSeq::newGetNumFromId(numberSequenceTable.RecId).num();
+
+        while select forupdate  prodParmReportFinishedLoc 
+            where prodParmReportFinishedLoc.ParmId == prodParmReportFinished.ParmId
+                && prodParmReportFinishedLoc.ProdId == prodParmReportFinished.ProdId
+        {
+            inventdimupd.clear();
+            inventBatch.clear();
+            inventDim.clear();
+            
+
+            ttsbegin;
+
+            inventBatchloc.clear();
+
+            select * from  inventBatchloc where inventBatchloc.itemId == prodParmReportFinishedLoc.ItemId && inventBatchloc.inventBatchId == batchId;
+            if (!inventBatchloc.RecId)
+            {
+                inventBatch.inventBatchId = batchId;
+                inventBatch.itemId = prodParmReportFinishedLoc.ItemId;
+                inventBatch.prodDate = today();
+                inventBatch.doInsert();
+            }
+
+            select forupdate inventDim where inventDim.inventDimId == prodParmReportFinishedLoc.InventDimId;
+
+            inventDim.inventBatchId = batchId;
+            inventdimupd = InventDim::findOrCreate(inventDim);
+            prodParmReportFinishedLoc.InventDimId = inventdimupd.inventDimId;
+            prodParmReportFinishedLoc.ETGBatchCreationDate = today();
+            prodParmReportFinishedLoc.doUpdate();
+
+            //select forupdate inventsum where inventsum.ItemId == prodParmReportFinishedLoc.ItemId && inventsum.InventDimId == prodParmReportFinishedLoc.InventDimId;
+            //if (inventsum.RecId)
+            //{
+            //    inventsum.AvailOrdered      += prodParmReportFinishedLoc.QtyGood;
+            //    inventsum.PhysicalInvent    += prodParmReportFinishedLoc.QtyGood;
+            //    inventsum.Registered        += prodParmReportFinishedLoc.QtyGood;
+            //    inventsum.AvailPhysical     += prodParmReportFinishedLoc.QtyGood;
+            //    inventsum.doUpdate();
+            //}
+            //else
+            //{
+            //    inventsumloc.ItemId            = prodParmReportFinishedLoc.ItemId;
+            //    inventsumloc.AvailOrdered      = 0;//prodParmReportFinishedLoc.QtyGood;
+            //    inventsumloc.PhysicalInvent    = 0;//prodParmReportFinishedLoc.QtyGood;
+            //    inventsumloc.Registered        = 0;//prodParmReportFinishedLoc.QtyGood;
+            //    inventsumloc.AvailPhysical     = 0;//prodParmReportFinishedLoc.QtyGood;
+            //    inventsumloc.InventDimId       = inventdimupd.inventDimId;
+            //    inventsumloc.insert();
+            //}
+
+            ttscommit;
+        }
+
+        inventDim_ds.executeQuery();
+        inventDim_ds.refresh();
+
+        prodParmReportFinished_ds.executeQuery();
+        prodParmReportFinished_ds.refresh();
+
+        if(inventDim.inventbatchid == "")
+        {
+            InventDim_Ds.object(fieldNum(InventDim,inventbatchid)).allowEdit(true);
+            InventDim_Ds.object(fieldNum(InventDim,inventbatchid)).mandatory(true);
+
+        }
+        else
+        {
+            InventDim_Ds.object(fieldNum(InventDim,inventbatchid)).allowEdit(false);
+
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

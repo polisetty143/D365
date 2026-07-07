@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_InventTransWMS_Register_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The class <c>ETG_InventTransWMS_Register_Extension</c> is used to handle the COC methods related to <c>InventTransWMS_Register</c> class.
+/// </summary>
+[ExtensionOf(classstr(InventTransWMS_Register))]
+final class ETG_InventTransWMS_Register_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>writeTmpInventTransWMS</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Writes a record to the pending records table.
+    /// </summary>
+    /// <param name="_tmpInventTransWMS">
+    /// A <c>TmpInventTransWMS</c> record.
+    /// </param>
+    /// <param name="_inventTrans">
+    /// A <c>InventTrans</c> record.
+    /// </param>
+    /// <param name="_inventDim">
+    /// The <c>InventDim</c> record related to the inventory transaction.
+    /// </param>
+    /// <returns>
+    /// true if the record was written successfully; otherwise, false.
+    /// </returns>
+    public boolean writeTmpInventTransWMS(
+        TmpInventTransWMS _tmpInventTransWMS,
+        InventTrans       _inventTrans,
+        InventDim         _inventDim)
+    {
+        boolean     result;
+        
+        this.updateAutoDimBatchId(_tmpInventTransWMS,_inventTrans);
+
+        result = next writeTmpInventTransWMS(_tmpInventTransWMS, _inventTrans,_inventDim);
+
+        return result;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateAutoDimBatchId</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Auto update batch id based on the GRN setup.
+    /// </summary>
+    /// <param name="_tmpInventTransWMS">
+    /// A <c>TmpInventTransWMS</c> record.
+    /// </param>
+    /// <param name="_inventTrans">
+    /// A <c>InventTrans</c> record.
+    /// </param>
+    Public void updateAutoDimBatchId(TmpInventTransWMS _tmpInventTransWMS,InventTrans _inventTrans)
+    {
+        InventNumGroup      inventNumGroup;
+        InventBatchId       inventBatchId;
+        InventBatch         inventBatch;
+        TransDate           postingDate;
+        InventTransOrigin   inventTransOrigin;
+        InventDim           inventDim           = InventDim::find(_tmpInventTransWMS.InventDimId);
+        InventTable         inventTable         = InventTable::find(_inventTrans.ItemId);
+        InventDimGroupSetup inventDimGroupSetup = InventDimGroupSetup::newItemId(inventTable.ItemId);
+
+        if(inventDimGroupSetup.isDimensionActive(fieldNum(InventDim,InventBatchId)) && !inventDim.InventBatchId)
+        {
+            if (! inventTable.BatchNumGroupId)
+            {
+                throw error(strFmt("@SYS68248",inventTable.ItemId));
+            }
+
+            inventNumGroup = InventNumGroup::find(inventTable.BatchNumGroupId);
+
+            if (!inventNumGroup)
+            {
+                throw error(strFmt("@SYS3312",inventNumGroup.NumGroupId));
+            }
+
+            if (this.mustBuildBatchId(inventNumGroup))
+            {
+                inventTransOrigin   = _inventTrans.inventTransOrigin();
+
+                //inventBatchId       = inventNumGroup.buildNumberParameters(_inventTrans.DateExpected,
+                //                                                            inventTransOrigin.ReferenceId,
+                //                                                            inventTransOrigin.InventTransId,
+                //                                                            extendedTypeNum(InventBatchId));
+                postingDate = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+
+                inventBatchId       = inventNumGroup.buildNumberParameters(postingDate,
+                                                                            inventTransOrigin.ReferenceId,
+                                                                            inventTransOrigin.InventTransId,
+                                                                            extendedTypeNum(InventBatchId));
+                if (!inventBatchId)
+                {
+                    throw error(strFmt("@SYS54023",inventNumGroup.NumGroupId));
+                }
+        
+                if (!InventBatch::exist(inventBatchId, inventTable.ItemId))
+                {
+                    inventBatch.InventBatchId = inventBatchId;
+                    inventBatch.initFromInventTrans(_inventTrans);
+                    inventBatch.prodDate    = systemDateGet();
+                    inventBatch.insert();
+                }
+
+                inventDim.inventBatchId = inventBatchId;
+                inventDim = InventDim::findOrCreate(inventDim);
+                _tmpInventTransWMS.InventDimId = inventDim.InventDimId;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>mustBuildBatchId</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Determines if a Batch Id must be build for a given inventory number group.
+    /// </summary>
+    /// <param name = "_inventNumGroup">The inventory number group.</param>
+    /// <returns>true if Batch Id must be build; otherwise, false.</returns>
+    protected boolean mustBuildBatchId(InventNumGroup _inventNumGroup)
+    {
+        if (_inventNumGroup.ManualAllocation        ||
+            _inventNumGroup.OnlyInventTransaction   ||
+            _inventNumGroup.PhysicalUpdate          ||
+            !_inventNumGroup.ETG_GRN)
+        {
+            return false;
+        }
+        return true;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>AgreementLineQuantityCommitmentETGSPAIN_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the <c>AgreementLineQuantityCommitment</c> table for the ETGSPAIN model.
+/// </summary>
+[ExtensionOf(tablestr(AgreementLineQuantityCommitment))]
+final class AgreementLineQuantityCommitmentETGSPAIN_Extension
+{    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>createAgreementLineFromETGSPAINOperation</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method to create <c>AgreementLineQuantityCommitment</c> lines through an <c>ETGSPAINPurchOperationTable</c> and <c>AgreementHeader</c>.
+    /// </summary>
+    /// <param name="_ETGSPAINPurchOperationTable">ETGSPAINPurchOperationTable</param>
+    /// <param name="_agreementHeader">AgreementHeader</param>
+    /// <returns>AgreementLineQuantityCommitment</returns>
+    /// <remarks>Accepts both <c>ETGSPAINPurchOperationTable</c> and <c>AgreementHeader</c></remarks>
+    static AgreementLineQuantityCommitment createAgreementLineFromETGSPAINOperation(ETGSPAINPurchOperationTable   _ETGSPAINPurchOperationTable,
+                                                                                AgreementHeader         _agreementHeader)
+    {
+        #OCCRetryCount
+        
+        AgreementLineQuantityCommitment agreementLineQuantity = AgreementLineQuantityCommitment::ETGSPAINfindETGSPAINPurchOperationId(_ETGSPAINPurchOperationTable.OperationId, _agreementHeader);
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            if (!agreementLineQuantity && _agreementHeader.DefaultAgreementLineExpirationDate)
+            {
+                agreementLineQuantity.clear();
+                agreementLineQuantity.initValue();
+
+                agreementLineQuantity.initFromAgreementHeader(_agreementHeader);
+
+                agreementLineQuantity.Agreement                 = _agreementHeader.RecId;
+                agreementLineQuantity.CommitedQuantity          = 1;
+
+                agreementLineQuantity.InventDimDataAreaId       = curExt();
+                agreementLineQuantity.ItemDataAreaId            = curExt();
+
+                agreementLineQuantity.ETGSPAINPurchOperationId       = _ETGSPAINPurchOperationTable.OperationId;
+                agreementLineQuantity.InventDimId               = _ETGSPAINPurchOperationTable.inventDimFromAgreementLine(agreementLineQuantity, _agreementHeader).inventDimId;
+                agreementLineQuantity.ETGSPAINPurchUnloadPortId      = _ETGSPAINPurchOperationTable.UnloadPortId;
+                agreementLineQuantity.initFromInventTable(_ETGSPAINPurchOperationTable.inventTable());
+                agreementLineQuantity.ItemId                    = _ETGSPAINPurchOperationTable.ItemId;
+
+                UnitOfMeasureSymbol unitOfMeasureSymbol;
+
+                switch (_agreementHeader.TableId)
+                {
+                    case tableNum(SalesAgreementHeader):
+                        unitOfMeasureSymbol = InventTableModule::find(agreementLineQuantity.ItemId, ModuleInventPurchSales::Purch).UnitId;
+                        break;
+
+                    case tableNum(PurchAgreementHeader):
+                        unitOfMeasureSymbol = InventTableModule::find(agreementLineQuantity.ItemId, ModuleInventPurchSales::Sales).UnitId;
+                        break;
+                }
+
+                agreementLineQuantity.ProductUnitOfMeasure = unitOfMeasureSymbol;
+
+                if (agreementLineQuantity.validateWrite())
+                {
+                    try
+                    {
+                        ttsbegin;
+                        agreementLineQuantity.insert();
+                        agreementLineQuantity.agreementHeader(true).update();
+                        ttscommit;
+                    }
+                    catch (Exception::Deadlock)
+                    {
+                        retry;
+                    }
+                    catch (Exception::UpdateConflict)
+                    {
+                        if (appl.ttsLevel() == 0)
+                        {
+                            if (xSession::currentRetryCount() >= #RetryNum)
+                            {
+                                throw Exception::UpdateConflictNotRecovered;
+                            }
+                            else
+                            {
+                                retry;
+                            }
+                        }
+                        else
+                        {
+                            throw Exception::UpdateConflict;
+                        }
+                    }
+                }
+                else
+                {
+                    throw error("@SYS18447");
+                }
+            }
+        }
+
+        return agreementLineQuantity;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSPAINfindETGSPAINPurchOperationId</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Finds a specific record in the <c>AgreementLine</c> table using its Operation ID.
+    /// </summary>
+    /// <param name="_ETGSPAINPurchOperationId">
+    /// The <c>ETGSPAINPurchOperationId</c> of the record to find.
+    /// </param>
+    /// <param name="_agreementHeader">
+    /// The <c>AgreementHeader</c> record.
+    /// </param>
+    /// <param name="_forUpdate">
+    /// A <c>Boolean</c> value indicating if the record is for read or write; optional.
+    /// </param>
+    /// <returns>
+    /// A record from the <c>AgreementLine</c> table; otherwise, an empty record.
+    /// </returns>
+    static AgreementLineQuantityCommitment ETGSPAINfindETGSPAINPurchOperationId(ETGSPAINPurchOperationId   _ETGSPAINPurchOperationId,
+                                                                        AgreementHeader     _agreementHeader,
+                                                                        boolean             _forUpdate = false)
+    {
+        AgreementLineQuantityCommitment    agreementLine;
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            if (_ETGSPAINPurchOperationId && _agreementHeader)
+            {
+                if (_forUpdate)
+                {
+                    agreementLine.selectForUpdate(_forUpdate);
+                }
+
+                select firstonly agreementLine
+                where agreementLine.ETGSPAINPurchOperationId     == _ETGSPAINPurchOperationId
+                    && agreementLine.Agreement              == _agreementHeader.RecId;
+            }
+        }
+
+        return agreementLine;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

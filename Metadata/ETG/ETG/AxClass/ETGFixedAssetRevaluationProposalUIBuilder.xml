@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGFixedAssetRevaluationProposalUIBuilder</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+internal final class ETGFixedAssetRevaluationProposalUIBuilder extends SysOperationAutomaticUIBuilder
+{
+    public DialogField journalname;
+    public DialogField postingLayer;
+    public DialogField assetId;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>postBuild</Name>
+				<Source><![CDATA[
+    public void postBuild()
+    {
+        super();
+        journalname  = this.bindInfo().getDialogField(this.dataContractObject(), methodStr(ETGFixedAssetRevaluationContract, parmLedgerJournalNameId));
+        postingLayer = this.bindInfo().getDialogField(this.dataContractObject(), methodStr(ETGFixedAssetRevaluationContract, parmPostingLayer));
+        assetId      = this.bindInfo().getDialogField(this.dataContractObject(), methodStr(ETGFixedAssetRevaluationContract, parmAssetId));
+
+        journalname.registerOverrideMethod(methodStr(FormStringControl, lookup), methodStr(ETGFixedAssetRevaluationProposalUIBuilder, journalNameLookup), this);
+        journalname.fieldControl().mandatory(true);
+        assetId.lookupButton(FormLookupButton::Always);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>journalNameLookup</Name>
+				<Source><![CDATA[
+    public void journalNameLookup(FormStringControl _control)
+    {
+        SysTableLookup          sysTableLookup;
+        QueryBuildDataSource    queryBuildDataSource;
+        Query                   query = new Query();
+
+        sysTableLookup = SysTableLookup::newParameters(tableNum(LedgerJournalName), _control);
+
+        sysTableLookup.addLookupfield(fieldNum(LedgerJournalName, JournalName));
+        sysTableLookup.addLookupfield(fieldNum(LedgerJournalName, Name));
+
+        queryBuildDataSource = query.addDataSource(tableNum(LedgerJournalName));
+        QueryBuildRange queryBuildRangeJournalType = queryBuildDataSource.addRange(fieldNum(LedgerJournalName, JournalType));
+        queryBuildRangeJournalType.value(int2str(enum2int(LedgerJournalType::Assets)));
+
+        QueryBuildRange queryBuildRangePostingLayer = queryBuildDataSource.addRange(fieldNum(LedgerJournalName, CurrentOperationsTax));
+        queryBuildRangePostingLayer.value(SysQuery::value(postingLayer.value()));
+
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.performFormLookup();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postRun</Name>
+				<Source><![CDATA[
+    public void postRun()
+    {
+        Query                   query               = new Query();
+        QueryBuildDataSource    qbds,qbdsCustTable  = query.addDataSource(tablenum(AssetTable));
+        QueryBuildRange         qbr;
+
+        qbdsCustTable.fields().addField(fieldNum(AssetTable, AssetId));
+        qbdsCustTable.fields().addField(fieldNum(AssetTable, Name));
+        qbdsCustTable.fields().addField(fieldNum(AssetTable, AssetGroup));
+
+        container selectedFields = [tableNum(AssetTable), fieldNum(AssetTable, AssetId)];
+ 
+        SysLookupMultiSelectCtrl::constructWithQuery(this.dialog().dialogForm().formRun(), assetId.control(), query, false, selectedFields);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

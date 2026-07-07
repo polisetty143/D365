@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_Acu_SalesTableImport</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// SAles header import
+/// </summary>
+public class ETG_Acu_SalesTableImport extends ETG_Acu_DataImportBase
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args args)
+    {
+        ETG_Acu_SalesTableImport  salesTableimport;
+
+        salesTableimport = ETG_Acu_SalesTableImport::construct();
+
+        if (salesTableimport.prompt())
+        {
+            salesTableimport.runOperation();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static ETG_Acu_SalesTableImport construct()
+    {
+        return new ETG_Acu_SalesTableImport();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>canRunInNewSession</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Describes whether the class is designed for execution in a new session.
+    /// </summary>
+    /// <returns>
+    /// true if the class is designed for execution the operation in a new session; otherwise, false.
+    /// </returns>
+    protected boolean canRunInNewSession()
+    {
+        return false;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processData</Name>
+				<Source><![CDATA[
+    protected void processData(container _con)
+    {
+        SalesOrderHeaderV3Entity    salesTable;
+        CustTable                   custTable;    
+        CustTable                   custTableInv;
+        DirPartyBaseEntity          custTableDirParty;
+        DirPartyBaseEntity          custTableInvDirParty;
+
+
+        salesTable.SalesOrderNumber                     = conpeek(_con, 1);
+        salesTable.ConfirmedReceiptDate                 = str2Date(conpeek(_con, 2), 123);
+        salesTable.ConfirmedShippingDate                = str2Date(conpeek(_con, 3), 123);
+        salesTable.CurrencyCode                         = conpeek(_con, 4);
+        salesTable.CustomerPaymentMethodName            = conpeek(_con, 5);
+        salesTable.CustomerPostingProfileId             = conpeek(_con, 6);
+        //salesTable.DefaultLedgerDimensionDisplayValue   = conpeek(_con, 7);
+        salesTable.DefaultShippingSiteId                = conpeek(_con, 8);
+        salesTable.DefaultShippingWarehouseId           = conpeek(_con, 9);
+        /*salesTable.DeliveryAddressCountryRegionId       = conpeek(_con, 10);
+        salesTable.DeliveryAddressDescription           = conpeek(_con, 11);
+        salesTable.DeliveryAddressName                  = conpeek(_con, 12);
+        salesTable.DeliveryAddressStreet                = conpeek(_con, 13);*/
+        salesTable.DeliveryModeCode                     = conpeek(_con, 14);
+        salesTable.DeliveryTermsCode                    = conpeek(_con, 15);
+        salesTable.FixedExchangeRate                    = conpeek(_con, 16);
+
+        select firstonly custTable
+            exists join custTableDirParty
+            where custTableDirParty.PartyRecordId  == custTable.Party
+                && custTableDirParty.OrganizationNumber == conpeek(_con, 19);
+
+        select firstonly custTableInv
+            exists join custTableInvDirParty
+            where custTableInvDirParty.PartyRecordId  == custTableInv.Party
+                && custTableInvDirParty.OrganizationNumber == conpeek(_con, 17);
+
+        salesTable.InvoiceCustomerAccountNumber         = custTableInv.AccountNum;
+        salesTable.LanguageId                           = conpeek(_con, 18);
+        salesTable.OrderingCustomerAccountNumber        = custTable.AccountNum;
+        salesTable.PaymentTermsName                     = conpeek(_con, 20);
+        salesTable.RequestedReceiptDate                 = str2Date(conpeek(_con, 21), 123);
+        salesTable.RequestedShippingDate                = str2Date(conpeek(_con, 22), 123);
+        salesTable.SalesOrderName                       = conpeek(_con, 23);
+        salesTable.SalesOrderPoolId                     = conpeek(_con, 24);
+        salesTable.DeliveryAddressLocationId            = LogisticsLocation::find(custTable.postalAddress().Location).LocationId;
+
+        // BusinessUnit (26)	Contract (27)	Department (28)	Intercompany (29)	Plant_Warehouse_Office (30)	Product_Service (31)	Trader_Employee (32)
+        // |Plant_Warehouse_Office|Department|Trader_Employee|Product_Service|BusinessUnit|Intercompany|Contract
+
+        salesTable.DefaultLedgerDimensionDisplayValue  = conPeek(_con, 30) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                    + conPeek(_con, 28) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                    + conPeek(_con, 32) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                    + conPeek(_con, 31) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                    + conPeek(_con, 26) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                    + conPeek(_con, 29) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                    + conPeek(_con, 27);
+        salesTable.SalesAgreementIdComfirmVer           = conPeek(_con,40);
+
+        salesTable.insert();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caption</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///Import inventory site
+    /// </summary>
+    /// <returns>Caption</returns>
+    public ClassDescription caption()
+    {
+        ClassDescription ret;
+    
+        ret = "@ETG_ENG_Labels:ImpOpenSalesHeader";
+    
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

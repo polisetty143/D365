@@ -1,0 +1,470 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchAgreementUploaderService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+using System.IO;
+using OfficeOpenXml;
+using OfficeOpenXml.ExcelPackage;
+using OfficeOpenXml.ExcelRange;
+public final class ETGPurchAgreementUploaderService extends SysOperationServiceBase
+{
+    System.IO.Stream                 stream;
+    FileUploadTemporaryStorageResult fileUploadResult;
+    ExcelSpreadsheetName             sheeet;
+    Filename                         filename;
+    ETGBrokerageCommissionType       brokerageCommissionType;
+    DimensionParameters              dimensionParameters = DimensionParameters::find();
+
+    protected   CommaStreamIo importFile;
+    ETG_PlaceOfLoading placeOfLoading;
+    ETG_PlaceOfDischarge placeOfDischarge;
+
+    str agreementStatus, wfStatus;
+    str                 purchNumberSequenceLoc;
+    VendAccount         vendAccountLoc;
+    str                 currencyCodeNew;
+    str                 agreementClassificationLoc, finalPlaceOfDelivery;
+    real                numberOfContainer, netWightMTS, grossWeightMTS;                 
+    TransDate           EffectiveDateLoc, Expiration, PricingFromDate, PricingTodate, AdvanceDue, FromDatePort, ToDatePort, ImportDate;
+    int                 PricingMonth;
+    str                 futures, NotifyToDifferentParty;
+    str                 Contact, BLDATE, AgreementType,VendorReference,	ETGVendor,	DocumentTitle,
+                        ExternalDocumentReference, Preparer, IntercompanyOrigin, PrimaryResponsibleWorker,
+                        SecondaryResponsibleWorker,	ParentPurchaseAgreement, BuyerAccount,	BuyerAddress,
+                        SellerAccount,	SellerAddress,	Broker, CommissionType, CommissionValue,
+                        TermsOfPaymentDescription, BuyerBank,	SellerBank,	PackingGroup, 	Notes,	ShipperBuyer,
+                        Consignee, OnAccountOf, DeliveryDescription,	ShipmentText,	NotifyName, NotifyAddress,
+                        TermsOfDelDescription,	QuantityConditions,	PortOFLoading,	PortOfDischarge,	CustomImport, PermitNumber, 
+                        NotifyParty2, GoodsDescription2, Fixation,HSCODE, 	Marks,
+                        ShippedQualityDetailsCertificate,	DIRECCOURIERTOINDVTM,	SupplierCode,	WHLocationReceipt,	DrawnUnderLetterOfCreditNumber,
+                        SHIPPEROREXPORTER,	VESSELNAMEVOYAGE,	VESSELSAILED,	SPECIALINSTRUCTIONS,	TermsOfPayment,	MethodOfPayment,	PaymentSpecification,
+                        PaymentSchedule, CashDiscountCode,	Bank, ChargesGroup,	ModeOfDelivery,	DeliveryTerm, 	BuyerGroup,	PurchasePool, PaymentTerms, MiscChargeGroup, DeliveryMode;
+
+    str                 defaultDimStr, BusinessUnit, Contract, costcenter, Department, InterCompany, Items, Line_of_Business, MainCommodity, Plant_Warehouse_Office, SubCommodity, TraderEmployee, Vertical ;
+
+
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>importPurchContracts</Name>
+				<Source><![CDATA[
+    public void importPurchContracts(ETGPurchAgreementUploaderContract  _contract)
+    {
+        #OCCRetryCount
+
+        ReqItemTable                    reqItemTable,reqItemTableDim;
+        InventDim                       inventDim;
+        InventTable                     inventTable;
+
+        try
+        {
+            if (_contract.parmStorageResult() != conNull())
+            {
+                FileUploadTemporaryStorageResult fileUploadResultLoc = new FileUploadTemporaryStorageResult();
+                fileUploadResultLoc.unpack(_contract.parmStorageResult());
+
+                if (fileUploadResultLoc != null && fileUploadResultLoc.getUploadStatus())
+                {
+                    stream = fileUploadResultLoc.openResult();
+
+                    using (ExcelPackage Package = new ExcelPackage(stream))
+                    {
+                        int                         rowCount, i,columncount,j;
+                        Package.Load(stream);
+                        ExcelWorksheet              worksheet   = package.get_Workbook().get_Worksheets().get_Item(1);
+                        OfficeOpenXml.ExcelRange    range       = worksheet.Cells;
+                        rowCount                                = (worksheet.Dimension.End.Row) - (worksheet.Dimension.Start.Row)  + 1;
+                        columncount                             = (worksheet.Dimension.End.Column);
+
+                        for (i = 2; i<= rowCount; i++)
+                        {
+                            try
+                            {
+                                this.initilizeHeader(range, i);
+                                this.createHeader();
+                            }
+                            catch
+                            {
+                                warning(ETGSalesOrderUploaderService::getError());
+                                continue;
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    throw error(strfmt("@SYS62207",filename));
+                }
+            }
+        }
+
+        catch (Exception::Deadlock)
+        {
+            retry;
+        }
+
+        catch (Exception::UpdateConflict)
+        {
+            if (appl.ttsLevel() == 0)
+            {
+                if (xSession::currentRetryCount() >= #RetryNum)
+                {
+                    throw Exception::UpdateConflictNotRecovered;
+                }
+                else
+                {
+                    retry;
+                }
+            }
+            else
+            {
+                throw Exception::UpdateConflict;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initilizeHeader</Name>
+				<Source><![CDATA[
+    public void initilizeHeader(OfficeOpenXml.ExcelRange    range, int i)
+    {
+        purchNumberSequenceLoc       = range.get_Item(i, 1).value;
+        vendAccountLoc               = range.get_Item(i, 2).value;
+        agreementClassificationLoc   = range.get_Item(i, 3).value;
+
+        Contact   = range.get_Item(i, 4).value;
+        AgreementType   = range.get_Item(i, 5).value;
+        VendorReference   = range.get_Item(i, 6).value;
+        ETGVendor   = range.get_Item(i, 7).value;
+        DocumentTitle   = range.get_Item(i, 8).value;
+        ExternalDocumentReference   = range.get_Item(i, 9).value;
+        Preparer   = range.get_Item(i, 10).value;
+        IntercompanyOrigin   = range.get_Item(i, 11).value;
+        PrimaryResponsibleWorker   = range.get_Item(i, 12).value;
+        SecondaryResponsibleWorker   = range.get_Item(i, 13).value;
+        ParentPurchaseAgreement   = range.get_Item(i, 14).value;
+        Expiration   = str2Date(range.get_Item(i, 15).Text.ToString(), 213);//str2Date(range.get_Item(i, 15).value, 123);
+        BuyerAccount   = range.get_Item(i, 16).value;
+        BuyerAddress   = range.get_Item(i, 17).value;
+        SellerAccount   = range.get_Item(i, 18).value;
+        SellerAddress   = range.get_Item(i, 19).value;
+        Broker   = range.get_Item(i, 20).value;
+        CommissionType   = range.get_Item(i, 21).value;
+        CommissionValue   = range.get_Item(i, 22).value;
+        TermsOfPaymentDescription   = range.get_Item(i, 23).value;
+        futures   = range.get_Item(i, 24).value;
+        if(range.get_Item(i, 25).value)
+        {
+            PricingMonth   = str2Int(range.get_Item(i, 25).value);
+        }
+
+        PricingFromDate   = str2Date(range.get_Item(i, 26).Text.ToString(), 213);// str2Date(range.get_Item(i, 26).value, 123);
+        PricingTodate   = str2Date(range.get_Item(i, 27).Text.ToString(), 213);//str2Date(range.get_Item(i, 27).value, 123);
+        AdvanceDue   = str2Date(range.get_Item(i, 28).Text.ToString(), 213);//str2Date(range.get_Item(i, 28).value, 123);
+        BuyerBank   = range.get_Item(i, 29).value;
+        SellerBank   = range.get_Item(i, 30).value;
+        PackingGroup   = range.get_Item(i, 31).value;
+        Notes   = range.get_Item(i, 32).value;
+        ShipperBuyer   = range.get_Item(i, 33).value;
+        Consignee   = range.get_Item(i, 34).value;
+        OnAccountOf   = range.get_Item(i, 35).value;
+        DeliveryDescription   = range.get_Item(i, 36).value;
+        NotifyToDifferentParty   = range.get_Item(i, 37).value;
+        NotifyName   = range.get_Item(i, 38).value;
+        NotifyAddress   = range.get_Item(i, 39).value;
+        TermsOfDelDescription   = range.get_Item(i, 40).value;
+        FromDatePort   = str2Date(range.get_Item(i, 41).Text.ToString(), 213);//str2Date(range.get_Item(i, 41).value, 123);
+        ToDatePort   = str2Date(range.get_Item(i, 42).Text.ToString(), 213);//str2Date(range.get_Item(i, 42).value, 123);
+        QuantityConditions   = range.get_Item(i, 43).value;
+        PortOFLoading   = range.get_Item(i, 44).value;
+        PortOfDischarge   = range.get_Item(i, 45).value;
+        CustomImport   = range.get_Item(i, 46).value;
+        ImportDate   = str2Date(range.get_Item(i, 47).Text.ToString(), 213);//str2Date(range.get_Item(i, 47).value, 123);
+        PermitNumber   = range.get_Item(i, 48).value;
+        NotifyParty2   = range.get_Item(i, 49).value;
+        GoodsDescription2   = range.get_Item(i, 50).value;
+        Fixation   = range.get_Item(i, 51).value;
+        HSCODE   = range.get_Item(i, 52).value;
+        Marks   = range.get_Item(i, 53).value;
+        ShippedQualityDetailsCertificate   = range.get_Item(i, 54).value;
+        DIRECCOURIERTOINDVTM   = range.get_Item(i, 55).value;
+        //agreementClassificationLoc   = range.get_Item(i, 56).value;
+        SupplierCode   = range.get_Item(i, 56).value;
+        WHLocationReceipt   = range.get_Item(i, 57).value;
+        DrawnUnderLetterOfCreditNumber   = range.get_Item(i, 58).value;
+        SHIPPEROREXPORTER   = range.get_Item(i, 59).value;
+        BLDATE   = range.get_Item(i, 60).value;
+        VESSELNAMEVOYAGE   = range.get_Item(i, 61).value;
+        VESSELSAILED   = range.get_Item(i, 62).value;
+        SPECIALINSTRUCTIONS   = range.get_Item(i, 63).value;
+        PaymentTerms   = range.get_Item(i, 64).value;
+        MethodOfPayment   = range.get_Item(i, 65).value;
+        PaymentSpecification   = range.get_Item(i, 66).value;
+        PaymentSchedule   = range.get_Item(i, 67).value;
+        CashDiscountCode   = range.get_Item(i, 68).value;
+        bank = range.get_Item(i, 69).value;
+        MiscChargeGroup   = range.get_Item(i, 70).value;
+        DeliveryMode   = range.get_Item(i, 71).value;
+        DeliveryTerm   = range.get_Item(i, 72).value;
+        BuyerGroup   = range.get_Item(i, 73).value;
+        PurchasePool   = range.get_Item(i, 74).value;
+        BusinessUnit   = range.get_Item(i, 75).value;
+        Contract   = range.get_Item(i, 76).value;
+        costcenter   = range.get_Item(i, 77).value;
+        InterCompany   = range.get_Item(i, 78).value;
+        Items   = range.get_Item(i, 79).value;
+        Line_of_Business   = range.get_Item(i, 80).value;
+        MainCommodity   = range.get_Item(i, 81).value;
+        Plant_Warehouse_Office   = range.get_Item(i, 82).value;
+        SubCommodity   = range.get_Item(i, 83).value;
+        TraderEmployee   = range.get_Item(i, 84).value;
+        Vertical   = range.get_Item(i, 85).value;
+        numberOfContainer = range.get_Item(i, 86).value;
+        netWightMTS = range.get_Item(i, 87).value;
+        grossWeightMTS =  range.get_Item(i, 88).value;
+        agreementStatus = range.get_Item(i, 89).value;
+        wfStatus =  range.get_Item(i, 90).value;
+        EffectiveDateLoc   = str2Date(range.get_Item(i, 91).Text.ToString(), 213);
+        currencyCodeNew    = range.get_Item(i, 92).value;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getError</Name>
+				<Source><![CDATA[
+    public static str getError()
+    {
+        SysInfologEnumerator    sysInfologEnumerator;
+        SysInfologMessageStruct infoMessageStruct;
+        str                     logMessage;
+        str                           logString;
+        str                          ret;
+        int                          i;
+        #Define.NewLine('\n')
+        sysInfologEnumerator = SysInfologEnumerator::newData(infolog.infologData());
+        while (sysInfologEnumerator.moveNext())
+        {
+            i = 1;
+            if (logMessage)
+            {
+                logMessage += #Newline;
+            }
+            infoMessageStruct = SysInfologMessageStruct::construct(sysInfologEnumerator.currentMessage());
+
+            while (i <= infoMessageStruct.prefixDepth())
+            {
+                logString = logString + infoMessageStruct.preFixTextElement(i) + '. ';
+                i++;
+            }
+
+            logString = logString + infoMessageStruct.message();
+            logMessage = logMessage + infoMessageStruct.message();
+        }
+
+        infolog().clear();
+
+        return logMessage;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createHeader</Name>
+				<Source><![CDATA[
+    public void createHeader()
+    {
+        PurchPurchaseAgreementHeaderV2Entity    purchAgreementHeader;
+
+        VendTable                               vendTable;
+        DirPartyBaseEntity                      vendTableDirParty;
+        DictEnum                                dictEnumCommitmentType = new DictEnum(enumNum(CommitmentType));
+
+        vendTable                                                   = VendTable::find(vendAccountLoc);
+        if(purchNumberSequenceLoc != "")
+        {
+            purchAgreementHeader.PurchaseAgreementId                    = purchNumberSequenceLoc;
+        }
+        else
+        {
+            purchAgreementHeader.PurchaseAgreementId       = NumberSeq::newGetNum(PurchParameters::numRefPurchAgreementId(),false).num();
+        }
+        purchAgreementHeader.PurchaseAgreementClassificationName    = agreementClassificationLoc;
+        purchAgreementHeader.AGREEMENTSTATUS                        = AgreementState::OnHold;
+        purchAgreementHeader.AgreementType                          = AgreementType;
+        purchAgreementHeader.AgreementVendorAccountNumber           = vendTable.AccountNum;
+        
+        if(wfStatus == "Approved")
+        {
+            purchAgreementHeader.AgreementWorkflowStatus                = PurchAgreementWorkflowStatus::Approved;
+        }
+        else 
+        {
+            if(wfStatus == "Submitted")
+            {
+                purchAgreementHeader.AgreementWorkflowStatus                = PurchAgreementWorkflowStatus::Submitted;
+            }
+            else 
+            {
+                purchAgreementHeader.AgreementWorkflowStatus                = PurchAgreementWorkflowStatus::Draft;
+            }
+        }
+       // purchAgreementHeader.AgreementWorkflowStatus                = PurchAgreementWorkflowStatus::Submitted;
+        purchAgreementHeader.BuyerAccountNum                        = BuyerAccount;
+        purchAgreementHeader.BuyerBank                              = BuyerBank;
+        purchAgreementHeader.BuyingLegalEntityId                    = curExt();
+        purchAgreementHeader.CurrencyCode                            = currencyCodeNew;
+        purchAgreementHeader.PaymentTermsName                        = PaymentTerms;
+        purchAgreementHeader.PaymentScheduleName = PaymentSchedule;
+        purchAgreementHeader.CashDiscountCode = CashDiscountCode;
+        purchAgreementHeader.MiscChargeGroup = MiscChargeGroup;
+        purchAgreementHeader.DeliveryModeCode = DeliveryMode;
+        purchAgreementHeader.DeliveryTermsCode = DeliveryTerm;
+        purchAgreementHeader.ContactPersonId = Contact;
+        purchAgreementHeader.MethodOfPayment = MethodOfPayment;
+        purchAgreementHeader.VendorReference = VendorReference;
+       //purchAgreementHeader.DefaultCommitmentType                  = dictEnumCommitmentType.symbol2Value(conpeek(con, 11)); //check
+        purchAgreementHeader.DefaultEffectiveDate                   = EffectiveDateLoc;//today();
+        purchAgreementHeader.DefaultExpirationDate                  = Expiration;
+        //purchAgreementHeader.DeliveryModeCode                       = ModeOfDelivery;
+        //purchAgreementHeader.DeliveryTermsCode                      = TermsOfDelDescription;
+        purchAgreementHeader.DocumentTitle                          = DocumentTitle;
+        purchAgreementHeader.ETG_Vendor                             = ETGVendor;
+            purchAgreementHeader.ExternalDocumentReference              = ExternalDocumentReference;
+
+        if(NotifyToDifferentParty == "Yes")
+        {
+            purchAgreementHeader.Notifytodifferentparty                 = NoYes::Yes;
+        }
+        else
+        {
+            purchAgreementHeader.Notifytodifferentparty                 = NoYes::No;
+        }
+        purchAgreementHeader.PortOfDischarge                        = PortOfDischarge;
+        select firstonly Description from placeOfDischarge where placeOfDischarge.PlaceOfDischarge == PortOfDischarge;
+        purchAgreementHeader.PortOfDischargeDesc                    = placeOfDischarge.Description;
+        purchAgreementHeader.PortOfLoading                          = PortOFLoading;
+        select firstonly Description from placeOfLoading where placeOfLoading.PlaceOfLoading == PortOFLoading;
+        purchAgreementHeader.PortOfLoadingDesc                      = placeOfLoading.Description;
+        purchAgreementHeader.PurchaseOrderPoolId                    = PurchasePool;
+        purchAgreementHeader.SellerAccountNum                   = SellerAccount;
+        purchAgreementHeader.SellerBank                             = SellerBank;
+        purchAgreementHeader.Through                                = Broker;
+
+        if(Broker && CommissionValue)
+        {
+            if(CommissionType == "Quantity")
+            {
+                purchAgreementHeader.BrokerageCommissionType     = ETGBrokerageCommissionType::Quantity;
+            }
+            else
+            {
+                purchAgreementHeader.BrokerageCommissionType     = ETGBrokerageCommissionType::Percent;
+            }
+            purchAgreementHeader.BrokerageCommissionValue = str2Num(CommissionValue);
+        }
+
+        purchAgreementHeader.TermPaymDescription   = TermsOfPaymentDescription;
+
+        if(futures == "Yes")
+        {
+            purchAgreementHeader.Future = NoYes::Yes;
+        }
+        else
+        {
+            purchAgreementHeader.Future = NoYes::No;
+        }
+        purchAgreementHeader.PricingMonth = PricingMonth;
+        purchAgreementHeader.PricingFromDate = PricingFromDate;
+        purchAgreementHeader.PricingTodate = PricingTodate;
+        purchAgreementHeader.AdvanceDue = AdvanceDue;
+        purchAgreementHeader.BuyerBank = BuyerBank;
+        purchAgreementHeader.BuyerDeliveryAddress = CompanyInfo::findDataArea(curExt()).postalAddress().RecId;
+        purchAgreementHeader.SellerDeliveryAddress = vendTable.postalAddress().RecId;;
+        purchAgreementHeader.SellerBank = SellerBank;
+        purchAgreementHeader.PackingGroup = PackingGroup;
+        purchAgreementHeader.Notes = Notes;
+        purchAgreementHeader.ShipperBuyer = ShipperBuyer;
+        purchAgreementHeader.Consignee = Consignee;
+        purchAgreementHeader.OnAccountOf = OnAccountOf;
+        purchAgreementHeader.DeliveryDescription = DeliveryDescription;
+        purchAgreementHeader.Name = NotifyName;
+        purchAgreementHeader.Address = NotifyAddress;
+        purchAgreementHeader.TermsOfDelDescription = TermsOfDelDescription;
+        purchAgreementHeader.FromDatePort = FromDatePort;
+        purchAgreementHeader.ToDatePort = ToDatePort;
+        purchAgreementHeader.QuantityConditions = QuantityConditions;
+        purchAgreementHeader.CustomImport = CustomImport;
+        purchAgreementHeader.ImportDate = ImportDate;
+        purchAgreementHeader.PermitNumber = PermitNumber;
+        purchAgreementHeader.Notifyparty2 = NotifyParty2;
+        purchAgreementHeader.GOODSDESCRIPTION2 = GoodsDescription2;
+        purchAgreementHeader.Fixation = Fixation;
+        purchAgreementHeader.HSCODE = HSCODE;
+        purchAgreementHeader.MARKS = Marks;
+        purchAgreementHeader.TermPaymDescription = TermsOfPayment;
+        purchAgreementHeader.MethodOfPayment = MethodOfPayment;
+        purchAgreementHeader.SHIPPEDQUALITYDETAILSCERTIFICATE = ShippedQualityDetailsCertificate;
+        purchAgreementHeader.DIRECTCOURIERTOINDVTM = DIRECCOURIERTOINDVTM;
+        purchAgreementHeader.Suppliercode = SupplierCode;
+        purchAgreementHeader.WHLocationandReceipt = WHLocationReceipt;
+        purchAgreementHeader.Drawnunderletterofcreditnumber = DrawnUnderLetterOfCreditNumber;
+        purchAgreementHeader.SHIPPEREXPORTER = SHIPPEROREXPORTER;
+        purchAgreementHeader.BLDATE = BLDATE;
+        purchAgreementHeader.VESSELNAMEVOYAGE = VESSELNAMEVOYAGE;
+        purchAgreementHeader.VESSELSAILED = VESSELSAILED;
+        purchAgreementHeader.SPECIALINSTRUCTIONS = SPECIALINSTRUCTIONS;
+        purchAgreementHeader.DefaultAgreementLineEffectiveDate = purchAgreementHeader.DefaultEffectiveDate;
+        purchAgreementHeader.DefaultAgreementLineExpirationDate  = purchAgreementHeader.DefaultExpirationDate;
+        purchAgreementHeader.NOOFCONTAINERS = numberOfContainer;
+        purchAgreementHeader.NETWEIGHTMTS = netWightMTS;
+        purchAgreementHeader.GROSSWEIGHTMTS = grossWeightMTS;
+
+        //if(agreementStatus == "Effective")
+        //{
+        //    purchAgreementHeader.AGREEMENTSTATUS                        = AgreementState::Effective;
+        //}
+        //else
+        //{
+        //    purchAgreementHeader.AGREEMENTSTATUS                        = AgreementState::OnHold;
+        //}
+
+
+      
+        purchAgreementHeader.PrimaryResponsibleWorkerName           = PrimaryResponsibleWorker;
+        purchAgreementHeader.SecondaryResponsibleWorkerName         = SecondaryResponsibleWorker;
+        purchAgreementHeader.DefaultLedgerDimensionDisplayValue     = Vertical + "|"
+                                                                    + BusinessUnit + "|"
+                                                                    + MainCommodity + "|"
+                                                                    + SubCommodity + "|"
+                                                                    + Contract + "|"
+                                                                    + TraderEmployee + "|"
+                                                                    + Intercompany + "|"
+                                                                    + costcenter + "|"
+                                                                    + Line_of_Business + "|"
+                                                                    + Plant_Warehouse_Office + "|"
+                                                                    + Items;
+
+         
+        if(purchAgreementHeader.validateWrite())
+        {
+            purchAgreementHeader.insert();
+            Info(strFmt("Agreement %1 is imported", purchAgreementHeader.PurchaseAgreementId));
+        }
+        else
+        {
+            warning(strFmt("Agreement %1 not imported", purchAgreementHeader.PurchaseAgreementId));
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

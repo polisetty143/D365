@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesEditLinesEventHandler</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// /// The <c>ETG_SalesEditLinesEventHandler</c> class provides data for the <c>PurchPurchaseOrderDP</c> report.
+/// </summary>
+class ETG_SalesEditLinesEventHandler
+{
+    
+
+
+   
+  
+
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>OK_OnClicked</Name>
+				<Source><![CDATA[
+    [FormControlEventHandler(formControlStr(SalesEditLines, OK), FormControlEventType::Clicked)]
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    public static void OK_OnClicked(FormControl sender, FormControlEventArgs e)
+    {
+        //  FormCommandButtonControl    callerButton = sender as FormCommandButtonControl;
+        FormRun                     form = sender.formRun();
+        FormDataSource              SalesParmLine_ds = form.dataSource(formDataSourceStr(SalesEditLines, SalesParmLine)) as FormDataSource;
+        SalesParmLine               SalesParmLine =     SalesParmLine_ds.cursor();
+        SalesParmTable              SalesParmTable =    SalesParmLine.salesParmTable();
+        InventTransOrigin           InventTransOriginLoc;
+        InventTrans                 InventTransLoc;
+        ETG_BillOfLading            ETG_BillOfLadingLoc;
+
+        select firstonly ETG_BillOfLadingLoc
+            where ETG_BillOfLadingLoc.ParmId          == SalesParmTable.ParmId &&
+                  ETG_BillOfLadingLoc.TableRefId      == SalesParmTable.TableRefId;
+
+
+        select firstonly InventTransOriginLoc
+            where InventTransOriginLoc.InventTransId == SalesParmLine.InventTransId;
+        if(InventTransOriginLoc)
+        {
+            while  select sum(Qty) from InventTransLoc
+                    join InventTransOriginLoc
+                    where InventTransLoc.InventTransOrigin     == InventTransOriginLoc.RecId
+                       // && inventTransOrigin.InventTransId   == salesParmLine.InventTransId
+                       && InventTransOriginLoc.ReferenceId     == salesParmLine.OrigSalesId
+                       && InventTransLoc.StatusIssue           == StatusIssue::Picked
+            {
+                if(!(ETG_BillOfLadingLoc.NetWeight == abs(InventTransLoc.Qty)))
+                {
+                    throw error("@ETG:NetWeightValidationMsg");
+                }
+            }
+           
+        }
+        if(!ETG_BillOfLadingLoc.BOLNo || !ETG_BillOfLadingLoc.BOLDate)
+        {
+            throw error("BL Details(BL No & BL Date) must be filled in.");
+        }
+        if(curExt() == "O001")
+        {
+            if(!ETG_BillOfLadingLoc.CarrierId)
+            {
+                throw error("Carrier ID must be filled in.");
+            }
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>Etg_ContainerDetail_OnClicked</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(SalesEditLines, Etg_ContainerDetail), FormControlEventType::Clicked)]
+    public static void Etg_ContainerDetail_OnClicked(FormControl sender, FormControlEventArgs e)
+    {
+        SalesParmSubTable salesParmSubTable;
+        FormRun formRun = sender.formRun();
+        FormDataSource SalesParmSubTable_ds = formRun.dataSource(formDataSourceStr(SalesEditLines, SalesParmSubTable));
+        salesParmSubTable = SalesParmSubTable_ds.cursor();
+
+        Args args = new Args(formStr(ETG_BOLContainerForm));
+        args.record(salesParmSubTable);
+        args.parm(salesParmSubTable.OrigSalesId);
+
+        new MenuFunction(menuItemDisplayStr(ETG_BOLCarrierDisplay),MenuItemType::Display).run(args);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

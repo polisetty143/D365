@@ -1,0 +1,1224 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesAgreementHeaderHandlers</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_SalesAgreementHeaderHandlers
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>ETGChangeReqButton_OnClicked</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// enable form in edit mode after button click 
+    /// Header/Line items should be frozen once P/S agreement/order is confirmed by user. It cannot be edited.
+    /// </summary>
+    /// <param name="sender">FormControl sender</param>
+    /// <param name="e">FormControlEventArgs e</param>
+    [FormControlEventHandler(formControlStr(SalesAgreement, ETGChangeReqButton), FormControlEventType::Clicked)]
+    public static void ETGChangeReqButton_OnClicked(FormControl sender, FormControlEventArgs e)
+    {
+        sender.formRun().design(ViewEditMode::Edit);
+        FormDataSource                   salesAgreementHeader_ds   = sender.formRun().dataSource('salesAgreementHeader');
+        SalesAgreementHeader             salesAgreementHeader      = salesAgreementHeader_ds.cursor();
+        salesAgreementHeader.AgreementState = AgreementState::OnHold;
+        //NS, DLT ,27/05/2025 Shreelekha header items should be enable when change request button is clicked
+        salesAgreementHeader_ds.write();
+        salesAgreementHeader_ds.allowEdit(true);
+        salesAgreementHeader_ds.allowCreate(true);
+        salesAgreementHeader_ds.allowDelete(true);
+        //salesAgreementHeader_ds.refresh();
+        //salesAgreementHeader_ds.active();
+        //salesAgreementHeader_ds.reread();
+        //salesAgreementHeader_ds.research();
+        //NE, DLT ,27/05/2025 Shreelekha header items should be enable when change request button is clicked
+
+        //NS, DLT ,27/05/2025 Shreelekha Line items should be enable when change request button is clicked
+        FormDataSource salesAgreementLine_ds = sender.formRun().dataSource('Aline');
+        salesAgreementLine_ds.allowEdit(true);
+        salesAgreementLine_ds.allowCreate(true);
+        salesAgreementLine_ds.allowDelete(true);
+        //salesAgreementLine_ds.refresh();
+        //salesAgreementLine_ds.active();
+
+        FormRun             element       = sender.formRun();
+        FormControl         LineViewLineDetailsctrl    = element.design().controlName('LineViewLineDetails');
+        LineViewLineDetailsctrl.allowEdit(true);
+        LineViewLineDetailsctrl.enabled(true);
+
+        FormControl         OverDeliveryPctCtrl    = element.design().controlName('OverDeliveryPct');
+        OverDeliveryPctCtrl.allowEdit(true);
+        OverDeliveryPctCtrl.enabled(true);
+        FormControl         UnderDeliveryPctCtrl    = element.design().controlName('UnderDeliveryPct');
+        UnderDeliveryPctCtrl.allowEdit(true);
+        UnderDeliveryPctCtrl.enabled(true);
+
+        salesAgreementHeader_ds.research(true);
+
+
+        //NE, DLT ,27/05/2025 Shreelekha Line items should be enable when change request button is clicked
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ButtonConfirmationETG_OnClicked</Name>
+				<Source><![CDATA[
+     /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(SalesAgreement, ButtonConfirmationETG), FormControlEventType::Clicked)]
+    public static void ButtonConfirmationETG_OnClicked(FormControl sender, FormControlEventArgs e)
+    {
+        
+       
+        Object                           formRun;
+        FormRun                          formrunloc = sender.formRun();
+        FormDataSource                   SalesAgreementHeader_ds   = sender.formRun().dataSource('SalesAgreementHeader');
+        SalesAgreementHeader             SalesAgreementHeader      = SalesAgreementHeader_ds.cursor();
+        FormDataSource                   Aline_ds                  = sender.formRun().dataSource('Aline');
+        //AgreementLineQuantityCommitment  aline                     = Aline_ds.cursor();
+        //Shreelekha
+        AgreementLineQuantityCommitment aline;
+        select firstonly aline
+            where aline.RecId == Aline_ds.cursor().RecId;
+
+        FormDataSource                   ETG_AgreementLineQualityGrp_ds = sender.formRun().dataSource('ETG_AgreementLineQualityGrp');
+        ETG_AgreementLineQualityGrp      agreementLineQualityGrp   = ETG_AgreementLineQualityGrp_ds.cursor();
+        AgreementLineQuantityCommitment  purchAgreementLine;
+        ETG_ChargeCodes                  chargeCodes;
+        int                              i = 1;
+        Args                             args = new Args();
+        boolean                          isContinue = true;
+        #task
+        FormDataSource                   inventDim_ds   = sender.formRun().dataSource('InventDim');
+        InventDim                        inventDim      = inventDim_ds.cursor();
+        DefaultDimensionView            defaultDimView;
+        //DimensionHierarchyView      dimensionHierarchy;
+        DimensionHierarchy              dimensionHierarchy;
+        DimensionHierarchyLevel         dimensionHierarchyLevel;
+        DimensionAttribute              dimAttribute;
+        Description255                  emptyDimension;
+
+        while select inventDim
+            where inventDim.inventDimId == aline.InventDimId
+            && inventDim.DataAreaId == aline.InventDimDataAreaId
+        {
+            
+            if(inventDim.InventSiteId == '' && inventDim.InventLocationId == '')
+            {
+                throw error("@ETG:SiteWarehouseMandatory");
+            }
+            if(inventDim.InventSiteId == '')
+            {
+                throw error("@ETG:SiteMandatory");
+            }
+            if( InventDim.InventLocationId == '')
+            {
+                throw error("@ETG:WarehouseMandatory");
+            }
+        }
+
+        if (ETGACFParameters::find().EnableContractFDAutomation && SalesAgreementHeader.ETG_IsThirdParty == NoYes::No)
+        {
+            ETGContractFDDerivedDimCreate derivedDimCreate = new ETGContractFDDerivedDimCreate();
+            derivedDimCreate.validate(SalesAgreementHeader);
+        }
+
+        select firstonly RecId from chargeCodes
+            where chargeCodes.PurchNumberSequence == SalesAgreementHeader.SalesNumberSequence;
+
+        if(ETG_Parameters::find().ETGIsDimensionValidationRequired == NoYes::Yes)
+        {
+            //select firstonly RecId from dimensionHierarchy
+            //    where dimensionHierarchy.StructureType == DimensionHierarchyType::AccountStructure
+            //        && dimensionHierarchy.Status == DimensionHierarchyConstraintStatus::Active
+            //        && dimensionHierarchy.UserLanguageId == CompanyInfo::languageId();
+
+            select firstonly RecId from dimensionHierarchy
+                where dimensionHierarchy.StructureType == DimensionHierarchyType::AccountStructure
+                     && dimensionHierarchy.IsDraft == NoYes::No;
+        
+            while select DimensionAttribute from dimensionHierarchyLevel
+                where dimensionHierarchyLevel.DimensionHierarchy == dimensionHierarchy.RecId
+            join dimAttribute
+                where dimAttribute.RecId == dimensionHierarchyLevel.DimensionAttribute
+                    && dimAttribute.Type != DimensionAttributeType::MainAccount
+            notexists join defaultDimView
+                where defaultDimView.Name ==  dimAttribute.Name
+                    && defaultDimView.DefaultDimension == SalesAgreementHeader.DefaultDimension
+            {
+                if(emptyDimension)
+                {
+                    emptyDimension = emptyDimension + ',' + dimAttribute.Name;
+                }
+                else
+                {
+                    emptyDimension = dimAttribute.Name;
+                }
+            }
+      
+            if(isContinue && emptyDimension)
+            {
+                if(Box::yesNoAxaptaForm(strFmt('Financial dimensions - %1 are not filled in. Do you want to update? ',emptyDimension), DialogButton::Yes) == DialogButton::Yes)
+                {
+                    isContinue = false;
+                }
+            }
+        }
+
+
+        if(SalesAgreementHeader.ETG_PurchAgreementIdTP)
+        {
+            if( Box::yesNo('@ETG:UnitPriceandPortValidation',DialogButton::Yes) == DialogButton::Yes)
+            {
+                isContinue = false;
+            }
+        }
+        if(isContinue && !chargeCodes)
+        {
+            if( Box::yesNo('@ETG:EstimationChargesValidation', DialogButton::yes) == DialogButton::yes)
+            {
+                isContinue = false;
+                args.record(SalesAgreementHeader);
+                args.name(menuItemDisplayStr(ETG_ChargeCodes));
+                formRun = classfactory.formRunClass(args);
+                formRun.init();
+                formRun.run();
+                formRun.wait();
+            }
+        }
+        if(isContinue && !agreementLineQualityGrp)
+        {
+            if(Box::yesNo('@ETG:QualitySpecValidation', DialogButton::Yes) == DialogButton::Yes)
+            {
+                isContinue = false;
+            }
+        }
+        if(isContinue)
+        {
+            args.record(SalesAgreementHeader);
+                                        
+            new MenuFunction(menuItemActionStr(SalesAgreementConfirm), MenuItemType::Action).run(args);
+        }
+        //NS, DLT ,25/03/2025 Once the agreement is confirmed Same FD value should appear automatically update DerivedDimCreate.
+        if (ETGACFParameters::find().EnableContractFDAutomation && SalesAgreementHeader.ETG_IsThirdParty == NoYes::No)
+         {
+            ETGContractFDDerivedDimCreate derivedDimCreate = new ETGContractFDDerivedDimCreate();
+            derivedDimCreate.createCustomFinDimContract(SalesAgreementHeader);
+            derivedDimCreate.ContractFDDerivedDimCreate(SalesAgreementHeader);
+         }
+        //NE, DLT ,25/03/2025 Once the agreement is confirmed Same FD value should appear automatically update DerivedDimCreate.
+
+
+        //NS, DLT ,11032025, Provisional charges IncoTerms
+
+        //if(ETGACFParameters::find().EnableProvisionalCharges &&
+        //            AgreementClassification::find(SalesAgreementHeader.AgreementClassification).ETGIncoTerms == NoYes::Yes)
+        //{
+        //    if(!SalesAgreementHeader.agreementHeaderDefault().DeliveryTerm)
+        //    {
+        //        throw error(strFmt("Terms of delivery is mandatory for agreement %1", SalesAgreementHeader.SalesNumberSequence));
+        //    }
+        //    ETGProvisionalChargesCreate::createChargesSales(SalesAgreementHeader);
+        //}
+        //NE, DLT ,11032025, Provisional charges IncoTerms
+
+
+          
+     
+
+        formrunloc.task(#taskRefresh);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>SalesAgreementHeader_OnWritten</Name>
+				<Source><![CDATA[
+    [FormDataSourceEventHandler(formDataSourceStr(SalesAgreementCreate, SalesAgreementHeader), FormDataSourceEventType::Written)]
+    public static void SalesAgreementHeader_OnWritten(FormDataSource sender, FormDataSourceEventArgs e)
+    {
+        ETG_SalesAgreementHeader SalesAgreementHeaderTP;//   = sender.cursor();;
+        FormDataSource              SalesAgreementHeader_ds   = sender.formRun().dataSource('SalesAgreementHeader');
+        SalesAgreementHeader        SalesAgreementHeader        =  SalesAgreementHeader_ds.cursor();//sender.cursor();
+        FormDataSource              AgreementHeaderDefault_ds   = sender.formRun().dataSource('AgreementHeaderDefault');
+        AgreementHeaderDefault      agreementHeaderDefault      = AgreementHeaderDefault_ds.cursor();
+ 
+ 
+        SalesAgreementHeaderTP.SalesAgreementId      = SalesAgreementHeader.SalesNumberSequence;
+        SalesAgreementHeaderTP.SellerAccountNum      = curExt();
+        SalesAgreementHeaderTP.SellerDeliveryAddress = CompanyInfo::findDataArea(curExt()).postalAddress().RecId;
+        SalesAgreementHeaderTP.SellerBank            = CompanyInfo::findDataArea(curExt()).Bank;
+      //  SalesAgreementHeaderTP.SellerBankDeliveryAddress = BankAccountTable::findByCompany(curExt(),SalesAgreementHeaderTP.BuyerBank).postalAddress().RecId;
+
+        SalesAgreementHeaderTP.BuyerAccountNum       = SalesAgreementHeader.CustAccount;
+        SalesAgreementHeaderTP.BuyerDeliveryAddress  = CustTable::find(salesAgreementHeader.CustAccount).postalAddress().RecId;
+        SalesAgreementHeaderTP.BuyerBank             = CustTable::find(salesAgreementHeader.CustAccount).BankAccount;
+        SalesAgreementHeaderTP.TermPaymDescription   = PaymTerm::find(agreementHeaderDefault.PaymentTerms).Description;
+        SalesAgreementHeaderTP.TermsOfDelDescription = DlvTerm::find(agreementHeaderDefault.DeliveryTerm).Txt;
+     //   SalesAgreementHeaderTP.BuyerBankDeliveryAddress =  CustBankAccount::find(salesAgreementHeader.CustAccount,SalesAgreementHeaderTP.SellerBank).Location;
+        SalesAgreementHeaderTP.insert();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>SellerDeliveryRef_OnLookup</Name>
+				<Source><![CDATA[
+    [FormControlEventHandler(formControlStr(SalesAgreement, SellerDeliveryRef), FormControlEventType::Lookup)]
+    public static void  SellerDeliveryRef_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+      
+        ETG_SalesAgreementHeaderHandlers::createLookup(sender);
+        FormControlCancelableSuperEventArgs cancelableArgs = e as FormControlCancelableSuperEventArgs;
+        cancelableArgs.CancelSuperCall();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ButtonPurchAgreementTP_OnClicked</Name>
+				<Source><![CDATA[
+    [FormControlEventHandler(formControlStr(SalesAgreement, ButtonPurchAgreementTP), FormControlEventType::Clicked)]
+    public static void ButtonPurchAgreementTP_OnClicked(FormControl sender, FormControlEventArgs e)
+    {
+        PurchAgreementHeader        purchAgreementHeader;
+        FormButtonControl callerButton = sender as FormButtonControl;
+        FormDataSource formDS          = sender.formRun().dataSource('SalesAgreementHeader');
+        SalesAgreementHeader        salesAgreementHeader      = formDS.cursor();
+
+        MenuFunction menuFunction = new MenuFunction(menuitemdisplaystr(PurchAgreement), MenuItemType::Display);
+        Args args  = new Args();
+        purchAgreementHeader = PurchAgreementHeader::findAgreementId(salesAgreementHeader.ETG_PurchAgreementIdTP);
+        args.record(purchAgreementHeader);
+        menuFunction.run(args);
+      
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ButtonPurchAgreementTPList_OnClicked</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(SalesAgreementListPage, ButtonPurchAgreementTP), FormControlEventType::Clicked)]
+    public static void ButtonPurchAgreementTPList_OnClicked(FormControl sender, FormControlEventArgs e)
+    {
+        PurchAgreementHeader        purchAgreementHeader;
+        FormButtonControl callerButton = sender as FormButtonControl;
+        FormDataSource formDS          = sender.formRun().dataSource('SalesAgreementHeader');
+        SalesAgreementHeader        salesAgreementHeader      = formDS.cursor();
+
+        MenuFunction menuFunction = new MenuFunction(menuitemdisplaystr(PurchAgreement), MenuItemType::Display);
+        Args args  = new Args();
+        purchAgreementHeader = PurchAgreementHeader::findAgreementId(salesAgreementHeader.ETG_PurchAgreementIdTP);
+        args.record(purchAgreementHeader);
+        menuFunction.run(args);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createLookup</Name>
+				<Source><![CDATA[
+    private static void createLookup(FormReferenceGroupControl _ctrl)
+    {
+        SysReferenceTableLookup     sysTableLookup  = SysReferenceTableLookup::newParameters(tablenum(LogisticsPostalAddress), _ctrl);
+        Query                       lookupQuery = new Query();
+        QueryBuildDataSource        lookupQry   = new QueryBuildDataSource();
+        CompanyInfo                 companyInfo;
+        DirPartyTable               dirPartyTable;
+        DirPartyLocation            dirPartyLocation;
+        LogisticsPostalAddress      logisticsPostalAddress;
+        SysReferenceTableLookup     sysRefTableLookup;
+        QuerybuildDatasource        qbd, qbd1, qbd2, qbd3, qbd4;
+
+        qbd     = lookupQuery.addDataSource(tablenum(LogisticsPostalAddress));
+        qbd1    = qbd.addDataSource(tablenum(DirPartyLocation));
+        qbd1.addLink(fieldNum(LogisticsPostalAddress, Location), fieldNum(DirPartyLocation, Location));
+        qbd1.joinMode(JoinMode::InnerJoin);
+
+        qbd2 = qbd1.addDataSource(tablenum(CompanyInfo));
+        qbd2.addLink(fieldNum(DirPartyLocation, Party), (fieldNum(CompanyInfo, RecId)));
+        qbd2.joinMode(JoinMode::InnerJoin);
+
+        qbd2.addRange(fieldnum(CompanyInfo, DataArea)).value(SysQuery::value(curext()));
+      
+        sysTableLookup.addLookupfield(fieldNum(LogisticsPostalAddress, Location));
+        sysTableLookup.addLookupfield(fieldNum(LogisticsPostalAddress, Street));
+       
+        sysTableLookup.parmQuery(lookupQuery);
+        sysTableLookup.performFormLookup();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>BuyerDeliveryRef_OnLookup</Name>
+				<Source><![CDATA[
+    [FormControlEventHandler(formControlStr(SalesAgreement, BuyerDeliveryRef), FormControlEventType::Lookup)]
+    public static void  BuyerDeliveryRef_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        FormDataSource          salesAgreementHeader_ds       = sender.formRun().dataSource('ETG_SalesAgreementHeader');
+        ETG_SalesAgreementHeader    salesAgreementHeaderETG   = salesAgreementHeader_ds.cursor();
+      
+        ETG_SalesAgreementHeaderHandlers::buyerLookup(sender,salesAgreementHeaderETG.BuyerAccountNum);
+
+        FormControlCancelableSuperEventArgs cancelableArgs = e as FormControlCancelableSuperEventArgs;
+        cancelableArgs.CancelSuperCall();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buyerLookup</Name>
+				<Source><![CDATA[
+    private static void buyerLookup(FormReferenceGroupControl _ctrl,CustAccount _custAccount)
+    {
+        SysReferenceTableLookup     sysTableLookup  = SysReferenceTableLookup::newParameters(tablenum(LogisticsPostalAddress), _ctrl);
+        Query                       lookupQuery = new Query();
+        QueryBuildDataSource        lookupQry   = new QueryBuildDataSource();
+        CompanyInfo                 companyInfo;
+        DirPartyTable               dirPartyTable;
+        DirPartyLocation            dirPartyLocation;
+        LogisticsPostalAddress      logisticsPostalAddress;
+        SysReferenceTableLookup     sysRefTableLookup;
+        QuerybuildDatasource        qbd, qbd1, qbd2, qbd3, qbd4;
+
+        qbd     = lookupQuery.addDataSource(tablenum(LogisticsPostalAddress));
+        qbd1    = qbd.addDataSource(tablenum(DirPartyLocation));
+        qbd1.addLink(fieldNum(LogisticsPostalAddress, Location), fieldNum(DirPartyLocation, Location));
+        qbd1.joinMode(JoinMode::InnerJoin);
+
+        qbd2 = qbd1.addDataSource(tablenum(CustTable));
+        qbd2.addLink(fieldNum(DirPartyLocation, Party), (fieldNum(CustTable, Party)));
+        qbd2.joinMode(JoinMode::InnerJoin);
+
+        qbd2.addRange(fieldnum(CustTable, AccountNum)).value(SysQuery::value(_custAccount));
+      
+        sysTableLookup.addLookupfield(fieldNum(LogisticsPostalAddress, Location));
+        sysTableLookup.addLookupfield(fieldNum(LogisticsPostalAddress, Street));
+       
+        sysTableLookup.parmQuery(lookupQuery);
+        sysTableLookup.performFormLookup();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>BuyerBankString_OnLookup</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+  /*  [FormControlEventHandler(formControlStr(SalesAgreement, SellerBankString), FormControlEventType::Lookup)]
+    public static void SellerBankString_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        Query                   query = new Query();
+        QueryBuildDataSource    queryBuildDataSource;
+        SysTableLookup          sysTableLookup;
+
+        ETG_SalesAgreementHeader SalesAgreementHeaderETG = sender.dataSourceObject().cursor();
+
+        query.allowCrossCompany(true);
+        query.addCompanyRange(SalesAgreementHeaderETG.SellerAccountNum);
+        sysTableLookup = SysTableLookup::newParameters(tableNum(BankAccountTable), sender);
+        queryBuildDataSource = query.addDataSource(tableNum(BankAccountTable));
+
+        sysTableLookup.addLookupField(fieldNum(BankAccountTable, AccountID));
+        sysTableLookup.addLookupField(fieldNum(BankAccountTable,Name ));
+       
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.performFormLookup();
+    }
+*/
+    [FormControlEventHandler(formControlStr(SalesAgreement, BuyerBankString), FormControlEventType::Lookup)]
+    public static void BuyerBankString_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        Query                       query = new Query();
+        QueryBuildDataSource        queryBuildDataSource;
+        SysTableLookup              sysTableLookup;
+
+        ETG_SalesAgreementHeader SalesAgreementHeaderETG = sender.dataSourceObject().cursor();
+       
+        sysTableLookup = SysTableLookup::newParameters(tableNum(CustBankAccount), sender);
+        queryBuildDataSource = query.addDataSource(tableNum(CustBankAccount));
+        queryBuildDataSource.addRange(fieldNum(CustBankAccount, CustAccount)).value(queryValue(SalesAgreementHeaderETG.BuyerAccountNum));
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.addLookupField(fieldNum(CustBankAccount, AccountID));
+        sysTableLookup.addLookupField(fieldNum(CustBankAccount,Name ));
+       
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.performFormLookup();
+
+        FormControlCancelableSuperEventArgs cancelableArgs = e as FormControlCancelableSuperEventArgs;
+        cancelableArgs.CancelSuperCall();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>Through_OnLookup</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    //[FormControlEventHandler(formControlStr(SalesAgreement, GroupId), FormControlEventType::Lookup)]
+    //public static void GroupId_OnLookup(FormControl sender, FormControlEventArgs e)
+    //{
+    //    Query                       query = new Query();
+    //    QueryBuildDataSource        queryBuildDataSource;
+    //    SysTableLookup              sysTableLookup;
+
+    //    FormControlCancelableSuperEventArgs formControlCancelSuper = e as FormControlCancelableSuperEventArgs;
+
+    //    sysTableLookup = SysTableLookup::newParameters(tableNum(ETGQualitySpecificationGroup), sender);
+    //    queryBuildDataSource = query.addDataSource(tableNum(ETGQualitySpecificationGroup));
+
+    //    sysTableLookup.parmQuery(query);
+    //    sysTableLookup.addLookupField(fieldNum(ETGQualitySpecificationGroup, GroupId));
+    //    sysTableLookup.addLookupField(fieldNum(ETGQualitySpecificationGroup,GroupDescription ));
+
+    //    sysTableLookup.parmQuery(query);
+    //    sysTableLookup.performFormLookup();
+
+    //    formControlCancelSuper.CancelSuperCall();
+    //}
+
+    /*
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(PurchAgreement, Notifytodifferentparty), FormControlEventType::Clicked)]
+    public static void Notifytodifferentparty_OnClicked(FormControl sender, FormControlEventArgs e)
+    {
+       /* FormRun             element       = sender.formRun(); //form element
+        FormControl         NameFormString   = element.design(0).controlName("NameFormString");
+        FormControl         AddressFormString   = element.design(0).controlName("AddressFormString");
+        NameFormString.enabled(false);
+        AddressFormString.enabled(false);
+        */
+    }
+*/
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+   
+
+     [FormControlEventHandler(formControlStr(SalesAgreement, Through), FormControlEventType::Lookup)]
+    public static void Through_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+       
+        SysTableLookup          sysTableLookup = SysTableLookup::newParameters(tableNum(VendTable),sender);
+        Query                   q   = new Query();
+        QueryBuildDataSource    qbds,qbds1,qbds2,qbds3;
+        QueryBuildRange         qbr;
+       
+        qbds   = q.addDataSource(tableNum(VendTable));
+        qbds2 = qbds.addDataSource(tableNum(VendGroup));
+        qbds2.joinMode(JoinMode::InnerJoin);
+        qbds2.relations(true);
+        qbds3    = qbds.addDataSource(tableNum(DirPartyTable)) ;
+        qbds3.joinMode(JoinMode::InnerJoin);
+        qbds3.addLink(fieldNum(VendTable, Party), fieldNum(DirPartyTable, RecId));
+        
+        
+        qbr     = qbds2.addRange(fieldNum(VendGroup,ETG_Broker));
+        qbr.value(queryValue(NoYes::Yes));
+        
+        sysTableLookup.addLookupfield(fieldNum(VendTable,AccountNum));
+        sysTableLookup.addLookupfield(fieldNum(VendTable,vendgroup));
+        sysTableLookup.addLookupfield(fieldNum(VendTable, Party), false);
+        
+        SysTableLookup.parmQuery(q);
+        SysTableLookup.performFormLookup();
+        FormControlCancelableSuperEventArgs ce = e as FormControlCancelableSuperEventArgs;
+       
+        ce.CancelSuperCall();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ShipperBuyer_OnLookup</Name>
+				<Source><![CDATA[
+    [FormControlEventHandler(formControlStr(SalesAgreement, ShipperBuyer), FormControlEventType::Lookup)]
+    public static void ShipperBuyer_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        FormRun                 element = sender.formRun();
+        SysTableLookup          sysTableLookup = SysTableLookup::newParameters(tableNum(VendTable),sender);
+        Query                   q   = new Query();
+        QueryBuildDataSource    qbds,qbds2;
+        QueryBuildRange         qbr;
+       
+     
+        //sysTableLookup.addLookupfield(fieldNum(VendTable,AccountNum));
+        //sysTableLookup.addLookupfield(fieldNum(VendTable,vendgroup));
+
+        qbds   = q.addDataSource(tableNum(VendTable));
+        qbds2 = qbds.addDataSource(tableNum(VendGroup));
+        qbds2.joinMode(JoinMode::InnerJoin);
+        qbds2.relations(true);
+        qbr     = qbds2.addRange(fieldNum(VendGroup,ETG_CFagents));
+        qbr.value(queryValue(NoYes::Yes));
+
+       // qbr     = qbds2.addRange(fieldNum(VendGroup,ETG_CFagents)); //QualitySpecificationBugs.,27 Jan 2021,Binay
+       // qbr.value(queryValue(NoYes::Yes));//QualitySpecificationBugs.,27 Jan 2021,Binay
+        SysTableLookup.parmQuery(q);
+
+        sysTableLookup.addLookupfield(fieldNum(VendTable,AccountNum));
+        sysTableLookup.addLookupfield(fieldNum(VendTable,vendgroup));
+        sysTableLookup.addLookupMethod(tableMethodStr(VendTable,Name));
+
+        SysTableLookup.performFormLookup();
+        FormControlCancelableSuperEventArgs ce = e as FormControlCancelableSuperEventArgs;
+       
+
+        ce.CancelSuperCall();
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>PlaceOfLoading_OnLookup</Name>
+				<Source><![CDATA[
+    [FormControlEventHandler(formControlStr(SalesAgreement, PlaceOfLoading), FormControlEventType::Lookup)]
+    public static void PlaceOfLoading_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        FormRun                 element = sender.formRun();
+        SysTableLookup          sysTableLookup = SysTableLookup::newParameters(tableNum(ETG_PlaceOfLoading),sender);
+        Query                   q   = new Query();
+        QueryBuildDataSource    qbds,qbds2;
+        QueryBuildRange         qbr;
+        qbds   = q.addDataSource(tableNum(ETG_PlaceOfLoading));
+        SysTableLookup.parmQuery(q);
+        sysTableLookup.addLookupfield(fieldNum(ETG_PlaceOfLoading,PlaceOfLoading));
+        sysTableLookup.addLookupfield(fieldNum(ETG_PlaceOfLoading,Description));
+
+        SysTableLookup.performFormLookup();
+        FormControlCancelableSuperEventArgs ce = e as FormControlCancelableSuperEventArgs;
+       
+
+        ce.CancelSuperCall();
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>PlaceOfDischarge_OnLookup</Name>
+				<Source><![CDATA[
+    [FormControlEventHandler(formControlStr(SalesAgreement, PlaceOfDischarge), FormControlEventType::Lookup)]
+    public static void PlaceOfDischarge_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        FormRun                 element = sender.formRun();
+        SysTableLookup          sysTableLookup = SysTableLookup::newParameters(tableNum(ETG_PlaceOfDischarge),sender);
+        Query                   q   = new Query();
+        QueryBuildDataSource    qbds,qbds2;
+        QueryBuildRange         qbr;
+        qbds   = q.addDataSource(tableNum(ETG_PlaceOfDischarge));
+        SysTableLookup.parmQuery(q);
+        sysTableLookup.addLookupfield(fieldNum(ETG_PlaceOfDischarge,PlaceOfDischarge));
+        sysTableLookup.addLookupfield(fieldNum(ETG_PlaceOfDischarge,Description));
+
+        SysTableLookup.performFormLookup();
+        FormControlCancelableSuperEventArgs ce = e as FormControlCancelableSuperEventArgs;
+       
+
+        ce.CancelSuperCall();
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>Notifytodifferentparty_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(SalesAgreement, Notifytodifferentparty), FormControlEventType::Modified)]
+    public static void Notifytodifferentparty_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        ETG_SalesAgreementHeader salesAgreementHeaderETG = sender.formRun().dataSource().cursor();
+        FormRun             element       = sender.formRun(); //form element
+        FormControl         NotifyName   = element.design(0).controlName("NotifyName");
+        FormControl         NotifyAddress   = element.design(0).controlName("NotifyAddress");
+
+        if(salesAgreementHeaderETG.Notifytodifferentparty == NoYes::Yes)// && salesAgreementHeaderETG.Consignee && salesAgreementHeaderETG.OnAccountOf)
+        {
+            NotifyName.enabled(true);
+            NotifyAddress.enabled(true);
+        }
+        else if(salesAgreementHeaderETG.Notifytodifferentparty == NoYes::No)// && salesAgreementHeaderETG.Consignee && salesAgreementHeaderETG.OnAccountOf)
+        {
+            salesAgreementHeaderETG.Name = "";
+            salesAgreementHeaderETG.Address = "";
+            NotifyName.enabled(false);
+            NotifyAddress.enabled(false);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ShipmentTabPage_OnPageActivated</Name>
+				<Source><![CDATA[
+    [FormControlEventHandler(formControlStr(SalesAgreement, ShipmentTabPage), FormControlEventType::PageActivated)]
+    public static void ShipmentTabPage_OnPageActivated(FormControl sender, FormControlEventArgs e)
+    {
+        ETG_SalesAgreementHeader salesAgreementHeaderETG = sender.formRun().dataSource().cursor();
+        FormRun             element       = sender.formRun(); //form element
+        FormControl         NotifyName   = element.design(0).controlName("NotifyName");
+        FormControl         NotifyAddress   = element.design(0).controlName("NotifyAddress");
+
+        if(salesAgreementHeaderETG.Notifytodifferentparty == NoYes::Yes)// && salesAgreementHeaderETG.Consignee && salesAgreementHeaderETG.OnAccountOf)
+        {
+            NotifyName.enabled(true);
+            NotifyAddress.enabled(true);
+        }
+        else if(salesAgreementHeaderETG.Notifytodifferentparty == NoYes::No)// && salesAgreementHeaderETG.Consignee && salesAgreementHeaderETG.OnAccountOf)
+        {
+            salesAgreementHeaderETG.Name = "";
+            salesAgreementHeaderETG.Address = "";
+            NotifyName.enabled(false);
+            NotifyAddress.enabled(false);
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>BuyerBankString_OnModified</Name>
+				<Source><![CDATA[
+    [FormControlEventHandler(formControlStr(SalesAgreement, BuyerBankString), FormControlEventType::Modified)]
+    public static void BuyerBankString_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        ETG_SalesAgreementHeader SalesAgreementHeaderETG = sender.formRun().dataSource(FormDataSourcestr(SalesAgreement, ETG_SalesAgreementHeader)).cursor();
+        FormDataSource      ETG_SalesAgreementHeader_ds =  sender.formRun().dataSource(FormDataSourcestr(SalesAgreement, ETG_SalesAgreementHeader));
+        CustBankAccount                              buyerBank;
+       
+        buyerBank     = CustBankAccount::find(SalesAgreementHeaderETG.BuyerAccountNum,SalesAgreementHeaderETG.BuyerBank);
+        if(buyerBank)
+            SalesAgreementHeaderETG.BuyerSecondaryBank = buyerBank.AccountNum + '\n'+buyerBank.SWIFTNo+'\n'+LogisticsPostalAddress::findByLocation(buyerBank.location).Address;
+        else
+            SalesAgreementHeaderETG.BuyerSecondaryBank = '';
+
+        if (SalesAgreementHeaderETG.Buyersecondarybank == '' || SalesAgreementHeaderETG.BuyerBank == '')
+        {
+            ETG_SalesAgreementHeader_ds.object(fieldNum(ETG_SalesAgreementHeader, BuyerSecondaryBank)).allowEdit(true);
+        }
+        else
+        {
+            ETG_SalesAgreementHeader_ds.object(fieldNum(ETG_SalesAgreementHeader, BuyerSecondaryBank)).allowEdit(false);
+        }
+
+       
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>SellerBankString_OnModified</Name>
+				<Source><![CDATA[
+    [FormControlEventHandler(formControlStr(SalesAgreement, SellerBankString), FormControlEventType::Modified)]
+    public static void SellerBankString_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        ETG_SalesAgreementHeader SalesAgreementHeaderETG = sender.formRun().dataSource(FormDataSourcestr(SalesAgreement, ETG_SalesAgreementHeader)).cursor();
+        FormDataSource      ETG_SalesAgreementHeader_ds =  sender.formRun().dataSource(FormDataSourcestr(SalesAgreement, ETG_SalesAgreementHeader));
+        BankAccountTable                              sellerBank;
+       
+        sellerBank     = BankAccountTable::find(SalesAgreementHeaderETG.sellerBank);
+        
+        if(sellerBank)
+            SalesAgreementHeaderETG.SellerSecondaryBank = sellerBank.AccountNum + '\n'+sellerBank.SWIFTNo+'\n'+sellerBank.postalAddress().Address;
+        else
+            SalesAgreementHeaderETG.SellerSecondaryBank = '';
+
+        if (SalesAgreementHeaderETG.Sellersecondarybank == '' || SalesAgreementHeaderETG.SellerBank == '')
+        {
+            ETG_SalesAgreementHeader_ds.object(fieldNum(ETG_SalesAgreementHeader, SellerSecondaryBank)).allowEdit(true);
+        }
+        else
+        {
+            ETG_SalesAgreementHeader_ds.object(fieldNum(ETG_SalesAgreementHeader, SellerSecondaryBank)).allowEdit(false);
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>PlaceOfLoading_OnModified</Name>
+				<Source><![CDATA[
+    [FormControlEventHandler(formControlStr(SalesAgreement, PlaceOfLoading), FormControlEventType::Modified)]
+    public static void PlaceOfLoading_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        ETG_SalesAgreementHeader SalesAgreementHeaderETG = sender.formRun().dataSource(FormDataSourcestr(SalesAgreement, ETG_SalesAgreementHeader)).cursor();
+        FormDataSource      ETG_SalesAgreementHeader_ds =  sender.formRun().dataSource(FormDataSourcestr(SalesAgreement, ETG_SalesAgreementHeader));
+        ETG_PlaceOfLoading placeofLoading;
+
+        select firstonly placeofLoading
+            where placeofLoading.PlaceOfLoading == SalesAgreementHeaderETG.PortOfLoading;
+
+        SalesAgreementHeaderETG.PortOfLoadingDesc = placeofLoading.Description;
+
+        if (SalesAgreementHeaderETG.PortOfLoadingDesc == '' || SalesAgreementHeaderETG.PortOfLoading == '')
+        {
+            ETG_SalesAgreementHeader_ds.object(fieldNum(ETG_SalesAgreementHeader, PortOfLoadingDesc)).allowEdit(true);
+        }
+        else
+        {
+            ETG_SalesAgreementHeader_ds.object(fieldNum(ETG_SalesAgreementHeader, PortOfLoadingDesc)).allowEdit(false);
+        }
+
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>PlaceOfDischarge_OnModified</Name>
+				<Source><![CDATA[
+    [FormControlEventHandler(formControlStr(SalesAgreement, PlaceOfDischarge), FormControlEventType::Modified)]
+    public static void PlaceOfDischarge_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        ETG_SalesAgreementHeader SalesAgreementHeaderETG = sender.formRun().dataSource(FormDataSourcestr(SalesAgreement, ETG_SalesAgreementHeader)).cursor();
+        FormDataSource      ETG_SalesAgreementHeader_ds =  sender.formRun().dataSource(FormDataSourcestr(SalesAgreement, ETG_SalesAgreementHeader));
+        ETG_PlaceOfDischarge    placeofDischarge;
+
+        select firstonly placeofDischarge
+            where placeofDischarge.PlaceOfDischarge == SalesAgreementHeaderETG.PortOfDischarge;
+        SalesAgreementHeaderETG.PortOfDischargeDesc = placeofDischarge.Description;
+
+        if (SalesAgreementHeaderETG.PortOfDischargeDesc == '' || SalesAgreementHeaderETG.PortOfDischarge == '')
+        {
+            ETG_SalesAgreementHeader_ds.object(fieldNum(ETG_SalesAgreementHeader, PortOfDischargeDesc)).allowEdit(true);
+        }
+        else
+        {
+            ETG_SalesAgreementHeader_ds.object(fieldNum(ETG_SalesAgreementHeader, PortOfDischargeDesc)).allowEdit(false);
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>Futures_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(SalesAgreement, Futures), FormControlEventType::Modified)]
+    public static void Futures_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        FormRun             element         = sender.formRun();
+        FormCheckBoxControl Futures         = element.design(0).controlName("Futures");
+        FormControl         PricingMonth    = element.design(0).controlName('PricingMonth');
+        FormControl         Pricingfromdate = element.design(0).controlName('Pricingfromdate');
+        FormControl         Pricingtodate   = element.design(0).controlName('Pricingtodate');
+        FormControl         AdvancedueForm  = element.design(0).controlName('AdvancedueForm');
+
+        PricingMonth.enabled(Futures.value() == 1);
+        Pricingfromdate.enabled(Futures.value() == 1);
+        Pricingtodate.enabled(Futures.value() == 1);
+        AdvancedueForm.enabled(Futures.value() == 1);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETG_SalesAgreementHeader_OnActivated</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataSourceEventHandler(formDataSourceStr(SalesAgreement, ETG_SalesAgreementHeader), FormDataSourceEventType::Activated)]
+    public static void ETG_SalesAgreementHeader_OnActivated(FormDataSource sender, FormDataSourceEventArgs e)
+    {
+        FormDataSource ETG_SalesAgreementHeader_ds   = sender;
+        FormRun             element         = sender.formRun();
+        FormCheckBoxControl Futures         = element.design(0).controlName("Futures");
+        FormControl         PricingMonth    = element.design(0).controlName('PricingMonth');
+        FormControl         Pricingfromdate = element.design(0).controlName('Pricingfromdate');
+        FormControl         Pricingtodate   = element.design(0).controlName('Pricingtodate');
+        FormControl         AdvancedueForm  = element.design(0).controlName('AdvancedueForm');
+        ETG_SalesAgreementHeader          salesAgreementHeader = ETG_SalesAgreementHeader_ds.cursor();
+
+
+        PricingMonth.enabled(Futures.value() == 1);
+        Pricingfromdate.enabled(Futures.value() == 1);
+        Pricingtodate.enabled(Futures.value() == 1);
+        AdvancedueForm.enabled(Futures.value() == 1);
+
+        if (salesAgreementHeader.Buyersecondarybank == '' || salesAgreementHeader.BuyerBank == '')
+        {
+            ETG_SalesAgreementHeader_ds.object(fieldNum(ETG_SalesAgreementHeader, BuyerSecondaryBank)).allowEdit(true);
+        }
+        else
+        {
+            ETG_SalesAgreementHeader_ds.object(fieldNum(ETG_SalesAgreementHeader, BuyerSecondaryBank)).allowEdit(false);
+        }
+
+        if (salesAgreementHeader.Sellersecondarybank == '' || salesAgreementHeader.SellerBank == '')
+        {
+            ETG_SalesAgreementHeader_ds.object(fieldNum(ETG_SalesAgreementHeader, SellerSecondaryBank)).allowEdit(true);
+        }
+        else
+        {
+            ETG_SalesAgreementHeader_ds.object(fieldNum(ETG_SalesAgreementHeader, SellerSecondaryBank)).allowEdit(false);
+        }
+
+        
+        if (salesAgreementHeader.PortOfLoadingDesc == '' || salesAgreementHeader.PortOfLoading == '')
+        {
+            ETG_SalesAgreementHeader_ds.object(fieldNum(ETG_SalesAgreementHeader, PortOfLoadingDesc)).allowEdit(true);
+        }
+        else
+        {
+            ETG_SalesAgreementHeader_ds.object(fieldNum(ETG_SalesAgreementHeader, PortOfLoadingDesc)).allowEdit(false);
+        }
+
+        if (salesAgreementHeader.PortOfDischargeDesc == '' || salesAgreementHeader.PortOfDischarge == '')
+        {
+            ETG_SalesAgreementHeader_ds.object(fieldNum(ETG_SalesAgreementHeader, PortOfDischargeDesc)).allowEdit(true);
+        }
+        else
+        {
+            ETG_SalesAgreementHeader_ds.object(fieldNum(ETG_SalesAgreementHeader, PortOfDischargeDesc)).allowEdit(false);
+        }
+
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETG_SalesAgreementLineQualityGrp_GroupId_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// QualitySpecificationBugs ,28 Jan 2021 , Binay 
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+  /*  [FormControlEventHandler(formControlStr(SalesAgreement, QualitySpecifications), FormControlEventType::Clicked)]
+    public static void QualitySpecifications_OnClicked(FormControl sender, FormControlEventArgs e)
+    {
+   
+        ETG_AgreementLineQualityGrp             agreementLineQualityGrp;
+        ETGAgrrementQualitySpecsLine            agrrementQualitySpecsLine;
+        ETGQualitySpecificationLineGroup        qualitySpecificationLineGroup;
+        ETGQualitySpecificationGroup            qualitySpecGrp;
+        ETGQualitySpecificationLine             qualitySpecLine;
+        ETGQualitySpecificationSubGroup         qualitySpecSubGrp;
+        AgreementLine                           agreementLine;
+        FormDataSource                          agreementLineQualityGrp_ds   = sender.formRun().dataSource(formDataSourceStr(PurchAgreement,ETG_AgreementLineQualityGrp))  as FormDataSource;
+
+        agreementLineQualityGrp = agreementLineQualityGrp_ds.cursor();
+        qualitySpecGrp               = ETGQualitySpecificationGroup::find(agreementLineQualityGrp.GroupId);
+        Args args = new Args();
+        args.record(agreementLineQualityGrp);
+
+        agreementLine = AgreementLine::find(agreementLineQualityGrp.AgreementLine);
+
+        select firstonly RecId from agrrementQualitySpecsLine
+            where agrrementQualitySpecsLine.AgreementLineRefrecid == agreementLineQualityGrp.AgreementLine
+            && agrrementQualitySpecsLine.GroupID  == agreementLineQualityGrp.GroupId;
+
+        if ( !agrrementQualitySpecsLine.RecId)
+        {
+            ttsbegin;
+
+            while select qualitySpecLine
+                where qualitySpecLine.GroupId == qualitySpecGrp.RecId
+            {
+                select firstonly qualitySpecSubGrp
+                    where qualitySpecSubGrp.SubGroupID == qualitySpecLine.SubGroupID;
+
+
+                while select qualitySpecificationLineGroup
+                    where qualitySpecificationLineGroup.SubGroupId == qualitySpecSubGrp.RecId
+                {
+                    agrrementQualitySpecsLine.MinRange = qualitySpecificationLineGroup.MinRange;
+                    agrrementQualitySpecsLine.MaxRange  = qualitySpecificationLineGroup.MaxRange;
+                    agrrementQualitySpecsLine.AdjustmentType = qualitySpecificationLineGroup.AdjustmentType;
+                    agrrementQualitySpecsLine.Increment = qualitySpecificationLineGroup.Increment;
+                    agrrementQualitySpecsLine.FixedValue = qualitySpecificationLineGroup.FixedValue;
+                    agrrementQualitySpecsLine.SubGroupId = qualitySpecificationLineGroup.SubGroupId;
+                    agrrementQualitySpecsLine.AgreementLineRefrecid = agreementLineQualityGrp.AgreementLine;
+                    agrrementQualitySpecsLine.GroupID = qualitySpecGrp.GroupID;
+                    agrrementQualitySpecsLine.GroupDescription = qualitySpecGrp.GroupDescription;
+                    agrrementQualitySpecsLine.insert();
+
+                }
+
+            }
+
+            ttscommit;
+        }
+
+        new  MenuFunction(MenuItemDisplayStr(ETG_SpecificationSubGroupList),MenuItemType::Display).run(args);
+    }
+
+    /// <summary>
+    /// QualitySpecificationBugs ,28 Jan 2021 , Binay
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(SalesAgreement, QualityGroupLine), FormControlEventType::PageActivated)]
+    public static void QualityGroupLine_OnPageActivated(FormControl sender, FormControlEventArgs e)
+    {
+       
+        FormControl                 RemoveGrpLineButton             = sender.formRun().design(0).controlName('RemoveGrpLine');
+        FormControl                 AddGrpLineButton                = sender.formRun().design(0).controlName('AddGrpLine');
+        ETG_AgreementLineQualityGrp agreementLineQualityGrp;
+        AgreementLine               agreementLine;
+        FormDataSource              agreementLineQualityGrp_ds  = sender.formRun().dataSource(formDataSourceStr(SalesAgreement,ETG_AgreementLineQualityGrp)) as FormDataSource;
+       
+        //agreementLineQualityGrp = agreementLineQualityGrp_ds.cursor();
+
+        //RemoveGrpLineButton.enabled(false);
+        //QualitySpecificationsButton.enabled(false);
+
+        //if (agreementLineQualityGrp.GroupId)
+        //{
+        //    RemoveGrpLineButton.enabled(true);
+        //    AddGrpLineButton.enabled(true);
+        //    QualitySpecificationsButton.enabled(true);
+
+        //}
+         
+         agreementLineQualityGrp = agreementLineQualityGrp_ds.cursor();
+         agreementLine = AgreementLine::find(agreementLineQualityGrp.AgreementLine);
+
+         if ( agreementLine.agreementHeader().AgreementState == AgreementState::Effective )
+         {
+             RemoveGrpLineButton.enabled(false);
+             AddGrpLineButton.enabled(false);
+        }
+       
+    }
+
+    /// <summary>
+    /////
+    ///// </summary>
+    ///// <param name="sender"></param>
+    ///// <param name="e"></param>
+    //[FormDataFieldEventHandler(formDataFieldStr(SalesAgreement, ETG_AgreementLineQualityGrp, GroupId), FormDataFieldEventType::Modified)]
+    //public static void GroupId_OnModified(FormDataObject sender, FormDataFieldEventArgs e)
+    //{
+    //    FormControl                 QualitySpecificationsButton     = sender.datasource().formRun().design(0).controlName('QualitySpecifications');
+    //    FormControl                 RemoveGrpLineButton             = sender.datasource().formRun().design(0).controlName('RemoveGrpLine');
+    //    FormControl                 AddGrpLineButton                = sender.datasource().formRun().design(0).controlName('AddGrpLine');
+    //    ETG_AgreementLineQualityGrp agreementLineQualityGrp;
+
+    //    FormDataSource agreementLineQualityGrp_ds = sender.datasource() as FormDataSource ;
+    //    agreementLineQualityGrp = agreementLineQualityGrp_ds.cursor();
+    //    RemoveGrpLineButton.enabled(false);
+
+    //    QualitySpecificationsButton.enabled(false);
+
+    //    if (agreementLineQualityGrp.GroupId)
+    //    {
+    //        RemoveGrpLineButton.enabled(true);
+    //        AddGrpLineButton.enabled(true);
+    //        QualitySpecificationsButton.enabled(true);
+
+
+    //    }
+    //    agreementLineQualityGrp_ds.refresh();
+
+    //    sender.datasource().refresh();
+
+    //}
+
+    ///// <summary>
+    /////
+    ///// </summary>
+    ///// <param name="sender"></param>
+    ///// <param name="e"></param>
+    //[FormDataSourceEventHandler(formDataSourceStr(SalesAgreement, ETG_AgreementLineQualityGrp), FormDataSourceEventType::Deleted)]
+    //public static void ETG_AgreementLineQualityGrp_OnDeleted(FormDataSource sender, FormDataSourceEventArgs e)
+    //{
+
+    //    FormControl                 QualitySpecificationsButton     = sender.formRun().design(0).controlName('QualitySpecifications');
+    //    FormControl                 RemoveGrpLineButton             = sender.formRun().design(0).controlName('RemoveGrpLine');
+    //    FormControl                 AddGrpLineButton                = sender.formRun().design(0).controlName('AddGrpLine');
+    //    ETG_AgreementLineQualityGrp agreementLineQualityGrp;
+
+    //    FormDataSource              agreementLineQualityGrp_ds  = sender.formRun().dataSource(formDataSourceStr(PurchAgreement,ETG_AgreementLineQualityGrp)) as FormDataSource;
+
+    //    agreementLineQualityGrp = agreementLineQualityGrp_ds.cursor();
+
+    //    RemoveGrpLineButton.enabled(false);
+    //    QualitySpecificationsButton.enabled(false);
+
+    //    if (agreementLineQualityGrp.RecId)
+    //    {
+    //        RemoveGrpLineButton.enabled(true);
+    //        AddGrpLineButton.enabled(true);
+    //        QualitySpecificationsButton.enabled(true);
+
+    //    }
+    //}
+
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataSourceEventHandler(formDataSourceStr(SalesAgreement, ETG_AgreementLineQualityGrp), FormDataSourceEventType::Activated)]
+    public static void ETG_AgreementLineQualityGrp_OnActivated(FormDataSource sender, FormDataSourceEventArgs e)
+    {
+       
+        FormControl                 RemoveGrpLineButton             = sender.formRun().design(0).controlName('RemoveGrpLine');
+        FormControl                 AddGrpLineButton                = sender.formRun().design(0).controlName('AddGrpLine');
+        ETG_AgreementLineQualityGrp agreementLineQualityGrp;
+        AgreementLine                           agreementLine;
+        
+        
+        
+        FormDataSource              agreementLineQualityGrp_ds  = sender.formRun().dataSource(formDataSourceStr(PurchAgreement,ETG_AgreementLineQualityGrp)) as FormDataSource;
+       
+        agreementLineQualityGrp = agreementLineQualityGrp_ds.cursor();
+        agreementLine = AgreementLine::find(agreementLineQualityGrp.AgreementLine);
+
+        if ( agreementLine.agreementHeader().AgreementState == AgreementState::Effective )
+        {
+            RemoveGrpLineButton.enabled(false);
+            AddGrpLineButton.enabled(false);
+        }
+        
+
+
+    }*/
+
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(SalesAgreement, ETG_SalesAgreementLineQualityGrp_GroupId), FormControlEventType::Modified)]
+    public static void ETG_SalesAgreementLineQualityGrp_GroupId_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        AgreementLine                           agreementLine;
+        ETGAgrrementQualitySpecsLine            agrrementQualitySpecsLine;
+        ETG_QualitySubGrpView                   qualitySubGrpView;
+        Name        grpId   = sender.valueStr();
+
+        FormDataSource  agreementLine_ds   = sender.formRun().dataSource(formDataSourceStr(SalesAgreement,Aline))  as FormDataSource;
+        agreementLine                      = agreementLine_ds.cursor();
+
+       
+        while select * from qualitySubGrpView
+            where qualitySubGrpView.GroupID == grpId
+        {
+            agrrementQualitySpecsLine.MinRange       = qualitySubGrpView.MinRange;
+            agrrementQualitySpecsLine.MaxRange       = qualitySubGrpView.MaxRange;
+            agrrementQualitySpecsLine.AdjustmentType = qualitySubGrpView.AdjustmentType;
+            agrrementQualitySpecsLine.Increment      = qualitySubGrpView.Increment;
+            agrrementQualitySpecsLine.FixedValue     = qualitySubGrpView.FixedValue;
+            agrrementQualitySpecsLine.SubGroupId     = qualitySubGrpView.SubGroupIdRef;
+            agrrementQualitySpecsLine.AgreementLineRefrecid = agreementLine.RecId;
+            agrrementQualitySpecsLine.GroupID               = qualitySubGrpView.GroupID;
+            agrrementQualitySpecsLine.GroupDescription      = qualitySubGrpView.GroupDescription;
+            agrrementQualitySpecsLine.SubGrpId              = qualitySubGrpView.SubGroupID;
+            agrrementQualitySpecsLine.SubGroupDescription   = qualitySubGrpView.SubGroupDescription;
+            agrrementQualitySpecsLine.insert();
+        }
+
+        if(!agreementLine.IsModified)
+        {
+            agreementLine.IsModified = NoYes::Yes;
+            agreementLine.doUpdate();
+
+            agreementLine_ds.research();
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>SalesLine_OnQueryExecuting</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataSourceEventHandler(formDataSourceStr(SalesAgreement, SalesLine), FormDataSourceEventType::QueryExecuting)]
+    public static void SalesLine_OnQueryExecuting(FormDataSource sender, FormDataSourceEventArgs e)
+    {
+        AgreementLine agreementLine = sender.formRun().dataSource(FormDataSourcestr(SalesAgreement, ALine)).cursor();
+      
+    // Ranges added to retrieve only the salesAgreement related salesline records.
+        if (agreementLine.RecId)
+        {
+            sender.query().dataSourceTable(tableNum(SalesLine)).addRange(fieldNum(SalesLine, MatchingAgreementLine)).value(queryValue(agreementLine.RecId));
+        }
+        else
+        {
+            sender.query().dataSourceTable(tableNum(SalesLine)).addRange(fieldNum(SalesLine, RecId)).value(queryValue(0));
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>AgreementHeaderDefault_onActivated</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Event handler for the onActivated event of the AgreementHeaderDefault datasource on the SalesAgreement form.
+    /// </summary>
+    /// <param name="sender">The form data source.</param>
+    /// <param name="e">The event arguments.</param>
+    [FormDataSourceEventHandler(formDataSourceStr(SalesAgreement, AgreementHeaderDefault), FormDataSourceEventType::Activated)]
+    public static void AgreementHeaderDefault_onActivated(FormDataSource sender, FormDataSourceEventArgs e)
+    {
+        
+        FormRun formRun = sender.formRun();
+
+   
+        FormStringControl paymentTermsControl = formRun.design().controlName(formControlStr(SalesAgreement, AgreementHeaderDefault_PaymentTerms)) as FormStringControl;
+
+        
+        if (paymentTermsControl)
+        {
+          
+            paymentTermsControl.mandatory(true);
+          
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

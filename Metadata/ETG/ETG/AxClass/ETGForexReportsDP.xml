@@ -1,0 +1,1127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGForexReportsDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The <c>ETGForexReportsDP</c> class is the report data provider class for Vendor, customer and GL related forex data like Unrealized/ realized
+/// </summary>
+[SrsReportParameterAttribute(classStr(ETGForexReportsContract))]
+class ETGForexReportsDP extends SRSReportDataProviderBase
+{
+    ETGForexReportsTmp          forexReportsTmp;
+    ETGForexReportsContract     contract;
+    FromDate                    fromDate;
+    ToDate                      toDate;
+    ETGForexType                forexType;
+    VendTrans                   vendTrans,VendTransloc;
+    CustTrans                   custTrans,custTransloc;
+    CustSettlement              custSettlement,custSettlementloc,custSettlementpervios,custSettlementexh,custSettlementorig;
+    VendSettlement              vendSettlement,vendSettlementloc,vendSettlementpervios,vendSettlementexh,VendSettlementorig;
+    LedgerTransSettlement       ledgerTransSettlement, ledgerTransSettlement2,ledgerTransSettlement3,ledgerTransSettlement4,ledgerTransSettlement5, ledgerTransSettlement6, ledgerTransSettlement7, ledgerTransSettlement8,ledgerTransSettlement9;
+    GeneralJournalAccountEntry  gjAE,gjAE2;
+    GeneralJournalEntry         gje,gje2;
+    LedgerTransSettlementView   ledgerTransSettlementView;
+    Ledger      ledger = Ledger::find(Ledger::current()) ;
+    MainAccount                 mainAccount;
+
+    ExchangeRate     exchangeRate;
+    ExchangeRateType ExchangeRateType;
+    ExchangeRateCurrencyPair exchangeRateCurrencyPair;
+    real             exchRate,exchRatepervios;
+     
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getForexreportsTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Executes temporary table.
+    /// </summary>
+    /// <returns>
+    /// The data for the report in the <c>forexReportsTmp</c> table.
+    /// </returns>
+    [
+        SRSReportDataSetAttribute(tablestr(ETGForexReportsTmp))
+    ]
+    public ETGForexReportsTmp getForexreportsTmp()
+    {
+        select forexReportsTmp;
+        return forexReportsTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Process the business logic.
+    /// </summary>
+    public void processReport()
+    {
+        ETGModuleType   moduleType;
+        contract = this.parmDataContract() as  ETGForexReportsContract;
+
+        moduleType          = contract.parmModuleType();
+        fromDate            = contract.parmFromDate();
+        toDate              = contract.parmToDate();
+        forexType           = contract.parmForexType();
+
+        forexReportsTmp.CompanyLogo  = FormLetter::companyLogo(); //Inserting company logo
+        
+        if(moduleType == ETGModuleType::Vendor && forexType == ETGForexType::Both)
+        {
+            this.getUnrealizedVend();
+            this.getRealizedVend();
+            
+        }
+        //When module type is vendor and forex type is unrealized
+        else  if(moduleType == ETGModuleType::Vendor && forexType == ETGForexType::Unrealised)
+        {
+            this.getUnrealizedVend();
+        }
+        //When module type is vendor and forex type is realised
+        else  if(moduleType == ETGModuleType::Vendor && forexType == ETGForexType::Realised)
+        {
+            this.getRealizedVend();
+        }
+        if(moduleType == ETGModuleType::Customer && forexType == ETGForexType::Both)
+        {
+            this.getUnrealizedCust();
+            this.getrealizedCust();
+            
+        }
+        //When module type is customer and forex type is unrealized
+        else  if(moduleType == ETGModuleType::Customer && forexType == ETGForexType::Unrealised)
+        {
+            this.getUnrealizedCust();
+        }
+        //When module type is customer and forex type is unrealized
+        else  if(moduleType == ETGModuleType::Customer && forexType == ETGForexType::Realised)
+        {
+            this.getrealizedCust();
+        }
+        else if(moduleType == ETGModuleType::GeneralLedger && forexType == ETGForexType::Both)
+        {
+            this.getRealizedLedger();
+            this.getUnRealizedLedger();
+            //As Unrealzed is not given in the requiremrnt
+           
+        }
+        else if(moduleType == ETGModuleType::GeneralLedger && forexType == ETGForexType::Realised)
+        {
+            this.getRealizedLedger();
+        }
+        else if(moduleType == ETGModuleType::GeneralLedger && forexType == ETGForexType::Unrealised)
+        {
+            this.getUnRealizedLedger();
+        }
+        else if(moduleType == ETGModuleType::ALL && forexType == ETGForexType::Both)
+        {
+            this.getUnrealizedVend();
+            this.getRealizedVend();
+            this.getUnrealizedCust();
+            this.getrealizedCust();
+            this.getRealizedLedger();
+            this.getUnRealizedLedger();
+        }
+        else if(moduleType == ETGModuleType::ALL && forexType == ETGForexType::Unrealised)
+        {
+            this.getUnrealizedVend();
+            this.getUnrealizedCust();
+            this.getUnRealizedLedger();
+           
+        }
+        else if(moduleType == ETGModuleType::ALL && forexType == ETGForexType::Realised)
+        {
+            this.getRealizedVend();
+            this.getrealizedCust();
+            this.getRealizedLedger();
+        }
+       
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getDefaultDimensionValue</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the dimenion values
+    /// </summary>
+    public void getDefaultDimensionValue(RefRecId  _defaultDimension)
+    {
+        DefaultDimensionView        defaultDimesnionView;
+
+        while select DisplayValue,Name from defaultDimesnionView
+            where defaultDimesnionView.DefaultDimension == _defaultDimension
+                && defaultDimesnionView.Name  == '@ETG_New:MainCommodity'
+                   
+        {
+            if(defaultDimesnionView.Name  == '@ETG_New:MainCommodity')
+            forexReportsTmp.MainCommodity = defaultDimesnionView.DisplayValue;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getDefaultDimensionValueVendVertical</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the dimenion values of vertical
+    /// </summary>
+    /// <param name = "_defaultDimension">_defaultDimension</param>
+    public void getDefaultDimensionValueVendVertical(RefRecId  _defaultDimension)
+    {
+        DefaultDimensionView        defaultDimesnionView;
+
+        while select DisplayValue,Name from defaultDimesnionView
+            where defaultDimesnionView.DefaultDimension == _defaultDimension
+                && defaultDimesnionView.Name  == '@ETG_New:Vertical'
+                   
+        {
+            if(defaultDimesnionView.Name  == '@ETG_New:Vertical')
+              forexReportsTmp.Vertical   = defaultDimesnionView.DisplayValue;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getDefaultDimensionValueBusinessUnit</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the dimension values Business unit
+    /// </summary>
+    /// <param name = "_defaultDimension">_defaultDimension</param>
+    public void getDefaultDimensionValueBusinessUnit(RefRecId  _defaultDimension)
+    {
+        DefaultDimensionView        defaultDimesnionView;
+
+        while select DisplayValue,Name from defaultDimesnionView
+            where defaultDimesnionView.DefaultDimension == _defaultDimension
+                && defaultDimesnionView.Name  == '@ETG_New:BusinessUnit'
+                   
+        {
+            if(defaultDimesnionView.Name  == '@ETG_New:BusinessUnit')
+            forexReportsTmp.BusinessUnit   = defaultDimesnionView.DisplayValue;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getDefaultDimensionValueSubCommodity</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the dimension value sub commodity
+    /// </summary>
+    /// <param name = "_defaultDimension">_defaultDimension</param>
+    public void getDefaultDimensionValueSubCommodity(RefRecId  _defaultDimension)
+    {
+        DefaultDimensionView        defaultDimesnionView;
+
+        while select DisplayValue,Name from defaultDimesnionView
+            where defaultDimesnionView.DefaultDimension == _defaultDimension
+                && defaultDimesnionView.Name  == '@ETG_New:SubCommodity'
+                   
+        {
+            if(defaultDimesnionView.Name  == '@ETG_New:SubCommodity')
+            forexReportsTmp.SubCommodity   = defaultDimesnionView.DisplayValue;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getDefaultDimensionValueContract</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the dimension value Contract
+    /// </summary>
+    /// <param name = "_defaultDimension">_defaultDimension</param>
+    public void getDefaultDimensionValueContract(RefRecId  _defaultDimension)
+    {
+        DefaultDimensionView        defaultDimesnionView;
+
+        while select DisplayValue,Name from defaultDimesnionView
+            where defaultDimesnionView.DefaultDimension == _defaultDimension
+                && defaultDimesnionView.Name  == '@ETG_New:Contract'
+                   
+        {
+            if(defaultDimesnionView.Name  == '@ETG_New:Contract')
+            forexReportsTmp.Contract   = defaultDimesnionView.DisplayValue;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getDefaultDimensionValueCustomer</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the dimension values customer
+    /// </summary>
+    /// <param name = "_defaultDimension"></param>
+    public void getDefaultDimensionValueCustomer(RefRecId  _defaultDimension)
+    {
+        DefaultDimensionView        defaultDimesnionView;
+
+        while select DisplayValue,Name from defaultDimesnionView
+            where defaultDimesnionView.DefaultDimension == _defaultDimension
+                && defaultDimesnionView.Name  == '@ETG_New:MainCommodity'
+                   
+        {
+            if(defaultDimesnionView.Name  == '@ETG_New:MainCommodity')
+            forexReportsTmp.Commodity   = defaultDimesnionView.DisplayValue;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getDefaultDimensionValueLedger</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the dimension value for ledger
+    /// </summary>
+    /// <param name = "_defaultDimension">_defaultDimension</param>
+    public void getDefaultDimensionValueLedger(RefRecId  _defaultDimension)
+    {
+        DefaultDimensionView        defaultDimesnionView;
+
+        while select DisplayValue,Name from defaultDimesnionView
+            where defaultDimesnionView.DefaultDimension == _defaultDimension
+                && defaultDimesnionView.Name  == '@ETG_New:MainCommodity'
+                   
+        {
+            if(defaultDimesnionView.Name  == '@ETG_New:MainCommodity')
+                forexReportsTmp.Commodity   = defaultDimesnionView.DisplayValue;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getDefaultDimensionValueGL</Name>
+				<Source><![CDATA[
+    //
+
+    public str getDefaultDimensionValueGL(RefRecId  _defaultDimension)
+    {
+        DefaultDimensionView        defaultDimesnionView;
+        str commodity;
+
+        while select DisplayValue,Name from defaultDimesnionView
+        where defaultDimesnionView.DefaultDimension == _defaultDimension
+            && defaultDimesnionView.Name  == '@ETG_New:MainCommodity'
+               
+        {
+            if(defaultDimesnionView.Name  == '@ETG_New:MainCommodity')
+            commodity = defaultDimesnionView.DisplayValue;
+        }
+        return commodity;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getDefaultDimensionValueBusinessUnitGL</Name>
+				<Source><![CDATA[
+    public str getDefaultDimensionValueBusinessUnitGL(RefRecId  _defaultDimension)
+    {
+        DefaultDimensionView        defaultDimesnionView;
+        str businessunit;
+
+        while select DisplayValue,Name from defaultDimesnionView
+        where defaultDimesnionView.DefaultDimension == _defaultDimension
+            && defaultDimesnionView.Name  == '@ETG_New:BusinessUnit'
+               
+        {
+            if(defaultDimesnionView.Name  == '@ETG_New:BusinessUnit')
+             businessunit   = defaultDimesnionView.DisplayValue;
+        }
+        return businessunit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getDefaultDimensionValueContractGL</Name>
+				<Source><![CDATA[
+    public str getDefaultDimensionValueContractGL(RefRecId  _defaultDimension)
+    {
+        DefaultDimensionView        defaultDimesnionView;
+        str contrct;
+
+        while select DisplayValue,Name from defaultDimesnionView
+         where defaultDimesnionView.DefaultDimension == _defaultDimension
+             && defaultDimesnionView.Name  == '@ETG_New:Contract'
+                
+        {
+            if(defaultDimesnionView.Name  == '@ETG_New:Contract')
+            contrct   = defaultDimesnionView.DisplayValue;
+        }
+        return contrct;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getDefaultDimensionValueSubCommodityGL</Name>
+				<Source><![CDATA[
+    public str getDefaultDimensionValueSubCommodityGL(RefRecId  _defaultDimension)
+    {
+        DefaultDimensionView        defaultDimesnionView;
+        str subcommodity;
+
+        while select DisplayValue,Name from defaultDimesnionView
+        where defaultDimesnionView.DefaultDimension == _defaultDimension
+            && defaultDimesnionView.Name  == '@ETG_New:SubCommodity'
+               
+        {
+            if(defaultDimesnionView.Name  == '@ETG_New:SubCommodity')
+        subcommodity   = defaultDimesnionView.DisplayValue;
+        }
+        return subcommodity;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getDefaultDimensionValueVendVerticalGL</Name>
+				<Source><![CDATA[
+    public str getDefaultDimensionValueVendVerticalGL(RefRecId  _defaultDimension)
+    {
+        DefaultDimensionView        defaultDimesnionView;
+        str  vertical;
+        while select DisplayValue,Name from defaultDimesnionView
+        where defaultDimesnionView.DefaultDimension == _defaultDimension
+            && defaultDimesnionView.Name  == '@ETG_New:Vertical'
+               
+        {
+            if(defaultDimesnionView.Name  == '@ETG_New:Vertical')
+          vertical   = defaultDimesnionView.DisplayValue;
+        }
+        return vertical;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getUnrealizedVend</Name>
+				<Source><![CDATA[
+    //
+
+
+    /// <summary>
+    /// Gets the unrealized records of vendor
+    /// </summary>
+    public void getUnrealizedVend()
+    {
+
+        while select vendTrans
+            where vendTrans.TransDate   <= toDate
+               && vendTrans.CurrencyCode != ledger.AccountingCurrency
+               && vendTrans.TransType    != LedgerTransType::ExchAdjustment
+               && vendTrans.TransType    != LedgerTransType::Settlement
+             //  && vendTrans.VendExchAdjustmentUnrealized != 0
+               && vendTrans.DataAreaId == curExt()
+            join vendSettlement
+            where vendSettlement.TransRecId   == vendTrans.RecId
+               && vendSettlement.TransCompany == vendTrans.DataAreaId
+               && vendSettlement.AccountNum   == vendTrans.AccountNum
+               && vendSettlement.TransDate    >= fromDate
+               && vendSettlement.TransDate    <= toDate
+               && vendSettlement.SettleAmountCur == 0
+               && vendSettlement.SettlementVoucher == ''
+               && vendSettlement.ExchAdjustment != 0
+               
+        {
+            select firstOnly forexReportsTmp
+                    where forexReportsTmp.LastExchAdjVoucher == vendSettlement.OffsetTransVoucher;
+
+            select sum (SettleAmountCur) from
+                        vendSettlementloc  where vendSettlementloc.TransRecId == vendTrans.RecId;
+
+           select firstOnly vendSettlementpervios
+                   order by vendSettlementpervios.CreatedDateTime desc
+                      where vendSettlementpervios.TransRecId == vendTrans.RecId
+                         && vendSettlementpervios.CreatedDateTime < vendSettlement.CreatedDateTime;
+
+            if (forexReportsTmp)
+            {
+                ttsbegin;
+                forexReportsTmp.selectForUpdate(true);
+                forexReportsTmp.VendExchAdjustmentUnrealized += -(vendSettlement.ExchAdjustment);
+                forexReportsTmp.update();
+                ttscommit;
+            }
+            else
+            {
+                forexReportsTmp.clear();
+                forexReportsTmp.CustomerOrVendor                = enum2str(ETGModuleType::Vendor);//Vendor
+                forexReportsTmp.AccountNum                      = vendTrans.AccountNum;
+                forexReportsTmp.VendName                        = VendTable::find(vendTrans.AccountNum).name();
+                forexReportsTmp.LastExchAdj                     = vendSettlement.TransDate;//FOrexdate
+                forexReportsTmp.LastExchAdjVoucher              = vendSettlement.OffsetTransVoucher; //Exch / Settlement Voucher
+                forexReportsTmp.TransDate                       = vendTrans.TransDate; //Trans date
+                forexReportsTmp.Voucher                         = vendTrans.Voucher; //Transaction Voucher
+                forexReportsTmp.CurrencyCode                    = vendTrans.CurrencyCode;//Transaction Currency
+                forexReportsTmp.AmountCur                       = vendTrans.AmountCur; //Transaction currency amount
+                forexReportsTmp.ExchRate                        = (vendTrans.ExchRate /100);//Transaction Exchange Rate with accounting currency
+                forexReportsTmp.AmountMST                       = vendTrans.AmountMST;//Accounting currency amount
+                forexReportsTmp.VendExchAdjustmentUnrealized    = -(vendSettlement.ExchAdjustment);//Exch. Adjustment - Unrealised
+                forexReportsTmp.VendExchAdjustmentRealized      = 0;
+                forexReportsTmp.BalanceAmount                   = vendTrans.AmountCur - vendSettlementloc.SettleAmountCur;
+              
+                CurrencyCode fromCurrency                       = vendTrans.CurrencyCode;
+                CurrencyCode toCurrency                         = ledger.AccountingCurrency;
+                TransDate    transDate                          = vendSettlement.TransDate;
+
+                select firstonly  exchangeRateCurrencyPair
+                            where exchangeRateCurrencyPair.ExchangeRateType == Ledger::find(Ledger::current()).DefaultExchangeRateType
+                              &&  exchangeRateCurrencyPair.FromCurrencyCode == fromCurrency
+                              &&  exchangeRateCurrencyPair.ToCurrencyCode   == toCurrency;
+
+                exchRate        = exchangeRate::findByDate(exchangeRateCurrencyPair.RecId,transDate).ExchangeRate;
+                exchRatepervios = exchangeRate::findByDate(exchangeRateCurrencyPair.RecId,vendSettlementpervios.TransDate).ExchangeRate;
+                if(exchRatepervios == 0)
+                {
+                   forexReportsTmp.PerviosExchRate                 = vendTrans.ExchRate/100;
+                }
+                else
+                {
+                    forexReportsTmp.PerviosExchRate                 = exchRatepervios/100;
+                }
+                forexReportsTmp.LastExchAdjRate                 = (exchRate/100);
+                if(forexReportsTmp.VendExchAdjustmentUnrealized == 0 && forexReportsTmp.VendExchAdjustmentRealized == 0)
+                {
+                    continue;
+                }
+                this.getDefaultDimensionValue(vendTrans.DefaultDimension); //Commodity
+                this.getDefaultDimensionValueBusinessUnit(vendTrans.DefaultDimension); //Business unit
+                this.getDefaultDimensionValueContract(vendTrans.DefaultDimension); //Contract
+                this.getDefaultDimensionValueSubCommodity(vendTrans.DefaultDimension); //Sub commodity
+                this.getDefaultDimensionValueVendVertical(vendTrans.DefaultDimension); //Vertical
+                forexReportsTmp.insert();
+            }
+            
+        }
+    
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getRealizedVend</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the realized records of vendor
+    /// </summary>
+    public void getRealizedVend()
+    {
+        while select  vendTrans
+             where  vendTrans.TransDate <= toDate
+                && vendTrans.CurrencyCode != ledger.AccountingCurrency
+                && ((vendTrans.TransType != LedgerTransType::ExchAdjustment) && (vendTrans.TransType != LedgerTransType::Settlement))
+                && (vendTrans.VendExchAdjustmentRealized != 0)
+                               
+        {
+            str voucherLoc              = vendTrans.Voucher;
+            while select sum(SettleAmountCur) from vendSettlement
+                group by TransDate, OffsetTransVoucher,SettlementVoucher,ExchAdjustment,TransRecId,SettleAmountCur,SettleAmountMST,OffSetRecId,CreatedDateTime
+                    where vendSettlement.TransRecId == vendTrans.RecId
+                    && vendSettlement.SettleAmountCur != 0
+                   && vendSettlement.TransDate >= fromDate
+                   && vendSettlement.TransDate <= toDate
+            {
+
+                select sum (SettleAmountCur) from
+                        vendSettlementloc  where vendSettlementloc.TransRecId == vendTrans.RecId;
+
+                select firstOnly vendSettlementpervios
+                       order by  vendSettlementpervios.CreatedDateTime desc
+                          where  vendSettlementpervios.TransRecId == vendTrans.RecId
+                             &&  vendSettlementpervios.CreatedDateTime < vendSettlement.CreatedDateTime
+                             &&  vendSettlementpervios.SettlementVoucher =="";
+
+                select firstonly vendSettlementexh
+                           where vendSettlementexh.TransRecId == vendTrans.RecId
+                              && vendSettlementexh.SettleAmountCur == 0
+                              && vendSettlementexh.OffsetTransVoucher == vendSettlement.OffsetTransVoucher
+                              && vendSettlementexh.SettlementVoucher == vendSettlement.SettlementVoucher;
+
+                select firstonly VendSettlementorig
+                              join VendTransloc
+                            where  VendTransloc.RecId ==  VendSettlementorig.TransRecId
+                                && VendTransloc.VendExchAdjustmentRealized == 0
+                                && VendTransloc.Voucher == vendSettlement.OffsetTransVoucher
+                                && VendSettlementorig.OffsetTransVoucher == vendTrans.Voucher
+                                && VendSettlementorig.DataAreaId == curExt()
+                                && VendSettlementorig.SettleAmountCur == 0
+                                && VendSettlementorig.SettlementVoucher == vendSettlement.SettlementVoucher;
+
+
+                forexReportsTmp.clear();
+                forexReportsTmp.CustomerOrVendor     = enum2str(ETGModuleType::Vendor);//Vendor
+                forexReportsTmp.AccountNum           = vendTrans.AccountNum;
+                forexReportsTmp.VendName             = VendTable::find(vendTrans.AccountNum).name();
+                forexReportsTmp.LastExchAdj          = vendSettlement.TransDate;//Forex Date / Settlement date
+                forexReportsTmp.LastExchAdjVoucher   = vendSettlement.SettlementVoucher; //LastExchAdj  un resilzed
+                forexReportsTmp.LastExchAdjRate      = VendTrans::find(vendSettlement.OFFSETRECID).ExchRate/100;//Unrealised or realised voucher Exchange Rate
+                forexReportsTmp.CurrencyCode         = vendTrans.CurrencyCode;//Transaction Currency
+                forexReportsTmp.TransDate            = vendTrans.TransDate; //TTransaction Date
+                forexReportsTmp.Voucher              = voucherLoc;// Adj. Voucher
+                forexReportsTmp.AmountCur            = vendTrans.AmountCur; //Transaction currency amount
+                forexReportsTmp.ExchRate             = VendTrans::find(vendSettlement.TransRecId).ExchRate/100;//Transaction Exchange Rate with accounting currency
+                forexReportsTmp.AmountMST            = vendTrans.AmountMST;//Accounting currency amount
+
+                //Settlement fields mapping -// Begin
+                forexReportsTmp.TransDateSettlementVoucher      = VendTrans::find(vendSettlement.OFFSETRECID).TransDate;//Offset (Settlement) Voucher Transaction Date
+                forexReportsTmp.SettlementVoucherVend           = vendSettlement.OffsetTransVoucher;//Settle voucher
+                forexReportsTmp.SettlementVoucherCurrencyVend   = VendTrans::find(vendSettlement.OFFSETRECID).CurrencyCode;//Settlement voucher currency
+                forexReportsTmp.SettleAmountCur                 = VendTrans::find(vendSettlement.OFFSETRECID).AmountCur;//Offset (Settlement) Voucher settled Amount in Transaction currency
+                forexReportsTmp.SettlementVoucherExchRate       = VendTrans::find(vendSettlement.OFFSETRECID).ExchRate/100;//Offset (Settlement) Voucher Exchange Rate
+                forexReportsTmp.SettleAmountMSTVend             = VendTrans::find(vendSettlement.OFFSETRECID).AmountMST;//Accounting Currency Amount of Settlement Voucher
+                forexReportsTmp.VendExchAdjustmentUnrealized    = -(vendSettlementexh.ExchAdjustment + VendSettlementorig.ExchAdjustment);
+                forexReportsTmp.VendExchAdjustmentRealized      = -(vendSettlement.ExchAdjustment);//Realised Exchange Rate
+                forexReportsTmp.SettledAmount                   = (vendSettlement.SettleAmountCur);
+
+                if(forexReportsTmp.VendExchAdjustmentUnrealized == 0 && forexReportsTmp.VendExchAdjustmentRealized == 0)
+                {
+                    continue;
+                }
+
+                CurrencyCode fromCurrency                       = vendTrans.CurrencyCode;
+                CurrencyCode toCurrency                         = ledger.AccountingCurrency;
+                TransDate    transDate                          = vendSettlement.TransDate;
+
+                select firstonly  exchangeRateCurrencyPair
+                            where exchangeRateCurrencyPair.ExchangeRateType == Ledger::find(Ledger::current()).DefaultExchangeRateType
+                              &&  exchangeRateCurrencyPair.FromCurrencyCode == fromCurrency
+                              &&  exchangeRateCurrencyPair.ToCurrencyCode   == toCurrency;
+
+                exchRatepervios = exchangeRate::findByDate(exchangeRateCurrencyPair.RecId,vendSettlementpervios.TransDate).ExchangeRate;
+                if(exchRatepervios == 0)
+                {
+                    forexReportsTmp.PerviosExchRate                 = vendTrans.ExchRate/100;
+                }
+                else
+                {
+                    forexReportsTmp.PerviosExchRate                 = exchRatepervios/100;
+                }
+
+                this.getDefaultDimensionValue(vendTrans.DefaultDimension); //Commodity
+                this.getDefaultDimensionValueBusinessUnit(vendTrans.DefaultDimension); //Business unit
+                this.getDefaultDimensionValueContract(vendTrans.DefaultDimension); //Contract
+                this.getDefaultDimensionValueSubCommodity(vendTrans.DefaultDimension); //Sub commodity
+                this.getDefaultDimensionValueVendVertical(vendTrans.DefaultDimension); //Vertical
+                forexReportsTmp.insert();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getUnrealizedCust</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the unrealized data of customer
+    /// </summary>
+    public void getUnrealizedCust()
+    {
+        while select  custTrans
+             where custTrans.TransDate <= toDate
+                && custTrans.CurrencyCode != ledger.AccountingCurrency
+                && custTrans.TransType    != LedgerTransType::ExchAdjustment
+                && custTrans.TransType    != LedgerTransType::Settlement
+                && custTrans.DataAreaId == curExt()
+              join custSettlement
+             where custSettlement.TransRecId   == custTrans.RecId
+                && custSettlement.TransCompany == custTrans.DataAreaId
+                && custSettlement.AccountNum   == custTrans.AccountNum
+                && custSettlement.TransDate    >= fromDate
+                && custSettlement.TransDate    <= toDate
+                && custSettlement.SettleAmountCur == 0
+                && custSettlement.SettlementVoucher == ''
+                && custSettlement.ExchAdjustment != 0
+        {
+            select firstOnly forexReportsTmp
+                 where forexReportsTmp.LastExchAdjVoucher == custSettlement.OffsetTransVoucher;
+
+            select sum (SettleAmountCur) from
+                     custSettlementloc  where custSettlementloc.TransRecId == custTrans.RecId            
+                                          &&   custSettlementloc.CreatedDateTime < custSettlement.CreatedDateTime;
+
+            select firstOnly custSettlementpervios
+             order by custSettlementpervios.CreatedDateTime desc
+                     where custSettlementpervios.TransRecId == custTrans.RecId
+                        && custSettlementpervios.CreatedDateTime < custSettlement.CreatedDateTime
+                        && custSettlementpervios.SettlementVoucher=="";
+
+                if (forexReportsTmp)
+                {
+                    ttsbegin;
+                    forexReportsTmp.selectForUpdate(true);
+                    forexReportsTmp.VendExchAdjustmentUnrealized += -(custSettlement.ExchAdjustment);
+                    forexReportsTmp.update();
+                    ttscommit;
+                }
+                else
+                {
+                    forexReportsTmp.clear();
+                    forexReportsTmp.CustomerOrVendor                = enum2str(ETGModuleType::Customer);//Customer
+                    forexReportsTmp.AccountNum                      = custTrans.AccountNum;
+                    forexReportsTmp.VendName                        = CustTable::find(custTrans.AccountNum).name();
+                    forexReportsTmp.LastExchAdj                     = custSettlement.TransDate;//FOrexdate
+                    forexReportsTmp.LastExchAdjVoucher              = custSettlement.OffsetTransVoucher; //Exch / Settlement Voucher
+                    forexReportsTmp.TransDate                       = custTrans.TransDate; //Trans date
+                    forexReportsTmp.Voucher                         = custTrans.Voucher; //Transaction Voucher
+                    forexReportsTmp.CurrencyCode                    = custTrans.CurrencyCode;//Transaction Currency
+                    forexReportsTmp.AmountCur                       = custTrans.AmountCur; //Transaction currency amount
+                    forexReportsTmp.ExchRate                        = (custTrans.ExchRate /100);//Transaction Exchange Rate with accounting currency
+                    forexReportsTmp.AmountMST                       = custTrans.AmountMST;//Accounting currency amount
+                    forexReportsTmp.VendExchAdjustmentUnrealized    = -(custSettlement.ExchAdjustment);//Exch. Adjustment - Unrealised
+                    forexReportsTmp.VendExchAdjustmentRealized = 0;
+                    forexReportsTmp.BalanceAmount                   = custTrans.AmountCur - custSettlementloc.SettleAmountCur;
+            
+                    CurrencyCode fromCurrencycust  = custTrans.CurrencyCode;
+                    CurrencyCode toCurrencycust    = ledger.AccountingCurrency;
+                    TransDate    transDatecust     = custSettlement.TransDate;
+
+                    select firstonly exchangeRateCurrencyPair
+                         where exchangeRateCurrencyPair.ExchangeRateType   == Ledger::find(Ledger::current()).DefaultExchangeRateType
+                             &&  exchangeRateCurrencyPair.FromCurrencyCode == fromCurrencycust
+                             &&  exchangeRateCurrencyPair.ToCurrencyCode   == toCurrencycust;
+
+                    exchRate        = exchangeRate::findByDate(exchangeRateCurrencyPair.RecId,transDatecust).ExchangeRate;
+                    exchRatepervios = exchangeRate::findByDate(exchangeRateCurrencyPair.RecId,custSettlementpervios.TransDate).ExchangeRate;
+
+                    if(exchRatepervios == 0)
+                    {
+                        forexReportsTmp.PerviosExchRate                 = custTrans.ExchRate/100;
+                    }
+                    else
+                    {
+                        forexReportsTmp.PerviosExchRate                 = exchRatepervios/100;
+                    }
+
+                    forexReportsTmp.LastExchAdjRate                 = exchRate/100;
+                   
+                    if(forexReportsTmp.VendExchAdjustmentUnrealized == 0 && forexReportsTmp.VendExchAdjustmentRealized == 0)
+                    {
+                        continue;
+                    }
+                    this.getDefaultDimensionValue(custTrans.DefaultDimension); //Commodity
+                    this.getDefaultDimensionValueBusinessUnit(custTrans.DefaultDimension); //Business unit
+                    this.getDefaultDimensionValueContract(custTrans.DefaultDimension); //Contract
+                    this.getDefaultDimensionValueSubCommodity(custTrans.DefaultDimension); //Sub commodity
+                    this.getDefaultDimensionValueVendVertical(custTrans.DefaultDimension); //Vertical
+                    forexReportsTmp.insert();
+                }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getrealizedCust</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the realized values of customer
+    /// </summary>
+    public void getrealizedCust()
+    {
+        while select  custTrans
+             where custTrans.TransDate <= toDate
+                && custTrans.CurrencyCode != ledger.AccountingCurrency
+                && ((custTrans.TransType != LedgerTransType::ExchAdjustment) && (custTrans.TransType != LedgerTransType::Settlement))
+                && (custTrans.CustExchAdjustmentRealized != 0)
+        {
+            str voucherLoc              = custTrans.Voucher;
+            while select sum(SettleAmountCur) from custSettlement
+                group by TransDate, OffsetTransVoucher,SettlementVoucher,ExchAdjustment,TransRecId,SettleAmountCur,SettleAmountMST,OffSetRecId,CreatedDateTime
+                    where custSettlement.TransRecId == custTrans.RecId
+                    && custSettlement.SettleAmountCur != 0
+                     && custSettlement.TransDate >= fromDate
+                     && custSettlement.TransDate <= toDate
+            {
+
+                select sum (SettleAmountCur) from custSettlementloc
+                    where custSettlementloc.TransRecId == custTrans.RecId
+                       && custSettlementloc.CreatedDateTime < custSettlement.CreatedDateTime;
+
+                select firstOnly custSettlementpervios
+                       order by  custSettlementpervios.CreatedDateTime desc
+                          where  custSettlementpervios.TransRecId == custTrans.RecId
+                              && custSettlementpervios.CreatedDateTime < custSettlement.CreatedDateTime
+                              && custSettlementpervios.SettlementVoucher=="";
+
+                   select firstonly custSettlementexh 
+                              where custSettlementexh.TransRecId == custTrans.RecId
+                                 && custSettlementexh.OffsetTransVoucher == custSettlement.OffsetTransVoucher
+                                 && custSettlementexh.SettleAmountCur == 0
+                                 && custSettlementexh.SettlementVoucher== custSettlement.SettlementVoucher;
+
+                select firstonly custSettlementorig  
+                              join custTransloc 
+                            where custTransloc.RecId == custSettlementorig.TransRecId
+                                && custTransloc.Voucher ==custSettlement.OffsetTransVoucher
+                                && custTransloc.CustExchAdjustmentRealized == 0
+                                && custSettlementorig.OffsetTransVoucher == custTrans.Voucher
+                                && custSettlementorig.DataAreaId == curExt()
+                                && custSettlementorig.SettleAmountCur == 0
+                                && custSettlementorig.SettlementVoucher== custSettlement.SettlementVoucher;
+
+
+                forexReportsTmp.clear();
+                forexReportsTmp.CustomerOrVendor     = enum2str(ETGModuleType::Customer);//Customer
+                forexReportsTmp.AccountNum           = custTrans.AccountNum;
+                forexReportsTmp.VendName             = CustTable::find(custTrans.AccountNum).name();
+                forexReportsTmp.LastExchAdj          = custSettlement.TransDate;//Forex Date / Settlement date
+                forexReportsTmp.LastExchAdjVoucher   = custSettlement.SettlementVoucher; //LastExchAdj  un resilzed
+                forexReportsTmp.LastExchAdjRate      = CustTrans::find(custSettlement.OFFSETRECID).ExchRate/100;//Unrealised or realised voucher Exchange Rate
+                forexReportsTmp.CurrencyCode         = custTrans.CurrencyCode;//Transaction Currency
+                forexReportsTmp.TransDate            = custTrans.TransDate; //TTransaction Date
+                forexReportsTmp.Voucher              = voucherLoc;// Adj. Voucher
+                forexReportsTmp.AmountCur            = custTrans.AmountCur; //Transaction currency amount
+                forexReportsTmp.ExchRate             = CustTrans::find(custSettlement.TransRecId).ExchRate/100;//this.getVoucherData(vendSettlement.OffsetTransVoucher).ExchRate/100;
+                forexReportsTmp.AmountMST            = custTrans.AmountMST;//Accounting currency amount
+
+                //Settlement fields mapping -// Begin
+                forexReportsTmp.TransDateSettlementVoucher      = CustTrans::find(custSettlement.OFFSETRECID).TransDate;//Offset (Settlement) Voucher Transaction Date
+                forexReportsTmp.SettlementVoucherVend           = custSettlement.OffsetTransVoucher;//Settle voucher
+                forexReportsTmp.SettlementVoucherCurrencyVend   = CustTrans::find(custSettlement.OFFSETRECID).CurrencyCode;//Settlement voucher currency
+                forexReportsTmp.SettleAmountCur                 = CustTrans::find(custSettlement.OFFSETRECID).AmountCur;//Offset (Settlement) Voucher settled Amount in Transaction currency
+                forexReportsTmp.SettlementVoucherExchRate       = CustTrans::find(custSettlement.OFFSETRECID).ExchRate/100;//Offset (Settlement) Voucher Exchange Rate
+                forexReportsTmp.SettleAmountMSTVend             = CustTrans::find(custSettlement.OFFSETRECID).AmountMST;//Accounting Currency Amount of Settlement Voucher
+                forexReportsTmp.VendExchAdjustmentUnrealized    = -(custSettlementexh.ExchAdjustment + custSettlementorig.ExchAdjustment);
+                forexReportsTmp.VendExchAdjustmentRealized      = -(custSettlement.ExchAdjustment);//Realised Exchange Rate
+                forexReportsTmp.SettledAmount                   = (custSettlement.SettleAmountCur);
+
+                forexReportsTmp.BalanceAmount                   = custTrans.AmountCur - custSettlementloc.SettleAmountCur;
+
+                if(forexReportsTmp.VendExchAdjustmentUnrealized == 0 && forexReportsTmp.VendExchAdjustmentRealized == 0)
+                {
+                    continue;
+                }
+
+                CurrencyCode fromCurrencycust  = custTrans.CurrencyCode;
+                CurrencyCode toCurrencycust    = ledger.AccountingCurrency;
+                TransDate    transDatecust     = custSettlement.TransDate;
+
+                select firstonly exchangeRateCurrencyPair
+                         where exchangeRateCurrencyPair.ExchangeRateType   == Ledger::find(Ledger::current()).DefaultExchangeRateType
+                             &&  exchangeRateCurrencyPair.FromCurrencyCode == fromCurrencycust
+                             &&  exchangeRateCurrencyPair.ToCurrencyCode   == toCurrencycust;
+
+                exchRatepervios = exchangeRate::findByDate(exchangeRateCurrencyPair.RecId,custSettlementpervios.TransDate).ExchangeRate;
+
+                if(exchRatepervios == 0)
+                {
+                    forexReportsTmp.PerviosExchRate                 = custTrans.ExchRate/100;
+                }
+                else
+                {
+                    forexReportsTmp.PerviosExchRate                 = exchRatepervios/100;
+                }
+
+                this.getDefaultDimensionValue(custTrans.DefaultDimension); //Commodity
+                this.getDefaultDimensionValueBusinessUnit(custTrans.DefaultDimension); //Business unit
+                this.getDefaultDimensionValueContract(custTrans.DefaultDimension); //Contract
+                this.getDefaultDimensionValueSubCommodity(custTrans.DefaultDimension); //Sub commodity
+                this.getDefaultDimensionValueVendVertical(custTrans.DefaultDimension); //Vertical
+                forexReportsTmp.insert();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getRealizedLedger</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Inserts the realized data of ledger module
+    /// </summary>
+    public void getRealizedLedger()
+    {
+        while select TransRecId,Voucher,SettleId,SettleDate,SettleAccountingCurrencyAmount,SettleTransactionCurrencyAmount,
+                ExchAdjAccountingCurrencyAmount,Voucher, IsReversed
+                from ledgerTransSettlement
+                    where ledgerTransSettlement.SettleDate >= fromDate
+                    && ledgerTransSettlement.SettleDate <= toDate
+                    && ledgerTransSettlement.SettleTransactionCurrencyAmount != 0
+                    && ledgerTransSettlement.SettleAccountingCurrencyAmount != 0
+                    && ledgerTransSettlement.ExchAdjAccountingCurrencyAmount == 0//as only realized
+                    && ledgerTransSettlement.IsReversed == 0
+        {
+            forexReportsTmp.clear();
+            forexReportsTmp.CustomerOrVendor = enum2Str(ETGModuleType::GeneralLedger); //Module
+            select firstonly gjAE
+                where gjAE.RecId == ledgerTransSettlement.TransRecId;
+            select firstonly gje
+                where gje.RecId == gjAE.GeneralJournalEntry;
+            select firstonly mainAccount
+                where mainAccount.RecId == gjAE.MainAccount;
+
+            forexReportsTmp.AccountNum       = mainAccount.MainAccountId;
+            forexReportsTmp.VendName         = mainAccount.Name;
+            forexReportsTmp.LastExchAdj      = ledgerTransSettlement.SettleDate; //Forex date/ Settel dte
+
+            select firstonly ledgerTransSettlement2
+                where ledgerTransSettlement2.SettleId == ledgerTransSettlement.SettleId
+                && ledgerTransSettlement2.SettleTransactionCurrencyAmount == 0
+                && ledgerTransSettlement2.SettleAccountingCurrencyAmount != 0;
+
+            forexReportsTmp.LastExchAdjVoucher = ledgerTransSettlement2.Voucher; //Exch. Voucher
+
+            select firstonly ledgerTransSettlement3
+                where ledgerTransSettlement3.SettleId == ledgerTransSettlement2.SettleId
+                && ledgerTransSettlement3.SettleTransactionCurrencyAmount != 0
+                && ledgerTransSettlement3.ExchAdjAccountingCurrencyAmount != 0;
+
+            if(ledgerTransSettlement3.SettleTransactionCurrencyAmount!=0)
+            {
+
+                forexReportsTmp.LastExchAdjRate = (ledgerTransSettlement3.SettleAccountingCurrencyAmount /ledgerTransSettlement3.SettleTransactionCurrencyAmount);//Exchange Rate
+            }
+            forexReportsTmp.CurrencyCode    = gjAE.TransactionCurrencyCode;//transaction Currency code
+
+            select firstonly ledgerTransSettlement4
+                where ledgerTransSettlement4.SettleId == ledgerTransSettlement3.SettleId
+                && ledgerTransSettlement4.SettleTransactionCurrencyAmount != 0
+                && ledgerTransSettlement4.SettleAccountingCurrencyAmount != 0
+                && ledgerTransSettlement4.ExchAdjAccountingCurrencyAmount == 0;
+
+            forexReportsTmp.TransDate  = gje.AccountingDate; //Transaction Date
+
+            select firstonly ledgerTransSettlement5
+                where ledgerTransSettlement5.SettleId == ledgerTransSettlement4.SettleId
+                && ledgerTransSettlement5.SettleTransactionCurrencyAmount != 0
+                && ledgerTransSettlement5.SettleAccountingCurrencyAmount != 0
+                && ledgerTransSettlement5.ExchAdjAccountingCurrencyAmount == 0;
+
+            forexReportsTmp.Voucher = ledgerTransSettlement5.Voucher;//Transaction Voucher
+
+            DimensionDefault defaultDimension = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(gjAE.LedgerDimension);
+            this.getDefaultDimensionValue(defaultDimension); //Commodity
+            this.getDefaultDimensionValueBusinessUnit(defaultDimension);//Business unit
+            this.getDefaultDimensionValueContract(defaultDimension);//Contract
+            this.getDefaultDimensionValueSubCommodity(defaultDimension);//Sub commodity
+            this.getDefaultDimensionValueVendVertical(defaultDimension);//Vertical
+
+
+            select firstonly ledgerTransSettlement6
+                where ledgerTransSettlement6.SettleId == ledgerTransSettlement5.SettleId
+                && ledgerTransSettlement6.SettleTransactionCurrencyAmount != 0
+                && ledgerTransSettlement6.SettleAccountingCurrencyAmount != 0
+                && ledgerTransSettlement6.ExchAdjAccountingCurrencyAmount == 0;
+
+            forexReportsTmp.AmountCur = gjAE.TransactionCurrencyAmount;//Transaction currency amount
+
+            select firstonly ledgerTransSettlement7
+                where ledgerTransSettlement7.SettleId == ledgerTransSettlement6.SettleId
+                && ledgerTransSettlement7.SettleTransactionCurrencyAmount != 0
+                && ledgerTransSettlement7.SettleAccountingCurrencyAmount != 0
+                && ledgerTransSettlement7.ExchAdjAccountingCurrencyAmount == 0;
+
+            forexReportsTmp.ExchRate = (ledgerTransSettlement7.SettleAccountingCurrencyAmount / ledgerTransSettlement.SettleTransactionCurrencyAmount);//Transaction Exchange Rate with accounting currency
+
+            select firstonly ledgerTransSettlement8
+                where ledgerTransSettlement8.SettleId == ledgerTransSettlement7.SettleId
+                && ledgerTransSettlement8.SettleTransactionCurrencyAmount != 0
+                && ledgerTransSettlement8.SettleAccountingCurrencyAmount != 0
+                && ledgerTransSettlement8.ExchAdjAccountingCurrencyAmount == 0;
+
+            forexReportsTmp.AmountMST = ledgerTransSettlement.SettleAccountingCurrencyAmount;//Accounting Currency Amount
+
+            select firstonly ledgerTransSettlement9
+                where ledgerTransSettlement9.SettleId == ledgerTransSettlement8.SettleId
+                && ledgerTransSettlement9.SettleTransactionCurrencyAmount != 0
+                && ledgerTransSettlement9.ExchAdjAccountingCurrencyAmount != 0;
+
+            select firstonly gjAE2
+                where gjAE2.RecId == ledgerTransSettlement9.TransRecId;
+            select firstonly gje2
+                where gje2.RecId == gjAE2.GeneralJournalEntry;
+
+            real SettlementVoucherExchRate;
+
+            if(gjAE2.AccountingCurrencyAmount != 0 )
+            {
+                SettlementVoucherExchRate = abs(gjAE2.AccountingCurrencyAmount/gjAE2.TransactionCurrencyAmount);
+            }
+
+
+            forexReportsTmp.TransDateSettlementVoucher    = gje2.AccountingDate;//Settlement Voucher Transaction Date
+            forexReportsTmp.SettlementVoucherVend         = ledgerTransSettlement9.Voucher;//Settlement Voucher
+            forexReportsTmp.SettlementVoucherCurrencyVend = gjAE2.TransactionCurrencyCode;//Settlement Voucher Currency
+            forexReportsTmp.SettleAmountCur               = gjAE2.TransactionCurrencyAmount;//Settlement Voucher settled Amount in Transaction currency
+            forexReportsTmp.SettlementVoucherExchRate     = SettlementVoucherExchRate; //Settlement Voucher Exchange Rate
+            forexReportsTmp.SettleAmountMSTVend           = ledgerTransSettlement9.SettleAccountingCurrencyAmount;
+            forexReportsTmp.VendExchAdjustmentRealized    = -(ledgerTransSettlement9.ExchAdjAccountingCurrencyAmount);//Realised Exchange Rate
+            forexReportsTmp.VendExchAdjustmentUnrealized  = 0;
+            forexReportsTmp.SettledAmount                 = ledgerTransSettlement9.SettleTransactionCurrencyAmount;//Settled amount
+            if(forexReportsTmp.VendExchAdjustmentRealized !=0)
+            {
+                forexReportsTmp.insert();
+            }
+        }
+        this.getRealisedAccountTrans();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getRealisedAccountTrans</Name>
+				<Source><![CDATA[
+    public void getRealisedAccountTrans()
+    {
+        Ledger                              currentLedger,reportcurrncy;
+        LedgerGainLossAccount               localLedgerGainLossAccount;
+        GeneralJournalAccountEntry          generalJournalAccountEntry;
+        GeneralJournalEntry                 generalJournalEntry;
+ 
+        currentLedger = Ledger::findByLegalEntity(CompanyInfo::current());
+
+        select firstonly localLedgerGainLossAccount
+            where localLedgerGainLossAccount.Ledger == currentLedger.RecId
+            && localLedgerGainLossAccount.AccountType == CurrencyGainLossAccountType::RealizedGain;
+        
+        DimensionAttributeValueCombination davc = DimensionAttributeValueCombination::find(localLedgerGainLossAccount.LedgerDimension);
+        MainAccount mainAccountloc              = MainAccount::find(davc.MainAccount);
+
+        while select generalJournalEntry
+            where generalJournalEntry.AccountingDate  >= fromDate
+                && generalJournalEntry.AccountingDate <= toDate
+                && generalJournalEntry.SubledgerVoucherDataAreaId ==curExt()
+                join generalJournalAccountEntry
+                where generalJournalAccountEntry.GeneralJournalEntry == generalJournalEntry.RecId
+                && generalJournalAccountEntry.MainAccount == mainAccountloc.RecId
+                && generalJournalAccountEntry.TransactionCurrencyAmount != 0
+        {
+            forexReportsTmp.clear();
+            forexReportsTmp.CustomerOrVendor            = enum2Str(ETGModuleType::GeneralLedger); //Module
+            forexReportsTmp.AccountNum                  = mainAccountloc.MainAccountId;
+            forexReportsTmp.VendName                    = mainAccountloc.Name;
+            forexReportsTmp.LastExchAdj                 = generalJournalEntry.AccountingDate;
+            forexReportsTmp.LastExchAdjVoucher          = generalJournalEntry.SubledgerVoucher;
+            forexReportsTmp.CurrencyCode                = generalJournalAccountEntry.TransactionCurrencyCode;
+            forexReportsTmp.TransDate                   = generalJournalEntry.AccountingDate;
+            forexReportsTmp.Voucher                     = generalJournalEntry.SubledgerVoucher;
+            forexReportsTmp.AmountCur                   = generalJournalAccountEntry.TransactionCurrencyAmount;
+            forexReportsTmp.AmountMST                   = generalJournalAccountEntry.AccountingCurrencyAmount;
+            forexReportsTmp.VendExchAdjustmentRealized  = generalJournalAccountEntry.AccountingCurrencyAmount;
+
+            DimensionDefault defaultDimension = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(generalJournalAccountEntry.LedgerDimension);
+            this.getDefaultDimensionValue(defaultDimension); //Commodity
+            this.getDefaultDimensionValueBusinessUnit(defaultDimension);//Business unit
+            this.getDefaultDimensionValueContract(defaultDimension);//Contract
+            this.getDefaultDimensionValueSubCommodity(defaultDimension);//Sub commodity
+            this.getDefaultDimensionValueVendVertical(defaultDimension);//Vertical
+
+            forexReportsTmp.ExchRate = forexReportsTmp.AmountCur / forexReportsTmp.AmountMST;
+            forexReportsTmp.LastExchAdjRate               = forexReportsTmp.ExchRate;
+
+            forexReportsTmp.insert();
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getUnRealizedLedger</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Inserts the unrealized data of ledger module
+    /// </summary>
+    public void getUnRealizedLedger()
+    {
+        Ledger                              currentLedger,reportcurrncy;
+        LedgerGainLossAccount               localLedgerGainLossAccount;
+        GeneralJournalAccountEntry          generalJournalAccountEntry;
+        GeneralJournalEntry                 generalJournalEntry;
+        MainAccount                         mainaccountledg;
+        str                                 commodity,businessunit, contrct, subcommodity, vertical,mainaccountid;
+
+        while select RecId, MainAccountId,Name from mainaccountledg
+            where mainaccountledg.ExchangeAdjusted == NoYes::Yes
+        {
+
+            while select generalJournalAccountEntry
+                   join generalJournalEntry
+                 order by generalJournalEntry.AccountingDate asc
+                where generalJournalAccountEntry.MainAccount == mainaccountledg.RecId
+                   && generalJournalAccountEntry.AccountingCurrencyAmount != 0
+                   && generalJournalEntry.RecId == generalJournalAccountEntry.GeneralJournalEntry
+                   && generalJournalEntry.AccountingDate >= fromDate
+                   && generalJournalEntry.AccountingDate <= toDate
+                   && generalJournalEntry.SubledgerVoucherDataAreaId == curExt()
+                   && generalJournalEntry.JournalCategory == LedgerTransType::ExchAdjustment
+            {
+                // Check if the same FD combination already exists in the temp table
+                DimensionDefault defaultDimension = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(generalJournalAccountEntry.LedgerDimension);
+
+                commodity                              = this.getDefaultDimensionValueGL(defaultDimension);
+                businessunit                           = this.getDefaultDimensionValueBusinessUnitGL(defaultDimension);
+                contrct                                = this.getDefaultDimensionValueContractGL(defaultDimension);
+                subcommodity                           = this.getDefaultDimensionValueSubCommodityGL(defaultdimension);
+                vertical                               = this.getDefaultDimensionValueVendVerticalGL(defaultdimension);
+                mainaccountid                          = mainaccountledg.MainAccountId;
+
+                select firstonly forexReportsTmp
+                        where  forexReportsTmp.AccountNum          == mainaccountid
+                            && forexReportsTmp.MainCommodity       == commodity
+                            && forexReportsTmp.BusinessUnit        == businessunit
+                            && forexReportsTmp.Contract            == contrct
+                            && forexReportsTmp.SubCommodity        == subcommodity
+                            && forexReportsTmp.Vertical            == vertical
+                            && forexReportsTmp.CurrencyCode        == generalJournalAccountEntry.TransactionCurrencyCode
+                            && forexReportsTmp.LastExchAdj         == generalJournalEntry.AccountingDate
+                            && forexReportsTmp.LastExchAdjVoucher  == generalJournalEntry.SubledgerVoucher;
+
+                if (forexReportsTmp)
+                {
+                    ttsbegin;
+                    forexReportsTmp.selectForUpdate(true);
+                    forexReportsTmp.VendExchAdjustmentUnrealized += -(generalJournalAccountEntry.AccountingCurrencyAmount);
+                    forexReportsTmp.update();
+                    ttscommit;
+                }
+                else
+                {
+                    forexReportsTmp.clear();
+                    forexReportsTmp.CustomerOrVendor             = enum2Str(ETGModuleType::GeneralLedger); //Module
+                    forexReportsTmp.AccountNum                   = mainaccountledg.MainAccountId;
+                    forexReportsTmp.VendName                     = mainaccountledg.Name;
+                    forexReportsTmp.LastExchAdj                  = generalJournalEntry.AccountingDate;
+                    forexReportsTmp.LastExchAdjVoucher           = generalJournalEntry.SubledgerVoucher;
+                    forexReportsTmp.CurrencyCode                 = generalJournalAccountEntry.TransactionCurrencyCode;
+                    forexReportsTmp.VendExchAdjustmentUnrealized = -(generalJournalAccountEntry.AccountingCurrencyAmount);
+                    forexReportsTmp.MainCommodity                = commodity;
+                    forexReportsTmp.BusinessUnit                 = businessunit;
+                    forexReportsTmp.Contract                     = contrct;
+                    forexReportsTmp.SubCommodity                 = subcommodity;
+                    forexReportsTmp.Vertical                     = vertical;
+                    
+                    forexReportsTmp.insert();
+                }
+            }
+
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

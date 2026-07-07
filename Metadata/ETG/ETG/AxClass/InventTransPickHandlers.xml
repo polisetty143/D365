@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>InventTransPickHandlers</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class InventTransPickHandlers
+{
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>InventTransPick_OnClosing</Name>
+				<Source><![CDATA[
+    [FormEventHandler(formStr(InventTransPick), FormEventType::Closing)]
+    public static void InventTransPick_OnClosing(xFormRun sender, FormEventArgs e)
+    {
+        FormRun                     element = sender;
+        FormRun                     formrun;
+        FormDataSource              formDatasource;
+        int                         idx;
+        str                         name;
+        SalesParmLine               salesParmLine ;
+        ETG_BillOfLading            billOfLading, billOfLadingUpd;
+        InventTransOrigin           inventTransOrigin ;
+        InventTrans                 inventTrans ;
+        SalesLine                   SalesLine;
+        #task
+        formrun = element.args().caller();
+
+        name = element.args().callerName();
+
+        if(name == formStr(SalesEditLines))
+        {
+            salesParmLine = formrun.dataSource(formDataSourceStr(SalesEditLines,SalesParmLine)).cursor();
+            billOfLading  = formrun.dataSource(formDataSourceStr(SalesEditLines,ETG_BillOfLading)).cursor();
+            inventTrans  =  sender.dataSource(formDataSourceStr(InventTransPick,InventTrans)).cursor();
+            //for(idx=1;formrun.dataSourceCount();idx++)
+            //{
+            //    if(formrun.dataSource(idx).cursor() is SalesParmLine)
+            //    {
+            //        formDatasource = formrun.dataSource(idx);
+            //        salesParmLine  = formDatasource.cursor() ;
+            //    }
+            //    if(formrun.dataSource(idx).cursor() is SalesLine)
+            //    {
+            //        formDatasource = formrun.dataSource(idx);
+            //        salesLine  = formDatasource.cursor() ;
+            //        break ;
+            //    }
+            //    if(formrun.dataSource(idx).cursor() is ETG_BillOfLading)
+            //    {
+            //        formDatasource = formrun.dataSource(idx);
+            //        billOfLading  = formDatasource.cursor() ;
+            //        break ;
+            //    }
+            //}
+            if (salesParmLine)
+            {
+                //select sum(Qty) from inventTrans
+                //    where inventTrans.StatusIssue           == StatusIssue::Picked
+                //        && inventTrans.PackingSlipId         == billOfLading.PackingSlipId;
+                    //join inventTransOrigin
+                    //where inventTrans.InventTransOrigin     == inventTransOrigin.RecId
+                    //   && inventTransOrigin.ReferenceId     == salesParmLine.OrigSalesId
+                    //    && inventTrans.StatusIssue           == StatusIssue::Picked
+                    //    && inventTrans.PackingSlipId         == billOfLading.PackingSlipId;
+                
+                //select firstonly billOfLadingUpd
+                //    where billOfLadingUpd.ParmId        == salesParmLine.ParmId
+                //    && billOfLadingUpd.TableRefId    == salesParmLine.TableRefId ;
+
+                //ttsbegin;
+                //billOfLadingUpd.selectForUpdate(true);
+                //billOfLadingUpd.NetWeight   = abs(inventTrans.Qty) ;
+                //billOfLadingUpd.update() ;
+                //ttscommit;
+
+                if(inventTrans.StatusIssue  == StatusIssue::Picked)
+                    billOfLading.NetWeight = abs(inventTrans.Qty) ;
+                
+            }
+            formrun.task(#taskRefresh);
+            //formDatasource.research(true);
+        }
+       
+      
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>TmpInventTransWMS_InventQty_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(InventTransPick, TmpInventTransWMS_InventQty), FormControlEventType::Modified)]
+    public static void TmpInventTransWMS_InventQty_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        FormRun         formrun        = sender.formRun().args().caller();
+        FormDataSource  inventTrans_ds =  sender.formRun().dataSource(formDataSourceStr(InventTransPick,InventTrans));
+        InventTrans     inventTrans    = inventTrans_ds.cursor();
+        
+
+        if(formrun.name() == formStr(SalesEditLines) && inventTrans.StatusIssue == StatusIssue::OnOrder)
+        {
+            SalesParmLine  salesParmLine  = formrun.dataSource(formDataSourceStr(SalesEditLines,SalesParmLine)).cursor();
+            SalesLine      salesLine      = salesParmLine.salesLine();
+            InventQty      pickQty        = str2Num(sender.valueStr());
+            InventQty      overDeliveryQty;
+
+            if(salesLine.RemainInventPhysical < pickQty )
+            {
+                overDeliveryQty = salesLine.RemainInventPhysical * salesLine.overDeliveryPct / 100 + salesLine.RemainInventPhysical;
+
+                if(overDeliveryQty >= pickQty && salesLine.overDeliveryPct)
+                {
+                    inventTrans.Qty = -pickQty;
+                    inventTrans.doUpdate();
+                    inventTrans.reread();                   
+                }
+
+                else
+                {
+                    throw Error(strFmt('Only over delivery %1 percent can be allowed',salesLine.overDeliveryPct));
+                }
+            }
+
+            else 
+            {
+                inventTrans.Qty = -salesLine.RemainInventPhysical;
+                inventTrans.doUpdate();
+                inventTrans.reread();
+            }
+        }
+
+        else if (formrun.name() == formStr(InventTransferParmShip))
+        {
+            InventTransferParmLine inventTransferParmLine  = formrun.dataSource(formDataSourceStr(InventTransferParmShip,InventTransferParmLine)).cursor();
+            InventTransferLine     inventTransferLine      = inventTransferParmLine.inventTransferLine();
+            InventQty              pickQty        = str2Num(sender.valueStr());
+            InventQty              overDeliveryQty;
+            InventTransOrigin      inventTransOrigin;
+            InventTrans            inventTransReceipt;
+
+            if(inventTransferLine.QtyRemainShip <= pickQty )
+            {
+                overDeliveryQty = inventTransferLine.QtyTransfer * inventTransferLine.OverDeliveryPct / 100 + inventTransferLine.QtyRemainShip;
+
+                if(overDeliveryQty >= pickQty && inventTransferLine.OverDeliveryPct)
+                {
+                    inventTrans.Qty = -pickQty;
+                    inventTrans.doUpdate();
+                    inventTrans.reread();
+              
+                    select firstonly RecId from inventTransOrigin
+                        where inventTransOrigin.ReferenceId == inventTransferLine.TransferId
+                            && inventTransOrigin.ReferenceCategory == InventTransType::TransferOrderReceive
+                    join forupdate Qty from inventTransReceipt
+                        where inventTransReceipt.InventTransOrigin == inventTransOrigin.RecId
+                            && inventTransReceipt.StatusIssue == StatusIssue::None
+                            && inventTransReceipt.StatusReceipt == StatusReceipt::Ordered
+                            && inventTransReceipt.TransChildType == InventTransChildType::None;
+
+                    if(inventTransReceipt)
+                    {
+                        ttsbegin;
+                        inventTransReceipt.Qty = pickQty;
+                        inventTransReceipt.doUpdate();
+                       // inventTransReceipt.reread();
+                        ttscommit;
+                    }
+                    ttsbegin;
+                    inventTransferLine.selectForUpdate(true);
+                    inventTransferLine.QtyRemainShip    = pickQty;
+                    inventTransferLine.QtyRemainReceive = pickQty;
+                    inventTransferLine.doUpdate();
+                    inventTransferLine.reread();
+                    ttscommit;
+                }
+
+                else
+                {
+                    throw Error(strFmt('Only over delivery %1 percent can be allowed',inventTransferLine.OverDeliveryPct));
+                }
+            }
+        }
+
+      /*  else if (formrun.name() == formStr(InventTransferParmReceive))
+        {
+            InventTransferParmLine inventTransferParmLine  = formrun.dataSource(formDataSourceStr(InventTransferParmReceive,InventTransferParmLine)).cursor();
+            InventTransferLine     inventTransferLine      = inventTransferParmLine.inventTransferLine();
+            InventQty              pickQty        = str2Num(sender.valueStr());
+            InventQty              overDeliveryQty;
+
+            if(inventTransferLine.QtyRemainReceive < pickQty )
+            {
+                overDeliveryQty = inventTransferLine.QtyTransfer * inventTransferLine.OverDeliveryPct / 100 + inventTransferLine.QtyRemainReceive;
+
+                if(overDeliveryQty >= pickQty && inventTransferLine.OverDeliveryPct)
+                {
+                    inventTrans.Qty = -pickQty;
+                    inventTrans.doUpdate();
+                    inventTrans.reread();
+                }
+
+                else
+                {
+                    throw Error(strFmt('Over delivery %1 percent can be allowed',inventTransferLine.OverDeliveryPct));
+                }
+            }
+        }*/
+                      
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

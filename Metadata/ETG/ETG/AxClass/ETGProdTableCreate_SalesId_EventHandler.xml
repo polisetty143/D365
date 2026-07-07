@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGProdTableCreate_SalesId_EventHandler</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// <c>ETGProdTableCreate_SalesId_EventHandler</c> Event Handler class to filter the Sales Order
+/// depending on the Company
+/// /// </summary>
+internal final class ETGProdTableCreate_SalesId_EventHandler
+{
+
+    
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>ProdTable_ETGSalesId_OnLookup</Name>
+				<Source><![CDATA[
+    [FormControlEventHandler(formControlStr(ProdTableCreate, ProdTable_ETGSalesId),FormControlEventType::Lookup)]
+    public static void ProdTable_ETGSalesId_OnLookup(FormControl sender,FormControlEventArgs e)
+    {
+        ETGCanadaParameters canadaParameters = ETGCanadaParameters::find();
+
+        if (!canadaParameters || !canadaParameters.DefaultEntityForDocuments)
+        {
+            return;
+        }
+
+
+        Query query = new Query();
+        query.allowCrossCompany(true);
+        query.addCompanyRange(canadaParameters.DefaultEntityForDocuments);
+
+        QueryBuildDataSource qbds = query.addDataSource(tableNum(SalesTable));
+        qbds.addSortField(fieldNum(SalesTable, CreatedDateTime), SortOrder::Descending);
+        SysTableLookup sysTableLookup = SysTableLookup::newParameters(tableNum(SalesTable), sender);
+
+        sysTableLookup.addLookupfield(fieldNum(SalesTable, SalesId), true);
+        sysTableLookup.addLookupfield(fieldNum(SalesTable, CustAccount));
+
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.performFormLookup();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ProdTable_ETGItemId_OnLookup</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(ProdTableCreate, ProdTable_ETGItemId), FormControlEventType::Lookup)]
+    public static void ProdTable_ETGItemId_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        FormRun formRun = sender.formRun();
+        FormDataSource ds = formRun.dataSource(formDataSourceStr(ProdTable, ProdTable));
+        ProdTable prod = ds.cursor();
+
+        if (!prod.ETGSalesId)
+        {
+            warning("Please select Sales Order first.");
+            return;
+        }
+
+        ETGCanadaParameters canadaParameters = ETGCanadaParameters::find();
+
+        Query query = new Query();
+        query.allowCrossCompany(true);
+        query.addCompanyRange(canadaParameters.DefaultEntityForDocuments);
+
+        QueryBuildDataSource qbdsSalesLine = query.addDataSource(tableNum(SalesLine));
+        qbdsSalesLine.addRange(fieldNum(SalesLine, SalesId)).value(queryValue(prod.ETGSalesId));
+
+        SysTableLookup sysTableLookup = SysTableLookup::newParameters(tableNum(SalesLine), sender);
+        sysTableLookup.addLookupfield(fieldNum(SalesLine,InventTransId));
+        sysTableLookup.addLookupfield(fieldNum(SalesLine,LineNum));
+        sysTableLookup.addLookupfield(fieldNum(SalesLine, ItemId));
+        sysTableLookup.addLookupMethod(tableMethodStr(SalesLine,itemName));
+        
+
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.performFormLookup();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

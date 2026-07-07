@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_PurchInvoiceJournalPost_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension class for PurchInvoiceJournalPost
+/// </summary>
+[ExtensionOf(classStr(PurchInvoiceJournalPost))]
+public final class ETG_PurchInvoiceJournalPost_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>endPost</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// End of posting
+    /// </summary>
+    protected void endPost()
+    {
+        next endPost();
+
+        VendInvoiceInfoSubLine      etgVendInvoiceInfoSubLine;
+        VendInvoiceInfoLine         etgVendInvoiceInfoLine;
+        ETG_VendInvBillOfLading     etgVendInvBillOfLading;
+        RecordInsertList            etgVendInvBillOfLadingList = new RecordInsertList(tableNum(ETG_VendInvBillOfLading));
+
+        while select etgVendInvoiceInfoSubLine group by ETG_BLnumber, ETG_BLDate, DocumentId
+            exists join etgVendInvoiceInfoLine
+                where etgVendInvoiceInfoSubLine.LineRefRecId    == etgVendInvoiceInfoLine.RecId
+                    && etgVendInvoiceInfoLine.TableRefId        == vendInvoiceInfoTable.TableRefId
+                    && etgVendInvoiceInfoLine.ParmId            == vendInvoiceInfoTable.ParmId
+                    && etgVendInvoiceInfoSubLine.ETG_BLnumber
+        {
+            etgVendInvBillOfLading.BLNumber         = etgVendInvoiceInfoSubLine.ETG_BLnumber;
+            etgVendInvBillOfLading.BLDate           = etgVendInvoiceInfoSubLine.ETG_BLDate;
+            etgVendInvBillOfLading.PackingSlipId    = etgVendInvoiceInfoSubLine.DocumentId;
+            etgVendInvBillOfLading.InvoiceId        = vendInvoiceJour.InvoiceId;
+            etgVendInvBillOfLading.VendInvRefRecId  = vendInvoiceJour.RecId;
+
+            etgVendInvBillOfLadingList.add(etgVendInvBillOfLading);
+        }
+
+        etgVendInvBillOfLadingList.insertDatabase();
+
+        //CS, DLT, Abhinav 04022025
+        if(ETGACFParameters::find().EnablePTBFContractsPurch == NoYes::Yes)
+        {
+            PurchLine purchLineLoc;
+            LedgerJournalTable LedgerjournalTable;
+
+            while select purchLineLoc
+                where purchLineLoc.PurchId == vendInvoiceJour.PurchId
+                && purchLineLoc.ETGIsCrDeJournalPosted == NoYes::No
+            {
+                select firstonly LedgerjournalTable
+                    where LedgerjournalTable.JournalNum == purchLineLoc.ETGJournalNum;
+
+                if(LedgerjournalTable)
+                {
+
+                    LedgerJournalCheckPost jourPost;
+
+                    jourPost = LedgerJournalCheckPost::newLedgerJournalTable(LedgerjournalTable, NoYes::Yes,NoYes::Yes);
+
+                    if( jourPost.validate())
+                    {
+                        jourPost.runOperation();
+                    }
+                    else
+                    {
+                        throw Error("@ETG_New:ETGCrDeJournalValidation");
+                    }
+
+                    ttsbegin;
+                    purchLineLoc.selectForUpdate(true);
+                    purchLineLoc.ETGIsCrDeJournalPosted = NoYes::Yes;
+                    purchLineLoc.doUpdate();
+                    ttscommit;
+
+                    VendInvoiceInfoLine infoLine;
+                    select forupdate infoLine 
+                        where infoLine.purchlinerecid == purchLineLoc.RecId;
+
+                    if(infoLine)
+                    {
+                        ttsbegin;
+                        infoLine.ETGCrDrNotePosted = NoYes::Yes;
+                        infoLine.doUpdate();
+                        ttscommit;
+                    }
+
+                }
+            }
+        }
+        //CE, Abhinav 
+
+        //CS, DLT, 18022025 create vendor invoice journal for brokearges amount
+        if(ETGACFParameters::find().EnableBrokeragesAmount == NoYes::Yes)
+        {
+            //CS Rajat Dubey 13/05/25
+            if(this.purchTable.MatchingAgreement)
+            {
+                ETGVendInvoiceJournalCreate::createVendInvJournal(vendInvoiceJour);
+            }
+            else if(PurchLine::find(this.purchTable.PurchId).InventRefId)
+            {
+                ETGVendInvoiceJournalCreate::createVendInvJournalReversal(vendInvoiceJour);
+            }
+            //CE.Rajat Dubey 13/05/25
+        }
+        //CE, DLT, 18022025 create vendor invoice journal for brokearges amount
+
+
+        //CS, DLT, 30072025 send purchase invoice details to zambia fiscal edge integration
+        //if(LedgerParameters::find().ETGEnableFiscaleEdgeIntegration == NoYes::Yes)
+        //{
+        //    if (BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGZRAPurchInvoiceBusinessEvent)))
+        //    {
+        //        ETGZRAPurchInvoiceBusinessEvent::newFromVendInvoiceJour(vendInvoiceJour).send();
+        //    }
+        //}
+        //CS, DLT, 30072025 send purchase invoice details to zambia fiscal edge integration
+
+
+        ///////DMS Deal reverse Intergreation 
+
+        if (ETGACFParameters::find().EnableDMSIntegration
+            && BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGDMSReverePurchAgreementIntegrationEventClass)))
+        {
+           // VendPackingSlipTrans vendPackingSlipTrans;
+            VendPackingSlipJour vendPackingSlipJour;
+            str productReceiptIds;
+            VendInvoiceTrans vendInvoiceTrans;
+
+            select vendInvoiceTrans 
+                where vendInvoiceTrans.InvoiceId == vendInvoiceJour.InvoiceId;
+
+            select  vendPackingSlipJour
+                        order by VendPackingSlipJour.PackingSlipId desc
+                        where vendPackingSlipJour.PurchId == purchTable.PurchId;
+
+            //select PackingSlipId from vendPackingSlipTrans
+            //where vendPackingSlipTrans.OrigPurchid   == vendInvoiceJour.PurchId
+            //    && vendPackingSlipTrans.InvoiceTransRefRecId == vendInvoiceTrans.RecId
+            //    && vendPackingSlipTrans.PackingSlipId != '';
+            //{
+            //    if (!strContains(productReceiptIds, vendPackingSlipTrans.PackingSlipId))
+            //    {
+            //        if (productReceiptIds)
+            //productReceiptIds += ', ';
+            //        productReceiptIds += vendPackingSlipTrans.PackingSlipId;
+            //    }
+            //}
+
+            //select firstonly purchtableloc where purchtableloc.PurchId == vendInvoiceJour.purchid;
+
+            if (PurchTable.MatchingAgreement)
+            {
+                PurchAgreementHeader  PurchAgreementHeader= PurchAgreementHeader::find(PurchTable.MatchingAgreement);
+                //PurchLine purchLine;
+
+                //select firstOnly purchLine
+                //    where purchLine.PurchId == purchTable.PurchId;
+
+                str formattedDateTime = DateTimeUtil::toStr(vendInvoiceJour.CreatedDateTime);
+
+                ETGDMSReverePurchAgreementIntegrationContract contract = new ETGDMSReverePurchAgreementIntegrationContract();
+
+                contract.parmDealNumber(PurchAgreementHeader.ETGDMSDealNumbers);
+                contract.parmDataAreaId(curExt());
+                contract.parmDocumentNumber(vendInvoiceJour.InvoiceId);
+                contract.parmDocumentDate(formattedDateTime);
+                contract.parmActivityOwner(vendInvoiceJour.CreatedBy);
+
+                contract.parmOperationType("Invoice Posting - Invoiced");
+                contract.parmActivityName("Purchase Agreement Invoicing");
+                contract.parmActivityRemarks(strFmt("The  product receipt(s) %1 of Purchase order %2 is invoiced with invoice number %3",vendPackingSlipJour.PackingSlipId, purchTable.PurchId, vendInvoiceJour.InvoiceId));
+
+                //if(purchTable.PurchStatus == PurchStatus::Invoiced)
+                //{
+                //    contract.parmOperationType("Invoice Posting - Invoiced");
+                //    contract.parmActivityName("Purchase Agreement Full Invoicing");
+                //    contract.parmActivityRemarks(strFmt("The  product receipt(s) %1 of Purchase order %2 is fully invoiced with invoice number %3",vendPackingSlipJour.PackingSlipId, purchTable.PurchId, vendInvoiceJour.InvoiceId));
+                //}
+                //else
+                //{
+                //    contract.parmOperationType("Invoice Posting - Partial Invoice");
+                //    contract.parmActivityName("Purchase Agreement Partial Invoicing");
+                //    contract.parmActivityRemarks(strFmt("The  product receipt(s) %1 of Purchase order %2 is partially invoiced with invoice number %3",vendPackingSlipJour.PackingSlipId, purchTable.PurchId, vendInvoiceJour.InvoiceId));
+                //}
+
+                ETGDMSReverePurchAgreementIntegrationEventClass eventClass = ETGDMSReverePurchAgreementIntegrationEventClass::newFromContract(contract);
+                eventClass.send();
+            }
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

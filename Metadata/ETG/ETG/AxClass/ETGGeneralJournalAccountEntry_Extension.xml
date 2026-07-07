@@ -1,0 +1,541 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGGeneralJournalAccountEntry_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public static class ETGGeneralJournalAccountEntry_Extension
+{
+
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>commodity</Name>
+				<Source><![CDATA[
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display ItemName commodity(GeneralJournalAccountEntry _generalJournalAccountEntry)
+    {
+        DimensionAttributeValueCombination  dimAttrValueComb;
+        DimensionStorage                    dimensionStorage;
+        DimensionStorageSegment             segment;
+        int                                 segmentCount, segmentIndex;
+        int                                 hierarchyCount, hierarchyIndex;
+        str                                 segmentName, segmentDescription;
+       // SysDim                            segmentValue;
+        Description                         segmentValue;
+        ItemName                            commodity;
+
+        setPrefix("@ETG_New:Dimensionvaluesfetching");
+        dimAttrValueComb = DimensionAttributeValueCombination::find(_generalJournalAccountEntry.LedgerDimension);
+        setPrefix("@ETG_New:Breakupfor" + dimAttrValueComb.DisplayValue);
+        dimensionStorage = DimensionStorage::findById(_generalJournalAccountEntry.LedgerDimension);
+
+        if (dimensionStorage == null)
+        {
+            throw error("@SYS83964");
+
+        }
+
+        // Get hierarchy count
+        hierarchyCount = dimensionStorage.hierarchyCount();
+
+                //Loop through hierarchies to get individual segments
+                for(hierarchyIndex = 1; hierarchyIndex <= hierarchyCount; hierarchyIndex++)
+                {
+                        setPrefix(strFmt("@ETG_New:Hierarchy", DimensionHierarchy::find(dimensionStorage.getHierarchyId(hierarchyIndex)).Name));
+                        //Get segment count for hierarchy
+                        segmentCount = dimensionStorage.segmentCountForHierarchy(hierarchyIndex);
+                        //Loop through segments and display required values
+                        for (segmentIndex = 1; segmentIndex <= segmentCount; segmentIndex++)
+                        {
+                            //Get segment
+                            segment = dimensionStorage.getSegmentForHierarchy(hierarchyIndex, segmentIndex);
+                            // Get the segment information
+                                if (segment.parmDimensionAttributeValueId() != 0)
+                                {
+                                    // Get segment name
+                                    segmentName = DimensionAttribute::find(DimensionAttributeValue::find(segment.parmDimensionAttributeValueId()).DimensionAttribute).Name;
+                                    //Get segment value (id of the dimension)
+                                    segmentValue        = segment.parmDisplayValue();
+                                    //Get segment value name (Description for dimension)
+                                    segmentDescription  = segment.getName();
+                                    if(segmentName == "@ETG_New:Item")
+                                    {
+                                        commodity = segmentValue;
+                        
+                                    }
+
+                                }
+
+                        }
+
+                }
+        return commodity;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>mainAccount</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adding main account based on ledger dimension.
+    /// </summary>
+    /// <param name = "_this"></param>
+    /// <returns></returns>
+
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display str mainAccount(GeneralJournalAccountEntry _this)
+    {
+        DimensionAttributeLevelValueAllView dimAttriView;
+        DimensionAttribute                  dimAttri;
+        str mainAccount;
+
+      
+
+        select DisplayValue from dimAttriView
+            where dimAttriView.ValueCombinationRecId == _this.LedgerDimension
+            join BackingEntityType from dimAttri
+            where dimAttri.RecId == dimAttriView.DimensionAttribute
+            && dimAttri.Name == "@ETG_ENG_Labels:MainAccount";
+
+        if(dimAttriView)
+        {
+            mainAccount = dimAttriView.DisplayValue;
+        }
+        return mainAccount;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>mainCommodityACF</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adding  on ledger dimension.
+    /// </summary>
+    /// <param name = "_this"></param>
+    /// <returns></returns>
+
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display str mainCommodityACF(GeneralJournalAccountEntry _this)
+    {
+        DimensionAttributeLevelValueAllView dimAttriView;
+        DimensionAttribute                  dimAttri;
+        str entity;
+        ETGACFParameters    acfParameters = ETGACFParameters::find();
+        if(acfParameters.MainCommodity == '')
+        {
+            return '';
+        }
+
+        select DisplayValue from dimAttriView
+            where dimAttriView.ValueCombinationRecId == _this.LedgerDimension
+            join BackingEntityType from dimAttri
+            where dimAttri.RecId == dimAttriView.DimensionAttribute
+            && dimAttri.Name == acfParameters.MainCommodity;//"Entity";
+
+        if(dimAttriView)
+        {
+            entity = dimAttriView.DisplayValue;
+        }
+        return entity;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>subCommodityACF</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adding  on ledger dimension.
+    /// </summary>
+    /// <param name = "_this"></param>
+    /// <returns></returns>
+
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display str subCommodityACF(GeneralJournalAccountEntry _this)
+    {
+        DimensionAttributeLevelValueAllView dimAttriView;
+        DimensionAttribute                  dimAttri;
+        str entity;
+        ETGACFParameters    acfParameters = ETGACFParameters::find();
+        if(acfParameters.SubCommodity == '')
+        {
+            return '';
+        }
+
+        select DisplayValue from dimAttriView
+            where dimAttriView.ValueCombinationRecId == _this.LedgerDimension
+            join BackingEntityType from dimAttri
+            where dimAttri.RecId == dimAttriView.DimensionAttribute
+            && dimAttri.Name == acfParameters.SubCommodity;//"Entity";
+
+        if(dimAttriView)
+        {
+            entity = dimAttriView.DisplayValue;
+        }
+        return entity;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>vertical</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adding  on ledger dimension.
+    /// </summary>
+    /// <param name = "_this"></param>
+    /// <returns></returns>
+
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display str vertical(GeneralJournalAccountEntry _this)
+    {
+        DimensionAttributeLevelValueAllView dimAttriView;
+        DimensionAttribute                  dimAttri;
+        str vertical;
+        ETGACFParameters    acfParameters = ETGACFParameters::find();
+
+        if(acfParameters.Vertical == '')
+        {
+            return '';
+        }
+        select DisplayValue from dimAttriView
+            where dimAttriView.ValueCombinationRecId == _this.LedgerDimension
+            join BackingEntityType from dimAttri
+            where dimAttri.RecId == dimAttriView.DimensionAttribute
+            && dimAttri.Name == acfParameters.Vertical;//"Vertical";
+
+        if(dimAttriView)
+        {
+            vertical = dimAttriView.DisplayValue;
+        }
+        return vertical;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>subVertical</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adding  on ledger dimension.
+    /// </summary>
+    /// <param name = "_this"></param>
+    /// <returns></returns>
+
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display str subVertical(GeneralJournalAccountEntry _this)
+    {
+        DimensionAttributeLevelValueAllView dimAttriView;
+        DimensionAttribute                  dimAttri;
+        str subVertical;
+        ETGACFParameters    acfParameters = ETGACFParameters::find();
+
+        if(acfParameters.SubVertical == '')
+        {
+            return '';
+        }
+
+        select DisplayValue from dimAttriView
+            where dimAttriView.ValueCombinationRecId == _this.LedgerDimension
+            join BackingEntityType from dimAttri
+            where dimAttri.RecId == dimAttriView.DimensionAttribute
+            && dimAttri.Name == acfParameters.SubVertical;
+
+        if(dimAttriView)
+        {
+            subVertical = dimAttriView.DisplayValue;
+        }
+        return subVertical;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>profitCenter</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adding  on ledger dimension.
+    /// </summary>
+    /// <param name = "_this"></param>
+    /// <returns></returns>
+
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display str profitCenter(GeneralJournalAccountEntry _this)
+    {
+        DimensionAttributeLevelValueAllView dimAttriView;
+        DimensionAttribute                  dimAttri;
+        str profitCenter;
+        ETGACFParameters    acfParameters = ETGACFParameters::find();
+
+        if(acfParameters.ProfitCenter == '')
+        {
+            return '';
+        }
+        select DisplayValue from dimAttriView
+            where dimAttriView.ValueCombinationRecId == _this.LedgerDimension
+            join BackingEntityType from dimAttri
+            where dimAttri.RecId == dimAttriView.DimensionAttribute
+            && dimAttri.Name == acfParameters.ProfitCenter;//"ProfitCenter";
+
+        if(dimAttriView)
+        {
+            profitCenter = dimAttriView.DisplayValue;
+        }
+        return profitCenter;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>item</Name>
+				<Source><![CDATA[
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display str item(GeneralJournalAccountEntry _this)
+    {
+        DimensionAttributeLevelValueAllView dimAttriView;
+        DimensionAttribute                  dimAttri;
+        str item;
+        ETGACFParameters    acfParameters = ETGACFParameters::find();
+
+        if(acfParameters.ItemId == '')
+        {
+            return '';
+        }
+        select DisplayValue from dimAttriView
+            where dimAttriView.ValueCombinationRecId == _this.LedgerDimension
+            join BackingEntityType from dimAttri
+            where dimAttri.RecId == dimAttriView.DimensionAttribute
+            && dimAttri.Name == acfParameters.ItemId;//"Item";
+
+        if(dimAttriView)
+        {
+            item = dimAttriView.DisplayValue;
+        }
+        return item;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>contractACF</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adding  on ledger dimension.
+    /// </summary>
+    /// <param name = "_this"></param>
+    /// <returns></returns>
+
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display str contractACF(GeneralJournalAccountEntry _this)
+    {
+        DimensionAttributeLevelValueAllView dimAttriView;
+        DimensionAttribute                  dimAttri;
+        str entity;
+        ETGACFParameters    acfParameters = ETGACFParameters::find();
+        if(acfParameters.Contract == '')
+        {
+            return '';
+        }
+
+        select DisplayValue from dimAttriView
+            where dimAttriView.ValueCombinationRecId == _this.LedgerDimension
+            join BackingEntityType from dimAttri
+            where dimAttri.RecId == dimAttriView.DimensionAttribute
+            && dimAttri.Name == acfParameters.Contract;
+
+        if(dimAttriView)
+        {
+            entity = dimAttriView.DisplayValue;
+        }
+        return entity;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>traderEmployeeACF</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adding  on ledger dimension.
+    /// </summary>
+    /// <param name = "_this"></param>
+    /// <returns></returns>
+
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display str traderEmployeeACF(GeneralJournalAccountEntry _this)
+    {
+        DimensionAttributeLevelValueAllView dimAttriView;
+        DimensionAttribute                  dimAttri;
+        str entity;
+        ETGACFParameters    acfParameters = ETGACFParameters::find();
+        if(acfParameters.TraderEmployee == '')
+        {
+            return '';
+        }
+
+        select DisplayValue from dimAttriView
+            where dimAttriView.ValueCombinationRecId == _this.LedgerDimension
+            join BackingEntityType from dimAttri
+            where dimAttri.RecId == dimAttriView.DimensionAttribute
+            && dimAttri.Name == acfParameters.TraderEmployee;
+
+        if(dimAttriView)
+        {
+            entity = dimAttriView.DisplayValue;
+        }
+        return entity;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>interCompanyACF</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adding  on ledger dimension.
+    /// </summary>
+    /// <param name = "_this"></param>
+    /// <returns></returns>
+
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display str interCompanyACF(GeneralJournalAccountEntry _this)
+    {
+        DimensionAttributeLevelValueAllView dimAttriView;
+        DimensionAttribute                  dimAttri;
+        str entity;
+        ETGACFParameters    acfParameters = ETGACFParameters::find();
+        if(acfParameters.Intercompany == '')
+        {
+            return '';
+        }
+
+        select DisplayValue from dimAttriView
+            where dimAttriView.ValueCombinationRecId == _this.LedgerDimension
+            join BackingEntityType from dimAttri
+            where dimAttri.RecId == dimAttriView.DimensionAttribute
+            && dimAttri.Name == acfParameters.Intercompany;
+
+        if(dimAttriView)
+        {
+            entity = dimAttriView.DisplayValue;
+        }
+        return entity;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>departmentACF</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adding  on ledger dimension.
+    /// </summary>
+    /// <param name = "_this"></param>
+    /// <returns></returns>
+
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display str departmentACF(GeneralJournalAccountEntry _this)
+    {
+        DimensionAttributeLevelValueAllView dimAttriView;
+        DimensionAttribute                  dimAttri;
+        str entity;
+        ETGACFParameters    acfParameters = ETGACFParameters::find();
+        if(acfParameters.Department == '')
+        {
+            return '';
+        }
+
+        select DisplayValue from dimAttriView
+            where dimAttriView.ValueCombinationRecId == _this.LedgerDimension
+            join BackingEntityType from dimAttri
+            where dimAttri.RecId == dimAttriView.DimensionAttribute
+            && dimAttri.Name == acfParameters.Department;
+
+        if(dimAttriView)
+        {
+            entity = dimAttriView.DisplayValue;
+        }
+        return entity;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>lineOfBusinessACF</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adding  on ledger dimension.
+    /// </summary>
+    /// <param name = "_this"></param>
+    /// <returns></returns>
+
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display str lineOfBusinessACF(GeneralJournalAccountEntry _this)
+    {
+        DimensionAttributeLevelValueAllView dimAttriView;
+        DimensionAttribute                  dimAttri;
+        str entity;
+        ETGACFParameters    acfParameters = ETGACFParameters::find();
+        if(acfParameters.LineofBusinesss == '')
+        {
+            return '';
+        }
+
+        select DisplayValue from dimAttriView
+            where dimAttriView.ValueCombinationRecId == _this.LedgerDimension
+            join BackingEntityType from dimAttri
+            where dimAttri.RecId == dimAttriView.DimensionAttribute
+            && dimAttri.Name == acfParameters.LineofBusinesss;
+
+        if(dimAttriView)
+        {
+            entity = dimAttriView.DisplayValue;
+        }
+        return entity;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>plantWarehouseACF</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adding  on ledger dimension.
+    /// </summary>
+    /// <param name = "_this"></param>
+    /// <returns></returns>
+
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display str plantWarehouseACF(GeneralJournalAccountEntry _this)
+    {
+        DimensionAttributeLevelValueAllView dimAttriView;
+        DimensionAttribute                  dimAttri;
+        str entity;
+        ETGACFParameters    acfParameters = ETGACFParameters::find();
+        if(acfParameters.PlantWarehouseOffice == '')
+        {
+            return '';
+        }
+
+        select DisplayValue from dimAttriView
+            where dimAttriView.ValueCombinationRecId == _this.LedgerDimension
+            join BackingEntityType from dimAttri
+            where dimAttri.RecId == dimAttriView.DimensionAttribute
+            && dimAttri.Name == acfParameters.PlantWarehouseOffice;
+
+        if(dimAttriView)
+        {
+            entity = dimAttriView.DisplayValue;
+        }
+        return entity;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

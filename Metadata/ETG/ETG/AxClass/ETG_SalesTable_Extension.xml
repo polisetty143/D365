@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesTable_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tableStr(SalesTable))]
+final class ETG_SalesTable_Extension
+
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>insert</Name>
+				<Source><![CDATA[
+    public void insert(boolean _skipMarkup)
+    {
+        AgreementHeader agreementHeader;
+
+        //CS - Abhinav - Creation of sales order number from salesAgreeement
+        if(this.MatchingAgreement && ETGCanadaParameters::find().EnableNewSONumberSequence)
+        {
+            SalesTable salestableCount;
+
+            select count(RecId) from salestableCount
+                where salestableCount.MatchingAgreement == this.MatchingAgreement;
+
+            SalesAgreementHeader SalesAgreementHeader = SalesAgreementHeader::find(this.MatchingAgreement);
+
+            str connector = salestableCount.RecId > 9 ? '' : '0';
+            int postfix = salestableCount.RecId + 1;
+            this.SalesId = SalesAgreementHeader.SalesNumberSequence + ' - ' + connector + int2Str(postfix) ;        
+        }
+        //CE - Abhinav
+
+        next insert(_skipMarkup);
+
+        if (this.MatchingAgreement)
+        {
+            select firstonly DefaultDimension from agreementHeader  where  agreementHeader.RecId == this.MatchingAgreement;
+
+            if (agreementHeader.DefaultDimension && agreementHeader.DefaultDimension != this.DefaultDimension)
+            {
+                this.DefaultDimension = agreementHeader.DefaultDimension;
+                this.doUpdate();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>canSubmitToWorkflow</Name>
+				<Source><![CDATA[
+    public boolean  canSubmitToWorkflow(str workflowType)
+    {
+        boolean     canSubmit = next canSubmitToWorkflow(workflowType);
+
+        if(ETGACFParameters::find().EnableSOWorkflow == NoYes::Yes)
+        {
+            if (this.RecId && this.ETGWorkflowStatus  == VersioningDocumentState::Draft)
+            {
+                canSubmit = true;
+            }
+        }
+
+        return canSubmit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateWorkflowStatus</Name>
+				<Source><![CDATA[
+    public static void  updateWorkflowStatus(RefRecId salesTableRecId , VersioningDocumentState status)
+    {
+        SalesTable salesTable;
+
+        ttsbegin;
+
+        salesTable = SalesTable::findRecId(salesTableRecId, true);
+        if(salesTable)
+        {
+            salesTable.ETGWorkflowStatus = status;
+            salesTable.doUpdate();
+        }
+
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>SalesTableListPage_OnInitializing</Name>
+				<Source><![CDATA[
+    //[PostHandlerFor(classStr(FormDataUtil), staticMethodStr(FormDataUtil, canSubmitToWorkflow))]
+    //public static void FormDataUtil_Post_canSubmitToWorkflow(XppPrePostArgs args)
+    //{
+    //    Common             record               = args.getArg(identifierStr(_record));
+    //    SalesTable          salesTable           = record as SalesTable;
+    //    boolean            ret                  = args.getReturnValue();
+
+    //    if (record.TableId == tableNum(SalesTable))
+    //    {
+    //        if (salesTable.ETGWorkflowStatus == VersioningDocumentState::Draft)
+    //        {
+    //            ret = boolean::true;
+    //        }
+    //        else
+    //        {
+    //            ret = boolean::false;
+    //        }
+    //    }
+    //    args.setReturnValue(ret);
+    //}
+
+    [FormEventHandler(formStr(SalesTableListPage), FormEventType::Initializing)]
+    public static void SalesTableListPage_OnInitializing(xFormRun sender, FormEventArgs e)
+    {
+        FormRun                SalesTableListPage         = sender;
+        if(ETGACFParameters::find().EnableSOWorkflow == NoYes::Yes)
+        {
+            FormBuildDesign SalesTableListPageDesign = SalesTableListPage.form().design();
+
+            SalesTableListPageDesign.workflowEnabled(true);
+            SalesTableListPageDesign.workflowDatasource(tableStr(SalesTable));
+            SalesTableListPageDesign.workflowType(workflowTypeStr(ETGSOWorkflowTypeNew));
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>SalesTableInteraction_Post_enableHeaderActions</Name>
+				<Source><![CDATA[
+    [PostHandlerFor(classStr(SalesTableInteraction), methodStr(SalesTableInteraction, enableHeaderActions))]
+    public static void SalesTableInteraction_Post_enableHeaderActions(XppPrePostArgs args)
+    {
+        if(ETGACFParameters::find().EnableSOWorkflow == NoYes::Yes)
+        {
+            SalesTable activeRecord;
+            SalesTableInteraction        interaction        = args.getThis();
+            Page salesTablePage = interaction.page();
+            if (salesTablePage.activeRecord(tablestr(SalesTable)))
+            {
+                FormRun formrun   = salesTablePage.formRun();
+                FormBuildDesign design     = formrun.form().design();
+                FormDesign        wfDesign = formrun.design();
+                //WF setup
+                design.workflowEnabled(true);
+                design.workflowDatasource(tableStr(SalesTable));
+                design.workflowType(workflowTypeStr(ETGSOWorkflowTypeNew));
+                wfDesign.workflowEnabled(true);
+                wfDesign.workflowDatasource(tableStr(SalesTable));
+                wfDesign.workflowType(workflowTypeStr(ETGSOWorkflowTypeNew));
+                //updating wf controls
+                formrun.updateWorkflowControls();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>SalesTable_Post_canSubmitToWorkflow</Name>
+				<Source><![CDATA[
+    [PostHandlerFor(formStr(SalesTable), formMethodStr(SalesTable, canSubmitToWorkflow))]
+    public static void SalesTable_Post_canSubmitToWorkflow(XppPrePostArgs args)
+    {
+        if(ETGACFParameters::find().EnableSOWorkflow == NoYes::Yes)
+        {
+            FormRun salesTableDetails = args.getThis();
+            formDataSource salesTableDS    = salesTableDetails.dataHelper().FindDataSource(formDataSourceStr(SalesTable, SalesTable));
+            SalesTable salesTable    = salesTableDS.cursor();
+            boolean ret    = args.getReturnValue();
+            if (salesTable.ETGWorkflowStatus == VersioningDocumentState::Draft)
+            {
+                ret = true;
+            }
+            else
+            {
+                ret = false;
+            }
+            args.setReturnValue(ret);
+            salesTableDetails.design().controlName('WorkflowActionBarButtonGroup').visible(true);
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

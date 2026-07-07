@@ -1,0 +1,456 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_AgreementGenerationTP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///    The <c>AgreementGenerationTask</c> class is the base class to generate agreements.
+/// </summary>
+abstract class ETG_AgreementGenerationTP extends RunBase
+{
+    ETG_AgreementGenerationStrategyTP agreementGenerationStrategyTP;
+    Common                          callerRecord;
+    DialogField                     custAccountDlg;
+    CustVendAC                     custAcc,customerId;
+    #ISOCountryRegionCodes
+
+    boolean intraCompany_RU;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>agreementCreatedInfo</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Sets the info for the created agreement.
+    /// </summary>
+    protected void agreementCreatedInfo()
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dialog</Name>
+				<Source><![CDATA[
+    public Object dialog()
+    {
+        DialogRunbase               dialog;
+        Common                      common;
+        FormBuildStringControl      control;
+       
+        ;
+        dialog = super();
+        common = this.parmCallerRecord();
+        switch (common.TableId)
+        {
+            case tablenum(PurchAgreementHeader):
+                custAccountDlg = dialog.addField(extendedTypeStr(CustAccount));
+                dialog.caption('Generate third party sales agreement');
+
+                control = custAccountDlg.control();
+                control.registerOverrideMethod('LookUp','customerLookup',this);
+                break;
+
+            case tablenum(SalesAgreementHeader):
+                custAccountDlg = dialog.addField(extendedTypeStr(VendAccount));
+                dialog.caption('Generate third party purchase agreement');
+
+                control = custAccountDlg.control();
+                control.registerOverrideMethod('LookUp','vendorLookup',this);
+                break;
+
+            default :
+                throw error(strfmt("@SYS19306",funcname()));
+        }
+
+        return dialog;
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>customerLookup</Name>
+				<Source><![CDATA[
+    private void customerLookup(FormStringControl _control)
+    {
+        Query query = new Query();
+        QueryBuildDataSource queryBuildDataSource, qbds,qbds1;
+        QueryBuildRange queryBuildRange;
+   
+        SysTableLookup sysTableLookup = sysTableLookup::newParameters(tableNum(CustTable), _control,true);
+   
+        
+        queryBuildDataSource = query.addDataSource(tableNum(CustTable));
+
+        qbds = queryBuildDataSource.addDataSource(tableNum(DirPartyTable));
+
+        qbds.joinMode(JoinMode::InnerJoin);
+
+        qbds.addLink(fieldNum(CustTable, Party), fieldNum(DirPartyTable, RecId));
+
+        qbds1  = qbds.addDataSource(tableNum(InterCompanyTradingPartner));
+
+        qbds1.joinMode(JoinMode::NoExistsJoin);
+
+        qbds1.addLink(fieldNum(InterCompanyTradingPartner, CustomerParty), fieldNum(DirPartyTable, RecId));
+
+        sysTableLookup.addLookupField(fieldNum(CustTable, AccountNum));
+        sysTableLookup.addLookupField(fieldNum(DirPartyTable, Name));
+        sysTableLookup.addLookupField(fieldNum(CustTable, Party), false);
+        sysTableLookup.parmQuery(query);
+   
+        sysTableLookup.performFormLookup();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>vendorLookup</Name>
+				<Source><![CDATA[
+    private void vendorLookup(FormStringControl _control)
+    {
+        Query query = new Query();
+        QueryBuildDataSource queryBuildDataSource, qbds,qbds1;
+        QueryBuildRange queryBuildRange;
+   
+        SysTableLookup sysTableLookup = sysTableLookup::newParameters(tableNum(vendTable), _control,true);
+   
+        
+        queryBuildDataSource = query.addDataSource(tableNum(vendTable));
+
+        qbds = queryBuildDataSource.addDataSource(tableNum(DirPartyTable));
+
+        qbds.joinMode(JoinMode::InnerJoin);
+
+        qbds.addLink(fieldNum(vendTable, Party), fieldNum(DirPartyTable, RecId));
+
+        qbds1  = qbds.addDataSource(tableNum(InterCompanyTradingPartner));
+
+        qbds1.joinMode(JoinMode::NoExistsJoin);
+
+        qbds1.addLink(fieldNum(InterCompanyTradingPartner, CustomerParty), fieldNum(DirPartyTable, RecId));
+
+        sysTableLookup.addLookupField(fieldNum(vendTable, AccountNum));
+        sysTableLookup.addLookupField(fieldNum(DirPartyTable, Name));
+        sysTableLookup.addLookupField(fieldNum(vendTable, Party), false);
+        sysTableLookup.parmQuery(query);
+   
+        sysTableLookup.performFormLookup();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getFromDialog</Name>
+				<Source><![CDATA[
+    public boolean getFromDialog()
+    {
+        // Retrieve values from Dialog
+        custAcc = custAccountDlg.value();
+
+        return true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>create</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Creates an agreement with header and lines.
+    /// </summary>
+    /// <exception cref="M:Exception::UpdateConflictNotRecovered">
+    ///    A update conflict was encountered when creating the agreement and the state could not be recovered.
+    /// </exception>
+    /// <exception cref="M:Exception::UpdateConflict">
+    ///    An update conflict was encountered when creating the agreement.
+    /// </exception>
+    public void create()
+    {
+        #OCCRetryCount
+
+        this.initAgreementGenerationStrategy();
+        try
+        {
+            if(custAcc)
+            {
+                this.parmCustAccount(custAcc);
+                this.setPrefix();
+
+                ttsbegin;
+
+                this.setCustVendAccount(custAcc);
+
+                this.setCustVendPrefix();
+
+                this.createAgreementHeader();
+
+                this.createAgreementLines();
+
+                this.endCreate();
+
+                ttscommit;
+
+                if (this.showInfo())
+                {
+                    this.agreementCreatedInfo();
+                }
+            }
+        }
+
+        catch (Exception::Deadlock)
+        {
+            retry;
+        }
+
+        catch (Exception::UpdateConflict)
+        {
+            if (appl.ttsLevel() == 0)
+            {
+                if (xSession::currentRetryCount() >= #RetryNum)
+                {
+                    throw Exception::UpdateConflictNotRecovered;
+                }
+                else
+                {
+                    retry;
+                }
+            }
+            else
+            {
+                throw Exception::UpdateConflict;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createAgreementHeader</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Creates an agreement header.
+    /// </summary>
+    protected void createAgreementHeader()
+    {
+        if (agreementGenerationStrategyTP)
+        {
+            agreementGenerationStrategyTP.createAgreementHeader();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createAgreementLines</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Creates the agreement lines for the agreement.
+    /// </summary>
+    protected void createAgreementLines()
+    {
+        if (agreementGenerationStrategyTP)
+        {
+            agreementGenerationStrategyTP.createAgreementLines();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>endCreate</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Performs functions after the creation of the agreement.
+    /// </summary>
+    protected void endCreate()
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initAgreementGenerationStrategy</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Initiates an agreement generation strategy object to use to create an agreement.
+    /// </summary>
+    protected void initAgreementGenerationStrategy()
+    {
+        if (callerRecord)
+        {
+            agreementGenerationStrategyTP = ETG_AgreementGenerationStrategyTP::newCommon(callerRecord);
+           
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmCallerRecord</Name>
+				<Source><![CDATA[
+    public Common parmCallerRecord(Common _callerRecord = callerRecord)
+    {
+        callerRecord = _callerRecord;
+
+        return callerRecord;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmCustAccount</Name>
+				<Source><![CDATA[
+    public CustAccount parmCustAccount(CustAccount _custAccount = customerId)
+    {
+        customerId = _custAccount;
+
+        return customerId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmIntraCompany_RU</Name>
+				<Source><![CDATA[
+    public boolean parmIntraCompany_RU(boolean _intracompany = intraCompany_RU)
+    {
+        intraCompany_RU = _intracompany;
+        return intraCompany_RU;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setCustVendAccount</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Sets the customer or vendor account to use to create the agreement.
+    /// </summary>
+    protected void setCustVendAccount(CustVendAC  _AccountNum)
+    {
+        if (agreementGenerationStrategyTP)
+        {
+            agreementGenerationStrategyTP.setCustVendTable(_AccountNum);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setCustVendPrefix</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Sets the prefix in relation to the customer or vendor that is related to the agreement that is
+    ///    being created.
+    /// </summary>
+    protected void setCustVendPrefix()
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setPrefix</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Sets the prefix for creating the agreement.
+    /// </summary>
+    protected void setPrefix()
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>showInfo</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Determines if info should be shown after the agreement is created.
+    /// </summary>
+    /// <returns>
+    ///    true if info should be shown after the agreement is created; otherwise, false.
+    /// </returns>
+    /// <remarks>
+    ///    In this base class this method always returns true.
+    /// </remarks>
+    protected boolean showInfo()
+    {
+        return true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args _args)
+    {
+        Common                  record;
+        ETG_AgreementGenerationTP agreementGenerationTP;
+        FormRun                 formrun = _args.caller();
+        FormDataSource          datasourceDs  = formrun.dataSource();
+        if (!_args)
+        {
+            throw error("@SYS333209");
+        }
+
+        record = _args.record();
+
+        agreementGenerationTP = ETG_AgreementGenerationTP::newCommon(record);
+        
+        if(agreementGenerationTP.prompt())
+        {
+            agreementGenerationTP.create();
+        }
+        datasourceDs.research(true);
+        datasourceDs.refresh();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>newCommon</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Constructs an <c>AgreementGenerationTask</c> class based on the specified <c>Common</c> buffer.
+    /// </summary>
+    /// <param name="_common">
+    ///    The <c>Common</c> buffer from which to construct the <c>AgreementGenerationTask</c> class.
+    /// </param>
+    /// <returns>
+    ///    The constructed <c>AgreementGenerationTask</c> class.
+    /// </returns>
+    /// <exception cref="M:Exception::Error">
+    ///    It is possible to create an <c>AgreementGenerationTask</c> class by using the specified
+    ///    <c>Common</c> buffer.
+    /// </exception>
+    public static ETG_AgreementGenerationTP newCommon(Common _common)
+    {
+        ETG_AgreementGenerationTP agreementGenerationTP;
+        
+        switch (_common.TableId)
+        {
+            case tablenum(PurchAgreementHeader):
+                agreementGenerationTP = ETG_SalesAgreementGenerationTaskTP::construct();
+                break;
+
+            case tablenum(SalesAgreementHeader):
+                agreementGenerationTP = ETG_PurchAgreementGenerationTaskTP::construct();
+                break;
+
+            default :
+                throw error(strfmt("@SYS19306",funcname()));
+        }
+
+        agreementGenerationTP.parmCallerRecord(_common);
+        return agreementGenerationTP;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

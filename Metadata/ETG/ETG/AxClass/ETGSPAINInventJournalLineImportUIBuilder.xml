@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSPAINInventJournalLineImportUIBuilder</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// UI Builder class for the process "Import warehouse outputs"
+/// of transfer journals for the ETGSPAIN model.
+/// </summary>
+class ETGSPAINInventJournalLineImportUIBuilder extends SysOperationUIBuilder
+{
+    private const str OkButtonName   = 'CommandButton';
+    private const str FileUploadName = 'FileUpload';
+    private const str AvailFileType  = '.xlsx';
+
+    private DialogField dlgInventLocation;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>build</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Inserts the option to import a file.
+    /// </summary>
+    public void build()
+    {
+        super();
+
+        Dialog                  dlg              = dialog as Dialog;
+        FormBuildControl        formBuildControl = dlg.curFormGroup(dlg.mainFormGroup());
+        FileUploadBuild         dialogFileUpload;
+
+        // Add Warehouse field
+        dlgInventLocation = dlg.addField(extendedTypeStr(InventLocationId), "@ETGSPAINLabels:InventLocationOutput");
+
+        // Add file import field
+        dialogFileUpload = formBuildControl.addControlEx(classstr(FileUpload), FileUploadName);
+        dialogFileUpload.style(FileUploadStyle::MinimalWithFilename);
+        dialogFileUpload.baseFileUploadStrategyClassName(classstr(FileUploadTemporaryStorageStrategy));
+        dialogFileUpload.fileNameLabel("@ETGSPAINLabels:UploadExceImportlFileData");
+        dialogFileUpload.fileTypesAccepted(AvailFileType);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postRun</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Overrides the postRun method.
+    /// </summary>
+    public void postRun()
+    {
+        super();
+        FormRun     formRun = this.dialog().dialogForm().formRun();
+
+        this.dialogEventsSubscribe(formRun);
+        this.setDialogOkButtonEnabled(formRun, false);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getFromDialog</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Overrides the getFromDialog method.
+    /// </summary>
+    public void getFromDialog()
+    {
+        super();
+
+        FormRun formRun = this.dialog().dialogForm().formRun();
+
+        this.dataContractObject().parmInventLocationId(dlgInventLocation.value());
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>uploadCompleted</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Enables the OK button once the file has been uploaded.
+    /// </summary>
+    protected void uploadCompleted()
+    {
+        var formRun = this.dialog().dialogForm().formRun();
+        FileUpload fileUpload = formRun.control(formRun.controlId(FileUploadName));
+
+        using (System.IO.Stream stream = fileUpload.getUploadedFile(true))
+        {
+            if (stream)
+            {
+                System.IO.MemoryStream copiedStream = new System.IO.MemoryStream();
+                stream.CopyTo(copiedStream);
+                this.dataContractObject().parmInputDataStream(copiedStream);
+            }
+        }
+
+        this.setDialogOkButtonEnabled(formRun, this.dataContractObject().parmInputDataStream() != null);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setDialogOkButtonEnabled</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Enables or disables the OK button.
+    /// </summary>
+    /// <param name = "_formRun">FormRun object.</param>
+    /// <param name = "_isEnabled">Indicates if the button should be enabled or disabled.</param>
+    protected void setDialogOkButtonEnabled(FormRun _formRun, boolean _isEnabled)
+    {
+        FormControl okButtonControl = _formRun.control(_formRun.controlId(OkButtonName));
+        if (okButtonControl)
+        {
+            okButtonControl.enabled(_isEnabled);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dialogClosing</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Overrides the dialogClosing method.
+    /// </summary>
+    /// <param name = "sender">xFormRun object.</param>
+    /// <param name = "e">FormEventArgs object.</param>
+    [SuppressBPWarningAttribute('BPParameterNotUsed', 'This is event parameter not required to use')]
+    private void dialogClosing(xFormRun sender, FormEventArgs e)
+    {
+        this.dialogEventsUnsubscribe(sender as FormRun);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dialogEventsSubscribe</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Subscribes to the dialog events.
+    /// </summary>
+    /// <param name = "_formRun">FormRun object.</param>
+    private void dialogEventsSubscribe(FormRun _formRun)
+    {
+        FileUpload fileUpload = _formRun.control(_formRun.controlId(FileUploadName));
+
+        fileUpload.notifyUploadCompleted += eventhandler(this.uploadCompleted);
+        fileUpload.notifyUploadAttemptStarted += eventhandler(this.uploadStarted);
+
+        _formRun.onClosing += eventhandler(this.dialogClosing);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dialogEventsUnsubscribe</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Unsubscribes from the dialog events.
+    /// </summary>
+    /// <param name = "_formRun">FormRun object.</param>
+    private void dialogEventsUnsubscribe(FormRun _formRun)
+    {
+        FileUpload fileUpload = _formRun.control(_formRun.controlId(FileUploadName));
+
+        fileUpload.notifyUploadCompleted -= eventhandler(this.uploadCompleted);
+        fileUpload.notifyUploadAttemptStarted -= eventhandler(this.uploadStarted);
+
+        _formRun.onClosing -= eventhandler(this.dialogClosing);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>uploadStarted</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Upload process has started.
+    /// </summary>
+    private void uploadStarted()
+    {
+        var formRun = this.dialog().dialogForm().formRun();
+        this.setDialogOkButtonEnabled(formRun, false);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

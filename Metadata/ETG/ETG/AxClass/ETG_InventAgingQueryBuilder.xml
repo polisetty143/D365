@@ -1,0 +1,822 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_InventAgingQueryBuilder</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The <c>InventAgingQueryBuilder</c> class builds queries for the aging report.
+/// </summary>
+class ETG_InventAgingQueryBuilder
+{
+    Query                       query;
+    QueryBuildDataSource        qbds;
+    QueryBuildDataSource        qbdsInventTable;
+    InventDimParm               inventDimParm;
+    ETG_InventAgingContract     contract;
+    TransDate                   fromDate;
+    TransDate                   toDate;
+
+    boolean                     buildAsOfQtyQuery;
+    boolean                     buildAsOfQtyAndAmountQuery;
+    boolean                     buildReceiptQtyQuery;
+    boolean                     canCalculateAsOfQty;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>addInventDim</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adds the <c>InventDim</c> table to the query.
+    /// </summary>
+    /// <param name="_qbdsParent">
+    /// The <c>QueryBuildDataSource</c> object with the parent data source.
+    /// </param>
+    /// <param name="_parentFieldId">
+    /// The <c>FieldId</c> in the parent data source.
+    /// </param>
+    /// <returns>
+    /// The <c>QueryBuildDataSource</c> object with the data source for the added table.
+    /// </returns>
+    private QueryBuildDataSource addInventDim(
+        QueryBuildDataSource    _qbdsParent,
+        FieldId                 _parentFieldId)
+    {
+        QueryBuildDataSource qbdsInventDim = _qbdsParent.addDataSource(tableNum(InventDim));
+        qbdsInventDim.addLink(_parentFieldId, fieldNum(InventDim, InventDimId));
+        qbdsInventDim.orderMode(OrderMode::GroupBy);
+        inventDimParm.queryAddGroupByField(qbdsInventDim);
+        this.addRangesFromContract(qbdsInventDim);
+        return qbdsInventDim;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addInventItemGroupItem</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adds the <c>InventItemGroupItem</c> table to the query.
+    /// </summary>
+    /// <param name="_qbdsParent">
+    /// The <c>QueryBuildDataSource</c> object with the parent data source.
+    /// </param>
+    /// <param name="_qbdsInventTable">
+    /// The <c>QueryBuildDataSource</c> object with the data source for <c>InventTable</c> table.
+    /// </param>
+    /// <returns>
+    /// The <c>QueryBuildDataSource</c> object with the data source for the added table.
+    /// </returns>
+    private QueryBuildDataSource addInventItemGroupItem(
+        QueryBuildDataSource    _qbdsParent,
+        QueryBuildDataSource    _qbdsInventTable)
+    {
+        QueryBuildDataSource qbdsInventItemGroupItem = _qbdsParent.addDataSource(tableNum(InventItemGroupItem));
+        qbdsInventItemGroupItem.addLink(fieldNum(InventTable, ItemId), fieldNum(InventItemGroupItem, ItemId), _qbdsInventTable.name());
+        qbdsInventItemGroupItem.addLink(fieldNum(InventTable, DataAreaId), fieldNum(InventItemGroupItem, ItemDataAreaId), _qbdsInventTable.name());
+        qbdsInventItemGroupItem.orderMode(OrderMode::GroupBy);
+        qbdsInventItemGroupItem.addGroupByField(fieldNum(InventItemGroupItem, ItemGroupId));
+
+        this.addRangesFromContract(qbdsInventItemGroupItem);
+
+        return qbdsInventItemGroupItem;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addInventTable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adds the <c>InventTable</c> table to the query.
+    /// </summary>
+    /// <returns>
+    /// A <c>QueryBuildDataSource</c> object with the data source for the table.
+    /// </returns>
+    private QueryBuildDataSource addInventTable()
+    {
+        qbdsInventTable = query.addDataSource(tableNum(InventTable));
+        qbdsInventTable.orderMode(OrderMode::GroupBy);
+        qbdsInventTable.addGroupByField(fieldNum(InventTable, RecId));      // order by RecId to avoid different sorting of ItemId depending on collation in SQL.
+        qbdsInventTable.addGroupByField(fieldNum(InventTable, ItemId));
+        this.addRangesFromContract(qbdsInventTable);
+        qbdsInventTable.addRange(fieldNum(InventTable, ItemType)).value(queryValue(ItemType::Item));
+
+        return qbdsInventTable;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addInventTableModule</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adds the <c>InventTableModule</c> table to the query.
+    /// </summary>
+    /// <param name="_qbdsParent">
+    /// The <c>QueryBuildDataSource</c> object with the parent data source.
+    /// </param>
+    /// <param name="_qbdsInventTable">
+    /// The <c>QueryBuildDataSource</c> object with the data source for <c>InventTable</c> table.
+    /// </param>
+    /// <returns>
+    /// The <c>QueryBuildDataSource</c> object with the data source for the added table.
+    /// </returns>
+    private QueryBuildDataSource addInventTableModule(
+        QueryBuildDataSource    _qbdsParent,
+        QueryBuildDataSource    _qbdsInventTable)
+    {
+        QueryBuildDataSource qbdsInventTableModule = _qbdsParent.addDataSource(tableNum(InventTableModule));
+        qbdsInventTableModule.addLink(fieldNum(InventTable, ItemId), fieldNum(InventTableModule, ItemId), _qbdsInventTable.name());
+        qbdsInventTableModule.addRange(fieldNum(InventTableModule, ModuleType)).value(queryValue(ModuleInventPurchSales::Invent));
+        qbdsInventTableModule.joinMode(JoinMode::OuterJoin);
+        qbdsInventTableModule.orderMode(OrderMode::GroupBy);
+        qbdsInventTableModule.addGroupByField(fieldNum(InventTableModule, UnitId));
+
+        return qbdsInventTableModule;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addProductDimensionGroupProduct</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adds the <c>EcoResProductDimensionGroupProduct</c> table to the query.
+    /// </summary>
+    /// <param name="_qbdsParent">
+    /// The <c>QueryBuildDataSource</c> object with the parent data source.
+    /// </param>
+    /// <param name="_qbdsInventTable">
+    /// The <c>QueryBuildDataSource</c> object with the data source for <c>InventTable</c> table.
+    /// </param>
+    /// <returns>
+    /// The <c>QueryBuildDataSource</c> object with the data source for the added table.
+    /// </returns>
+    private QueryBuildDataSource addProductDimensionGroupProduct(
+        QueryBuildDataSource    _qbdsParent,
+        QueryBuildDataSource    _qbdsInventTable)
+    {
+        QueryBuildDataSource qbdsProductDimensionGroupProduct = _qbdsParent.addDataSource(tableNum(EcoResProductDimensionGroupProduct));
+        qbdsProductDimensionGroupProduct.addLink(fieldNum(InventTable, Product), fieldNum(EcoResProductDimensionGroupProduct, Product), _qbdsInventTable.name());
+        qbdsProductDimensionGroupProduct.joinMode(JoinMode::OuterJoin);
+        qbdsProductDimensionGroupProduct.orderMode(OrderMode::GroupBy);
+        qbdsProductDimensionGroupProduct.addGroupByField(fieldNum(EcoResProductDimensionGroupProduct, ProductDimensionGroup));
+
+        return qbdsProductDimensionGroupProduct;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addProductTranslation</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adds the <c>EcoResProductTranslation</c> table to the query.
+    /// </summary>
+    /// <param name="_qbdsParent">
+    /// The <c>QueryBuildDataSource</c> object with the parent data source.
+    /// </param>
+    /// <param name="_qbdsInventTable">
+    /// The <c>QueryBuildDataSource</c> object with the data source for <c>InventTable</c> table.
+    /// </param>
+    /// <returns>
+    /// The <c>QueryBuildDataSource</c> object with the data source for the joined table.
+    /// </returns>
+    private QueryBuildDataSource addProductTranslation(
+        QueryBuildDataSource    _qbdsParent,
+        QueryBuildDataSource    _qbdsInventTable)
+    {
+        QueryBuildDataSource qbdsProductTranslation = _qbdsParent.addDataSource(tableNum(EcoResProductTranslation));
+        qbdsProductTranslation.addLink(fieldNum(InventTable, Product), fieldNum(EcoResProductTranslation, Product), _qbdsInventTable.name());
+        qbdsProductTranslation.addRange(fieldNum(EcoResProductTranslation, LanguageId)).value(queryValue(SystemParameters::getSystemLanguageId()));
+        qbdsProductTranslation.joinMode(JoinMode::OuterJoin);
+        qbdsProductTranslation.orderMode(OrderMode::GroupBy);
+        qbdsProductTranslation.addGroupByField(fieldNum(EcoResProductTranslation, Name));
+
+        return qbdsProductTranslation;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addRangesFromContract</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adds ranges from the contract to the data source.
+    /// </summary>
+    /// <param name="_queryBuildDataSource">
+    /// The data source.
+    /// </param>
+    private void addRangesFromContract(QueryBuildDataSource _queryBuildDataSource)
+    {
+        int                         rangeNo, rangeCount;
+
+        Query contractQuery = contract.parmQuery();
+        if (contractQuery)
+        {
+            QueryBuildDataSource contractDataSource = contractQuery.dataSourceTable(_queryBuildDataSource.table());
+            if (contractDataSource)
+            {
+                rangeCount = contractDataSource.rangeCount();
+                for (rangeNo = 1; rangeNo <= rangeCount; rangeNo++)
+                {
+                    QueryBuildRange contractRange = contractDataSource.range(rangeNo);
+                    str value = contractRange.value();
+                    if (value)
+                    {
+                        rangeCount = contractDataSource.rangeCount();
+                        if (this.applyRange(_queryBuildDataSource.table(), contractRange.field()))
+                        {
+                            _queryBuildDataSource.addRange(contractRange.field()).value(value);
+                        }
+                        else
+                        {
+                            canCalculateAsOfQty = false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addStorageDimensionGroupProduct</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adds the <c>EcoResStorageDimensionGroupItem</c> table to the query.
+    /// </summary>
+    /// <param name="_qbdsParent">
+    /// The <c>QueryBuildDataSource</c> object with the parent data source.
+    /// </param>
+    /// <param name="_qbdsInventTable">
+    /// The <c>QueryBuildDataSource</c> object with the data source for <c>InventTable</c> table.
+    /// </param>
+    /// <returns>
+    /// The <c>QueryBuildDataSource</c> object with the data source for the added table.
+    /// </returns>
+    private QueryBuildDataSource addStorageDimensionGroupProduct(
+        QueryBuildDataSource    _qbdsParent,
+        QueryBuildDataSource    _qbdsInventTable)
+    {
+        QueryBuildDataSource qbdsStorageDimensionGroupItem = _qbdsParent.addDataSource(tableNum(EcoResStorageDimensionGroupItem));
+        qbdsStorageDimensionGroupItem.addLink(fieldNum(InventTable, ItemId), fieldNum(EcoResStorageDimensionGroupItem, ItemId), _qbdsInventTable.name());
+        qbdsStorageDimensionGroupItem.addLink(fieldNum(InventTable, DataAreaId), fieldNum(EcoResStorageDimensionGroupItem, ItemDataAreaId), _qbdsInventTable.name());
+        qbdsStorageDimensionGroupItem.joinMode(JoinMode::OuterJoin);
+        qbdsStorageDimensionGroupItem.orderMode(OrderMode::GroupBy);
+        qbdsStorageDimensionGroupItem.addGroupByField(fieldNum(EcoResStorageDimensionGroupItem, StorageDimensionGroup));
+
+        return qbdsStorageDimensionGroupItem;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addTrackingDimensionGroupProduct</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adds the <c>EcoResTrackingDimensionGroupItem</c> table to the query.
+    /// </summary>
+    /// <param name="_qbdsParent">
+    /// The <c>QueryBuildDataSource</c> object with the parent data source.
+    /// </param>
+    /// <param name="_qbdsInventTable">
+    /// The <c>QueryBuildDataSource</c> object with the data source for <c>InventTable</c> table.
+    /// </param>
+    /// <returns>
+    /// The <c>QueryBuildDataSource</c> object with the data source for the added table.
+    /// </returns>
+    private QueryBuildDataSource addTrackingDimensionGroupProduct(
+        QueryBuildDataSource    _qbdsParent,
+        QueryBuildDataSource    _qbdsInventTable)
+    {
+        QueryBuildDataSource qbdsTrackingDimensionGroupItem = _qbdsParent.addDataSource(tableNum(EcoResTrackingDimensionGroupItem));
+        qbdsTrackingDimensionGroupItem.addLink(fieldNum(InventTable, ItemId), fieldNum(EcoResTrackingDimensionGroupItem, ItemId), _qbdsInventTable.name());
+        qbdsTrackingDimensionGroupItem.addLink(fieldNum(InventTable, DataAreaId), fieldNum(EcoResTrackingDimensionGroupItem, ItemDataAreaId), _qbdsInventTable.name());
+        qbdsTrackingDimensionGroupItem.joinMode(JoinMode::OuterJoin);
+        qbdsTrackingDimensionGroupItem.orderMode(OrderMode::GroupBy);
+        qbdsTrackingDimensionGroupItem.addGroupByField(fieldNum(EcoResTrackingDimensionGroupItem, TrackingDimensionGroup));
+
+        return qbdsTrackingDimensionGroupItem;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>applyRange</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Determines if a range should be applied to the query.
+    /// </summary>
+    /// <param name="_tableId">
+    /// The <c>TableId</c> to validate.
+    /// </param>
+    /// <param name="_fieldId">
+    /// The <c>FieldId</c> to validate.
+    /// </param>
+    /// <returns>
+    /// true, if the range should be applied to the query; otherwise false.
+    /// </returns>
+    private boolean applyRange(TableId _tableId, FieldId _fieldId)
+    {
+        boolean applyRange;
+
+        if (buildAsOfQtyQuery || buildReceiptQtyQuery)
+        {
+            applyRange = true;
+        }
+        else
+        {
+            if (_tableId == tableNum(InventDim))
+            {
+                if (InventDim::isFieldIdProductDimension(_fieldId) ||
+                    _fieldId == fieldNum(InventDim, InventSiteId))
+                {
+                    applyRange = true;
+                }
+            }
+            else
+            {
+                applyRange = true;
+            }
+        }
+        return applyRange;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>build</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Builds the the requested query.
+    /// </summary>
+    /// <returns>
+    /// An instance of <c>Query</c> with the requested query.
+    /// </returns>
+    public Query build()
+    {
+        if (!query)
+        {
+            inventDimParm = ETG_InventAgingQueryBuilder::selectedInventDimParm(contract);
+            if (buildReceiptQtyQuery)
+            {
+                this.buildReceiptQtyQuery();
+            }
+            else
+            {
+                canCalculateAsOfQty = true;
+                this.buildAsOfQuery();
+            }
+        }
+        return query;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buildAsOfQuery</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Builds an as of query.
+    /// </summary>
+    private void buildAsOfQuery()
+    {
+        this.buildCommonQuery();
+
+        if (buildAsOfQtyAndAmountQuery)
+        {
+            QueryBuildDataSource qbdsInventView = qbds.addDataSource(tableNum(InventValueReportView));
+            qbdsInventView.addLink(fieldNum(InventTable, ItemId), fieldNum(InventValueReportView, ItemId), qbdsInventTable.name());
+            qbdsInventView.addRange(fieldNum(InventValueReportView, TransDate)).value(queryRange(contract.parmAsOnDate() + 1, dateMax()));
+            qbdsInventView.orderMode(OrderMode::GroupBy);
+            qbdsInventView.addSelectionField(fieldNum(InventValueReportView, Qty), SelectionField::Sum);
+            qbdsInventView.addSelectionField(fieldNum(InventValueReportView, Amount), SelectionField::Sum);
+
+            if (!inventDimParm.isAllFlagNo() || this.contractHasRange(tableNum(InventDim)))
+            {
+                qbds = this.addInventDim(qbdsInventView, fieldNum(InventValueReportView, InventDimId));
+            }
+        }
+        else
+        {
+            QueryBuildDataSource qbdsInventView = qbds.addDataSource(tableNum(InventAgingQtyReportView));
+            qbdsInventView.addLink(fieldNum(InventTable, ItemId), fieldNum(InventAgingQtyReportView, ItemId), qbdsInventTable.name());
+            qbdsInventView.addRange(fieldNum(InventAgingQtyReportView, TransDate)).value(queryRange(contract.parmAsOnDate() + 1, dateMax()));
+            qbdsInventView.orderMode(OrderMode::GroupBy);
+            qbdsInventView.addSelectionField(fieldNum(InventAgingQtyReportView, Qty), SelectionField::Sum);
+
+            if (!inventDimParm.isAllFlagNo() || this.contractHasRange(tableNum(InventDim)))
+            {
+                qbds = this.addInventDim(qbdsInventView, fieldNum(InventAgingQtyReportView, InventDimId));
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buildCommonQuery</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Builds the common parts of the query.
+    /// </summary>
+    private void buildCommonQuery()
+    {
+        query = new Query();
+        query.literals(true); // More important make an optimal plan for the ranges the user enters for the report than to reuse the query plan.
+        qbds = this.addInventTable();
+        if (contract.parmViewItemGroup() || this.contractHasRange(tableNum(InventItemGroupItem)))
+        {
+            qbds = this.addInventItemGroupItem(qbds, qbdsInventTable);
+        }
+        if (contract.parmViewItem())
+        {
+            qbds = this.addProductTranslation(qbds, qbdsInventTable);
+            qbds = this.addInventTableModule(qbds, qbdsInventTable);
+        }
+        if (!inventDimParm.isAllFlagNo())
+        {
+            qbds = this.addProductDimensionGroupProduct(qbds, qbdsInventTable);
+            qbds = this.addStorageDimensionGroupProduct(qbds, qbdsInventTable);
+            qbds = this.addTrackingDimensionGroupProduct(qbds, qbdsInventTable);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buildReceiptQtyQuery</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Builds the query to calculate the receipt quantity for a period.
+    /// </summary>
+    private void buildReceiptQtyQuery()
+    {
+        this.buildCommonQuery();
+
+        QueryBuildDataSource qbdsReceipt = qbds.addDataSource(tableNum(InventAgingReceiptView));
+        qbdsReceipt.addLink(fieldNum(InventTable, ItemId), fieldNum(InventAgingReceiptView, ItemId), qbdsInventTable.name());
+        qbdsReceipt.orderMode(OrderMode::GroupBy);
+        qbdsReceipt.addSelectionField(fieldNum(InventAgingReceiptView, Qty), SelectionField::Sum);
+        qbdsReceipt.addSelectionField(fieldNum(InventAgingReceiptView, TransDate), SelectionField::Max);
+
+        qbdsReceipt.addRange(fieldNum(InventAgingReceiptView, Qty)).value(strFmt('((%2 > 0) || (%3))',
+                                                                                qbdsReceipt.name(),
+                                                                                fieldStr(InventAgingReceiptView, Qty),
+                                                                                fieldStr(InventAgingReceiptView, Voucher)));
+
+        qbdsReceipt.addRange(fieldNum(InventAgingReceiptView, TransDate)).value(queryRange(fromDate, toDate));
+        qbdsReceipt.addGroupByField(fieldNum(InventAgingReceiptView, Voucher));
+
+        query.addHavingFilter(qbdsReceipt, fieldStr(InventAgingReceiptView, Qty), AggregateFunction::Sum).value('>0');
+
+        if (this.contractHasRange(tableNum(InventDim)) || !inventDimParm.isAllFlagNo())
+        {
+            qbds = this.addInventDim(qbdsReceipt, fieldNum(InventAgingReceiptView, InventDimId));
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>canCalculateAsOfQty</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Determines if the as of quantity can be calculated.
+    /// </summary>
+    /// <returns>
+    /// true if the as of quantity can be calculated; otherwise, false.
+    /// </returns>
+    public boolean canCalculateAsOfQty()
+    {
+        return canCalculateAsOfQty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>contractHasRange</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Determines if the contract has a range on a table.
+    /// </summary>
+    /// <param name="_tableId">
+    /// The <c>TableId</c> identifying the table.
+    /// </param>
+    /// <returns>
+    /// true, if the contract has a range on the table; otherwise false.
+    /// </returns>
+    private boolean contractHasRange(TableId _tableId)
+    {
+        boolean                 hasRanges;
+
+        Query contractQuery = contract.parmQuery();
+        if (contractQuery)
+        {
+            QueryBuildDataSource contractDataSource = contractQuery.dataSourceTable(_tableId);
+            hasRanges = SysQueryRangeUtil::queryBuildDataSourceHasRange(contractDataSource);
+        }
+
+        return hasRanges;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initializeBuildQueryAsOfQty</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Initializes the <c>InventAgingQueryBuilder</c> class to build a query to calculate the as of quantity
+    /// based on the contract.
+    /// </summary>
+    /// <param name="_contract">
+    /// The contract used to build the query.
+    /// </param>
+    private void initializeBuildQueryAsOfQty(ETG_InventAgingContract _contract)
+    {
+        contract = _contract;
+        buildAsOfQtyQuery = true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initializeBuildQueryAsOfQtyAndAmount</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Initializes the <c>InventAgingQueryBuilder</c> class to build a query to calculate the as of quantity
+    /// and amount based on the contract.
+    /// </summary>
+    /// <param name="_contract">
+    /// The contract used to build the query.
+    /// </param>
+    private void initializeBuildQueryAsOfQtyAndAmount(ETG_InventAgingContract _contract)
+    {
+        contract = _contract;
+        buildAsOfQtyAndAmountQuery = true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initializeBuildQueryReceiptQty</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Initializes the <c>InventAgingQueryBuilder</c> class to build a query to calculate the receipt quantity
+    /// for a period based on the contract.
+    /// </summary>
+    /// <param name="_contract">
+    /// The contract used to build the query.
+    /// </param>
+    /// <param name="_fromDate">
+    /// The start of the period.
+    /// </param>
+    /// <param name="_toDate">
+    /// The end of the period.
+    /// </param>
+    private void initializeBuildQueryReceiptQty(
+        ETG_InventAgingContract     _contract,
+        TransDate               _fromDate,
+        TransDate               _toDate)
+    {
+        contract = _contract;
+        fromDate = _fromDate;
+        toDate = _toDate;
+        buildReceiptQtyQuery = true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>new</Name>
+				<Source><![CDATA[
+    protected void new()
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static ETG_InventAgingQueryBuilder construct()
+    {
+        return new ETG_InventAgingQueryBuilder();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>newAsOfQtyAndAmountQuery</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Builds a query to calculate the as of quantity and amount based on the contract.
+    /// </summary>
+    /// <param name="_contract">
+    /// The contract used to build the query.
+    /// </param>
+    /// <returns>
+    /// A query to calculate the as of quantity and amount based on the contract.
+    /// </returns>
+    /// <remarks>
+    /// The query filters only filters on item group, item id, product dimensions and site.
+    /// </remarks>
+    public static ETG_InventAgingQueryBuilder newAsOfQtyAndAmountQuery(ETG_InventAgingContract _contract)
+    {
+        ETG_InventAgingQueryBuilder inventAgingQueryBuilder = ETG_InventAgingQueryBuilder::construct();
+        inventAgingQueryBuilder.initializeBuildQueryAsOfQtyAndAmount(_contract);
+
+        return inventAgingQueryBuilder;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>newAsOfQtyQuery</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Builds a query to calculate the as of quantity based on the contract.
+    /// </summary>
+    /// <param name="_contract">
+    /// The contract used to build the query.
+    /// </param>
+    /// <returns>
+    /// A query to calculate the as of quantity based on the contract.
+    /// </returns>
+    public static ETG_InventAgingQueryBuilder newAsOfQtyQuery(ETG_InventAgingContract _contract)
+    {
+        ETG_InventAgingQueryBuilder inventAgingQueryBuilder = ETG_InventAgingQueryBuilder::construct();
+        inventAgingQueryBuilder.initializeBuildQueryAsOfQty(_contract);
+
+        return inventAgingQueryBuilder;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>newReceiptQtyQuery</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Builds a query to calculate the receipt quantity for a period based on the contract.
+    /// </summary>
+    /// <param name="_contract">
+    /// The contract used to build the query.
+    /// </param>
+    /// <param name="_fromDate">
+    /// The start of the period.
+    /// </param>
+    /// <param name="_toDate">
+    /// The end of the period.
+    /// </param>
+    /// <returns>
+    /// A query to calculate the receipt quantity for a period based on the contract.
+    /// </returns>
+    public static ETG_InventAgingQueryBuilder newReceiptQtyQuery(
+        ETG_InventAgingContract  _contract,
+        TransDate               _fromDate,
+        TransDate               _toDate)
+    {
+        ETG_InventAgingQueryBuilder inventAgingQueryBuilder = ETG_InventAgingQueryBuilder::construct();
+        inventAgingQueryBuilder.initializeBuildQueryReceiptQty(_contract, _fromDate, _toDate);
+
+        return inventAgingQueryBuilder;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>selectedInventDimParm</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates an <c>InventDimParm</c> record with the flags set to Yes if the field is set to View or Total in the contact.
+    /// </summary>
+    /// <param name="_contract">
+    /// The contract.
+    /// </param>
+    /// <returns>
+    /// An <c>InventDimParm</c> with the flags set to Yes if the field is set to View or Total in the contact.
+    /// </returns>
+    public static InventDimParm selectedInventDimParm(ETG_InventAgingContract _contract)
+    {
+        InventDimParm   inventDimParm;
+
+        #InventDimDevelop
+        if (_contract.parmViewConfigId())
+        {
+            inventDimParm.ConfigIdFlag = NoYes::Yes;
+        }
+        if (_contract.parmViewInventBatchId())
+        {
+            inventDimParm.InventBatchIdFlag = NoYes::Yes;
+        }
+        if (_contract.parmViewInventColorId())
+        {
+            inventDimParm.InventColorIdFlag = NoYes::Yes;
+        }
+        if (_contract.parmViewInventGTDId_RU())
+        {
+            inventDimParm.InventGTDIdFlag_RU = NoYes::Yes;
+        }
+        if (_contract.parmViewInventLocationId())
+        {
+            inventDimParm.InventLocationIdFlag = NoYes::Yes;
+        }
+        if (_contract.parmViewInventOwnerId_RU())
+        {
+            inventDimParm.InventOwnerIdFlag_RU = NoYes::Yes;
+        }
+        if (_contract.parmViewInventProfileId_RU())
+        {
+            inventDimParm.InventProfileIdFlag_RU = NoYes::Yes;
+        }
+        if (_contract.parmViewInventSerialId())
+        {
+            inventDimParm.InventSerialIdFlag = NoYes::Yes;
+        }
+        if (_contract.parmViewInventSiteId())
+        {
+            inventDimParm.InventSiteIdFlag = NoYes::Yes;
+        }
+        if (_contract.parmViewInventSizeId())
+        {
+            inventDimParm.InventSizeIdFlag = NoYes::Yes;
+        }
+        if (_contract.parmViewInventStyleId())
+        {
+            inventDimParm.InventStyleIdFlag = NoYes::Yes;
+        }
+        if (_contract.parmViewInventVersionId())
+        {
+            inventDimParm.InventVersionIdFlag = NoYes::Yes;
+        }
+        if (_contract.parmViewWMSLocationId())
+        {
+            inventDimParm.wmsLocationIdFlag = NoYes::Yes;
+        }
+        if (_contract.parmViewInventStatusId())
+        {
+            inventDimParm.InventStatusFlag = NoYes::Yes;
+        }
+        if (_contract.parmViewLicensePlateId())
+        {
+            inventDimParm.LicensePlateFlag = NoYes::Yes;
+        }
+        if (_contract.parmViewDimension1())
+        {
+            inventDimParm.InventDimension1Flag = NoYes::Yes;
+        }
+        if (_contract.parmViewDimension2())
+        {
+            inventDimParm.InventDimension2Flag = NoYes::Yes;
+        }
+        if (_contract.parmViewDimension3())
+        {
+            inventDimParm.InventDimension3Flag = NoYes::Yes;
+        }
+        if (_contract.parmViewDimension4())
+        {
+            inventDimParm.InventDimension4Flag = NoYes::Yes;
+        }
+        if (_contract.parmViewDimension5())
+        {
+            inventDimParm.InventDimension5Flag = NoYes::Yes;
+        }
+        if (_contract.parmViewDimension6())
+        {
+            inventDimParm.InventDimension6Flag = NoYes::Yes;
+        }
+        if (_contract.parmViewDimension7())
+        {
+            inventDimParm.InventDimension7Flag = NoYes::Yes;
+        }
+        if (_contract.parmViewDimension8())
+        {
+            inventDimParm.InventDimension8Flag = NoYes::Yes;
+        }
+        if (_contract.parmViewDimension9())
+        {
+            inventDimParm.InventDimension9Flag = NoYes::Yes;
+        }
+        if (_contract.parmViewDimension10())
+        {
+            inventDimParm.InventDimension10Flag = NoYes::Yes;
+        }
+        if (_contract.parmViewDimension11())
+        {
+            inventDimParm.InventDimension11Flag = NoYes::Yes;
+        }
+        if (_contract.parmViewDimension12())
+        {
+            inventDimParm.InventDimension12Flag = NoYes::Yes;
+        }
+        return inventDimParm;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

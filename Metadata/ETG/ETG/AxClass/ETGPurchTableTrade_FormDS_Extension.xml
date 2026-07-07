@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchTableTrade_FormDS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///     extension class of form <c>PurchTable</c> datasource <c>ETG_PurchTableTrade</c>
+/// </summary>
+[ExtensionOf(formDataSourceStr(PurchTable, ETG_PurchTableTrade))]
+internal final class ETGPurchTableTrade_FormDS_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>write</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///     update port of loading and discharge details on lines
+    /// </summary>
+    public void write()
+    {
+        boolean flowPortDetailsToLines, checkLinesUpdateReqPortLoading, checkLinesUpdateReqPortDischarge;
+        ETG_PurchTableTrade         purchTableTrade;
+        FormDataSource              purchTableTradeDS;
+
+        if(ETGACFParameters::find().EnablePortLoadingDetailsHeaderToLine == NoYes::Yes)
+        {
+            flowPortDetailsToLines = true;
+        }
+        if (flowPortDetailsToLines)
+        {
+            purchTableTradeDS = this;
+            purchTableTrade   = purchTableTradeDS.cursor();
+
+            if(purchTableTrade.orig().PortOfLoading != purchTableTrade.PortOfLoading && purchTableTrade.orig().PortOfDischarge != purchTableTrade.PortOfDischarge)
+            {
+                checkLinesUpdateReqPortLoading = true;
+                checkLinesUpdateReqPortDischarge = true;
+            }
+            else if(purchTableTrade.orig().PortOfLoading != purchTableTrade.PortOfLoading)
+            {
+                checkLinesUpdateReqPortLoading = true;
+            }
+            else if(purchTableTrade.orig().PortOfDischarge != purchTableTrade.PortOfDischarge)
+            {
+                checkLinesUpdateReqPortDischarge = true;
+            }
+        }
+        next write();
+
+        if(flowPortDetailsToLines && (checkLinesUpdateReqPortLoading || checkLinesUpdateReqPortDischarge))
+        {
+            this.updateLinesETG(purchTableTrade, checkLinesUpdateReqPortLoading, checkLinesUpdateReqPortDischarge);
+           // FormDataSource lineDS = purchTableTradeDS.formRun().dataSource(formDataSourceStr(PurchTable,ETG_PurchLineTrade));
+           // lineDS.research();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateLinesETG</Name>
+				<Source><![CDATA[
+    public void updateLinesETG(ETG_PurchTableTrade purchTableTrade, boolean changePortLoading, boolean changePortDischarge)
+    {
+        PurchTable          purchTable;
+        ETG_PurchLineTrade  purchLineTrade;
+        DialogButton        diagBut;
+
+        str strMessage = "@ETG_New:CopyPortDetailsToLines";
+        str strTitle   = "@ETG_New:UpdatePortDetails";
+        diagBut        = Box::yesNoCancel(strMessage, DialogButton::No, strTitle);
+
+        if (diagBut  ==  DialogButton::No)
+        {
+            return;
+        }
+        else if(diagBut == DialogButton::Yes)
+        {
+            ttsbegin;
+
+            if(changePortLoading && changePortDischarge)
+            {
+                update_recordset purchLineTrade
+                setting
+                PortOfDischarge     = purchTableTrade.PortOfDischarge,
+                PortOfDischargeDesc = purchTableTrade.PortOfDischargeDesc,
+                PortOfLoading       = purchTableTrade.PortOfLoading,
+                PortOfLoadingDesc   = purchTableTrade.PortOfLoadingDesc
+                where purchLineTrade.PurchId == purchTableTrade.PurchId;
+            }
+            else if(changePortLoading)
+            {
+                update_recordset purchLineTrade
+                setting
+                PortOfLoading       = purchTableTrade.PortOfLoading,
+                PortOfLoadingDesc   = purchTableTrade.PortOfLoadingDesc
+                where purchLineTrade.PurchId == purchTableTrade.PurchId;
+            }
+            else if(changePortDischarge)
+            {
+                update_recordset purchLineTrade
+                setting
+                PortOfDischarge     = purchTableTrade.PortOfDischarge,
+                PortOfDischargeDesc = purchTableTrade.PortOfDischargeDesc
+                where purchLineTrade.PurchId == purchTableTrade.PurchId;
+            }
+           
+            ttscommit;
+        }
+        else
+        {
+            info("@SYS105413");
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

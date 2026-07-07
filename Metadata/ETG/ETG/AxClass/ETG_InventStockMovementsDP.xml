@@ -1,0 +1,950 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_InventStockMovementsDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+//start rajesh S3
+
+[
+    SRSReportParameterAttribute(classStr(ETG_InventStockMovementContract))
+    ]
+    class ETG_InventStockMovementsDP extends SrsReportDataProviderPreProcessTempDB
+{
+    ETG_InventStockMovementContract         ETG_InventStockMovementContract;
+    ETG_InventStockMovementTable         StockMovementTable;
+    DateFinancial                        _from,_To;
+    InventTable                         inventTable;
+    InventTrans                         inventtrans,inventtrans1;
+    // InventTable                  inventtrans1;
+    InventTransOrigin                   inventTransOrigin;
+    InventDim                           inventDim,inventDimTot,inventDimLocal,inventDimLoc;
+    InventBatch                         inventBatch;
+    InventItemGroup                     inventItemGroup;
+    InventItemGroupItem                 inventItemGroupItem;
+    ItemId                              _itemid;
+    InventDimId                         inventdimid;
+    InventSum                           inventSum;
+    InventTrans                         openInventTransIn,openInventTransOut,grnInventTrans,invoicegrnInventTrans,returnInventTrans,stockInventTransIn,stockInventTransOut,purchtransitInventTrans,soldtransitInventTrans,transferJourTransIn,transferJourTransOut,salesInventTrans, closingInventTrans,
+                                        prodInventTrans,prodReceivedInventTrans,consInventTrans,consDeductedInventTrans,salespickedInventTrans,inventAdjgainInventTrans,inventAdjLossInventTrans,movementjourInventTransIn,movementjourInventTransOut,salesCOGSInventTrans,salesreturnInventTrans;
+    InventTransferJour                  inventTransferJour;
+    InventTransferJourLine              inventTransferJourLine;
+    ProdJournalBOM                      prodJournalBOM;
+    ProdJournalTable                    prodJournalTable;
+    ProdCalcTrans                       prodCalcTrans;
+    ProdTable                           prodTable;
+    ProdBOM                             prodBom;
+    ProdJournalProd                     prodJournalProd;
+    EcoResProductTranslation            productTranslation;
+    InventTableModule                   inventTableModule;
+    CompanyInfo                         companyInfo;
+    InventValueReportTmpLine            inventValueReportTmpLine;
+    NoYes                               config,size,color,style,site,warehouse,location,batchnumber;
+    // ItemName                            itmnme;
+    //ItemGroup                           itmgrp;
+    real                                purchqty, soldqty, soldamount, purchamount , totalpurchqty, totalsoldqty, totalpurchamt , totalsoldamt;
+
+    ItemId                              itemIdParm;
+    ItemGroupId                         itemGroupIdParm;
+
+
+   
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getInventValueReportTmpLedgerLine</Name>
+				<Source><![CDATA[
+    [
+    SRSReportDataSetAttribute(tableStr(ETG_InventStockMovementTable))
+    ]
+        public ETG_InventStockMovementTable getInventValueReportTmpLedgerLine()
+    {
+        select StockMovementTable;
+        return StockMovementTable;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+       
+        this.openingprocessReport();
+        this.RemainprocessReport();
+
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>openingprocessReport</Name>
+				<Source><![CDATA[
+    public void openingprocessReport()
+    {
+
+        Query                   q;
+        QueryBuildDataSource    qbds;
+        QueryBuildRange         qbdr;
+        QueryRun                QR;
+        InventTable             inventTableloc;
+        InventDimParm           inventDimParmCriteria;
+        container               conItemInventDim;
+        String255               keyItemInventDim;
+
+
+        ETG_InventStockMovementContract = this.parmDataContract() as ETG_InventStockMovementContract;
+
+        _from         =       ETG_InventStockMovementContract.parmFromDate();
+        _To           =         ETG_InventStockMovementContract.parmToDate();
+        config        =       ETG_InventStockMovementContract.parmConfig();
+        size          =       ETG_InventStockMovementContract.parmSize();
+        color         =       ETG_InventStockMovementContract.parmColor();
+        style         =       ETG_InventStockMovementContract.parmStyle();
+        site          =       ETG_InventStockMovementContract.parmSite();
+        warehouse     =       ETG_InventStockMovementContract.parmWarehouse();
+        location      =       ETG_InventStockMovementContract.parmLocation();
+        batchnumber   =       ETG_InventStockMovementContract.parmBatchNumber();
+
+        itemIdParm                        =    ETG_InventStockMovementContract.parmitmnme();
+        itemGroupIdParm                   =    ETG_InventStockMovementContract.parmitemGroupIdParm();
+        companyInfo                       =    CompanyInfo::find();
+        StockMovementTable.CompanyLogo    =    CompanyImage::findByRecord(companyInfo).Image;
+        StockMovementTable.CompanyName    =    companyInfo.Name;
+
+        q = new Query();
+        qbds = q.addDataSource(tableNum(InventTrans));
+        qbdr = qbds.addRange(fieldNum(InventTrans, DateFinancial));
+        qbdr.value(queryRange(_from,_To));
+        QR = new QueryRun(q);
+
+        //while(QR.next())
+        //{
+        //inventtrans1 = QR.get(tableNum(InventTrans));
+         
+        while select   inventtrans1
+                        Order by itemid /*,inventdimid */
+        where ((inventtrans1.DateFinancial == dateNull() || inventtrans1.DateFinancial < _from) && inventtrans1.DatePhysical < _from)
+                        && (inventtrans1.ItemId == itemIdParm || itemIdParm == "")
+                        join inventDim
+                        order by configId,WMSLocationId,InventStyleId,InventSizeId,InventSiteId,InventLocationId,InventBatchId,InventColorId
+                        where inventtrans1.inventDimId == inventDim.inventDimId
+
+        {
+            if((InventTable::find(inventtrans1.ItemId).itemGroupId() == itemGroupIdParm) || itemGroupIdParm == "")
+            {
+                StockMovementTable.clear();
+                inventTableloc     = InventTable::find(inventtrans1.ItemId);
+                //inventDim          = InventDim::find(inventtrans1.inventDimId);
+                if(config)
+                        StockMovementTable.configId                  =  inventDim.configId;
+                if(location)
+                        StockMovementTable.WMSLocationId             =  inventDim.wMSLocationId;
+                if(style)
+                        StockMovementTable.InventStyleId             =  inventDim.InventStyleId;
+                if(size)
+                        StockMovementTable.InventSizeId              =  inventDim.InventSizeId;
+                if(site)
+                        StockMovementTable.InventSiteId              =  inventDim.InventSiteId;
+                if(warehouse)
+                        StockMovementTable.InventLocationId          =  inventDim.InventLocationId;
+                if(batchnumber)
+                        StockMovementTable.InventBatchId              = inventDim.inventBatchId;
+                if(color)
+                        StockMovementTable.InventColorId             =  inventDim.InventColorId;
+
+
+
+                keyItemInventDim = strFmt("%1-%2-%3-%4-%5-%6-%7-%8-%9",inventtrans1.itemid,StockMovementTable.configId,StockMovementTable.InventStyleId, StockMovementTable.InventSizeId, StockMovementTable.InventColorId,StockMovementTable.InventSiteId, StockMovementTable.InventLocationId, StockMovementTable.wMSLocationId, StockMovementTable.inventBatchId);
+                
+                if(conFind(conItemInventDim,keyItemInventDim) == 0)
+                {
+                    conItemInventDim += keyItemInventDim ;
+                        
+                    StockMovementTable.CompanyLogo               =  FormLetter::companyLogo();
+                    StockMovementTable.CompanyName               =  companyInfo.Name;
+                    //StockMovementTable.InventRecId               =  inventtrans1.RecId;
+                    StockMovementTable.ItemId                    =  inventTableloc.ItemId;
+                    StockMovementTable.itemName                  =  InventTable::find(inventtrans1.ItemId).itemName();
+                    StockMovementTable.UnitId                    =  InventTable::find(inventtrans1.ItemId).inventUnitId();
+           
+                    inventDimLocal.clear();
+                    inventDimLocal.configId             = StockMovementTable.configId ;
+                    inventDimLocal.wMSLocationId        = StockMovementTable.WMSLocationId;
+                    inventDimLocal.InventStyleId        = StockMovementTable.InventStyleId;
+                    inventDimLocal.InventSizeId         = StockMovementTable.InventSizeId ;
+                    inventDimLocal.InventSiteId         = StockMovementTable.InventSiteId  ;
+                    inventDimLocal.InventLocationId     = StockMovementTable.InventLocationId;
+                    inventDimLocal.inventBatchId        = StockMovementTable.InventBatchId ;
+                    inventDimLocal.InventColorId        = StockMovementTable.InventColorId ;
+
+                    //Open Stock Start
+                        
+                      
+                    while select  * from openInventTransIn
+                        where ((openInventTransIn.DatePhysical < _from) 
+                        && !(openInventTransIn.DateFinancial >= _from && openInventTransIn.DateFinancial <= _To)
+                        //&& (openInventTransIn.DateFinancial == dateNull() || openInventTransIn.DateFinancial < _from)
+                        )
+                        && openInventTransIn.ItemId == inventtrans1.ItemId
+                        && (openInventTransIn.StatusIssue == StatusIssue::Sold ||  openInventTransIn.StatusReceipt == StatusReceipt::Purchased)
+                        join inventDimLoc
+                        where openInventTransIn.inventDimId == inventDimLoc.inventDimId
+                        && ( (inventDimLoc.configId    == StockMovementTable.configId         || config == NoYes::No)    &&
+                        (inventDimLoc.InventSizeId     == StockMovementTable.InventSizeId     || Size == NoYes::No)      &&
+                        (inventDimLoc.InventColorId    == StockMovementTable.InventColorId    || color == NoYes::No)     &&
+                        (inventDimLoc.InventStyleId    == StockMovementTable.InventStyleId    || style == NoYes::No)     &&
+                        (inventDimLoc.InventSiteId     == StockMovementTable.InventSiteId     || site == NoYes::No)      &&
+                        (inventDimLoc.InventLocationId == StockMovementTable.InventLocationId || warehouse == NoYes::No) &&
+                        (inventDimLoc.wMSLocationId    == StockMovementTable.WMSLocationId    || location == NoYes::No)  &&
+                        (inventDimLoc.inventBatchId    == StockMovementTable.InventBatchId    || batchnumber == NoYes::No))
+                    {
+                      
+                   
+                        StockMovementTable.OpenStockQtySold      += openInventTransIn.Qty;
+                        if (openInventTransIn.DateFinancial >= _from )                                  {
+                            StockMovementTable.OpenStockValueSold    += openInventTransIn.CostAmountPhysical;
+                           // StockMovementTable.OpenStockValueSold    += openInventTransIn.CostAmountAdjustment; // s3 for testing adjustment value 
+                        }
+                       if( _from > openInventTransIn.DateFinancial && openInventTransIn.DateFinancial != dateNull())
+                        { 
+                              // if(openInventTransIn.CostAmountPosted != 0)
+                              StockMovementTable.OpenStockValueSold += openInventTransIn.CostAmountPosted;
+                             StockMovementTable.OpenStockValueSold    += openInventTransIn.CostAmountAdjustment;
+                        }
+                       
+                        
+                    }
+                   
+                       
+                     
+                    InventSettlement    inventsettlement;
+                   /* 
+                    select sum(Qty), sum(CostAmountAdjustment) from openInventTransIn
+                        where ((openInventTransIn.DatePhysical < _from) 
+                        && !(openInventTransIn.DateFinancial >= _from && openInventTransIn.DateFinancial <= _To)
+                        //&& (openInventTransIn.DateFinancial == dateNull() || openInventTransIn.DateFinancial < _from)
+                        )
+                       && openInventTransIn.ItemId == inventtrans1.ItemId
+                        && (openInventTransIn.StatusIssue == StatusIssue::Sold ||  openInventTransIn.StatusReceipt == StatusReceipt::Purchased)
+                        join inventsettlement
+                        where   inventsettlement.TransRecId == openInventTransIn.RecId &&  inventsettlement.TransDate < _from  && inventsettlement.Cancelled == 0
+                        join inventDimLoc
+                        where openInventTransIn.inventDimId == inventDimLoc.inventDimId
+                        && ( (inventDimLoc.configId    == StockMovementTable.configId         || config == NoYes::No)    &&
+                        (inventDimLoc.InventSizeId     == StockMovementTable.InventSizeId     || Size == NoYes::No)      &&
+                        (inventDimLoc.InventColorId    == StockMovementTable.InventColorId    || color == NoYes::No)     &&
+                        (inventDimLoc.InventStyleId    == StockMovementTable.InventStyleId    || style == NoYes::No)     &&
+                        (inventDimLoc.InventSiteId     == StockMovementTable.InventSiteId     || site == NoYes::No)      &&
+                        (inventDimLoc.InventLocationId == StockMovementTable.InventLocationId || warehouse == NoYes::No) &&
+                        (inventDimLoc.wMSLocationId    == StockMovementTable.WMSLocationId    || location == NoYes::No)  &&
+                        (inventDimLoc.inventBatchId    == StockMovementTable.InventBatchId    || batchnumber == NoYes::No));
+                    {
+                        
+                        StockMovementTable.OpenStockValueSold    += openInventTransIn.CostAmountAdjustment;
+                        //StockMovementTable.OpenStockValueSold    += openInventTransIn.costValue();
+                        
+                    }*/
+                
+                  
+                    select sum(Qty), sum(CostAmountPhysical) from openInventTransOut
+                        where (openInventTransOut.DatePhysical < _from  //|| openInventTransOut.DateFinancial <= _from)
+                    && !(openInventTransOut.DateFinancial >= _from && openInventTransOut.DateFinancial <= _To))
+                    && openInventTransOut.ItemId == inventtrans1.ItemId
+                        && (openInventTransOut.StatusReceipt == StatusReceipt::Received || openInventTransOut.StatusIssue == StatusIssue::Deducted)
+                        join inventDimLoc
+                        where openInventTransOut.inventDimId == inventDimLoc.inventDimId
+                        && ( (inventDimLoc.configId == StockMovementTable.configId || config == NoYes::No) &&
+                        (inventDimLoc.InventSizeId == StockMovementTable.InventSizeId || Size == NoYes::No) &&
+                        (inventDimLoc.InventColorId == StockMovementTable.InventColorId || color == NoYes::No) &&
+                        (inventDimLoc.InventStyleId == StockMovementTable.InventStyleId || style == NoYes::No) &&
+                        (inventDimLoc.InventSiteId == StockMovementTable.InventSiteId || site == NoYes::No) &&
+                        (inventDimLoc.InventLocationId == StockMovementTable.InventLocationId || warehouse == NoYes::No) &&
+                        (inventDimLoc.wMSLocationId == StockMovementTable.WMSLocationId || location == NoYes::No) &&
+                        (inventDimLoc.inventBatchId == StockMovementTable.InventBatchId || batchnumber == NoYes::No));
+    
+                    StockMovementTable.OpenStockQtyDeducted      = openInventTransOut.Qty;
+                    StockMovementTable.OpenStockValueDeducted    = openInventTransOut.CostAmountPhysical;
+           
+                    StockMovementTable.OpenStockQty  = StockMovementTable.OpenStockQtyPurchased + StockMovementTable.OpenStockQtySold + StockMovementTable.OpenStockQtyDeducted;
+                    StockMovementTable.OpenStockValue  = StockMovementTable.OpenStockValuePurchased + StockMovementTable.OpenStockValueSold + StockMovementTable.OpenStockValueDeducted;
+                    /*
+                    select sum(Qty), sum(CostAmountPhysical) from openInventTransOut
+                        where (openInventTransOut.DatePhysical < _from  && (openInventTransOut.DateFinancial >= _from ))
+                    && openInventTransOut.ItemId == inventtrans1.ItemId
+                        && (openInventTransOut.StatusReceipt == StatusReceipt::Purchased || openInventTransOut.StatusIssue == StatusIssue::Sold)
+                        join inventDimLoc
+                        where openInventTransOut.inventDimId == inventDimLoc.inventDimId
+                        && ( (inventDimLoc.configId == StockMovementTable.configId || config == NoYes::No) &&
+                        (inventDimLoc.InventSizeId == StockMovementTable.InventSizeId || Size == NoYes::No) &&
+                        (inventDimLoc.InventColorId == StockMovementTable.InventColorId || color == NoYes::No) &&
+                        (inventDimLoc.InventStyleId == StockMovementTable.InventStyleId || style == NoYes::No) &&
+                        (inventDimLoc.InventSiteId == StockMovementTable.InventSiteId || site == NoYes::No) &&
+                        (inventDimLoc.InventLocationId == StockMovementTable.InventLocationId || warehouse == NoYes::No) &&
+                        (inventDimLoc.wMSLocationId == StockMovementTable.WMSLocationId || location == NoYes::No) &&
+                        (inventDimLoc.inventBatchId == StockMovementTable.InventBatchId || batchnumber == NoYes::No));
+    
+                    StockMovementTable.OpenStockQty      -= openInventTransOut.Qty;
+                    StockMovementTable.OpenStockValue    += openInventTransOut.CostAmountPhysical;
+                    */
+
+
+                    StockMovementTable.ClosingStockQty  = StockMovementTable.OpenStockQty;
+                    StockMovementTable.ClosingStockValue = StockMovementTable.OpenStockValue;
+
+                    StockMovementTable.insert();
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>RemainprocessReport</Name>
+				<Source><![CDATA[
+    public void RemainprocessReport()
+    {
+        InventTable             inventTableloc;
+        InventDimParm           inventDimParmCriteria;
+        container               conItemInventDim;
+        String255               keyItemInventDim;
+
+        conItemInventDim = conNull();
+
+        while select   inventtrans1
+        Order by itemid /*,inventdimid */
+        where ((inventtrans1.DateFinancial >= _from && inventtrans1.DateFinancial <= _To ) || (inventtrans1.DatePhysical >= _from || inventtrans1.DatePhysical <= _To))
+        && (inventtrans1.ItemId == itemIdParm || itemIdParm == "")
+        join inventDim
+        order by configId,WMSLocationId,InventStyleId,InventSizeId,InventSiteId,InventLocationId,InventBatchId,InventColorId
+        where inventtrans1.inventDimId == inventDim.inventDimId
+
+        {
+            ttsbegin;
+            if((InventTable::find(inventtrans1.ItemId).itemGroupId() == itemGroupIdParm) || itemGroupIdParm == "")
+            {
+
+                StockMovementTable.clear();
+                inventTableloc     = InventTable::find(inventtrans1.ItemId);
+                //inventDim          = InventDim::find(inventtrans1.inventDimId);
+                if(config)
+                            StockMovementTable.configId                  =  inventDim.configId;
+                if(location)
+                            StockMovementTable.WMSLocationId             =  inventDim.wMSLocationId;
+                if(style)
+                            StockMovementTable.InventStyleId             =  inventDim.InventStyleId;
+                if(size)
+                            StockMovementTable.InventSizeId              =  inventDim.InventSizeId;
+                if(site)
+                            StockMovementTable.InventSiteId              =  inventDim.InventSiteId;
+                if(warehouse)
+                            StockMovementTable.InventLocationId          =  inventDim.InventLocationId;
+                if(batchnumber)
+                            StockMovementTable.InventBatchId              = inventDim.inventBatchId;
+                if(color)
+                            StockMovementTable.InventColorId             =  inventDim.InventColorId;
+
+
+                keyItemInventDim = strFmt("%1-%2-%3-%4-%5-%6-%7-%8-%9",inventtrans1.ItemId,StockMovementTable.configId,StockMovementTable.InventStyleId, StockMovementTable.InventSizeId, StockMovementTable.InventColorId,StockMovementTable.InventSiteId, StockMovementTable.InventLocationId, StockMovementTable.wMSLocationId, StockMovementTable.inventBatchId);
+                if(conFind(conItemInventDim,keyItemInventDim) == 0)
+                {
+                    conItemInventDim += keyItemInventDim ;
+                    inventDimLocal.clear();
+                    inventDimLocal.configId             = StockMovementTable.configId ;
+                    inventDimLocal.wMSLocationId        = StockMovementTable.WMSLocationId;
+                    inventDimLocal.InventStyleId        = StockMovementTable.InventStyleId;
+                    inventDimLocal.InventSizeId         = StockMovementTable.InventSizeId ;
+                    inventDimLocal.InventSiteId         = StockMovementTable.InventSiteId  ;
+                    inventDimLocal.InventLocationId     = StockMovementTable.InventLocationId;
+                    inventDimLocal.inventBatchId        = StockMovementTable.InventBatchId ;
+                    inventDimLocal.InventColorId        = StockMovementTable.InventColorId ;
+                    select forupdate StockMovementTable
+                        where StockMovementTable.ItemId         == inventtrans1.ItemId
+                         && StockMovementTable.configId         == inventDimLocal.configId
+                         && StockMovementTable.WMSLocationId    == inventDimLocal.WMSLocationId
+                         && StockMovementTable.InventStyleId    == inventDimLocal.InventStyleId
+                         && StockMovementTable.InventSizeId     == inventDimLocal.InventSizeId
+                         && StockMovementTable.InventSiteId     == inventDimLocal.InventSiteId
+                         && StockMovementTable.InventLocationId == inventDimLocal.InventLocationId
+                         && StockMovementTable.InventBatchId    == inventDimLocal.InventBatchId
+                         && StockMovementTable.InventColorId    == inventDimLocal.InventColorId;
+
+                    if(config)
+                            StockMovementTable.configId                  =  inventDim.configId;
+                    if(location)
+                            StockMovementTable.WMSLocationId             =  inventDim.wMSLocationId;
+                    if(style)
+                            StockMovementTable.InventStyleId             =  inventDim.InventStyleId;
+                    if(size)
+                            StockMovementTable.InventSizeId              =  inventDim.InventSizeId;
+                    if(site)
+                            StockMovementTable.InventSiteId              =  inventDim.InventSiteId;
+                    if(warehouse)
+                            StockMovementTable.InventLocationId          =  inventDim.InventLocationId;
+                    if(batchnumber)
+                            StockMovementTable.InventBatchId              = inventDim.inventBatchId;
+                    if(color)
+                            StockMovementTable.InventColorId             =  inventDim.InventColorId;
+            
+                        
+                    StockMovementTable.CompanyLogo               =  FormLetter::companyLogo();
+                    StockMovementTable.CompanyName               =  companyInfo.Name;
+                    StockMovementTable.ItemId                    =  inventTableloc.ItemId;
+                    StockMovementTable.itemName                  =  InventTable::find(inventtrans1.ItemId).itemName();
+                    StockMovementTable.UnitId                    =  InventTable::find(inventtrans1.ItemId).inventUnitId();
+           
+                        
+
+            
+                    //received qty and amount
+
+
+                    while  select *  from grnInventTrans
+                            where (grnInventTrans.DatePhysical >= _from
+                            && grnInventTrans.DatePhysical <= _To) 
+                           && !(grnInventTrans.DateFinancial >= _from
+                           && grnInventTrans.DateFinancial <= _To)
+                            && grnInventTrans.ItemId == inventtrans1.ItemId
+                        &&( grnInventTrans.StatusReceipt == StatusReceipt::Received ||  grnInventTrans.StatusReceipt == StatusReceipt::Purchased)
+                            join inventDimLoc
+                            where  grnInventTrans.inventDimId == inventDimLoc.inventDimId
+                            && ( (inventDimLoc.configId == StockMovementTable.configId || config == NoYes::No) &&
+                            (inventDimLoc.InventSizeId == StockMovementTable.InventSizeId || Size == NoYes::No) &&
+                            (inventDimLoc.InventColorId == StockMovementTable.InventColorId || color == NoYes::No) &&
+                            (inventDimLoc.InventStyleId == StockMovementTable.InventStyleId || style == NoYes::No) &&
+                            (inventDimLoc.InventSiteId == StockMovementTable.InventSiteId || site == NoYes::No) &&
+                            (inventDimLoc.InventLocationId == StockMovementTable.InventLocationId || warehouse == NoYes::No) &&
+                            (inventDimLoc.wMSLocationId == StockMovementTable.WMSLocationId || location == NoYes::No) &&
+                            (inventDimLoc.inventBatchId == StockMovementTable.InventBatchId || batchnumber == NoYes::No))
+                    {
+
+                        inventTransOrigin = grnInventTrans.inventTransOrigin();
+                        if( grnInventTrans.StatusReceipt == StatusReceipt::Received && inventTransOrigin.ReferenceCategory == InventTransType::Purch)      //Purchase GRN start
+                        {
+                                   
+                            StockMovementTable.PurchaseGRNQty    += grnInventTrans.Qty;
+                            StockMovementTable.PurchaseGRNValue  += grnInventTrans.CostAmountPhysical;
+
+                        }
+
+                        if( grnInventTrans.StatusReceipt == StatusReceipt::Purchased && inventTransOrigin.ReferenceCategory == InventTransType::Purch && grnInventTrans.DateFinancial > _To )      //Purchase GRN start
+                        {
+                                   
+                            StockMovementTable.PurchaseGRNQty    += grnInventTrans.Qty;
+                            StockMovementTable.PurchaseGRNValue  += grnInventTrans.CostAmountPhysical;
+
+                        }
+
+
+                        if(  grnInventTrans.StatusReceipt == StatusReceipt::Received && (inventTransOrigin.ReferenceCategory == InventTransType::ProdLine ||inventTransOrigin.ReferenceCategory == InventTransType::PmfProdCoBy || inventTransOrigin.ReferenceCategory == InventTransType::Production))     //Production Received
+                        {
+                        
+                            StockMovementTable.ProductionReceivedQty     += grnInventTrans.Qty;
+                            StockMovementTable.ProductionReceivedValue   += grnInventTrans.CostAmountPhysical;
+                        }
+
+                        if( grnInventTrans.StatusReceipt == StatusReceipt::Purchased && inventTransOrigin.ReferenceCategory == InventTransType::Sales)     // 20/06/2022 new field added 
+                        {
+                            StockMovementTable.SalereturndeductedQty        += grnInventTrans.Qty;
+                            StockMovementTable.SalesreturndeductedValue     += grnInventTrans.CostAmountPhysical;
+                        }
+                        if( grnInventTrans.StatusReceipt == StatusReceipt::Received && inventTransOrigin.ReferenceCategory == InventTransType::Sales)     // 20/06/2022 new field added
+                        {
+                            StockMovementTable.SalereturndeductedQty        += grnInventTrans.Qty;
+                            StockMovementTable.SalesreturndeductedValue     += grnInventTrans.CostAmountPhysical;
+                        }
+                        //if( grnInventTrans.StatusReceipt == StatusReceipt::Purchased && inventTransOrigin.ReferenceCategory == InventTransType::Purch)      //Purchase GRN start
+                        //{
+
+                        //    StockMovementTable.PurchaseInvoiceQty    += grnInventTrans.Qty;
+                        //    StockMovementTable.Purchaseinvoicevalue  += grnInventTrans.CostAmountPhysical;
+
+                        //}
+
+                      
+                        if( grnInventTrans.StatusReceipt == StatusReceipt::Purchased && (inventTransOrigin.ReferenceCategory == InventTransType::ProdLine ||inventTransOrigin.ReferenceCategory == InventTransType::PmfProdCoBy || inventTransOrigin.ReferenceCategory == InventTransType::Production))     //Production Received
+                        {
+                        
+                            StockMovementTable.ProductionReceivedQty    += grnInventTrans.Qty;
+                            StockMovementTable.ProductionReceivedValue  += grnInventTrans.CostAmountPhysical;
+                        }
+ 
+
+                       
+                    }
+
+
+                //Purchased Qty and Value
+
+                    while select *  from invoicegrnInventTrans
+                            where (invoicegrnInventTrans.DateFinancial >= _from
+                            && invoicegrnInventTrans.DateFinancial <= _To ) 
+                            //&& invoicegrnInventTrans.DateFinancial != invoicegrnInventTrans.DatePhysical
+                            && invoicegrnInventTrans.ItemId == inventtrans1.ItemId
+                            && (invoicegrnInventTrans.StatusReceipt == StatusReceipt::Purchased || invoicegrnInventTrans.StatusReceipt == StatusReceipt::Received)
+                           //exists join inventTransOrigin
+                           // where invoicegrnInventTrans.InventTransOrigin == inventTransOrigin.RecId
+                           // && (( inventTransOrigin.ReferenceCategory == InventTransType::Purch)
+                           // || (inventTransOrigin.ReferenceCategory == InventTransType::ProdLine ||inventTransOrigin.ReferenceCategory == InventTransType::PmfProdCoBy || inventTransOrigin.ReferenceCategory == InventTransType::Production))
+                            join inventDimLoc
+                            where invoicegrnInventTrans.inventDimId == inventDimLoc.inventDimId
+                            && ( (inventDimLoc.configId == StockMovementTable.configId || config == NoYes::No) &&
+                            (inventDimLoc.InventSizeId == StockMovementTable.InventSizeId || Size == NoYes::No) &&
+                            (inventDimLoc.InventColorId == StockMovementTable.InventColorId || color == NoYes::No) &&
+                            (inventDimLoc.InventStyleId == StockMovementTable.InventStyleId || style == NoYes::No) &&
+                            (inventDimLoc.InventSiteId == StockMovementTable.InventSiteId || site == NoYes::No) &&
+                            (inventDimLoc.InventLocationId == StockMovementTable.InventLocationId || warehouse == NoYes::No) &&
+                            (inventDimLoc.wMSLocationId == StockMovementTable.WMSLocationId || location == NoYes::No) &&
+                            (inventDimLoc.inventBatchId == StockMovementTable.InventBatchId || batchnumber == NoYes::No))
+
+                    {
+                        inventTransOrigin = invoicegrnInventTrans.inventTransOrigin();
+                    
+                        if (inventTransOrigin.ReferenceCategory == InventTransType::Purch &&  invoicegrnInventTrans.StatusReceipt == StatusReceipt::Purchased )                        // Purchase Invoice start
+                        {
+                            StockMovementTable.PurchaseInvoiceQty  += invoicegrnInventTrans.Qty;
+                            StockMovementTable.Purchaseinvoicevalue += invoicegrnInventTrans.CostAmountPosted;       //  invoicegrnInventTrans.costValue();
+                        }
+
+                      
+
+                        if(inventTransOrigin.ReferenceCategory == InventTransType::TransferOrderReceive)                // Stock In Start
+                        {
+                            StockMovementTable.StockInQty  += invoicegrnInventTrans.Qty;
+                            StockMovementTable.StockInValue += invoicegrnInventTrans.CostAmountPosted;               //invoicegrnInventTrans.costValue(); 
+                        }
+
+                        if (inventTransOrigin.ReferenceCategory == InventTransType::TransferOrderShip)             //In-Transit Purchased Stock start
+                        {
+
+                            StockMovementTable.InTransitStockInQty  += invoicegrnInventTrans.Qty;
+                            StockMovementTable.InTransitStockInValue += invoicegrnInventTrans.CostAmountPosted;       //invoicegrnInventTrans.costValue(); 
+                        }
+
+
+                        if(inventTransOrigin.ReferenceCategory == InventTransType::ProdLine ||inventTransOrigin.ReferenceCategory == InventTransType::PmfProdCoBy ||inventTransOrigin.ReferenceCategory == InventTransType::Production)    //Production Purchased
+                        {
+                            StockMovementTable.ProductionPurchasedQty  += invoicegrnInventTrans.Qty;
+                            StockMovementTable.ProductionPurchasedValue += invoicegrnInventTrans.CostAmountPosted;      // invoicegrnInventTrans.costValue(); 
+                        }
+
+                        if(inventTransOrigin.ReferenceCategory == InventTransType::Sales)                                // SalesReturn
+
+                        {
+                            StockMovementTable.SalesReturnQty  += invoicegrnInventTrans.Qty;
+                            StockMovementTable.SalesReturnValue += invoicegrnInventTrans.CostAmountPosted;                //invoicegrnInventTrans.costValue(); 
+                        }
+           
+                        if(inventTransOrigin.ReferenceCategory == InventTransType::InventLossProfit)                      // Inventory Adjustment Gain
+                        {
+                        
+                            StockMovementTable.InventoryAdjustmentGainQty  += invoicegrnInventTrans.Qty;
+                            StockMovementTable.InventoryAdjustmentGainValue += invoicegrnInventTrans.CostAmountPosted;      //invoicegrnInventTrans.costValue();  
+                        }
+
+                        if(inventTransOrigin.ReferenceCategory == InventTransType::InventTransaction)                        //Movemment Journal trans In
+                        {
+                            StockMovementTable.MovementJournalsInwardQty  += invoicegrnInventTrans.Qty;
+                            StockMovementTable.MovementJournalsInwardValue += invoicegrnInventTrans.CostAmountPosted;        //invoicegrnInventTrans.costValue(); 
+                        }
+
+                                    
+                        if(inventTransOrigin.ReferenceCategory == InventTransType::InventTransfer)                           // Transfer Journal inward
+                        {
+                            StockMovementTable.TransferJournalsInwardQty  += invoicegrnInventTrans.Qty;
+                            StockMovementTable.TransferJournalsInwardValue += invoicegrnInventTrans.CostAmountPosted;        //invoicegrnInventTrans.costValue();  
+                        }
+
+                    }
+                    //adjustment purchased
+
+                    Inventsettlement    inventsettlement;
+
+
+                            while select  * from invoicegrnInventTrans
+                            where (invoicegrnInventTrans.DateFinancial >= _from
+                            && invoicegrnInventTrans.DateFinancial <= _To )
+                            && invoicegrnInventTrans.ItemId == inventtrans1.ItemId
+                            && invoicegrnInventTrans.StatusReceipt == StatusReceipt::Purchased
+                            //exists join inventTransOrigin
+                            //where invoicegrnInventTrans.InventTransOrigin == inventTransOrigin.RecId
+                            //&& (( inventTransOrigin.ReferenceCategory == InventTransType::Purch)
+                            //|| (inventTransOrigin.ReferenceCategory == InventTransType::ProdLine ||inventTransOrigin.ReferenceCategory == InventTransType::PmfProdCoBy || inventTransOrigin.ReferenceCategory == InventTransType::Production))
+                           
+                            //join inventsettlement
+                           //where   inventsettlement.TransRecId == invoicegrnInventTrans.RecId && inventsettlement.TransDate >= _from  && inventsettlement.TransDate <= _To  &&  inventsettlement.Cancelled == 0
+                           
+                           join inventDimLoc
+                            where invoicegrnInventTrans.inventDimId == inventDimLoc.inventDimId
+                            && ( (inventDimLoc.configId == StockMovementTable.configId || config == NoYes::No) &&
+                            (inventDimLoc.InventSizeId == StockMovementTable.InventSizeId || Size == NoYes::No) &&
+                            (inventDimLoc.InventColorId == StockMovementTable.InventColorId || color == NoYes::No) &&
+                            (inventDimLoc.InventStyleId == StockMovementTable.InventStyleId || style == NoYes::No) &&
+                            (inventDimLoc.InventSiteId == StockMovementTable.InventSiteId || site == NoYes::No) &&
+                            (inventDimLoc.InventLocationId == StockMovementTable.InventLocationId || warehouse == NoYes::No) &&
+                            (inventDimLoc.wMSLocationId == StockMovementTable.WMSLocationId || location == NoYes::No) &&
+                            (inventDimLoc.inventBatchId == StockMovementTable.InventBatchId || batchnumber == NoYes::No)) 
+                        {
+                           select * from inventsettlement
+                           where   inventsettlement.TransRecId == invoicegrnInventTrans.RecId && inventsettlement.TransDate >= _from  && inventsettlement.TransDate <= _To  &&  inventsettlement.Cancelled == 0;
+                           inventTransOrigin = invoicegrnInventTrans.inventTransOrigin();
+
+
+                        if (inventTransOrigin.ReferenceCategory == InventTransType::Purch  )                    // Purchase Invoice start
+                        {
+                            //StockMovementTable.Purchaseinvoicevalue += invoicegrnInventTrans.CostAmountAdjustment;
+                            StockMovementTable.Purchaseinvoicevalue += inventsettlement.CostAmountAdjustment;
+                        }
+
+                        if(inventTransOrigin.ReferenceCategory == InventTransType::TransferOrderReceive)         // Stock In Start
+                        {
+                            //StockMovementTable.StockInValue += invoicegrnInventTrans.CostAmountAdjustment;
+                            StockMovementTable.StockInValue += inventsettlement.CostAmountAdjustment;
+                        }
+
+                        if (inventTransOrigin.ReferenceCategory == InventTransType::TransferOrderShip)             //In-Transit Purchased Stock start
+                        {
+                           //StockMovementTable.InTransitStockInValue += invoicegrnInventTrans.CostAmountAdjustment;
+                           StockMovementTable.InTransitStockInValue += inventsettlement.CostAmountAdjustment;
+                        }
+                        
+
+                        if(inventTransOrigin.ReferenceCategory == InventTransType::ProdLine ||inventTransOrigin.ReferenceCategory == InventTransType::PmfProdCoBy ||inventTransOrigin.ReferenceCategory == InventTransType::Production)    //Production Purchased
+                        {
+                            //StockMovementTable.ProductionPurchasedValue += invoicegrnInventTrans.CostAmountAdjustment;
+                            StockMovementTable.ProductionPurchasedValue += inventsettlement.CostAmountAdjustment;
+                        }
+
+                        if(inventTransOrigin.ReferenceCategory == InventTransType::Sales)                                // SalesReturn
+
+                        {
+                            //StockMovementTable.SalesReturnValue += invoicegrnInventTrans.CostAmountAdjustment;
+                            StockMovementTable.SalesReturnValue += inventsettlement.CostAmountAdjustment;
+                        }
+
+                        if(inventTransOrigin.ReferenceCategory == InventTransType::InventLossProfit)                      // Inventory Adjustment Gain
+                        {
+
+                            //StockMovementTable.InventoryAdjustmentGainValue += invoicegrnInventTrans.CostAmountAdjustment;
+                            StockMovementTable.InventoryAdjustmentGainValue += inventsettlement.CostAmountAdjustment;
+                        }
+
+                        if(inventTransOrigin.ReferenceCategory == InventTransType::InventTransaction)                        //Movemment Journal trans In
+                        {
+                            //StockMovementTable.MovementJournalsInwardValue += invoicegrnInventTrans.CostAmountAdjustment;
+                            StockMovementTable.MovementJournalsInwardValue += inventsettlement.CostAmountAdjustment;
+                        }
+
+
+                        if(inventTransOrigin.ReferenceCategory == InventTransType::InventTransfer)                           // Transfer Journal inward
+                        {
+                            //StockMovementTable.TransferJournalsInwardValue += invoicegrnInventTrans.CostAmountAdjustment;
+                            StockMovementTable.TransferJournalsInwardValue += inventsettlement.CostAmountAdjustment;
+                        }
+
+
+                        }
+
+
+
+                    //adj purch
+
+                    //Sold Qty and amount
+
+                    while select *   from returnInventTrans
+                            where(( returnInventTrans.DateFinancial >= _from
+                            && returnInventTrans.DateFinancial <= _To ) 
+                            /*|| (returnInventTrans.DatePhysical >= _from
+                            && returnInventTrans.DatePhysical <= _To )*/
+                        )
+                            //&& returnInventTrans.DateFinancial != returnInventTrans.DatePhysical
+                            && returnInventTrans.ItemId == inventtrans1.ItemId
+                           && (returnInventTrans.StatusIssue == StatusIssue::Sold )
+                            //exists join inventTransOrigin
+                            //where returnInventTrans.InventTransOrigin == inventTransOrigin.RecId
+                            //&& (( inventTransOrigin.ReferenceCategory == InventTransType::Purch)
+                            //|| (inventTransOrigin.ReferenceCategory == InventTransType::ProdLine ||inventTransOrigin.ReferenceCategory == InventTransType::PmfProdCoBy || inventTransOrigin.ReferenceCategory == InventTransType::Production))
+                             exists join inventDimLoc
+                            where returnInventTrans.inventDimId == inventDimLoc.inventDimId
+                            && ( (inventDimLoc.configId == StockMovementTable.configId || config == NoYes::No) &&
+                            (inventDimLoc.InventSizeId == StockMovementTable.InventSizeId || Size == NoYes::No) &&
+                            (inventDimLoc.InventColorId == StockMovementTable.InventColorId || color == NoYes::No) &&
+                            (inventDimLoc.InventStyleId == StockMovementTable.InventStyleId || style == NoYes::No) &&
+                            (inventDimLoc.InventSiteId == StockMovementTable.InventSiteId || site == NoYes::No) &&
+                            (inventDimLoc.InventLocationId == StockMovementTable.InventLocationId || warehouse == NoYes::No) &&
+                            (inventDimLoc.wMSLocationId == StockMovementTable.WMSLocationId || location == NoYes::No) &&
+                            (inventDimLoc.inventBatchId == StockMovementTable.InventBatchId || batchnumber == NoYes::No))
+                    {
+                        inventTransOrigin = returnInventTrans.inventTransOrigin();
+
+                        if (inventTransOrigin.ReferenceCategory == InventTransType::Purch)                              // Purchase Return Start
+                        {
+                            StockMovementTable.PurchasereturnQty  += returnInventTrans.Qty;
+                            StockMovementTable.PurchasereturnValue += returnInventTrans.CostAmountPosted; //returnInventTrans.costValue(); 
+                        }
+                       
+
+                        if (inventTransOrigin.ReferenceCategory == InventTransType::TransferOrderReceive)                // In-Transit Sold Stock start
+                        {
+                            StockMovementTable.InTransitStockOutQty  += returnInventTrans.Qty;
+                            StockMovementTable.InTransitStockOutValue += returnInventTrans.CostAmountPosted; //returnInventTrans.costValue(); ;
+                        }
+                        
+                        if( inventTransOrigin.ReferenceCategory == InventTransType::TransferOrderShip)                   // Stock Out Start
+                        {
+                            StockMovementTable.StockOutQty  += returnInventTrans.Qty;
+                            StockMovementTable.StockOutValue += returnInventTrans.CostAmountPosted;          // returnInventTrans.costValue(); 
+                        }
+                        
+                        if(inventTransOrigin.ReferenceCategory == InventTransType::ProdLine ||inventTransOrigin.ReferenceCategory == InventTransType::PmfProdCoBy ||inventTransOrigin.ReferenceCategory == InventTransType::Production)           // Consumption Sold
+                        {
+                                StockMovementTable.ConsumptionSoldQty  += returnInventTrans.Qty;
+                                StockMovementTable.ConsumptionSoldValue += returnInventTrans.CostAmountPosted;         /// returnInventTrans.costValue(); 
+                            
+                        }
+
+                        if (inventTransOrigin.ReferenceCategory == InventTransType::Sales)                                // Sales
+                        {
+                            StockMovementTable.SalesQty  += returnInventTrans.Qty;
+                            StockMovementTable.SalesValue += returnInventTrans.CostAmountPosted;                  // returnInventTrans.costValue(); 
+                        }
+
+
+
+                        if(inventTransOrigin.ReferenceCategory == InventTransType::InventLossProfit)                      // InventoryChargeCDSEntity Adjustment Loss
+                        {
+                            StockMovementTable.InventoryAdjustmentLossQty  += returnInventTrans.Qty;
+                            StockMovementTable.InventoryAdjustmentLossValue += returnInventTrans.CostAmountPosted; //  returnInventTrans.costValue(); 
+                        }
+
+                    
+                        if (inventTransOrigin.ReferenceCategory == InventTransType::InventTransaction)                   //Movement Journal transOut
+                        {
+                            StockMovementTable.MovementJournalsOutwardQty  += returnInventTrans.Qty;
+                            StockMovementTable.MovementJournalsOutwardValue += returnInventTrans.CostAmountPosted; // returnInventTrans.costValue(); 
+                        }
+                   
+
+                        if (inventTransOrigin.ReferenceCategory == InventTransType::InventTransfer)                     //Transfer Journal Outward
+                        {
+                            StockMovementTable.TransferJournalsOutwardQty  += returnInventTrans.Qty;
+                            StockMovementTable.TransferJournalsOutwardValue += returnInventTrans.CostAmountPosted;  // returnInventTrans.costValue(); 
+                        }
+
+                        
+
+                    }
+
+                    // Calculate sold with adjustment amount
+
+                            while select * from returnInventTrans
+                            where((returnInventTrans.DateFinancial >= _from
+                            && returnInventTrans.DateFinancial <= _To ) 
+                            /*|| (returnInventTrans.DatePhysical >= _from
+                            && returnInventTrans.DatePhysical <= _To )*/
+                                )
+                            && returnInventTrans.ItemId == inventtrans1.ItemId
+                            && returnInventTrans.StatusIssue == StatusIssue::Sold
+                            //exists join inventTransOrigin
+                            //where returnInventTrans.InventTransOrigin == inventTransOrigin.RecId
+                            //&& (( inventTransOrigin.ReferenceCategory == InventTransType::Purch)
+                            //|| (inventTransOrigin.ReferenceCategory == InventTransType::ProdLine ||inventTransOrigin.ReferenceCategory == InventTransType::PmfProdCoBy || inventTransOrigin.ReferenceCategory == InventTransType::Production))
+                           
+                            //join inventsettlement
+                           // where   inventsettlement.TransRecId == returnInventTrans.RecId && inventsettlement.TransDate >= _from && inventsettlement.TransDate <= _To  &&   inventsettlement.Cancelled == 0
+
+                            join inventDimLoc
+                            where returnInventTrans.inventDimId == inventDimLoc.inventDimId
+                            && ( (inventDimLoc.configId == StockMovementTable.configId || config == NoYes::No) &&
+                            (inventDimLoc.InventSizeId == StockMovementTable.InventSizeId || Size == NoYes::No) &&
+                            (inventDimLoc.InventColorId == StockMovementTable.InventColorId || color == NoYes::No) &&
+                            (inventDimLoc.InventStyleId == StockMovementTable.InventStyleId || style == NoYes::No) &&
+                            (inventDimLoc.InventSiteId == StockMovementTable.InventSiteId || site == NoYes::No) &&
+                            (inventDimLoc.InventLocationId == StockMovementTable.InventLocationId || warehouse == NoYes::No) &&
+                            (inventDimLoc.wMSLocationId == StockMovementTable.WMSLocationId || location == NoYes::No) &&
+                            (inventDimLoc.inventBatchId == StockMovementTable.InventBatchId || batchnumber == NoYes::No)) 
+                        {
+                            select inventsettlement
+                            where   inventsettlement.TransRecId == returnInventTrans.RecId && inventsettlement.TransDate >= _from && inventsettlement.TransDate <= _To  &&   inventsettlement.Cancelled == 0;
+
+                            inventTransOrigin = returnInventTrans.inventTransOrigin();
+
+                        if (inventTransOrigin.ReferenceCategory == InventTransType::Purch)                              // Purchase Return Start
+                        {
+                            //StockMovementTable.PurchasereturnQty  = returnInventTrans.Qty;
+                            //StockMovementTable.PurchasereturnValue += returnInventTrans.CostAmountAdjustment;
+                            StockMovementTable.PurchasereturnValue += inventsettlement.CostAmountAdjustment;
+                        }
+
+                        if (inventTransOrigin.ReferenceCategory == InventTransType::TransferOrderReceive)                // In-Transit Sold Stock start
+                        {
+                            //StockMovementTable.InTransitStockOutQty  = returnInventTrans.Qty;
+                            //StockMovementTable.InTransitStockOutValue += returnInventTrans.CostAmountAdjustment;
+                            StockMovementTable.InTransitStockOutValue += inventsettlement.CostAmountAdjustment;
+                        }
+
+                        if( inventTransOrigin.ReferenceCategory == InventTransType::TransferOrderShip)                   // Stock Out Start
+                        {
+                            // StockMovementTable.StockOutQty  = returnInventTrans.Qty;
+                            //StockMovementTable.StockOutValue += returnInventTrans.CostAmountAdjustment;
+                            StockMovementTable.StockOutValue += inventsettlement.CostAmountAdjustment;
+                        }
+
+                        if(inventTransOrigin.ReferenceCategory == InventTransType::ProdLine ||
+                                                inventTransOrigin.ReferenceCategory == InventTransType::PmfProdCoBy ||
+                                                                    inventTransOrigin.ReferenceCategory == InventTransType::Production)           // Consumption Sold
+                        {
+                            //StockMovementTable.ConsumptionSoldQty  = returnInventTrans.Qty;
+                            //StockMovementTable.ConsumptionSoldValue += returnInventTrans.CostAmountAdjustment;
+                            StockMovementTable.ConsumptionSoldValue += inventsettlement.CostAmountAdjustment;
+                        }
+
+                        if (inventTransOrigin.ReferenceCategory == InventTransType::Sales)                                // Sales
+                        {
+                            // StockMovementTable.SalesQty  = returnInventTrans.Qty;
+                            //StockMovementTable.SalesValue += returnInventTrans.CostAmountAdjustment;
+                            StockMovementTable.SalesValue += inventsettlement.CostAmountAdjustment;
+                        }
+
+
+
+                        if(inventTransOrigin.ReferenceCategory == InventTransType::InventLossProfit)                      // InventoryChargeCDSEntity Adjustment Loss
+                        {
+                            //StockMovementTable.InventoryAdjustmentLossQty  = returnInventTrans.Qty;
+                            //StockMovementTable.InventoryAdjustmentLossValue += returnInventTrans.CostAmountAdjustment;
+                            StockMovementTable.InventoryAdjustmentLossValue += inventsettlement.CostAmountAdjustment;
+                        }
+
+
+                        if (inventTransOrigin.ReferenceCategory == InventTransType::InventTransaction)                   //Movement Journal transOut
+                        {
+                            //StockMovementTable.MovementJournalsOutwardQty  = returnInventTrans.Qty;
+                            //StockMovementTable.MovementJournalsOutwardValue += returnInventTrans.CostAmountAdjustment;
+                            StockMovementTable.MovementJournalsOutwardValue += inventsettlement.CostAmountAdjustment;
+                        }
+
+
+                        if (inventTransOrigin.ReferenceCategory == InventTransType::InventTransfer)                     //Transfer Journal Outward
+                        {
+                            //StockMovementTable.TransferJournalsOutwardQty  = returnInventTrans.Qty;
+                            //StockMovementTable.TransferJournalsOutwardValue += returnInventTrans.CostAmountAdjustment;
+                            StockMovementTable.TransferJournalsOutwardValue += inventsettlement.CostAmountAdjustment;
+                        }
+
+                     }
+
+                //Deduction Qty and amount
+                    
+            
+                           while select *   from consDeductedInventTrans
+                            where consDeductedInventTrans.DatePhysical >= _from
+                            && consDeductedInventTrans.DatePhysical <= _To
+                            && !(consDeductedInventTrans.DateFinancial >= _from
+                            && consDeductedInventTrans.DateFinancial <= _To)
+                            && consDeductedInventTrans.ItemId == inventtrans1.ItemId
+                            && (consDeductedInventTrans.StatusIssue == StatusIssue::Deducted || consDeductedInventTrans.StatusIssue == StatusIssue::sold)
+                            //exists join inventTransOrigin
+                            //where  consDeductedInventTrans.InventTransOrigin  == inventTransOrigin.RecId 
+                            //&& ((inventTransOrigin.ReferenceCategory == InventTransType::ProdLine ||inventTransOrigin.ReferenceCategory == InventTransType::PmfProdCoBy ||  inventTransOrigin.ReferenceCategory == InventTransType::Production)
+                            //|| inventTransOrigin.ReferenceCategory == InventTransType::Sales )
+                            exists join inventDimLoc
+                            where consDeductedInventTrans.inventDimId == inventDimLoc.inventDimId
+                            && ( (inventDimLoc.configId == StockMovementTable.configId || config == NoYes::No) &&
+                            (inventDimLoc.InventSizeId == StockMovementTable.InventSizeId || Size == NoYes::No) &&
+                            (inventDimLoc.InventColorId == StockMovementTable.InventColorId || color == NoYes::No) &&
+                            (inventDimLoc.InventStyleId == StockMovementTable.InventStyleId || style == NoYes::No) &&
+                            (inventDimLoc.InventSiteId == StockMovementTable.InventSiteId || site == NoYes::No) &&
+                            (inventDimLoc.InventLocationId == StockMovementTable.InventLocationId || warehouse == NoYes::No) &&
+                            (inventDimLoc.wMSLocationId == StockMovementTable.WMSLocationId || location == NoYes::No) &&
+                            (inventDimLoc.inventBatchId == StockMovementTable.InventBatchId || batchnumber == NoYes::No))
+
+                    { 
+                        inventTransOrigin = consDeductedInventTrans.inventTransOrigin();
+
+                       
+                        
+                        if(consDeductedInventTrans.StatusIssue == StatusIssue::Deducted && inventTransOrigin.ReferenceCategory == InventTransType::Purch )    // 20/06/2022 new field added
+                        {
+                            StockMovementTable.PurchasereturndeductedQty += consDeductedInventTrans.Qty;
+                            StockMovementTable.PurchasereturndeductedValue += consDeductedInventTrans.CostAmountPhysical;
+                        }
+                        if(consDeductedInventTrans.StatusIssue == StatusIssue::Sold && inventTransOrigin.ReferenceCategory == InventTransType::Purch)    // 20/06/2022 new field added
+                        {
+                            StockMovementTable.PurchasereturndeductedQty += consDeductedInventTrans.Qty;
+                            StockMovementTable.PurchasereturndeductedValue += consDeductedInventTrans.CostAmountPhysical;
+                        }
+                        if(consDeductedInventTrans.StatusIssue == StatusIssue::Deducted && (inventTransOrigin.ReferenceCategory == InventTransType::ProdLine ||inventTransOrigin.ReferenceCategory == InventTransType::PmfProdCoBy ||  inventTransOrigin.ReferenceCategory == InventTransType::Production)) // Consumption Start 
+                            {
+                                StockMovementTable.ConsumptionDeductedQty  += consDeductedInventTrans.Qty;
+                                StockMovementTable.ConsumptionDeductedValue += consDeductedInventTrans.CostAmountPhysical;
+                            }
+
+                        if(inventTransOrigin.ReferenceCategory == InventTransType::Sales && consDeductedInventTrans.StatusIssue == StatusIssue::Deducted)  //  Sales Pick
+                            {
+                                StockMovementTable.SalesPickedQty  += consDeductedInventTrans.Qty;
+                               StockMovementTable.SalesPickedValue += consDeductedInventTrans.CostAmountPhysical;
+                            }
+                        //sold for deduction
+                        if( consDeductedInventTrans.StatusIssue == StatusIssue::sold && (inventTransOrigin.ReferenceCategory == InventTransType::ProdLine ||inventTransOrigin.ReferenceCategory == InventTransType::PmfProdCoBy ||  inventTransOrigin.ReferenceCategory == InventTransType::Production)) // Consumption Start
+                        {
+                            StockMovementTable.ConsumptionDeductedQty  += consDeductedInventTrans.Qty;
+                            StockMovementTable.ConsumptionDeductedValue += consDeductedInventTrans.CostAmountPhysical;
+                        }
+
+                        if(inventTransOrigin.ReferenceCategory == InventTransType::Sales && consDeductedInventTrans.StatusIssue == StatusIssue::sold && consDeductedInventTrans.DateFinancial > _To)  //  Sales Pick
+                        {
+                            StockMovementTable.SalesPickedQty  += consDeductedInventTrans.Qty;
+                            StockMovementTable.SalesPickedValue += consDeductedInventTrans.CostAmountPhysical;
+                        }
+                        //sold deduction
+                                                
+                    }
+                   
+                    
+  
+
+                    //closing
+                    // Closing start
+                    totalpurchqty = 0;
+                    totalsoldqty =  0;
+                    totalpurchamt = 0;
+                    totalsoldamt = 0;
+                    // calculation for total qty and total amount
+                   
+                    totalpurchqty  =   StockMovementTable.OpenStockQty + StockMovementTable.PurchaseGRNQty + StockMovementTable.ProductionReceivedQty +StockMovementTable.SalereturndeductedQty+ StockMovementTable.PurchaseInvoiceQty + StockMovementTable.StockInQty + StockMovementTable.InTransitStockInQty + StockMovementTable.ProductionPurchasedQty + StockMovementTable.SalesReturnQty + StockMovementTable.InventoryAdjustmentGainQty +  StockMovementTable.MovementJournalsInwardQty + StockMovementTable.TransferJournalsInwardQty;
+                    totalsoldqty  =    StockMovementTable.PurchasereturnQty + StockMovementTable.InTransitStockOutQty + StockMovementTable.StockOutQty +StockMovementTable.PurchasereturndeductedQty+ StockMovementTable.ConsumptionSoldQty + StockMovementTable.SalesQty +  StockMovementTable.InventoryAdjustmentLossQty + StockMovementTable.MovementJournalsOutwardQty +  StockMovementTable.TransferJournalsOutwardQty + StockMovementTable.ConsumptionDeductedQty +  StockMovementTable.SalesPickedQty;
+                    totalpurchamt  =   StockMovementTable.OpenStockValue  + StockMovementTable.PurchaseGRNValue + StockMovementTable.ProductionReceivedValue + StockMovementTable.SalesreturndeductedValue+ StockMovementTable.Purchaseinvoicevalue + StockMovementTable.StockInValue + StockMovementTable.InTransitStockInValue + StockMovementTable.ProductionPurchasedValue +  StockMovementTable.SalesReturnValue + StockMovementTable.InventoryAdjustmentGainValue + StockMovementTable.MovementJournalsInwardValue + StockMovementTable.TransferJournalsInwardValue ;
+                    totalsoldamt   =   StockMovementTable.PurchasereturnValue + StockMovementTable.InTransitStockOutValue + StockMovementTable.StockOutValue + StockMovementTable.PurchasereturndeductedValue + StockMovementTable.ConsumptionSoldValue +  StockMovementTable.SalesValue + StockMovementTable.InventoryAdjustmentLossValue  + StockMovementTable.MovementJournalsOutwardValue +  StockMovementTable.TransferJournalsOutwardValue  + StockMovementTable.ConsumptionDeductedValue +   StockMovementTable.SalesPickedValue ;
+
+
+                    StockMovementTable.ClosingStockQty  = totalpurchqty + totalsoldqty; //- StockMovementTable.ConsumptionSoldQty - StockMovementTable.ProductionPurchasedQty;
+                    StockMovementTable.ClosingStockValue = totalpurchamt + totalsoldamt; //- StockMovementTable.ConsumptionSoldValue - StockMovementTable.ProductionPurchasedValue;
+
+            
+                    if(StockMovementTable.RecId != 0)
+                                        StockMovementTable.update();
+                    else
+                                        StockMovementTable.insert();
+
+                }
+
+            }
+               
+            ttscommit;
+        }
+           
+
+    }
+
+    /// <summary>
+    ///
+    /// </summary>
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

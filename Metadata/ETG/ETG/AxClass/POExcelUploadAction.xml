@@ -1,0 +1,248 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>POExcelUploadAction</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class POExcelUploadAction
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args _args)
+    {
+        Dialog dialog = new Dialog("Upload Purchase Order Excel");
+        DialogGroup dialogGroup = dialog.addGroup("File Upload");
+
+        FormBuildControl formBuildControl = dialog.formBuildDesign().control(dialogGroup.name());
+        FileUploadBuild fileUploadBuild = formBuildControl.addControlEx(classstr(FileUpload), 'FileUpload');
+
+        fileUploadBuild.style(FileUploadStyle::MinimalWithFilename);
+        fileUploadBuild.baseFileUploadStrategyClassName(classstr(FileUploadTemporaryStorageStrategy));
+
+        if (dialog.run())
+        {
+            FormControl fileUploadControl = dialog.formRun().control(fileUploadBuild.id());
+            Object fileUploadControlObj = fileUploadControl;
+            FileUploadTemporaryStorageResult fileUploadResult = fileUploadControlObj.getFileUploadResult() as FileUploadTemporaryStorageResult;
+
+            if (fileUploadResult && fileUploadResult.getUploadStatus())
+            {
+                try
+                {
+                    System.IO.Stream fileStream = fileUploadResult.openResult();
+                    OfficeOpenXml.ExcelPackage package = new OfficeOpenXml.ExcelPackage(fileStream);
+
+                    if (package.get_Workbook().get_Worksheets().get_Count() == 0)
+                    {
+                        warning("No worksheets found in the Excel file.");
+                        return;
+                    }
+
+                    OfficeOpenXml.ExcelWorksheet worksheet = package.get_Workbook().get_Worksheets().get_Item(1);
+                    int rowCount = worksheet.get_Dimension().get_End().get_Row();
+
+                    // Loop through Excel rows
+                    for (int row = 2; row <= rowCount; row++)
+                    {
+                        str VendorName        = worksheet.Cells.get_Item(row, 1).get_Value();
+                        str HSN               = any2Str(worksheet.Cells.get_Item(row, 2).get_Value()); // This is the SAC Code
+                        str businessUnit      = worksheet.Cells.get_Item(row, 3).get_Value();
+                        str vertical          = worksheet.Cells.get_Item(row, 4).get_Value();
+                        str department        = worksheet.Cells.get_Item(row, 5).get_Value();
+                        str InvoiceAmount     = any2Str(worksheet.Cells.get_Item(row, 6).get_Value());
+                        str CommodityItemName = worksheet.Cells.get_Item(row, 7).get_Value();
+                        str tdsGroup          = worksheet.Cells.get_Item(row, 8).get_Value();
+                        ItemFreeTxt TransactionText =worksheet.Cells.get_Item(row, 9).get_Value();
+
+
+                        // Define target company
+                        DataAreaId targetCompany = 'o051';
+
+                        changeCompany(targetCompany)
+                        {
+                            PurchTable purchTable;
+                            PurchLine purchLine;
+                            PurchLine_IN purchLine_IN; // Declared new variable
+                            NumberSeq numberSeq;
+                            VendTable vendTable;
+                            DirPartyTable dirPartyTable;
+                            PurchTable_W purchTable_W;
+                            // TransTaxInformationRelationView taxRelation; // Not needed for update
+                            TransTaxInformation taxInfo;
+                            ServiceAccountingCodeTable_IN sacTable;
+
+                            ttsBegin;
+
+                            // 1. Create PO Header
+                            numberSeq = NumberSeq::newGetNum(PurchParameters::numRefPurchId());
+                            purchTable.PurchId   = numberSeq.num();
+                            purchTable.initValue();
+                            purchTable.PurchName = VendorName;
+
+                            // Get vendor details using PartyName
+                            select firstOnly vendTable
+                              join dirPartyTable
+                                 where vendTable.Party == dirPartyTable.RecId
+                               && dirPartyTable.Name == VendorName;
+
+                            if (vendTable)
+                            {
+                                purchTable.OrderAccount   = vendTable.AccountNum;
+                                purchTable.VendGroup      = vendTable.VendGroup;
+                            }
+
+                            purchTable.LanguageId     = "en-US";
+                            purchTable.InvoiceAccount = purchTable.OrderAccount;
+                            purchTable.CurrencyCode   = "INR";
+
+                            // Add Financial Dimensions
+                            DimensionAttributeValueSetStorage dimStorage = new DimensionAttributeValueSetStorage();
+                            DimensionAttribute dimAttrBusinessUnit = DimensionAttribute::findByName("BusinessUnit");
+                            DimensionAttribute dimAttrVertical     = DimensionAttribute::findByName("Vertical");
+                            DimensionAttribute dimAttrDepartment   = DimensionAttribute::findByName("Department");
+
+                            DimensionAttributeValue dimValueBusinessUnit = DimensionAttributeValue::findByDimensionAttributeAndValue(dimAttrBusinessUnit, businessUnit, true, true);
+                            DimensionAttributeValue dimValueVertical     = DimensionAttributeValue::findByDimensionAttributeAndValue(dimAttrVertical, vertical, true, true);
+                            DimensionAttributeValue dimValueDepartment     =DimensionAttributeValue::findByDimensionAttributeAndValue(dimAttrDepartment, department, true, true);
+
+                            if (dimValueBusinessUnit) dimStorage.addItem(dimValueBusinessUnit);
+                            if (dimValueVertical)     dimStorage.addItem(dimValueVertical);
+                            if (dimValueDepartment)   dimStorage.addItem(dimValueDepartment);
+
+                            purchTable.DefaultDimension = dimStorage.save();
+
+                            purchTable.PurchStatus = PurchStatus::Backorder;
+                            purchTable.insert();
+                            purchTable.ChangeRequestRequired = NoYes::Yes;
+                            purchTable.DocumentState=VersioningDocumentState::Draft;
+                            purchTable.update();
+
+                            // Update TDS Group
+                            select forUpdate purchTable_W
+                                     where purchTable_W.PurchTable == purchTable.RecId;
+
+                            if (purchTable_W)
+                            {
+                                purchTable_W.TDSGroup_IN = tdsGroup;
+                                purchTable_W.update();
+                            }
+                            else
+                            {
+                                purchTable_W.clear();
+                                purchTable_W.initValue();
+                                purchTable_W.PurchTable = purchTable.RecId;
+                                purchTable_W.TDSGroup_IN = tdsGroup;
+                                purchTable_W.insert();
+                            }
+                            
+                            // 2. Create PO Line
+                            purchLine.clear();
+                            purchLine.PurchId    = purchTable.PurchId;
+                            purchLine.ItemId     = CommodityItemName;
+                            purchLine.DefaultDimension = purchTable.DefaultDimension;
+
+                            InventDim inventDim;
+                            inventDim.InventSiteId     = "BLR";
+                            inventDim.InventLocationId = "BLR";
+                            purchLine.InventDimId      = InventDim::findOrCreate(inventDim).inventDimId;
+
+                            purchLine.createLine(true, true, true, true, true);
+                            purchLine.selectForUpdate(true);
+
+                            purchLine.PurchQty   = 1;
+                            purchLine.PurchPrice = str2Num(InvoiceAmount);
+                            purchLine.LineAmount = purchLine.PurchQty * purchLine.PurchPrice;
+                            purchLine.Name       = TransactionText;
+
+                            purchLine.update();
+
+                            // ===========================================================
+                            // NEW REQUIREMENT: Update Assessable Value on PurchLine_IN
+                            // ===========================================================
+                            
+                            select firstonly forupdate purchLine_IN
+                                where purchLine_IN.PurchLine == purchLine.RecId;
+                            
+                            if (purchLine_IN)
+                            {
+                                // Updating the tax document field with the line amount
+                                purchLine_IN.AssessableValueTransactionCurrency = purchLine.LineAmount;
+                                purchLine_IN.update();
+                            }
+
+                            // ===========================================================
+                            // NEW LOGIC: Update Tax Information and SAC (HSN) Code
+                            // ===========================================================
+
+                            // A. Find SAC Master Record based on HSN from Excel
+                            sacTable.clear();
+
+                            if(HSN != "")
+                            {
+                            
+                                select firstonly RecId from sacTable where sacTable.SAC == HSN;
+                            
+                                if (sacTable.RecId)
+                                {
+                                    // B. Get or Create the TransTaxInformation record linked to the PurchLine
+                                    taxInfo = TransTaxInformationHelper::findOrCreateTransTaxInformation(
+                                        tableNum(PurchLine),
+                                        purchLine.RecId,
+                                        true);
+                                    
+
+                                    taxInfo.selectForUpdate(true);
+
+                                    // C. Assign Tax Information Fields (Using Hardcoded IDs provided)
+                                    // Warning: Hardcoded RecIds are environment specific.
+                                    taxInfo.CompanyLocation      = 5637283514;
+                                    taxInfo.TaxInformation = 5637146078;
+                                    taxInfo.GSTIN                = 5637144576;
+                                    taxInfo.TaxWithholdTAN       = 5637144576;
+
+                                    // D. Assign SAC Code (After Tax Info, as requested)
+                                    taxInfo.ServiceAccountingCodeTable = sacTable.RecId;
+
+                                    // E. Save Changes
+                                    taxInfo.update();
+                                }
+                                else
+                                {
+                                    warning(strFmt("SAC/HSN Code '%1' not found in system for PO %2. Tax info not updated.", HSN, purchTable.PurchId));
+                                }
+                            
+                            }
+                            // ===========================================================
+                            // END NEW LOGIC
+                            // ===========================================================
+
+                            ttsCommit;
+
+                            info(strFmt("Purchase order '%1' has been created ", purchTable.PurchId));
+                        }
+                    }
+                }
+                catch (Exception::CLRError)
+                {
+                    System.Exception ex = CLRInterop::getLastException();
+                    if (ex)
+                    {
+                        error(ex.ToString());
+                    }
+                }
+            }
+            else
+            {
+                warning("File upload failed or was cancelled.");
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

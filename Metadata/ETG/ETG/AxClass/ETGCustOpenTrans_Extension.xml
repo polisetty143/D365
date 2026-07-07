@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCustOpenTrans_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formStr(CustOpenTrans))]
+internal final class ETGCustOpenTrans_Extension
+{
+}//NE, DLT, //04/04/2025 Transaction wise currency total requirement in settlement While performing with single currency
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>updateDesignDynamic</Name>
+				<Source><![CDATA[
+    //NC DLT, //04/04/2025 Transaction wise currency total requirement in settlement While performing with single currency
+    public void updateDesignDynamic()
+    {
+        next updateDesignDynamic();
+        if (ETGACFParameters::find().EnableUATSmallPoints)
+        {
+
+            //CurrencyCode transactionCurrency = manager.getCustVendTransOpenCurrency(custTransOpen);
+            //str transactionCurrencyText = strFmt("@CashManagement:TransactionCurrency", transactionCurrency);
+            //BalanceCurTransLabel.text(transactionCurrencyText);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>displayTotalTransPaymentMst</Name>
+				<Source><![CDATA[
+    public display AmountMST displayTotalTransPaymentMst()
+    {
+        return 0;//manager.convertAmountPaymCurToAmountTransCur(custTransOpen, manager.getJournalTransAmountMst());
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>displayTotalTransBalaceMst</Name>
+				<Source><![CDATA[
+    public display AmountMST displayTotalTransBalaceMst()
+    {
+        return 0;//manager.convertAmountPaymCurToAmountTransCur(custTransOpen, manager.getMarkedTotalMst());
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>displayTotalTranshDicsMst</Name>
+				<Source><![CDATA[
+    public display AmountMST displayTotalTranshDicsMst()
+    {
+        return 0;// manager.convertAmountPaymCurToAmountTransCur(custTransOpen, manager.getCashDiscTotalMst());
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>displayShowRemainAmountTransCur</Name>
+				<Source><![CDATA[
+    public display AmountMST displayShowRemainAmountTransCur()
+    {
+        FormRun formrun;
+        AmountMST ShowRemainAmountTransCur, ExchangeRate;
+        CustTransOpen                custTransOpen, custTransOpenloc;
+        ExchangeRateUnionView ExchangeRateUnionView;
+        Ledger ledger;
+        formrun = this as FormRun;
+
+        if (ETGACFParameters::find().EnableUATSmallPoints == NoYes::No)
+        {
+            return 0;
+        }
+
+        FormDataSource CustTransOpen_ds = formrun.dataSource(formDataSourceStr(CustOpenTrans,CustTransOpen));
+    
+        MultiSelectionHelper        selectionHelper = MultiSelectionHelper::construct();
+    
+        selectionHelper.parmDataSource(CustTransOpen_ds);
+        custTransOpen = selectionHelper.getFirst();
+
+        //LedgerJournalTrans originator = this.args().record();
+    
+        ShowRemainAmountTransCur = 0;
+        while select * from custTransOpenloc where custTransOpenloc.AccountNum==custTransOpen.AccountNum
+        {
+            if (manager.getTransMarked(custTransOpenloc))
+            {
+               
+                ShowRemainAmountTransCur += custTransOpenloc.AmountCur;
+           
+            }
+        }
+
+        FormRealControl         showTransactionAmountCur =   formRun.design(0).controlName(formControlStr(CustOpenTrans, showTransactionAmountCur));
+        
+        return ShowRemainAmountTransCur + showTransactionAmountCur.realValue();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>displayshowTransactionAmountCur</Name>
+				<Source><![CDATA[
+    public display AmountMST displayshowTransactionAmountCur()
+    {
+
+        FormRun formrun;
+        AmountMST showTransactionAmountCur, ExchangeRate,ExchangeRatetotal;
+        CustTransOpen                custTransOpen, custTransOpenloc;
+        ExchangeRateUnionView        ExchangeRateUnionView;
+        CustTrans                   custTransRecord;
+        LedgerJournalTrans          originator;
+        Ledger                      ledger;
+        Common                      record;
+
+        formrun = this as FormRun;
+
+        if (ETGACFParameters::find().EnableUATSmallPoints == NoYes::No)
+        {
+            return 0;
+        }
+
+        FormDataSource CustTransOpen_ds = formrun.dataSource(formDataSourceStr(CustOpenTrans,CustTransOpen));
+    
+        MultiSelectionHelper        selectionHelper = MultiSelectionHelper::construct();
+    
+        selectionHelper.parmDataSource(CustTransOpen_ds);
+        custTransOpen = selectionHelper.getFirst();
+
+        record = this.args().record();
+
+        //CustTrans custTransRecord = this.args().record();
+        //LedgerJournalTrans originator = LedgerJournalTrans::findByCustVendTrans(custTransRecord);
+
+        if (record && record.TableId == tableNum(CustTrans))
+        {
+            custTransRecord = record;
+            originator = LedgerJournalTrans::findByCustVendTrans(custTransRecord);
+        }
+        else if (record && record.TableId == tableNum(LedgerJournalTrans))
+        {
+            originator = record;
+        }
+
+
+        showTransactionAmountCur = originator.AmountCurDebit - originator.AmountCurCredit;
+    
+        ExchangeRatetotal = showTransactionAmountCur;
+        while select * from custTransOpenloc where custTransOpenloc.AccountNum==custTransOpen.AccountNum
+        {
+            //ExchangeRatetotal = 0;
+            if (manager.getTransMarked(custTransOpenloc))
+            {
+                CustTrans   custtrans =custTransOpenloc.custTrans();
+                select firstonly ledger where ledger.Name == curExt();
+
+                select firstonly ExchangeRateUnionView order by ExchangeRateUnionView.ValidFrom desc
+                where ExchangeRateUnionView.FromCurrencyCode == originator.CurrencyCode && ExchangeRateUnionView.ToCurrencyCode == custtrans.CurrencyCode
+                    && ExchangeRateUnionView.ValidFrom <= originator.TransDate &&  ExchangeRateUnionView.ValidTo >= originator.TransDate
+                    && ExchangeRateUnionView.ExchangeRateType == ledger.DefaultExchangeRateType;
+
+                ExchangeRate = (ExchangeRateUnionView.ExchangeRate) /100.00;
+
+                if (ExchangeRate > 0)
+                {
+                    ExchangeRatetotal = showTransactionAmountCur * ExchangeRate;
+                }
+
+            }
+        }
+
+
+        return ExchangeRatetotal;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

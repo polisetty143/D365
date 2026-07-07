@@ -1,0 +1,285 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>AgreementHeaderETGSPAIN_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the <c>AgreementHeader</c> table for the ETGSPAIN model.
+/// </summary>
+[ExtensionOf(tablestr(AgreementHeader))]
+final class AgreementHeaderETGSPAIN_Extension
+{    
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>validateField</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>validateField</c> method.
+    /// </summary>
+    /// <param name="_fieldIdToCheck">Field ID to check</param>
+    /// <returns>Boolean value indicating if the field is valid</returns>
+    public boolean validateField(fieldId _fieldIdToCheck)
+    {
+        boolean ret;
+
+        ret = next validateField(_fieldIdToCheck);
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            switch (_fieldIdToCheck)
+            {
+                case fieldNum(AgreementHeader, ETGSPAINPurchExecutionDueDate),
+                fieldNum(AgreementHeader, ETGSPAINPurchExecutionFromDate) :
+                    ret = AgreementHeader::ETGSPAINvalidateExecutionPeriod(this.ETGSPAINPurchExecutionFromDate,
+                                                      this.ETGSPAINPurchExecutionDueDate);
+                    break;
+            }
+        }
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSPAINvalidateExecutionPeriod</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Validates execution dates.
+    /// </summary>
+    /// <param name="_fromDate">Execution start date</param>
+    /// <param name="_toDate">Execution due date</param>
+    /// <returns>True if the period is valid; otherwise, False.</returns>
+    public static boolean ETGSPAINvalidateExecutionPeriod(ETGSPAINPurchExecutionFromDate  _fromDate,
+                                         ETGSPAINPurchExecutionDueDate _toDate)
+    {
+        boolean     ok = true;
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            if (_fromDate && _toDate)
+            {
+                if (_fromDate > _toDate)
+                {
+                    ok = checkFailed("@ETGSPAINLabels:ETGSPAINValidateExecutionPeriod");
+                }
+            }
+        }
+        return ok;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSPAINresetAgreementQuota</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Resets the quota contract values.
+    /// </summary>
+    public void ETGSPAINresetAgreementQuota()
+    {
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            this.ETGSPAINPurchHasAgreementQuotas     = NoYes::No;
+            this.ETGSPAINPurchAgreementQuotaPeriods  = 0;
+            this.ETGSPAINPurchAgreementQuotaFromDate = dateNull();
+            this.ETGSPAINPurchAgreementQuotaToDate   = dateNull();
+
+            // Actualizamos la dimensión Contrato de las líneas con el valor original.
+            InventDim                   inventDim;
+            InventSerial                inventSerial;
+            AgreementLine               agreementLine;
+            ETGSPAINPurchSalesAgreementId    agreementId = this.ETGSPAINgetAgreementId();
+
+            ttsbegin;
+
+            while select forupdate agreementLine
+            where              agreementLine.Agreement == this.RecId
+            {
+                inventSerial = InventSerial::findOrCreate(agreementId, agreementLine.ItemId);
+
+                // Actualizamos el valor de Contrato.
+                inventDim                  = agreementLine.inventDim();
+                inventDim.inventSerialId   = inventSerial.InventSerialId;
+                inventDim                  = InventDim::findOrCreate(inventDim);
+
+                agreementLine.InventDimId           = inventDim.inventDimId;
+                agreementLine.ETGSPAINLineCreatedByQuota = NoYes::No;
+                agreementLine.update();
+            }
+
+            ttscommit;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSPAINregenerateAgreementLineCode</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Regenerates the agreement line codes.
+    /// </summary>
+    public void ETGSPAINregenerateAgreementLineCode()
+    {
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            ETGSPAINPurchSalesAgreementId        agreementId = this.ETGSPAINgetAgreementId();
+            AgreementLine                   agreementLine;
+            Counter                         i;
+
+            ttsbegin;
+
+            while select forupdate agreementLine
+            order by           LineNumber
+            where              agreementLine.Agreement == this.RecId
+            {
+                i++;
+
+                agreementLine.ETGSPAINLineCode = strFmt("%1/%2", agreementId,i);
+                agreementLine.update();
+            }
+
+            ttscommit;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSPAINcopyExecutionDatesToLines</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Copies execution dates to lines.
+    /// </summary>
+    public void ETGSPAINcopyExecutionDatesToLines()
+    {
+        AgreementLine   agreementLine;
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            ttsbegin;
+
+            update_recordset agreementLine
+            setting      ETGSPAINPurchExecutionFromDate = this.ETGSPAINPurchExecutionFromDate,
+                         ETGSPAINPurchExecutionDueDate  = this.ETGSPAINPurchExecutionDueDate
+            where        agreementLine.Agreement  == this.RecId;
+
+            ttscommit;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSPAINgetAgreementId</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Returns the agreement ID.
+    /// </summary>
+    /// <returns>Agreement number</returns>
+    public ETGSPAINPurchSalesAgreementId ETGSPAINgetAgreementId()
+    {
+        
+            PurchAgreementHeader            purchAgreementHeader = PurchAgreementHeader::find(this.RecId);
+            SalesAgreementHeader            salesAgreementHeader = SalesAgreementHeader::find(this.RecId);
+            ETGSPAINPurchSalesAgreementId        agreementId;
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            if (purchAgreementHeader)
+            {
+                agreementId = purchAgreementHeader.PurchNumberSequence;
+            }
+            else if (salesAgreementHeader)
+            {
+                agreementId = salesAgreementHeader.SalesNumberSequence;
+            }
+        }
+        
+        return agreementId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>modifiedField</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>modifiedField</c> method.
+    /// </summary>
+    /// <param name="_fieldId">Modified field ID</param>
+    public void modifiedField(fieldId _fieldId)
+    {        
+        next modifiedField(_fieldId);
+        
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            switch(_fieldId)
+            {
+                case fieldNum(AgreementHeader, ETGSPAINPurchExecutionFromDate),
+                 fieldNum(AgreementHeader, ETGSPAINPurchExecutionDueDate):
+
+                // En el caso de que NO sea un contrato por Cupos, las líneas deben tener las mismas fechas que la cabecera
+                if(this.ETGSPAINPurchHasAgreementQuotas == NoYes::No)
+                    {
+                        this.ETGSPAINcopyExecutionDatesToLines();
+                    }
+
+                    break;
+
+                case fieldNum(AgreementHeader, DefaultAgreementLineEffectiveDate),
+                fieldNum(AgreementHeader, DefaultAgreementLineExpirationDate):
+
+                // Copiar fechas de vigencia a las líneas.
+                this.ETGSPAINcopyEffectiveDateToLines();
+
+                    break;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSPAINcopyEffectiveDateToLines</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Copies effective dates to lines.
+    /// </summary>
+    public void ETGSPAINcopyEffectiveDateToLines()
+    {
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            AgreementLine   agreementLine;
+
+            ttsbegin;
+
+            agreementLine.skipDataMethods(true);
+            update_recordset agreementLine
+            setting      EffectiveDate  = this.DefaultAgreementLineEffectiveDate,
+                         ExpirationDate = this.DefaultAgreementLineExpirationDate
+            where        agreementLine.Agreement  == this.RecId;
+
+            ttscommit;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSPAINPurchOperationTable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Returns the associated <c>ETGSPAINPurchOperationTable</c> record, if any.
+    /// </summary>
+    /// <param name="_forUpdate">Boolean indicating if the record is for update</param>
+    /// <returns>ETGSPAINPurchOperationTable record</returns>
+    public ETGSPAINPurchOperationTable ETGSPAINPurchOperationTable(boolean _forUpdate = false)
+    {
+        return ETGSPAINPurchOperationTable::find(this.ETGSPAINAgreementOperationId, _forUpdate);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

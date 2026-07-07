@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesAgreementHeader_FormDS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///     extension class of form <c>SalesAgreement</c> datasource <c>ETG_SalesAgreementHeader</c>
+/// </summary>
+[ExtensionOf(formDataSourceStr(SalesAgreement, ETG_SalesAgreementHeader))]
+internal final class ETGSalesAgreementHeader_FormDS_Extension
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>write</Name>
+				<Source><![CDATA[
+        /// <summary>
+    ///     update port of loading and discharge details on lines
+    /// </summary>
+    public void write()
+    {
+        boolean flowPortDetailsToLines, checkLinesUpdateReqPortLoading, checkLinesUpdateReqPortDischarge;
+        FormDataSource             salesAgreementHeaderDS; 
+        ETG_SalesAgreementHeader   salesAgreementHeader;   
+
+        if(ETGACFParameters::find().EnablePortLoadingDetailsHeaderToLine == NoYes::Yes)
+        {
+            flowPortDetailsToLines = true;
+        }
+        if(flowPortDetailsToLines)
+        {
+            salesAgreementHeaderDS  = this;
+            salesAgreementHeader    = salesAgreementHeaderDS.cursor();
+
+            if(salesAgreementHeader.orig().PortOfLoading != salesAgreementHeader.PortOfLoading && salesAgreementHeader.orig().PortOfDischarge != salesAgreementHeader.PortOfDischarge)
+            {
+                checkLinesUpdateReqPortLoading = true;
+                checkLinesUpdateReqPortDischarge = true;
+            }
+            else if(salesAgreementHeader.orig().PortOfLoading != salesAgreementHeader.PortOfLoading)
+            {
+                checkLinesUpdateReqPortLoading = true;
+            }
+            else if(salesAgreementHeader.orig().PortOfDischarge != salesAgreementHeader.PortOfDischarge)
+            {
+                checkLinesUpdateReqPortDischarge = true;
+            }
+        }
+        
+        next write();
+
+        if (flowPortDetailsToLines && (checkLinesUpdateReqPortLoading || checkLinesUpdateReqPortDischarge))
+        {
+            this.updateLinesETG(salesAgreementHeader, checkLinesUpdateReqPortLoading, checkLinesUpdateReqPortDischarge);
+            FormDataSource lineDS = salesAgreementHeaderDS.formRun().dataSource(formDataSourceStr(SalesAgreement,ALine));
+            lineDS.research();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateLinesETG</Name>
+				<Source><![CDATA[
+    public void updateLinesETG(ETG_SalesAgreementHeader header, boolean changePortLoading, boolean changePortDischarge)
+    {
+        SalesAgreementHeader salesAgreementHeader;
+        DialogButton  diagBut;
+        AgreementLine aLine;
+
+        str strMessage = "@ETG_New:CopyPortDetailsToLines";
+        str strTitle   = "@ETG_New:UpdatePortDetails";
+        diagBut        = Box::yesNoCancel(strMessage, DialogButton::No, strTitle);
+  
+        if (diagBut == DialogButton::No)
+        {
+            return;
+        }
+        else if(diagBut == DialogButton::Yes)
+        {
+            select firstonly RecId from salesAgreementHeader
+                where salesAgreementHeader.SalesNumberSequence == header.SalesAgreementId;
+
+            ttsbegin;
+
+            if(changePortLoading && changePortDischarge)
+            {
+                update_recordset aLine
+                setting
+                ETGPortOfDischarge     = header.PortOfDischarge,
+                ETGPortOfDischargeDesc = header.PortOfDischargeDesc,
+                ETGPortOfLoading       = header.PortOfLoading,
+                ETGPortOfLoadingDesc   = header.PortOfLoadingDesc
+                where aLine.Agreement == salesAgreementHeader.RecId;
+                Info("@ETG_New:PortLoadingDischargeDetailsCopied");
+            }
+
+            else if (changePortLoading)
+            {
+                update_recordset aLine
+                setting
+                ETGPortOfLoading       = header.PortOfLoading,
+                ETGPortOfLoadingDesc   = header.PortOfLoadingDesc
+                where aLine.Agreement == salesAgreementHeader.RecId;
+                Info("@ETG_New:PortLoadingDischargeDetailsCopied");
+            }
+
+            else if(changePortDischarge)
+            {
+                update_recordset aLine
+                setting
+                ETGPortOfDischarge     = header.PortOfDischarge,
+                ETGPortOfDischargeDesc = header.PortOfDischargeDesc
+                where aLine.Agreement == salesAgreementHeader.RecId;
+                Info("@ETG_New:PortLoadingDischargeDetailsCopied");
+            }
+
+            ttscommit;
+        }
+        else
+        {
+            info("@SYS105413");
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {
+        int ret = next active();
+
+        if (ETGACFParameters::find().EnableMandatoryFields == NoYes::Yes)
+        {
+            this.object(fieldNum(ETG_SalesAgreementHeader, Future)).allowEdit(false);
+                this.object(fieldNum(ETG_SalesAgreementHeader, FromDatePort)).mandatory(true);
+                this.object(fieldNum(ETG_SalesAgreementHeader, ToDatePort)).mandatory(true);
+                this.object(fieldNum(ETG_SalesAgreementHeader, PortOfLoading)).mandatory(true);
+                this.object(fieldNum(ETG_SalesAgreementHeader, PortOfDischarge)).mandatory(true);
+                this.object(fieldNum(ETG_SalesAgreementHeader, BuyerAccountNum)).mandatory(true);
+                this.object(fieldNum(ETG_SalesAgreementHeader, SellerAccountNum)).mandatory(true);
+            
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initValue</Name>
+				<Source><![CDATA[
+    public void initValue()
+    {
+        next initValue();
+
+        if(ETGACFParameters::find().EnableMandatoryFields == NoYes::Yes)
+        {
+             ETG_SalesAgreementHeader salesAgreementHeader = this.cursor();
+            if (!salesAgreementHeader.SellerAccountNum)
+            {
+                salesAgreementHeader.SellerAccountNum = "o001";
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateWrite</Name>
+				<Source><![CDATA[
+    public boolean validateWrite()
+    {
+        boolean ret = next validateWrite();
+
+        if (ret && ETGACFParameters::find().EnableMandatoryFields == NoYes::Yes)
+        {
+            ret = ETGSalesAgreementMandatoryValidation::validateFormHeaders(this.formRun());
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

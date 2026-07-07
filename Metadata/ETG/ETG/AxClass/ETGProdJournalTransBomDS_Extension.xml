@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGProdJournalTransBomDS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formdatasourcestr(ProdJournalTransBOM,ProdJournalBOM))]
+final class ETGProdJournalTransBomDS_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {
+        int                 ret;
+        ret = next active();
+
+        if(ret && ETGCanadaparameters::find().EnableProdJournalValidations)
+        {
+            FormDataSource       ProdJournalBOM_DS   = any2Object(this) as FormDataSource;
+            ProdJournalBOM          prodJournalBom       = ProdJournalBOM_DS.cursor();
+            ProdJournalTable prodJournaltable = ProdJournalTable::find(prodJournalBom.JournalId);
+            ProdTable prodtable = ProdTable::find(prodJournaltable.ProdId);
+
+            if(prodtable.ETGIsSubContractingOrder && prodtable.ETGChildProdId && prodJournaltable.ETGSubcontractingJournalNumber)
+            {
+                ProdJournalBOM_DS.allowCreate(false);
+                ProdJournalBOM_DS.allowDelete(false);
+            }
+        }
+
+        //CS - BIN Qty Status activation - Abhinav
+        FormPartControl formpartcontrol = this.formrun().design().controlName("ETGBinQtyAvailable");
+        formpartcontrol.visible(ETGCanadaParameters::find().EnableBinQtyStatus);
+
+        if(ETGCanadaParameters::find().EnableBinQtyStatus)
+        {
+            FormDataSource       ProdJournalBOM_DS   = any2Object(this) as FormDataSource;
+            ProdJournalBOM          prodJournalBom       = ProdJournalBOM_DS.cursor();
+
+            InventDim inventdim = prodJournalBom.inventDim();
+            ETGBinQtyVisualChartHelperClass::populateBinQtyChartData(inventdim,formpartcontrol);
+        }
+        //CE
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

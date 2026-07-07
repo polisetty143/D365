@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesAgreementWFQuery</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///    The <c>ETGSalesAgreementWFQuery</c> class is the workflow document class for the <c>SalesAgreementHeader</c> table.
+/// </summary>
+/// <remarks>
+///    This class is required in order to provide a unique workflow document for purchase order.
+/// </remarks>
+[WorkflowDocIsQueueEnabledAttribute(true,"Sales agreement")]
+public class ETGSalesAgreementWFQuery extends WorkflowDocument implements SysErrorMessageHelpScopeIWorkflow
+{
+    SalesAgreementHeader salesAgreementHeader;
+
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static ETGSalesAgreementWFQuery construct()
+    {
+        return new ETGSalesAgreementWFQuery();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>enableErrorMessageHelpScopeAndShowLink</Name>
+				<Source><![CDATA[
+    [Hookable(false)]
+    public boolean enableErrorMessageHelpScopeAndShowLink()
+    {
+        return true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getQueryName</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Retrieves the name of the query to use for the document.
+    /// </summary>
+    /// <returns>
+    ///    The name of the query to use for the document.
+    /// </returns>
+    QueryName getQueryName()
+    {
+        return queryStr(ETGSalesAgreementWFQuery);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>new</Name>
+				<Source><![CDATA[
+    protected void new()
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getSalesAgreementHeader</Name>
+				<Source><![CDATA[
+    private SalesAgreementHeader getSalesAgreementHeader(RecId  _recId)
+    {
+        if (!salesAgreementHeader)
+        {
+            salesAgreementHeader = SalesAgreementHeader::find(_recId);
+        }
+
+        return salesAgreementHeader;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmCalcAgreementAmount</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Calculates the total sales agreement order amount and converts it company currency.
+    /// </summary>
+    /// <param name="_companyId">
+    ///    The company ID that corresponds to the workflow instance.
+    /// </param>
+    /// <param name="_tableId">
+    ///    The table ID that corresponds to the workflow instance.
+    /// </param>
+    /// <param name="_recId">
+    ///    The record ID that corresponds to the workflow instance.
+    /// </param>
+    /// <returns>
+    ///     The total sales agreement order amount.
+    /// </returns>
+    public InvoiceAmountMST parmCalcAgreementAmount(CompanyId _companyId, TableId _tableId, RecId _recId)
+    {
+        InvoiceAmountMST   amountMST;
+        AgreementLineQuantityCommitment agreementLine;
+
+        this.getSalesAgreementHeader(_recId);
+
+        if (salesAgreementHeader)
+        {
+            while select agreementLine where agreementLine.Agreement == salesAgreementHeader.RecId
+            {
+                amountMST   += agreementLine.lineAmount();
+            }
+            amountMST   = CurrencyExchangeHelper::amountCur2MST(amountMST, agreementLine.Currency);
+        }
+
+        return amountMST;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

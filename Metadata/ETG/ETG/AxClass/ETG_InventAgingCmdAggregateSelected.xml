@@ -1,0 +1,248 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_InventAgingCmdAggregateSelected</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The <c>InventAgingCmdAggregateSelected</c> class implements a command to aggregate report lines.
+/// </summary>
+class ETG_InventAgingCmdAggregateSelected implements InventAgingICommand
+{
+    InventAgingReportLines      input, output;
+    ETG_InventAgingContract     contract;
+    InventDimParm               inventDimParmSelected;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>execute</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Aggregates a report line.
+    /// </summary>
+    public void execute()
+    {
+        InventAgingTmp      line, aggregatedLine;
+        ItemGroupId         itemGroupId;
+        ItemId              itemId;
+        ItemName            itemName;
+        UnitOfMeasureSymbol unit;
+
+        line = input.parmLine();
+
+        if (contract.parmViewItemGroup())
+        {
+            itemGroupId = line.ItemGroupId;
+        }
+        if (contract.parmViewItem())
+        {
+            itemId = line.ItemId;
+            itemName = line.ItemName;
+            unit = line.Unit;
+        }
+
+        InventDim inventDim = line.inventDim();
+        inventDim.clearNotSelectedDim(inventDimParmSelected);
+
+        aggregatedLine = output.findOrCreate(itemGroupId, itemId, itemName, unit, inventDim);
+
+        this.initAggregatedLine(aggregatedLine, line);
+
+        output.insert(aggregatedLine);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initAggregatedLine</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Initialzes the <c>InventAgingTmp</c> record.
+    /// </summary>
+    /// <param name = "_aggregatedLine">
+    /// The <c>InventAgingTmp</c> record.
+    /// </param>
+    /// <param name = "_inputLine">
+    /// The <c>InventAgingTmp</c> record to initialize from.
+    /// </param>
+    protected void initAggregatedLine(InventAgingTmp _aggregatedLine, InventAgingTmp _inputLine)
+    {
+        this.initAggregatedLineQtyFields(_aggregatedLine, _inputLine);
+        
+        this.initAggregatedLineAmountFields(_aggregatedLine, _inputLine);
+
+        if (_aggregatedLine.Qty)
+        {
+            _aggregatedLine.UnitPrice = _aggregatedLine.Amount / _aggregatedLine.Qty;
+        }
+        else
+        {
+            _aggregatedLine.UnitPrice = 0.0;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initAggregatedLineQtyFields</Name>
+				<Source><![CDATA[
+    protected void initAggregatedLineQtyFields(InventAgingTmp _aggregatedLine, InventAgingTmp _inputLine)
+    {
+        InventBatch                     inventbatch;
+        InventTrans                     inventTransloc;
+        INVENTTRANSPOSTING              InventTransPosting;
+        InventDim                       inventdimloc;
+        DimensionSetName                financialDimSet;
+        DimensionDefault                defaultDimension;
+        DefaultDimensionView            defaultDimView;
+        DimensionHierarchy              dimensionHierarchy;
+        DimensionHierarchyLevel         dimensionHierarchyLevel;
+        DimensionAttribute              dimAttribute;
+       
+        
+        _aggregatedLine.Qty += _inputLine.Qty;
+        _aggregatedLine.QtyOnHand += _inputLine.QtyOnHand;
+        _aggregatedLine.QtyofAgingPeriod1 += _inputLine.QtyofAgingPeriod1;
+        _aggregatedLine.QtyofAgingPeriod2 += _inputLine.QtyofAgingPeriod2;
+        _aggregatedLine.QtyofAgingPeriod3 += _inputLine.QtyofAgingPeriod3;
+        _aggregatedLine.QtyofAgingPeriod4 += _inputLine.QtyofAgingPeriod4;
+        _aggregatedLine.QtyofAgingPeriod5 += _inputLine.QtyofAgingPeriod5;
+        _aggregatedLine.QtyofAgingPeriod6 += _inputLine.QtyofAgingPeriod6;
+        _aggregatedLine.QtyofAgingPeriod7 += _inputLine.QtyofAgingPeriod7;
+
+        if(_inputLine.inventBatchId)
+        {
+            select firstonly inventDimId from inventdimloc
+                where inventdimloc.inventBatchId == _inputLine.inventBatchId
+            join DatePhysical,InventTransOrigin,VoucherPhysical from inventTransloc
+                where inventTransloc.ItemId == _inputLine.ItemId
+                    && inventTransloc.inventDimId == inventdimloc.inventDimId;
+           
+           select firstonly DefaultDimension from inventTransPosting
+                where inventTransPosting.Voucher == inventTransloc.VoucherPhysical;
+         
+            select firstonly prodDate,expDate from inventbatch
+                where inventbatch.itemId == _inputLine.ItemId
+                    && inventbatch.inventBatchId == _inputLine.inventBatchId;
+
+            _aggregatedLine.prodDate         = inventbatch.prodDate;
+            _aggregatedLine.expDate          = inventbatch.expDate;
+            _aggregatedLine.DatePhysical     = inventTransloc.DatePhysical;
+            financialDimSet                  = contract.parmFinancialDimSet();
+            
+            if(financialDimSet)
+            {
+                defaultDimension = inventTransPosting.DefaultDimension;
+            
+                select firstonly RecId from dimensionHierarchy
+                    where dimensionHierarchy.Name == financialDimSet;
+
+                while select Level from dimensionHierarchyLevel
+                    where dimensionHierarchyLevel.DimensionHierarchy == dimensionHierarchy.RecId
+                join Name from dimAttribute
+                    where dimAttribute.RecId == dimensionHierarchyLevel.DimensionAttribute
+                {
+                    select firstonly DisplayValue from defaultDimView
+                        where defaultDimView.DefaultDimension == defaultDimension
+                            && defaultDimView.Name == dimAttribute.Name;
+                    
+                    if(defaultDimView.DisplayValue)
+                        _aggregatedLine.DimensionValues[dimensionHierarchyLevel.Level] = defaultDimView.DisplayValue;
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initAggregatedLineAmountFields</Name>
+				<Source><![CDATA[
+    protected void initAggregatedLineAmountFields(InventAgingTmp _aggregatedLine, InventAgingTmp _inputLine)
+    {
+        _aggregatedLine.Amount += _inputLine.Amount;
+        _aggregatedLine.AmountOnHand += _inputLine.AmountOnHand;
+        _aggregatedLine.AmountofAgingPeriod1 += _inputLine.AmountofAgingPeriod1;
+        _aggregatedLine.AmountofAgingPeriod2 += _inputLine.AmountofAgingPeriod2;
+        _aggregatedLine.AmountofAgingPeriod3 += _inputLine.AmountofAgingPeriod3;
+        _aggregatedLine.AmountofAgingPeriod4 += _inputLine.AmountofAgingPeriod4;
+        _aggregatedLine.AmountofAgingPeriod5 += _inputLine.AmountofAgingPeriod5;
+        _aggregatedLine.AmountofAgingPeriod6 += _inputLine.AmountofAgingPeriod6;
+        _aggregatedLine.AmountofAgingPeriod7 += _inputLine.AmountofAgingPeriod7;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initialize</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Initializes the <c>InventAgingCmdAggregateSelected</c> class.
+    /// </summary>
+    /// <param name="_contract">
+    /// The instance of the <c>InventAgingContract</c> class that specifies how the report lines should be aggregated.
+    /// </param>
+    /// <param name="_input">
+    /// The instance of the <c>InventAgingReportLines</c> that should be aggregated.
+    /// </param>
+    /// <param name="_output">
+    /// The instance of the <c>InventAgingReportLines</c> where the result is aggregated.
+    /// </param>
+    protected void initialize(
+        ETG_InventAgingContract         _contract,
+        InventAgingReportLines          _input,
+        InventAgingReportLines          _output)
+    {
+        contract = _contract;
+        input = _input;
+        output = _output;
+        inventDimParmSelected = ETG_InventAgingQueryBuilder::selectedInventDimParm(contract);
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    protected static ETG_InventAgingCmdAggregateSelected construct()
+    {
+        return new ETG_InventAgingCmdAggregateSelected();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>newFromParameters</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates an instance of the <c>InventAgingCmdAggregateSelected</c> class.
+    /// </summary>
+    /// <param name="_contract">
+    /// The instance of the <c>InventAgingContract</c> class that specifies how the report lines should be aggregated.
+    /// </param>
+    /// <param name="_input">
+    /// The instance of the <c>InventAgingReportLines</c> that should be aggregated.
+    /// </param>
+    /// <param name="_output">
+    /// The instance of the <c>InventAgingReportLines</c> where the result is aggregated.
+    /// </param>
+    /// <returns>
+    /// An instance of the <c>InventAgingCmdAggregateSelected</c> class.
+    /// </returns>
+    public static ETG_InventAgingCmdAggregateSelected newFromParameters(
+        ETG_InventAgingContract         _contract,
+        InventAgingReportLines          _input,
+        InventAgingReportLines          _output)
+    {
+        ETG_InventAgingCmdAggregateSelected inventAgingCmdAggregateSelected = ETG_InventAgingCmdAggregateSelected::construct();
+        inventAgingCmdAggregateSelected.initialize(_contract, _input, _output);
+
+        return inventAgingCmdAggregateSelected;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

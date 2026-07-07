@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGProFormaInvoiceCanadaRDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(ETGProFormaInvoiceCanadaContract))]
+public class ETGProFormaInvoiceCanadaRDP extends SrsReportDataProviderBase
+{
+    DirPartyTable                   dirPartyTable;
+    DirPartyLocation                dirPartyLocation;
+    TaxRegistration                 taxRegistration;
+    ETGProFormaInvoiceCanadaTmp     agreementConfirmTmp;
+   
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getAgreementHeaderTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Selects the <c>ETGProFormaInvoiceCanadaTmp</c> table.
+    /// </summary>
+    /// <returns>
+    ///    The <c>ETGProFormaInvoiceCanadaTmp</c> table.
+    /// </returns>
+    [
+        SRSReportDataSetAttribute(tableStr(ETGProFormaInvoiceCanadaTmp))
+    ]
+    public ETGProFormaInvoiceCanadaTmp getAgreementHeaderTmp()
+    {
+        select firstonly * from agreementConfirmTmp;
+        return agreementConfirmTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createSalesAgreementHeaderTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// populate records for report
+    /// </summary>
+    /// <param name = "_salesAgreement">SalesAgreementId _salesAgreement</param>
+    public Void createSalesAgreementHeaderTmp(SalesAgreementId _salesAgreement)
+    {
+        ETG_SalesAgreementHeader                      salesAgreementHeaderTrade;
+        SalesAgreementHeader                          salesAgreementHeader;
+        AgreementLineQuantityCommitment               agreementLine;
+        AgreementLineQuantityCommitmentHistory        agreementLineHistory;
+        AgreementHeaderDefault                        agreementHeaderDefault;
+        AgreementHeader                               agreementHeader;
+        CompanyInfo                                   companyInfo = CompanyInfo::find();
+        BankAccountTable                              sellerBank;
+        InventTableModule                              inventTableModule;
+        LineAmount                                    lineAmount, totalAmount;
+
+        select firstonly Currency, CustAccount,DefaultAgreementLineEffectiveDate,DefaultAgreementLineExpirationDate, ETGDMSDealNumber from salesAgreementHeader
+            where salesAgreementHeader.SalesNumberSequence == _salesAgreement
+        join salesAgreementHeaderTrade
+            where salesAgreementHeaderTrade.SalesAgreementId == salesAgreementHeader.SalesNumberSequence
+        join agreementHeaderDefault
+            where agreementHeaderDefault.AgreementHeader == salesAgreementHeader.RecId;
+
+        
+        agreementConfirmTmp.CompanyLogo        = FormLetter::companyLogo();
+        agreementConfirmTmp.CompanyTeleFax     = strFmt('Tel : %1  Fax : %2',companyInfo.phone(),companyInfo.teleFax());
+        agreementConfirmTmp.CompanyAddress     = companyInfo.postalAddress().Address;
+        agreementConfirmTmp.CompanyAddress     = strReplace(agreementConfirmTmp.CompanyAddress,"\n","");
+        agreementConfirmTmp.CompanyName        = companyInfo.Name;
+        agreementConfirmTmp.BeneficiaryName     = companyInfo.Name;
+        agreementConfirmTmp.AgreementId      = _salesAgreement;
+        agreementConfirmTmp.SellerBank       = salesAgreementHeaderTrade.SellerBank;
+
+        if(agreementConfirmTmp.SellerBank)
+        {
+            sellerBank = BankAccountTable::find(agreementConfirmTmp.sellerBank);
+            agreementConfirmTmp.BeneficiaryBankAccount       = sellerBank.AccountNum;
+            agreementConfirmTmp.BeneficiaryBankBICSwiftCode  = sellerBank.SWIFTNo;
+            agreementConfirmTmp.BeneficiaryBankAccountNumber = sellerBank.IBAN;
+
+            str                    addressInOneLine;
+            addressInOneLine = strReplace(LogisticsPostalAddress::findByLocation(sellerBank.Location).Address, "\n", ", ");
+            addressInOneLine = strReplace(addressInOneLine, "\r", "");
+
+            agreementConfirmTmp.BeneficiaryBankName          = sellerBank.Name + "\n" + addressInOneLine;
+            agreementConfirmTmp.BeneficiaryBankIntermediaryName = sellerBank.ETGCorrespondentBank;
+            agreementConfirmTmp.BeneficiaryBankIntermediaryNameBICSwift = sellerBank.ETGCorrespondSwiftCode;
+            agreementConfirmTmp.Institution                      = sellerBank.ETGInstitutionCode;
+            agreementConfirmTmp.BranchTransit                    = sellerBank.ETGBranchTransit;
+        }
+
+        agreementConfirmTmp.DeliveryTerm        = agreementHeaderDefault.DeliveryTerm;
+        agreementConfirmTmp.BuyerName        = salesAgreementHeaderTrade.buyerName();
+        agreementConfirmTmp.BuyerAddress     = LogisticsPostalAddress::findRecId(salesAgreementHeaderTrade.BuyerDeliveryAddress).Address;
+        agreementConfirmTmp.PortOfDischargeDesc     = salesAgreementHeaderTrade.PortOfDischargeDesc;
+        agreementConfirmTmp.PortOfLoadingDesc       = salesAgreementHeaderTrade.PortOfLoadingDesc;
+        agreementConfirmTmp.ShipmentFromDatePort = DateTimeUtil::date(salesAgreementHeaderTrade.FromDatePort);
+        agreementConfirmTmp.ShipmentToDatePort = DateTimeUtil::date(salesAgreementHeaderTrade.ToDatePort);
+        agreementConfirmTmp.ETGDealNumber         = salesAgreementHeader.ETGDMSDealNumber;
+        agreementConfirmTmp.EffectiveDate    = DateTimeUtil::date(salesAgreementHeader.DefaultAgreementLineEffectiveDate);
+        agreementConfirmTmp.TermOfPaymDescription = agreementHeaderDefault.PaymentTerms;
+
+        while select agreementLine where agreementLine.Agreement == agreementHeaderDefault.AgreementHeader
+        {
+            if(agreementLine.ETG_ItemAlternativeName)
+            {
+                agreementConfirmTmp.ItemName     = agreementLine.ETG_ItemAlternativeName;
+            }
+            else
+            {
+                agreementConfirmTmp.ItemName     = InventTable::find(agreementLine.ItemId).itemName();
+
+            }
+            
+            agreementConfirmTmp.Origin           = InventDim::find(agreementLine.InventDimId).InventColorId;
+            agreementConfirmTmp.CommitedQuantity = agreementLine.CommitedQuantity;
+            agreementConfirmTmp.PricePerUnit     = agreementLine.PricePerUnit;
+            agreementConfirmTmp.CurrencyCode     = salesAgreementHeader.Currency;
+            agreementConfirmTmp.Unit                 = agreementLine.ProductUnitOfMeasure;
+            agreementConfirmTmp.Grade               = InventDim::find(agreementLine.InventDimId).configId;
+
+            if (agreementLine.isQuantityBased())
+            {
+                AgreementLineQuantityCommitment agreementLineQuantityCommitment = agreementLine as AgreementLineQuantityCommitment;
+                lineAmount = agreementLineQuantityCommitment.lineAmount();
+            }
+            else
+            {
+                lineAmount = AgreementLineVolumeCommitment::find(agreementLine.RecId).CommitedAmount;
+            }
+
+            totalAmount                                         = totalAmount + lineAmount;
+            agreementConfirmTmp.LineAmount                      = lineAmount;
+            agreementConfirmTmp.TotalAmountInWords              = strReplace(Global::numeralsToTxt(totalAmount),"***"," ");
+            agreementConfirmTmp.TotalAmountInWords              = strReplace(agreementConfirmTmp.TotalAmountInWords,"and 00/100"," ");
+            agreementConfirmTmp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETGProFormaInvoiceCanadaContract   contract;
+        SalesAgreementId                        salesAgreementId;
+
+        contract                = this.parmDataContract() as ETGProFormaInvoiceCanadaContract;
+        salesAgreementId        = contract.parmSalesAgreementId();
+
+        if(salesAgreementId)
+        {
+            this.createSalesAgreementHeaderTmp(salesAgreementId);
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

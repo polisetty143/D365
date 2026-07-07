@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>IFRUniversalInterfaceSystemPostService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+abstract class IFRUniversalInterfaceSystemPostService extends SysOperationServiceBase
+{   
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>post</Name>
+				<Source><![CDATA[
+    public void post(IFRUniversalInterfaceSystemPostContract _contract)
+    {        
+        SetEnumerator			            se;
+        Common					            record;
+        #OCCRetryCount
+
+        guid processGuid = newGuid();
+                               
+        if (conLen(_contract.parmRecordCon()) > 0)
+        {                
+            se = Set::create(_contract.parmRecordCon()).getEnumerator();
+            while (se.moveNext())
+            {
+                record = se.current();
+                    
+                try
+                {
+                    if (this.processRecord(record, processGuid))
+                    {
+                        ttsBegin;
+                        this.markRecordAsProcessed(record, processGuid);
+                        ttsCommit;
+                    } 
+                }
+                catch (Exception::Deadlock)
+                {
+                    retry;
+                }
+                catch (Exception::UpdateConflict)
+                {
+                    if (appl.ttsLevel() == 0)
+                    {
+                        if (xSession::currentRetryCount() >= #RetryNum)
+                        {
+                            throw Exception::UpdateConflictNotRecovered;
+                        }
+                        else
+                        {
+                            retry;
+                        }
+                    }
+                    else
+                    {
+                        throw Exception::UpdateConflict;
+                    }
+                }
+                catch (Exception::Error)
+                {
+                    IFRUniversalInterfaceSystemTable ifrUniversalInterfaceSystemTable;
+                    
+                    ttsbegin;
+                    
+                    while select ifrUniversalInterfaceSystemTable
+                        where ifrUniversalInterfaceSystemTable.ExecutionId  == processGuid
+                            && ifrUniversalInterfaceSystemTable.RecId       == record.RecId
+                    {
+                        ifrUniversalInterfaceSystemTable.writeInfoLogErrorData();
+                    }
+
+                    ttscommit;
+                }
+            }
+        }                            
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processRecord</Name>
+				<Source><![CDATA[
+    abstract protected boolean processRecord(Common _common, guid _processGuid)
+    {    
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>markRecordAsProcessed</Name>
+				<Source><![CDATA[
+    private void markRecordAsProcessed(Common _common, guid _processGuid)
+    {
+        IFRUniversalInterfaceSystemTable ifrUniversalInterfaceSystemTable = IFRUniversalInterfaceSystemTable::findRecId(_common.RecId);
+            
+        if (ifrUniversalInterfaceSystemTable)
+        {
+            IFRUniversalInterfaceSystemTable::markRecordsAsProcessed(_processGuid, ifrUniversalInterfaceSystemTable.RecId);
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

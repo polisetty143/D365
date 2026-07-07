@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_CTRMPurchaseAgreementCreation</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+ class ETG_CTRMPurchaseAgreementCreation
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Class entry point. The system will call this method when a designated menu
+    /// is selected or when execution starts and this class is set as the startup class.
+    /// </summary>
+    /// <param name = "_args">The specified arguments.</param>
+    public static void main(Args _args)
+    {
+        str dealNum = "O001-00001";
+        ETGPurchAgreementAPI agreementHeader;
+        ETGPurchAgreementLineAPI agreementLineAPI;
+        PurchAgreementHeader purchAgreementHeader;
+        VendTable vendTable;
+        AgreementHeaderDefault agreementHeaderDefault;
+        PurchAgreementHeaderDefault purchAgreementHeaderDefault;
+        PurchAgreementCertification purchAgreementCertification;
+        ETG_PurchaseAgreementHeader ETG_PurchaseAgreementHeaderNew;
+        AgreementLineQuantityCommitment agreementLineQuantityCommitment;
+        // AgreementLine agreementLineQuantityCommitment;
+        NumberSequenceReference numberSequenceReference;
+        NumberSeq num;
+        WMSLocation wmsLocation;
+        InventDim inventDim;
+        AgreementLineDefault AgreementLineDefaultNew;
+ 
+        ttsbegin;
+        select forupdate agreementHeader
+            where agreementHeader.DealNumber == dealNum
+            && agreementHeader.ETGIntegrationsStatus == ETGIntegrationStatus::Unprocessed;
+ 
+        select * from numberSequenceReference where numberSequenceReference.NumberSequenceId == PurchParameters::numRefPurchAgreementId().NumberSequenceId;
+        num = NumberSeq::newGetNum(numberSequenceReference);
+ 
+        purchAgreementHeader.initValue();
+        purchAgreementHeader.VendAccount = agreementHeader.VendAccount;
+        vendTable   = VendTable::find(agreementHeader.VendAccount);
+        purchAgreementHeader.initFromVendTable(vendTable);
+        AgreementClassification agreementClassification = AgreementClassification::findPurchClassification(agreementHeader.AgreementClassifications);
+        if (agreementClassification)
+        {
+            purchAgreementHeader.AgreementClassification = agreementClassification.RecId;
+        }
+        //purchAgreementHeader.AgreementClassification = agreementClassificationNew.RecId;
+        purchAgreementHeader.PurchNumberSequence = num.num();//PurchAgreementId
+        //purchAgreementHeader.DocumentExternalReference   = purchAgreementHeader.DocumentExternalReference;
+        //purchAgreementHeader.PrimaryResponsibleWorker  =  purchAgreementHeader.PrimaryResponsibleWorker;//worker
+        //purchAgreementHeader.DocumentTitle   = purchAgreementHeader.DocumentTitle;
+        purchAgreementHeader.DefaultAgreementLineEffectiveDate   = agreementHeader.EffectiveDate;
+        purchAgreementHeader.DefaultAgreementLineExpirationDate  = agreementHeader.ExpirationDate;
+        purchAgreementHeader.AgreementState  = AgreementState::OnHold;
+        //purchAgreementHeader.DefaultDimension    = purchAgreementHeader.DefaultDimension; // for this need to get logic
+        purchAgreementHeader.insert();
+ 
+        agreementHeaderDefault.initFromVendTable(vendTable);
+        agreementHeaderDefault.AgreementHeader   = purchAgreementHeader.RecId;
+        agreementHeaderDefault.PaymentTerms = agreementHeader.PaymentTerms;
+        agreementHeaderDefault.DeliveryTerm = agreementHeader.DeliveryTerm;
+        agreementHeaderDefault.DeliveryMode = agreementHeader.DeliveryMode;
+        agreementHeaderDefault.insert();
+ 
+        purchAgreementHeaderDefault.PurchaseAgreementHeader  = purchAgreementHeader.RecId;
+        purchAgreementHeaderDefault.initFromVendTable(vendTable);
+        purchAgreementHeaderDefault.insert();
+ 
+        purchAgreementCertification.PurchAgreementHeader = purchAgreementHeader.RecId;
+        purchAgreementCertification.VendTable    = vendTable.AccountNum;
+        purchAgreementCertification.insert();
+ 
+        ETG_PurchaseAgreementHeaderNew.PurchAgreementId    = purchAgreementHeader.PurchNumberSequence;
+        ETG_PurchaseAgreementHeaderNew.PortOfLoading       = agreementHeader.PortOfLoading;
+        ETG_PurchaseAgreementHeaderNew.PortOfDischarge     = agreementHeader.PortOfDischarge;
+        ETG_PurchaseAgreementHeaderNew.insert();
+ 
+        while select agreementLineAPI
+    where agreementLineAPI.DealNumber == agreementHeader.DealNumber
+        {
+            agreementLineQuantityCommitment.clear();
+            agreementLineQuantityCommitment.initValue();
+ 
+            agreementLineQuantityCommitment.Agreement = purchAgreementHeader.RecId;
+            agreementLineQuantityCommitment.initFromAgreementHeader(purchAgreementHeader);
+ 
+            agreementLineQuantityCommitment.ItemId = agreementLineAPI.ItemId;
+            agreementLineQuantityCommitment.initFromInventTable(InventTable::find(agreementLineAPI.ItemId));
+ 
+            agreementLineQuantityCommitment.LineNumber = 1;
+ 
+            agreementLineQuantityCommitment.CommitedQuantity      = agreementLineAPI.Quantity;
+            agreementLineQuantityCommitment.ProductUnitOfMeasure  = agreementLineAPI.Unit;
+            agreementLineQuantityCommitment.PricePerUnit          = agreementLineAPI.UnitPrice;
+ 
+            agreementLineQuantityCommitment.EffectiveDate         = agreementHeader.EffectiveDate;
+            agreementLineQuantityCommitment.ExpirationDate        = agreementHeader.ExpirationDate;
+            AgreementLineQuantityCommitment.IsMaxEnforced = NoYes::Yes;
+            AgreementLineQuantityCommitment.IsPriceInformationMandatory = NoYes::Yes;
+            AgreementLineQuantityCommitment.DefaultDimension      = InventTable::find(agreementLineAPI.ItemId).DefaultDimension;
+            inventDim.clear();
+            inventDim.InventSiteId     = agreementLineAPI.InventSiteId;
+            inventDim.InventLocationId = agreementLineAPI.InventLocationId;
+            inventDim.WMSLocationId    = agreementLineAPI.WMSLocationId;
+            inventDim.ConfigId         = agreementLineAPI.ConfigId;
+            inventDim.InventSizeId     = agreementLineAPI.InventSizeId;
+            inventDim.InventColorId    = agreementLineAPI.InventColorId;
+            inventDim.InventStyleId    = agreementLineAPI.InventStyleId;
+ 
+            AgreementLineQuantityCommitment.InventDimDataAreaId = "O001";
+            agreementLineQuantityCommitment.InventDimId = InventDim::findOrCreate(inventDim).InventDimId;
+ 
+            agreementLineQuantityCommitment.ETGFinalPlaceOfDelivery =
+    agreementLineAPI.FinalPlaceOfDelivery;
+ 
+            if (!agreementLineQuantityCommitment.validateWrite())
+            {
+                throw error(strFmt(
+        "Agreement line validation failed for item %1",
+        agreementLineAPI.ItemId));
+            }
+ 
+            agreementLineQuantityCommitment.insert();
+ 
+            info(strFmt(
+    "Agreement line created. RecId=%1",
+    agreementLineQuantityCommitment.RecId));
+        }
+        agreementHeader.PurchaseAgreement = purchAgreementHeader.PurchNumberSequence;
+        //agreementHeader.ETGIntegrationsStatus = ETGIntegrationStatus::Processed;
+        agreementHeader.update();
+        ttscommit;
+ 
+        info(strFmt("PA created %1", purchAgreementHeader.PurchNumberSequence));
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

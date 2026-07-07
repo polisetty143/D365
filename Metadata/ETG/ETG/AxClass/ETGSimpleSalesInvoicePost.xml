@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSimpleSalesInvoicePost</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGSimpleSalesInvoicePost
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name = "_args"></param>
+    public static void main(Args _args)
+    {
+        ETGSalesHeader salesHeader, salesHeaderDelete;
+        ETGSalesLines salesLines, salesLinesDelete;
+
+        if(_args.record() && _args.dataset() == tableNum(ETGSalesHeader))
+        {
+            salesHeader = _args.record();
+
+            SalesTable salesTable;
+            NumberSeq NumberSeq;
+            SalesId sid = "";
+            SalesLine sl;
+            InventDim inventDim;
+            SalesFormLetter salesFormLetter;
+            ETG_SalesTableTrade             salesTableTrade;
+            ETG_BillOfLading                ETGBilloflading;
+            CustInvoiceJour custInvoiceJour;
+            InventTable inventTable;
+            WMSLocation wmsLocation;
+            ;
+            ttsbegin;
+            NumberSeq = NumberSeq::newGetNum(SalesParameters::numRefSalesId() , true);
+            sid = NumberSeq.num();
+            salesTable.SalesId = sid;
+            salesTable.ShippingDateRequested = salesHeader.SalesShippingDateRequested;
+            salesTable.ReceiptDateRequested = salesHeader.SalesShippingDateRequested;
+            salesTable.initValue();
+            salesTable.CustAccount = salesHeader.CustAccount;
+            salesTable.ETGBusinessSegment = salesHeader.ETGBusinessSegment;
+            salesTable.initFromCustTable();
+            salesTable.CurrencyCode = salesHeader.CustCurrencyCode;
+            salesTable.InventSiteId = salesHeader.InventSiteId;
+            salesTable.InventLocationId = salesHeader.InventLocationId;
+            salesTable.PaymMode = salesHeader.CustPaymMode;
+            salesTable.insert();
+
+            salesTableTrade.clear();
+            salesTableTrade.SalesId = salesTable.SalesId;
+            salesTableTrade.CountryOfFinalDestination = "";
+            salesTableTrade.Declaration = "";
+            salesTableTrade.Remarks = "";
+            salesTableTrade.PortOfLoading = "";
+            salesTableTrade.PortOfLoadingDesc = "";
+            salesTableTrade.PortOfDischarge = "";
+            salesTableTrade.PortOfDischargeDesc = "";
+            salesTableTrade.ETGNameOfCust = salesHeader.ETGNameOfCust;
+            salesTableTrade.ETGMobileNumberOfCust = salesHeader.ETGMobileNumberOfCust;
+            salesTableTrade.ETGNRCOfCust = salesHeader.ETGNRCOfCust;
+            salesTableTrade.ETGAddressOfCust = salesHeader.ETGAddressOfCust;
+            salesTableTrade.insert();
+
+            ETGBilloflading.clear();
+            ETGBilloflading.SalesId   = salesTable.SalesId;
+            ETGBilloflading.CarrierCode = "";
+            ETGBilloflading.NumberOfBags = "";
+            ETGBilloflading.NumberOfContainers = 0;
+            ETGBilloflading.insert();
+        
+            //Create the Sales Line with the created Sales Order
+            while select salesLines
+                where salesLines.ETGSalesHeaderRecId == salesHeader.RecId
+            {
+                select * from inventTable
+                    where inventTable.itemId == salesLines.ItemIdSmall;
+
+                sl.clear();
+                sl.initFromSalesTable(salesTable);
+                sl.SalesId = sid;
+                sl.ItemId = inventTable.ItemId;
+     
+                //  Initialize InventDim
+                sl.initFromInventTable(InventTable::find(sl.ItemId));
+
+                if(Inventlocation::find(salesHeader.InventLocationId).InventLocationId != "")
+                {
+                    inventdim.InventSiteId = InventLocation::find(salesHeader.InventLocationId).InventSiteId;
+                    inventdim.InventLocationId = Inventlocation::find(salesHeader.InventLocationId).InventLocationId;
+                }
+                sl.SalesQty = salesLines.SalesOrderedQty;
+                sl.SalesUnit = salesLines.SalesUnit;
+
+                select * from wmsLocation where wmsLocation.inventLocationId == salesHeader.InventLocationId;
+
+                inventDim.wMSLocationId = wmsLocation.wMSLocationId;
+                inventDim.inventBatchId = salesLines.InventBatchId;
+                sl.InventDimId = InventdIm::findOrCreate(inventdim).inventDimId;
+
+                sl.CreateLine(NoYes::Yes,NoYes::Yes,NoYes::Yes,NoYes::Yes,NoYes::Yes,NoYes::Yes);
+                sl.SalesPrice = salesLines.SalesPrice;//InventTableModule::find(inventTable.ItemId, ModuleInventPurchSales::Sales).Price;
+                sl.TaxGroup = salesLines.TaxGroup;
+                sl.TaxItemGroup = salesLines.TaxItemGroup;
+                sl.ETGDepositAmount = salesLines.ETGDepositAmount;
+                sl.ETGDepositRate = salesLines.ETGDepositRate;
+                sl.ETGConnectionType = salesLines.ETGConnectionType;
+                sl.ETGFilledOrEmpty = salesLines.ETGFilledOrEmpty;
+                sl.LineAmount= sl.calcLineAmount();
+
+                sl.update();
+            }
+
+            // ttscommit;
+            // info("Sales Order Created with Line");
+            SalesTable salesTableOrg;
+            salesTableOrg = SalesTable::find(sid);
+            salesFormLetter = SalesFormLetter::construct(DocumentStatus::Confirmation);
+            salesFormLetter.update(salesTableOrg, salesHeader.SalesShippingDateRequested, SalesUpdate::All);
+
+            //Post the delivery
+            salesFormLetter = SalesFormLetter::construct(DocumentStatus::PackingSlip);
+            salesFormLetter.update(SalesTable::find(sid));
+            // salesFormLetter.progressHide();                                // Hide the progress bar.
+            salesFormLetter.update(salesTableOrg,                             // SalesTable
+            salesHeader.SalesShippingDateRequested,                        // Delivery date
+            SalesUpdate::All,                // Quantity to update (SpecQty)
+            AccountOrder::None,                     // AccountOrder
+            false,                                  // Proforma only?
+            false);                                 // Printout?
+
+            //Post the Sales Order Invoice
+            salesFormLetter = salesFormLetter::construct(DocumentStatus::Invoice);
+            salesFormLetter.update(salesTableOrg,
+            salesHeader.SalesShippingDateRequested,
+            SalesUpdate::All,
+            AccountOrder::None,
+            false,
+            false);
+
+            delete_from salesHeaderDelete where salesHeaderDelete.RecId == salesHeader.RecId;
+            delete_from salesLinesDelete where salesLinesDelete.ETGSalesHeaderRecId == salesHeader.RecId;
+            //salesFormLetter.update(salesTableOrg, systemDateGet(), SalesUpdate::All, AccountOrder::None, NoYes::No, NoYes::No, NoYes::No, NoYes::Yes);
+            ttscommit;
+
+            ttsbegin;
+            select forupdate custInvoiceJour where custInvoiceJour.SalesId == salesTable.SalesId;
+            custInvoiceJour.ETG_BLnumber = "N004-00001";
+            custInvoiceJour.ETG_BLDate = salesHeader.SalesShippingDateRequested;
+            //custInvoiceJour.initFromSalesTable(salesTable);
+            //custInvoiceJour.InvoiceDate = salesHeader.SalesShippingDateRequested;
+            custInvoiceJour.update();
+            ttscommit;
+
+            //ttsbegin;
+            
+            //ttscommit;
+
+            info(strFmt("%1 Sales Order invoice is created", salesTable.SalesId));
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

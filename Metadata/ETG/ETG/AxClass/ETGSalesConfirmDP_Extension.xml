@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesConfirmDP_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The <c>ETGSalesConfirmDP_Extension</c> class is the report Data Provider class for the <c>SalesConfirm</c> SRS
+/// </summary>
+[ExtensionOf(classstr(SalesConfirmDP))]
+final class ETGSalesConfirmDP_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initializeSalesOrderConfirmationHeader</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Initializes a sales order confirmation header.
+    /// </summary>
+    /// <returns>
+    /// The initialized <c>SalesConfirmHeaderTmp</c> sales order confirmation header record.
+    /// </returns>
+    protected SalesConfirmHeaderTmp initializeSalesOrderConfirmationHeader()
+    {
+        SalesConfirmHeaderTmp           salesConfirmHeaderTmp;
+        SalesTable                      salesTable;
+        ETG_SalesTableTrade             eTG_SalesTableTrade;
+        Amount                          Amount;
+        Description1000                 disc,AmountinTxt;
+        DirPartyTable                   dirPartyTable;
+        DirPartyLocation                dirPartyLocation;
+        TaxRegistration                 taxRegistration;
+
+        SalesConfirmHeaderTmp = next initializeSalesOrderConfirmationHeader();
+
+        select firstonly salesTable 
+                where salesTable.SalesId == this.parmCustConfirmJour().SalesId;
+        select firstonly ETG_SalesTableTrade
+                where ETG_SalesTableTrade.SalesId == SalesTable.SalesId;
+        select firstonly RegistrationNumber from  taxRegistration
+            exists join dirPartyLocation
+                where  dirPartyLocation.RecId == taxRegistration.DirPartyLocation
+            exists join dirPartyTable
+                where dirPartyTable.RecId == dirPartyLocation.Party;
+
+        Amount                                        =     SalesConfirmHeaderTmp.ConfirmAmount;
+        AmountinTxt                                   =     Global::numeralsToTxt_EN(Amount);
+        AmountinTxt                                   =     strReplace(AmountinTxt,'***','');
+        //AmountinTxt                                   =     strReplace(AmountinTxt,'and 00/100','');
+        disc                                          =     ETG_SalesTableTrade.PortOfDischargeDesc;
+        salesConfirmHeaderTmp.DeliveryDate            =     salesTable.ShippingDateRequested; 
+        salesConfirmHeaderTmp.ETGPortPlaceOfDisc      =     AmountinTxt;
+        salesConfirmHeaderTmp.ETGModeOfDelivery       =     salesTable.DlvMode;
+        salesConfirmHeaderTmp.ETGModeOfTerm           =     salesTable.DlvTerm;
+        salesConfirmHeaderTmp.ETGTermsOfPayment       =     salesTable.Payment;
+        salesConfirmHeaderTmp.ETGPortPlaceOfLoading   =     ETG_SalesTableTrade.PortOfLoadingDesc;
+        salesConfirmHeaderTmp.ETGPortPlaceOfDischarge =     ETG_SalesTableTrade.PortOfDischargeDesc;
+        salesConfirmHeaderTmp.OrderType               =     ETG_SalesTableTrade.OrderType;
+        salesConfirmHeaderTmp.ETGTeleFax              =     strFmt('Tel : %1  Fax :%2',CompanyInfo::find().phone(),CompanyInfo::find().teleFax());
+        salesConfirmHeaderTmp.CompanyEmail            =     strFmt('Email : %1  Web : %2',CompanyInfo::find().email(),CompanyInfo::find().url());
+        salesConfirmHeaderTmp.CompanyCoRegNum         =     CompanyInfo::find().CoRegNum;
+        salesConfirmHeaderTmp.CompanyCoRegNum         =     taxRegistration.RegistrationNumber;
+        salesConfirmHeaderTmp.CompanyAddress          =     strReplace(salesConfirmHeaderTmp.CompanyAddress,'\n',' ');
+
+        return SalesConfirmHeaderTmp; 
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGVendorOpenTransDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[
+SRSReportQueryAttribute(''),
+    SRSReportParameterAttribute(classStr(ETGVendorOpenTransContract))
+]
+class ETGVendorOpenTransDP extends SRSReportDataProviderBase
+{
+    ETGVendorOpenTransactions   tmpVendOpenTrans;
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGVendorOpenTransactions</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the processed data for the report
+    /// </summary>
+    [SRSReportDataSetAttribute(tableStr(ETGVendorOpenTransactions))]
+    public ETGVendorOpenTransactions getETGVendorOpenTransactions()
+    {
+        select tmpVendOpenTrans;
+        return tmpVendOpenTrans;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETGVendorOpenTransContract contract;
+        TransDate                  asOfDate;
+        NoYes                      excludeFutureSettlements;
+
+        // Retrieve contract
+        contract = this.parmDataContract() as ETGVendorOpenTransContract;
+        asOfDate = contract.parmAsOfDate();
+        excludeFutureSettlements = contract.parmExcludeFutureSettlements();
+
+        // Validate date similar to original dialog logic
+        if (asOfDate >= today())
+        {
+            throw error("As of date should not be greater than Today's date");
+        }
+
+        this.insertVendOpenTransData(asOfDate, excludeFutureSettlements);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertVendOpenTransData</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Business logic to populate the temp table
+    /// </summary>
+    /// <param name = "_fromDate">The cut-off date from the contract</param>
+    /// <param name = "_excludeFutureSettlements">Flag to exclude future settlements</param>
+    private void insertVendOpenTransData(date _fromDate, NoYes _excludeFutureSettlements = NoYes::No)
+    {
+        VendTrans          vendTrans;
+        VendTable          vendTable;
+        VendSettlement     vendSettlement;
+        
+        Amount             amountCurSettled;
+        Amount             amountMSTSettled;
+        Amount             amountCurOpen;
+        Amount             amountMSTOpen;
+
+        date               maximumDate = _fromDate;
+
+        // Helper strings for dimensions
+        str businessUnitStr         = "BusinessUnit";
+        str verticalStr             = "Vertical";
+        str MAIN_COMMODITYStr       = "MainCommodity";
+        str SUB_COMMODITYStr        = "SubCommodity";
+        str lineOfBusinessStr       = "Line_of_Business";
+        str plantWarehouseOfficeStr = "Plant_Warehouse_Office";
+        str departmentStr           = "Department";
+        str interCompanyStr         = "InterCompany";
+        str trader_EmployeeStr      = "Trader_Employee";
+        str itemStr                 = "Item";
+
+        tmpVendOpenTrans.clear();
+        delete_from tmpVendOpenTrans;
+
+        while select vendTrans
+            where vendTrans.TransDate <= _fromDate
+            && (vendTrans.Closed == dateNull() || vendTrans.Closed > _fromDate)
+        {
+            // --- HISTORICAL SETTLEMENT CALCULATION LOGIC ---
+            if (!_excludeFutureSettlements)
+            {
+                // If we are NOT excluding future settlements, just use the live, up-to-date summary fields
+                amountCurSettled = vendTrans.SettleAmountCur;
+                amountMSTSettled = vendTrans.SettleAmountMST;
+            }
+            else
+            {
+                // If we ARE excluding future settlements, sum up only the settlements on or before 'asOfDate'
+                select sum(SettleAmountCur), sum(SettleAmountMST)
+                    from vendSettlement
+                    where vendSettlement.TransRecId == vendTrans.RecId
+                       && vendSettlement.TransDate <= maximumDate;
+
+                amountCurSettled = vendSettlement.SettleAmountCur;
+                amountMSTSettled = vendSettlement.SettleAmountMST;
+            }
+
+            // Calculate historical open amounts accurately
+            amountCurOpen = vendTrans.AmountCur - amountCurSettled;
+            amountMSTOpen = vendTrans.AmountMST - amountMSTSettled;
+            // -----------------------------------------------
+
+            // Skip lines that have a true zero historical balance
+            if ((vendTrans.AmountCur && amountCurOpen == 0.00) ||
+                (vendTrans.AmountMST && amountMSTOpen == 0.00))
+            {
+                continue;
+            }
+
+            // ---------------------------------------------------------
+            // REPLICATE CUSTOM ETGVendTransFinDim_Extension BALANCE LOGIC
+            // ---------------------------------------------------------
+            ExchRate newExchRate, newExchRateOrg;
+
+            if (vendTrans.LastExchAdjRate)
+            {
+                newExchRate = vendTrans.LastExchAdjRate;
+            }
+            else
+            {
+                newExchRate = vendTrans.ExchRate;
+            }
+
+            if (newExchRate)
+            {
+                newExchRateOrg = newExchRate / 100;
+            }
+
+            // Exactly matching the logic from ETGVendTransFinDim_Extension::balanceUSD but using historical open TC
+            AmountMST calculatedBalanceUSD = amountCurOpen * newExchRateOrg;
+            // ---------------------------------------------------------
+
+            tmpVendOpenTrans.clear();
+            tmpVendOpenTrans.AccountNum                = vendTrans.AccountNum;
+            
+            // Assigning our dynamically calculated historical amounts
+            tmpVendOpenTrans.AmountMST                 = amountMSTOpen;
+            tmpVendOpenTrans.AmountCur                 = amountCurOpen;
+            tmpVendOpenTrans.SettleAmountMST           = amountMSTSettled;
+            tmpVendOpenTrans.SettleAmountCur           = amountCurSettled;
+
+            tmpVendOpenTrans.CurrencyCode              = vendTrans.CurrencyCode;
+            tmpVendOpenTrans.ExchAdjustment            = vendTrans.ExchAdjustment;
+            tmpVendOpenTrans.ExchRate                  = vendTrans.ExchRate;
+            tmpVendOpenTrans.DocumentNum               = vendTrans.DocumentNum;
+            tmpVendOpenTrans.DocumentDate              = vendTrans.DocumentDate;
+            tmpVendOpenTrans.DueDate                   = vendTrans.DueDate;
+            tmpVendOpenTrans.Invoice                   = vendTrans.Invoice;
+            tmpVendOpenTrans.LastExchAdj               = vendTrans.LastExchAdj;
+            tmpVendOpenTrans.LastExchAdjRate           = vendTrans.LastExchAdjRate;
+            tmpVendOpenTrans.LastExchAdjVoucher        = vendTrans.LastExchAdjVoucher;
+            tmpVendOpenTrans.ReportingCurrencyAmount   = vendTrans.ReportingCurrencyAmount;
+            tmpVendOpenTrans.ReportingCurrencyExchRate = vendTrans.ReportingCurrencyExchRate;
+            tmpVendOpenTrans.Voucher                   = vendTrans.Voucher;
+            tmpVendOpenTrans.TransDate                 = vendTrans.TransDate;
+            tmpVendOpenTrans.RecId                     = vendTrans.RecId;
+            
+            tmpVendOpenTrans.CounterPartyName          = vendTrans.vendTableName();
+            tmpVendOpenTrans.LedgerOffsetCode          = VendTrans::ledgerOffsetCode(vendTrans);
+            tmpVendOpenTrans.LedgerOffsetName          = VendTrans::ledgerOffsetName(vendTrans);
+            
+            // FIX THE ZERO AND MATH ISSUES USING HISTORICAL VALUES
+            tmpVendOpenTrans.ETGBalanceTC              = amountCurOpen;         // Historical TC
+            tmpVendOpenTrans.ETGBalanceUSD             = calculatedBalanceUSD;  // Custom Exch Rate * Historical TC
+            
+            tmpVendOpenTrans.NewExchangeRate           = VendTrans::newExchangeRate(vendTrans);
+            tmpVendOpenTrans.LedgerCode                = VendTrans::displayMainAccountId(vendTrans);
+            
+            // Get Vendor Group
+            select firstonly VendGroup from vendTable where vendTable.AccountNum == vendTrans.AccountNum;
+            tmpVendOpenTrans.CustGroup                 = vendTable.VendGroup;
+            tmpVendOpenTrans.CustName                  = vendTable.name();
+
+            // Financial Dimension
+            tmpVendOpenTrans.BusinessUnit          = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, businessUnitStr);
+            tmpVendOpenTrans.Vertical              = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, verticalStr);
+            tmpVendOpenTrans.MainCommodity         = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, MAIN_COMMODITYStr);
+            tmpVendOpenTrans.SubCommodity          = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(vendTrans.DefaultDimension, SUB_COMMODITYStr);
+            tmpVendOpenTrans.LineOfBusiness        = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, lineOfBusinessStr);
+            tmpVendOpenTrans.PlantWarehouseOffice  = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, plantWarehouseOfficeStr);
+            tmpVendOpenTrans.Department            = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, departmentStr);
+            tmpVendOpenTrans.InterCompany          = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, interCompanyStr);
+            tmpVendOpenTrans.TraderEmployee        = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, trader_EmployeeStr);
+            tmpVendOpenTrans.Item                  = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, itemStr);
+            
+            tmpVendOpenTrans.Product_Service       = VendTrans::product_Service(vendTrans);
+
+            tmpVendOpenTrans.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

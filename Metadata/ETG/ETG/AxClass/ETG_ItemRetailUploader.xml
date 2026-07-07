@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_ItemRetailUploader</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+using System.IO;
+using OfficeOpenXml;
+using OfficeOpenXml.ExcelPackage;
+using OfficeOpenXml.ExcelRange;
+
+class ETG_ItemRetailUploader
+{
+    
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Runs the class with the specified arguments.
+    /// </summary>
+    /// <param name = "_args">The specified arguments.</param>
+    public static void main(Args _args)
+    {
+        System.IO.Stream		    stream;
+        ExcelSpreadsheetName	    sheeet;
+        FileUploadBuild			    fileUpload;
+        DialogGroup				    dlgUploadGroup;
+        FileUploadBuild			    fileUploadBuild;
+        FormBuildControl		    formBuildControl;
+        int                         counter,minrange,maxrange;
+        InventTable				    inventTable;
+        ItemId					    itemID;
+        ETGNote                     etgNote;
+        Description1000             description;
+        NoYesId                     noyes;
+        ETGTradingNotes             tradingNotes, tradingNotesUpd;
+              
+        Dialog dialog = new Dialog("Import Item Retail Note");
+
+        dlgUploadGroup		= dialog.addGroup("Select Excel File to Upload.");
+        formBuildControl	= dialog.formBuildDesign().control(dlgUploadGroup.name());
+        fileUploadBuild		= formBuildControl.addControlEx(classstr(FileUpload), 'Upload');
+
+        fileUploadBuild.style(FileUploadStyle::MinimalWithFilename);
+        fileUploadBuild.fileTypesAccepted('.xlsx');
+
+    
+        if (dialog.run() && dialog.closedOk())
+        {
+            FileUpload fileUploadControl					  = dialog.formRun().control(dialog.formRun().controlId('Upload'));
+            FileUploadTemporaryStorageResult fileUploadResult = fileUploadControl.getFileUploadResult();
+
+            if (fileUploadResult != null && fileUploadResult.getUploadStatus())
+            {
+                stream = fileUploadResult.openResult();
+                using (ExcelPackage Package = new ExcelPackage(stream))
+                {
+                    int rowCount, i;
+
+                    Package.Load(stream);
+                    ExcelWorksheet worksheet		= package.get_Workbook().get_Worksheets().get_Item(1);
+                    OfficeOpenXml.ExcelRange range	= worksheet.Cells;
+                    rowCount = worksheet.Dimension.End.Row - worksheet.Dimension.Start.Row + 1;
+
+                    for (i = 2; i<= rowCount; i++)
+                    {
+                        
+                        itemID                   = range.get_Item(i, 1).Value;
+                        etgNote                  = str2Enum(etgNote, range.get_Item(i, 3).Value);
+
+                        select firstonly inventTable
+                            where inventTable.ItemId == itemID;
+
+                        select firstonly tradingNotesUpd
+                            where tradingNotesUpd.ItemId == itemID
+                            && tradingNotesUpd.EnumNotes == etgNote;
+
+
+                        if(!inventTable)
+                        {
+                            error(strFmt('Item %1 not found in master', itemID));
+                        }
+                       
+                        if(inventTable && !tradingNotesUpd)
+                        {
+                            tradingNotes.clear();
+
+                            try
+                            {    
+                                tradingNotes.ItemId                   = range.get_Item(i, 1).Value;
+                                tradingNotes.Description              = range.get_Item(i, 2).Value;
+                                tradingNotes.EnumNotes                = str2Enum(etgNote, range.get_Item(i, 3).Value);
+                                tradingNotes.PrintNotesInContract     = str2Enum(noyes, range.get_Item(i, 4).Value);
+
+                                ttsbegin;
+                                tradingNotes.insert();
+                                ttscommit;
+                                counter++;
+                            }
+                            catch(Exception::Error)
+                            {
+                                ttsabort;
+                            }
+                        }
+
+                        if(inventTable && tradingNotesUpd)
+                        {
+                            try
+                            {
+                                tradingNotesUpd.ItemId                   = range.get_Item(i, 1).Value;
+                                tradingNotesUpd.Description              = range.get_Item(i, 2).Value;
+                                tradingNotesUpd.EnumNotes                = str2Enum(etgNote, range.get_Item(i, 3).Value);
+                                tradingNotesUpd.PrintNotesInContract     = str2Enum(noyes, range.get_Item(i, 4).Value);
+
+                                ttsbegin;
+                                tradingNotesUpd.selectForUpdate(true);
+                                tradingNotesUpd.update();
+                                ttscommit;
+                                counter++;
+
+                            }
+                            catch(Exception::Error)
+                            {
+                                ttsabort;
+                            }
+                        }
+                        
+                    }
+                    info(strFmt('Item Retail Uploaded Sucessfully. Total Lines %1 : ',counter));
+                }
+            }
+            else
+            {
+                error("Error During Upload. Please Contact System Admin. Item ID %1",itemID);
+            }
+
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

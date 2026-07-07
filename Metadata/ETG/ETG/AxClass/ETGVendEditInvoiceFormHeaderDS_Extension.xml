@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGVendEditInvoiceFormHeaderDS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formDataSourceStr(VendEditInvoice, VendInvoiceInfoTable))]
+internal final class ETGVendEditInvoiceFormHeaderDS_Extension
+{
+    private static RecId lastInvoiceRecId;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {
+        int ret = next active();
+      
+        if(ETGACFParameters::find().EnablePTBFContractsPurch == NoYes::Yes)
+        {
+            FormDataSource VendInvoiceInfoTable_ds            = this;
+            VendInvoiceInfoTable VendInvoiceInfoTableloc       = VendInvoiceInfoTable_ds.cursor();
+
+            FormControl         buttonParmTablePacking   = element.design(0).controlName("buttonParmTablePackingSlips");
+            FormControl         okpost   = element.design(0).controlName("OK");
+             
+            VendInvoiceInfoLine  VendInvoiceInfoLineloc;
+              
+            select sum(ETGActualLineAmt),sum(LineAmount) from  VendInvoiceInfoLineloc
+                    where   VendInvoiceInfoLineloc.ParmId == VendInvoiceInfoTableloc.ParmId
+                    &&      VendInvoiceInfoLineloc.TableRefId == VendInvoiceInfoTableloc.TableRefId;
+
+            if(abs(VendInvoiceInfoLineloc.ETGActualLineAmt)  != 0 && VendInvoiceInfoTableloc.ETGCrDrNoteCreated == NoYes::No)
+            {
+                buttonParmTablePacking.enabled(false);
+                okpost.enabled(false);
+            }
+            else
+            {
+                buttonParmTablePacking.enabled(true);
+                okpost.enabled(true);
+            }
+        }
+      
+        //NS, DLT ,04/03/2025 To update the GRN date to the posting Date in Pending invoices
+        if(ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+        {
+            VendInvoiceInfoTable VendInvoiceInfoTableloc = this.cursor();
+
+            //Avoids scenarios where the currently active record becomes null by selecting the previously selected record.
+            if (!VendInvoiceInfoTableloc.RecId && lastInvoiceRecId)
+            {
+                select firstOnly VendInvoiceInfoTableloc where VendInvoiceInfoTableloc.RecId == lastInvoiceRecId;
+            }
+            else
+            {
+                lastInvoiceRecId = VendInvoiceInfoTableloc.RecId;
+            }
+
+            vendpackingsliptrans packingsliptrans;
+
+            select firstonly packingsliptrans
+            where packingsliptrans.OrigPurchid == VendInvoiceInfoTableloc.PurchId;
+
+            if(VendInvoiceInfoTableloc.ETGPostingDateCheck == NoYes::No)
+            {
+                ttsbegin;
+                VendInvoiceInfoTableloc.selectForUpdate(true);
+                VendInvoiceInfoTableloc.TransDate      = packingsliptrans.DeliveryDate;
+                VendInvoiceInfoTableloc.ETGPostingDateCheck = NoYes::Yes;
+                VendInvoiceInfoTableloc.doUpdate();
+                ttscommit;
+            }
+        }
+        //NE, DLT ,04/03/2025 To update the GRN date to the posting Date in Pending invoices
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

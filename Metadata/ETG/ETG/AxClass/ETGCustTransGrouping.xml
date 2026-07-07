@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCustTransGrouping</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGCustTransGrouping
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>dialog</Name>
+				<Source><![CDATA[
+    public void dialog()
+    {
+        Dialog                       dialog;
+        TransDate                    fromDate,toDate;
+        DialogField                  dialogFromDate,dialogToDate;
+        DialogField                  dialogCustomerBalance;
+        dialog = new dialog("Customer transactions list group");
+        dialogFromDate       = dialog.addField(extendedTypeStr(TransDate), "From date");
+        dialogToDate         = dialog.addField(extendedTypeStr(TransDate), "To date");
+        dialog.run();
+        if(dialogFromDate.value() >= dialogToDate.value())
+        {
+            throw error("To date should be greater than From date'");
+        }
+        else if (dialog.run())
+        {
+            this.createCustTransGroupData(dialogFromDate.value(), dialogToDate.value());
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createCustTransGroupData</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name = "_fromdate"></param>
+    /// <param name = "_todate"></param>
+    public void createCustTransGroupData(date _fromdate, date _todate)
+    {
+        ETGCustomerTransGroup customerTransGroup;
+        CustTrans custTrans, custTransCredit, custTransOpen,custTransLocal;
+        CustTable custtableLocal;
+        date fromdate, todate;
+        timeofday fromtime, totime;
+        AmountCur creditBal, openBal;
+
+        str businessUnitValue, verticalValue,
+            MAIN_COMMODITYValue, SUB_COMMODITYValue, lineOfBusinessValue, contractValue, plantWarehouseOfficeValue,
+            departmentValue, interCompanyValue, trader_EmployeeValue, itemValue;
+        str businessUnitStr = "BusinessUnit";        
+        str verticalStr = "Vertical";
+        str MAIN_COMMODITYStr = "MAIN_COMMODITY";
+        str SUB_COMMODITYStr = "SUB_COMMODITY";
+        str lineOfBusinessStr = "Line_of_Business";
+        str contractsStr = "Contract";
+        str plantWarehouseOfficeStr = "Plant_Warehouse_Office";
+        str departmentStr = "Department";
+        str interCompanyStr = "InterCompany";
+        str trader_EmployeeStr = "Trader_Employee";
+        str itemStr = "Item";
+
+        Args args = new Args();
+        ;
+        ttsbegin;
+        delete_from customerTransGroup;
+        ttscommit;
+
+            // Debit
+
+        while select CurrencyCode, AccountNum from custTransLocal group by custTransLocal.CurrencyCode,
+                                        custTransLocal.AccountNum
+            where custTransLocal.DataAreaId == curext()
+            && custTransLocal.TransDate >= _fromdate && custTransLocal.TransDate <= _todate
+            && (custTransLocal.Closed == dateNull() ||
+                custTransLocal.Closed >= _fromdate && custTransLocal.Closed <= _todate)
+        if(custTransLocal)
+        {
+            customerTransGroup.AccountNum = custTransLocal.AccountNum;
+            customerTransGroup.ETGCustName = custTransLocal.custTableName();  
+            customerTransGroup.CurrencyCode = custTransLocal.CurrencyCode;
+
+            select sum(AmountCur),sum(SettleAmountCur), CurrencyCode, AccountNum from custTrans group by custTrans.CurrencyCode,
+                                        custTrans.AccountNum
+            where custTrans.DataAreaId == curext()
+           && custTrans.AccountNum == custTransLocal.AccountNum
+           && custTrans.CurrencyCode == custTransLocal.CurrencyCode
+           && custTrans.AmountCur < 0.00
+           && custTrans.TransDate >= _fromdate && custTrans.TransDate <= _todate
+           && (custTrans.Closed == dateNull()
+           ||  custTrans.Closed >= _fromdate && custTrans.Closed <= _todate);
+             {
+                 customerTransGroup.AmountCredit = abs(custTrans.AmountCur) - abs(custTrans.SettleAmountCur);
+             }
+                //credit - Start
+                select sum(AmountCur),sum(SettleAmountCur), CurrencyCode, AccountNum from custTransCredit group by custTransCredit.CurrencyCode,
+                                            custTransCredit.AccountNum
+                where custTransCredit.DataAreaId == curext()
+                && custTransCredit.AccountNum == custTransLocal.AccountNum
+                &&  custTransCredit.CurrencyCode == custTransLocal.CurrencyCode
+                && custTransCredit.AmountCur > 0.00
+                && custTransCredit.TransDate >= _fromdate && custTransCredit.TransDate <= _todate
+                && (custTransCredit.Closed == dateNull() ||
+                   custTransCredit.Closed >= _fromdate && custTransCredit.Closed <= _todate);
+                    {
+                        creditBal = 0.00;
+                customerTransGroup.AmountDebit = abs(custTransCredit.AmountCur) - abs(custTransCredit.SettleAmountCur);
+                    }
+       
+  
+                    select sum(AmountCur),sum(SettleAmountCur), CurrencyCode, AccountNum from custTransOpen group by custTransOpen.CurrencyCode,
+                                        custTransOpen.AccountNum
+            where custTransOpen.DataAreaId == curext()
+            && custTransOpen.AccountNum == custTransLocal.AccountNum
+            &&  custTransOpen.CurrencyCode == custTransLocal.CurrencyCode
+                && custTransOpen.TransDate < _fromdate
+                &&(custTransOpen.Closed == dateNull() || custTransOpen.Closed < _fromdate);
+            {          
+                customerTransGroup.OpeningBalance = abs(custTransOpen.AmountCur) - abs(custTransOpen.SettleAmountCur);
+            }
+            openBal = customerTransGroup.AmountDebit - customerTransGroup.AmountCredit;
+            customerTransGroup.SumAmount = customerTransGroup.OpeningBalance + openBal;
+
+            businessUnitValue = ETGBankTransFinDim::getDimensionDisplayValue(custTransLocal.DefaultDimension, businessUnitStr);
+
+            if(businessUnitValue)
+            {
+                customerTransGroup.BusinessUnit = businessUnitValue;
+            }
+
+            verticalValue = ETGBankTransFinDim::getDimensionDisplayValue(custTransLocal.DefaultDimension, verticalStr);
+
+            if(verticalValue)
+            {
+                customerTransGroup.Vertical = verticalValue;
+            }
+
+            MAIN_COMMODITYValue = ETGBankTransFinDim::getDimensionDisplayValue(custTransLocal.DefaultDimension, MAIN_COMMODITYStr);
+
+            if(MAIN_COMMODITYValue)
+            {
+                customerTransGroup.MainCommodity = MAIN_COMMODITYValue;
+            }
+
+            SUB_COMMODITYValue = ETGBankTransFinDim::getDimensionDisplayValue(custTransLocal.DefaultDimension, SUB_COMMODITYStr);
+
+            if(SUB_COMMODITYValue)
+            {
+                customerTransGroup.SubCommodity = SUB_COMMODITYValue;
+            }
+
+            lineOfBusinessValue = ETGBankTransFinDim::getDimensionDisplayValue(custTransLocal.DefaultDimension, lineOfBusinessStr);
+
+            if(lineOfBusinessValue)
+            {
+                customerTransGroup.LineOfBusiness = lineOfBusinessValue;
+            }
+
+            contractValue = ETGBankTransFinDim::getDimensionDisplayValue(custTransLocal.DefaultDimension, contractsStr);
+
+            if(contractValue)
+            {
+                customerTransGroup.Contract = contractValue;
+            }
+
+            plantWarehouseOfficeValue = ETGBankTransFinDim::getDimensionDisplayValue(custTransLocal.DefaultDimension, plantWarehouseOfficeStr);
+
+            if(plantWarehouseOfficeValue)
+            {
+                customerTransGroup.PlantWarehouseOffice = plantWarehouseOfficeValue;
+            }
+
+            departmentValue = ETGBankTransFinDim::getDimensionDisplayValue(custTransLocal.DefaultDimension, departmentStr);
+
+            if(departmentValue)
+            {
+                customerTransGroup.Department = departmentValue;
+            }
+
+            interCompanyValue = ETGBankTransFinDim::getDimensionDisplayValue(custTransLocal.DefaultDimension, interCompanyStr);
+
+            if(interCompanyValue)
+            {
+                customerTransGroup.InterCompany = interCompanyValue;
+            }
+
+            trader_EmployeeValue = ETGBankTransFinDim::getDimensionDisplayValue(custTransLocal.DefaultDimension, trader_EmployeeStr);
+
+            if(trader_EmployeeValue)
+            {
+                customerTransGroup.TraderEmployee = trader_EmployeeValue;
+            }
+
+            itemValue = ETGBankTransFinDim::getDimensionDisplayValue(custTransLocal.DefaultDimension, itemStr);
+
+            if(itemValue)
+            {
+                customerTransGroup.Item = itemValue;
+            }
+            customerTransGroup.insert();
+        }
+        new MenuFunction(menuItemdisplayStr(ETGCustTransGrouping),MenuItemType::Display).run();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    public void run()
+    {
+        this.dialog();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name = "_args"></param>
+    public static void main(Args _args)
+    {
+        ETGCustTransGrouping custTransGrouping;
+        custTransGrouping = new ETGCustTransGrouping();
+        custTransGrouping.run();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

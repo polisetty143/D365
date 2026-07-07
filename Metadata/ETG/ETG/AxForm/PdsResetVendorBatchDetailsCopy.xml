@@ -1,0 +1,636 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxForm xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V6">
+	<Name>PdsResetVendorBatchDetailsCopy</Name>
+	<SourceCode>
+		<Methods xmlns="">
+			<Method>
+				<Name>classDeclaration</Name>
+				<Source><![CDATA[
+[Form]
+public class PdsResetVendorBatchDetailsCopy extends FormRun
+{
+    PdsVendBatchInfo        vendBatchInfo;
+    InventBatch             inventBatch;
+    PdsVendBatchDate        vendBatchDate;
+    PdsUseVendBatchDate     useVendBatchDate;
+    PdsVendExpiryDate       vendExpDate;
+    PdsUseVendBatchExp      useVendExpDate;
+    PdsCountryOfOrigin1     ctryOrigin1;
+    PdsCountryOfOrigin2     ctryOrigin2;
+    PdsVendBatchId          vendBatchId;
+    RefRecId                purchLineRecId;
+    RefRecId                consignmentReplenishmentOrderLineRecId;
+    boolean                 updDates;
+    boolean                 isInVendBatchInfoMode;
+    InventValueReportTmpLine         inventValueReportTmpLine;
+
+}
+]]></Source>
+			</Method>
+			<Method>
+				<Name>closeOk</Name>
+				<Source><![CDATA[
+    public void closeOk()
+    {
+        InventDim           lclInventDim;
+        ItemId              lclItemId;
+
+        if (updDates)
+        {
+            //store the vendor batch details on the form
+            PdsVendBatchInfo lclVendBatchInfo = this.initializeVendBatchInfo();
+            try
+            {
+                ttsbegin;
+                if (isInVendBatchInfoMode)
+                {
+                    if (purchLineRecId)
+                    {
+                        vendBatchInfo = PdsVendBatchInfo::findBySourceRecId(PdsVendBatchInfoSourceRefType::PurchaseOrderLine, purchLineRecId, true);
+                        vendBatchInfo.initFromVendorBatchInfo(lclVendBatchInfo);
+                        
+                        PurchLine purchLine = PurchLine::findRecId(purchLineRecId);
+
+                        vendBatchInfo.initFromPurchLine(purchLine);
+
+                        lclInventDim = purchLine.inventDim();
+                        lclItemId = purchLine.ItemId;
+                    }
+                    else if (consignmentReplenishmentOrderLineRecId)
+                    {
+                        vendBatchInfo = PdsVendBatchInfo::findBySourceRecId(PdsVendBatchInfoSourceRefType::ConsignmentReplenishmentOrderLine, consignmentReplenishmentOrderLineRecId, true);
+                        vendBatchInfo.initFromVendorBatchInfo(lclVendBatchInfo);
+                        
+                        ConsignmentReplenishmentOrderLine consignmentReplenishmentOrderLine = ConsignmentReplenishmentOrderLine::find(consignmentReplenishmentOrderLineRecId);
+
+                        vendBatchInfo.initFromConsignmentReplenishmentOrderLine(consignmentReplenishmentOrderLine);
+
+                        lclInventDim = consignmentReplenishmentOrderLine.inventDim();
+                        lclItemId = consignmentReplenishmentOrderLine.ItemId;
+                    }
+
+                    //this may not be already created (if the item was updated with new shelf life info)
+                    vendBatchInfo.write();
+
+                    inventBatch = InventBatch::find(lclInventDim.inventBatchId, lclItemId);
+                    //fall through
+                }
+
+                if (inventBatch.InventBatchId && inventBatch.ItemId)
+                {
+                    InventBatch lclInventBatch = InventBatch::find(
+                                                    inventBatch.InventBatchId,
+                                                    inventBatch.ItemId,
+                                                    true);
+                    lclInventBatch.pdsInitFromVendBatchDetails(lclVendBatchInfo, lclVendBatchInfo.isNullOrEmpty());
+                    this.doUpdateInventBatch(lclInventBatch);
+                }
+                ttscommit;
+            }
+            catch (Exception::Deadlock)
+            {
+                retry;
+            }
+       
+            if (FormDataUtil::isFormDataSource(inventBatch))
+            {
+                FormDataUtil::getFormDataSource(inventBatch).research(true);
+            }
+        }
+
+        super();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>doUpdateInventBatch</Name>
+				<Source><![CDATA[
+    protected void doUpdateInventBatch(InventBatch _inventBatch)
+    {
+        _inventBatch.update();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initializeVendBatchInfo</Name>
+				<Source><![CDATA[
+    protected PdsVendBatchInfo initializeVendBatchInfo()
+    {
+        PdsVendBatchInfo pdsVendBatchInfo;
+        
+        pdsVendBatchInfo.VendBatchDate     = vendBatchDate;
+        pdsVendBatchInfo.UseVendBatchDate  = useVendBatchDate;
+        pdsVendBatchInfo.VendExpiryDate    = vendExpDate;
+        pdsVendBatchInfo.UseVendBatchExp   = useVendExpDate;
+        pdsVendBatchInfo.CountryOfOrigin1  = ctryOrigin1;
+        pdsVendBatchInfo.CountryOfOrigin2  = ctryOrigin2;
+        pdsVendBatchInfo.VendBatchId       = vendBatchId;
+
+        return pdsVendBatchInfo;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>country1</Name>
+				<Source><![CDATA[
+    public edit PdsCountryOfOrigin1 country1(
+        boolean                 _set,
+        PdsCountryOfOrigin1     _country1)
+    {
+        if (_set)
+        {
+            if (ctryOrigin1 != _country1)
+            {
+                if (_country1 && !LogisticsAddressCountryRegion::find(_country1))
+                {
+                    throw error(strFmt("@SYS316352", _country1, fieldPName(PdsVendBatchInfo, CountryOfOrigin1), tablePName(LogisticsAddressCountryRegion)));
+                }
+                if (_country1 && (_country1 == ctryOrigin2))
+                {
+                    throw error("@PDS1356");
+                }
+
+                ctryOrigin1 = _country1;
+                updDates    = true;
+            }
+        }
+
+        return ctryOrigin1;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>country2</Name>
+				<Source><![CDATA[
+    public edit PdsCountryOfOrigin2 country2(
+        boolean                 _set,
+        PdsCountryOfOrigin1     _country2)
+    {
+        if (_set)
+        {
+            if (ctryOrigin2 != _country2)
+            {
+                if (_country2 && !LogisticsAddressCountryRegion::find(_country2))
+                {
+                    throw error(strFmt("@SYS316352", _country2, fieldPName(PdsVendBatchInfo, CountryOfOrigin2), tablePName(LogisticsAddressCountryRegion)));
+                }
+                if (_country2 && (_country2 == ctryOrigin1))
+                {
+                    throw error("@PDS1356");
+                }
+
+                ctryOrigin2 = _country2;
+                updDates    = true;
+            }
+        }
+
+        return ctryOrigin2;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>init</Name>
+				<Source><![CDATA[
+    public void init()
+    {
+        ItemId      itemId;
+        boolean     isShelfLifeDefined;
+
+        if (!element.args() || !element.args().record())
+        {
+            throw error(Error::missingRecord(formstr(PdsResetVendorBatchDetails)));
+        }
+
+        switch (element.args().dataset())
+        {
+            case tableNum(InventSum):
+                InventSum inventSum = element.args().record() as InventSum;
+                InventDim inventDim = Global::getJoinChildFormDataSource(FormDataUtil::getFormDataSource(inventSum), tableNum(InventDim)).cursor() as InventDim;
+                inventBatch = InventBatch::find(inventDim.inventBatchId, inventSum.ItemId);
+                if (!inventBatch.inventBatchId)
+                {
+                    //batch number is required
+                    throw error("@PRO1677");
+                }
+                break;
+            case tableNum(PurchLine) :
+                PurchLine purchLine   = element.args().record();
+                if (purchLine.inventDim().inventBatchId)
+                {
+                    inventBatch = InventBatch::find(purchLine.inventDim().inventBatchId, purchLine.ItemId);
+                }
+                else
+                {
+                    isInVendBatchInfoMode   = true;
+                    purchLineRecId          = purchLine.RecId;
+                    itemId                  = purchLine.ItemId;
+                    vendBatchInfo           = PdsVendBatchInfo::findBySourceRecId(PdsVendBatchInfoSourceRefType::PurchaseOrderLine, purchLineRecId);
+                }
+                break;
+            case tableNum(ConsignmentReplenishmentOrderLine) :
+                ConsignmentReplenishmentOrderLine consignmentReplenishmentOrderLine = element.args().record();
+                if (consignmentReplenishmentOrderLine.inventDim().inventBatchId)
+                {
+                    inventBatch = InventBatch::find(consignmentReplenishmentOrderLine.inventDim().inventBatchId, consignmentReplenishmentOrderLine.ItemId);
+                }
+                else
+                {
+                    isInVendBatchInfoMode                   = true;
+                    consignmentReplenishmentOrderLineRecId  = consignmentReplenishmentOrderLine.RecId;
+                    itemId                                  = consignmentReplenishmentOrderLine.ItemId;
+                    vendBatchInfo                           = PdsVendBatchInfo::findBySourceRecId(PdsVendBatchInfoSourceRefType::ConsignmentReplenishmentOrderLine, consignmentReplenishmentOrderLineRecId);
+                }
+                break;
+            case tableNum(InventBatch) :
+                inventBatch         = element.args().record();
+                break;
+
+            default:
+                throw error(strfmt("@SYS29104", formstr(PdsResetVendorBatchDetails)));
+        }
+
+        if (isInVendBatchInfoMode)
+        {
+            vendBatchDate       = vendBatchInfo.VendBatchDate;
+            useVendBatchDate    = vendBatchInfo.UseVendBatchDate;
+            vendExpDate         = vendBatchInfo.VendExpiryDate;
+            useVendExpDate      = vendBatchInfo.UseVendBatchExp;
+            ctryOrigin1         = vendBatchInfo.CountryOfOrigin1;
+            ctryOrigin2         = vendBatchInfo.CountryOfOrigin2;
+            vendBatchId         = vendBatchInfo.VendBatchId;
+        }
+        else
+        {
+            vendBatchDate       = inventBatch.PdsVendBatchDate;
+            useVendBatchDate    = inventBatch.PdsUseVendBatchDate;
+            vendExpDate         = inventBatch.PdsVendExpiryDate;
+            useVendExpDate      = inventBatch.PdsUseVendBatchExp;
+            ctryOrigin1         = inventBatch.PdsCountryOfOrigin1;
+            ctryOrigin2         = inventBatch.PdsCountryOfOrigin2;
+            vendBatchId         = inventBatch.PdsVendBatchId;
+            itemId              = inventBatch.itemId;
+        }
+
+        super();
+
+        isShelfLifeDefined = InventTable::find(itemId).isShelfLifeItem();
+
+        useVendExpDate_Ctrl.allowEdit(isShelfLifeDefined);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>useVendDate</Name>
+				<Source><![CDATA[
+    public edit PdsUseVendBatchDate useVendDate(
+        boolean             _set,
+        PdsUseVendBatchDate _useVendBatchDate)
+    {
+        if (_set)
+        {
+            if (useVendBatchDate != _useVendBatchDate)
+            {
+                if (vendBatchDate == dateNull())
+                {
+                    throw error("@PRO2231");
+                }
+
+                useVendBatchDate = _useVendBatchDate;
+                updDates    = true;
+            }
+        }
+
+        return useVendBatchDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>useVendExpDate</Name>
+				<Source><![CDATA[
+    public edit PdsUseVendBatchExp useVendExpDate(
+        boolean             _set,
+        PdsUseVendBatchExp  _useVendExpDate)
+    {
+        if (_set)
+        {
+            if (useVendExpDate != _useVendExpDate)
+            {
+                if (vendExpDate == dateNull())
+                {
+                    throw error("@PDS1352");
+                }
+
+                useVendExpDate = _useVendExpDate;
+                updDates       = true;
+            }
+        }
+
+        return useVendExpDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>vendBatchDate</Name>
+				<Source><![CDATA[
+    public edit PdsVendBatchDate vendBatchDate(
+        boolean             _set,
+        PdsVendBatchDate    _vendBatchDate)
+    {
+        if (_set
+            && vendBatchDate != _vendBatchDate)
+        {
+            if (_vendBatchDate != dateNull()
+                && _vendBatchDate > DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()))
+            {
+                error("@PRO2230");
+            }
+            else
+            {
+                vendBatchDate   = _vendBatchDate;
+                if (vendBatchDate == dateNull())
+                {
+                    useVendBatchDate = NoYes::No;
+                }
+                updDates    = true;
+            }
+        }
+
+        return vendBatchDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>vendBatchId</Name>
+				<Source><![CDATA[
+    public edit PdsVendBatchId vendBatchId(
+        boolean         _set,
+        PdsVendBatchId  _vendBatchId)
+    {
+        if (_set
+            && vendBatchId != _vendBatchId)
+        {
+            vendBatchId = _vendBatchId;
+            updDates    = true;
+        }
+
+        return vendBatchId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>vendExpDate</Name>
+				<Source><![CDATA[
+    public edit PdsVendExpiryDate vendExpDate(
+        boolean             _set,
+        PdsVendExpiryDate   _vendExpDate)
+    {
+        if (_set && vendExpDate != _vendExpDate)
+        {
+            if (_vendExpDate != dateNull()
+                && _vendExpDate <= DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()))
+            {
+                throw error("@PDS1353");
+            }
+            else
+            {
+                vendExpDate    = _vendExpDate;
+                if (vendExpDate == dateNull())
+                {
+                    useVendExpDate = NoYes::No;
+                }
+                updDates    = true;
+            }
+        }
+
+        return vendExpDate;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+		<DataSources xmlns="" />
+		<DataControls xmlns="" />
+		<Members xmlns="" />
+	</SourceCode>
+	<DataSources />
+	<Design>
+		<BackgroundColor xmlns="">WindowBackground</BackgroundColor>
+		<Caption xmlns="">@PDS1934</Caption>
+		<Frame xmlns="">Dialog</Frame>
+		<HideToolbar xmlns="">Yes</HideToolbar>
+		<Pattern xmlns="">Dialog</Pattern>
+		<PatternVersion xmlns="">1.2</PatternVersion>
+		<Style xmlns="">Dialog</Style>
+		<WindowResize xmlns="">Fixed</WindowResize>
+		<WindowType xmlns="">Popup</WindowType>
+		<Controls xmlns="">
+			<AxFormControl xmlns=""
+				i:type="AxFormStaticTextControl">
+				<Name>MoreInstructionText</Name>
+				<ExtendedStyle>dialog_secondaryInstruction</ExtendedStyle>
+				<Type>StaticText</Type>
+				<WidthMode>SizeToAvailable</WidthMode>
+				<FormControlExtension
+					i:nil="true" />
+				<Text>@PDS1937</Text>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGroupControl">
+				<Name>DialogContent</Name>
+				<ElementPosition>715827882</ElementPosition>
+				<FilterExpression>%1</FilterExpression>
+				<HeightMode>SizeToAvailable</HeightMode>
+				<Pattern>FieldsFieldGroups</Pattern>
+				<PatternVersion>1.1</PatternVersion>
+				<Type>Group</Type>
+				<VerticalSpacing>-1</VerticalSpacing>
+				<WidthMode>SizeToAvailable</WidthMode>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormGroupControl">
+						<Name>ShelfLifeDates</Name>
+						<ElementPosition>954437176</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<Type>Group</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormDateControl">
+								<Name>VendBatchDate</Name>
+								<ElementPosition>1073741822</ElementPosition>
+								<FilterExpression>%1</FilterExpression>
+								<HelpText>@FieldDescriptions_InventoryManagement:PdsResetVendorBatchDetails_VendBatchDate</HelpText>
+								<Type>Date</Type>
+								<VerticalSpacing>-1</VerticalSpacing>
+								<FormControlExtension
+									i:nil="true" />
+								<DataMethod>vendBatchDate</DataMethod>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormCheckBoxControl">
+								<Name>UseVendDate</Name>
+								<ElementPosition>1610612733</ElementPosition>
+								<FilterExpression>%1</FilterExpression>
+								<Type>CheckBox</Type>
+								<VerticalSpacing>-1</VerticalSpacing>
+								<FormControlExtension
+									i:nil="true" />
+								<DataMethod>useVendDate</DataMethod>
+							</AxFormControl>
+						</Controls>
+						<Caption>@PDS1940</Caption>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormGroupControl">
+						<Name>ExpiryDates</Name>
+						<ElementPosition>1431655764</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<Type>Group</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormDateControl">
+								<Name>VendExpDate</Name>
+								<ElementPosition>1073741822</ElementPosition>
+								<FilterExpression>%1</FilterExpression>
+								<HelpText>@FieldDescriptions_InventoryManagement:PdsResetVendorBatchDetails_VendExpDate</HelpText>
+								<Type>Date</Type>
+								<VerticalSpacing>-1</VerticalSpacing>
+								<FormControlExtension
+									i:nil="true" />
+								<DataMethod>vendExpDate</DataMethod>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormCheckBoxControl">
+								<Name>UseVendExpDate_Ctrl</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<ElementPosition>1610612733</ElementPosition>
+								<FilterExpression>%1</FilterExpression>
+								<Type>CheckBox</Type>
+								<VerticalSpacing>-1</VerticalSpacing>
+								<FormControlExtension
+									i:nil="true" />
+								<DataMethod>useVendExpDate</DataMethod>
+							</AxFormControl>
+						</Controls>
+						<Caption>@PDS1938</Caption>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormGroupControl">
+						<Name>Other</Name>
+						<ElementPosition>1670265058</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<Type>Group</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>CtryOrigin1</Name>
+								<ElementPosition>858993458</ElementPosition>
+								<FilterExpression>%1</FilterExpression>
+								<HelpText>@FieldDescriptions_InventoryManagement:PdsResetVendorBatchDetails_CtryOrigin1</HelpText>
+								<Type>String</Type>
+								<VerticalSpacing>-1</VerticalSpacing>
+								<FormControlExtension
+									i:nil="true" />
+								<DataMethod>country1</DataMethod>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>CtryOrigin2</Name>
+								<ElementPosition>1288490187</ElementPosition>
+								<FilterExpression>%1</FilterExpression>
+								<HelpText>@FieldDescriptions_InventoryManagement:PdsResetVendorBatchDetails_CtryOrigin2</HelpText>
+								<Type>String</Type>
+								<VerticalSpacing>-1</VerticalSpacing>
+								<FormControlExtension
+									i:nil="true" />
+								<DataMethod>country2</DataMethod>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>VendBatchId</Name>
+								<ElementPosition>1717986916</ElementPosition>
+								<FilterExpression>%1</FilterExpression>
+								<Type>String</Type>
+								<VerticalSpacing>-1</VerticalSpacing>
+								<FormControlExtension
+									i:nil="true" />
+								<DataMethod>vendBatchId</DataMethod>
+							</AxFormControl>
+						</Controls>
+						<Caption>@PDS1939</Caption>
+					</AxFormControl>
+				</Controls>
+				<ColumnsMode>Fill</ColumnsMode>
+				<Style>DialogContent</Style>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormButtonGroupControl">
+				<Name>ButtonGroup</Name>
+				<ElementPosition>1610612733</ElementPosition>
+				<FilterExpression>%1</FilterExpression>
+				<Left>0</Left>
+				<Type>ButtonGroup</Type>
+				<VerticalSpacing>-1</VerticalSpacing>
+				<WidthMode>SizeToAvailable</WidthMode>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormCommandButtonControl">
+						<Name>OKButton</Name>
+						<ElementPosition>1073741822</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<HeightMode>Auto</HeightMode>
+						<Type>CommandButton</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<WidthMode>Auto</WidthMode>
+						<FormControlExtension
+							i:nil="true" />
+						<ButtonDisplay>TextOnly</ButtonDisplay>
+						<Command>OK</Command>
+						<DefaultButton>Yes</DefaultButton>
+						<ShowShortCut>No</ShowShortCut>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormCommandButtonControl">
+						<Name>CancelButton</Name>
+						<ElementPosition>1610612733</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<HeightMode>Auto</HeightMode>
+						<Type>CommandButton</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<WidthMode>Auto</WidthMode>
+						<FormControlExtension
+							i:nil="true" />
+						<ButtonDisplay>TextOnly</ButtonDisplay>
+						<Command>Cancel</Command>
+						<SaveRecord>No</SaveRecord>
+					</AxFormControl>
+				</Controls>
+				<ArrangeMethod>HorizontalRight</ArrangeMethod>
+				<Style>DialogCommitContainer</Style>
+			</AxFormControl>
+		</Controls>
+	</Design>
+	<Parts />
+</AxForm>

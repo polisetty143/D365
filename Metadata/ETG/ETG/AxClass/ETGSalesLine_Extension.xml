@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesLine_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This class is an extension of SalesLine Table
+/// </summary>
+[ExtensionOf(tablestr(SalesLine))]
+final class ETGSalesLine_Extension
+{
+ 
+
+    
+
+   
+
+  
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>modifiedField</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculating the Depositamount field when DepositRate and SalesQty fields are modified
+    /// </summary>
+    /// <param name = "_fieldId">FieldId</param>
+    public void modifiedField(FieldId _fieldId)
+    {
+        next modifiedField(_fieldId);
+
+        switch (_fieldId)
+        {
+            case fieldNum(SalesLine, ETGDepositRate):
+                if(SalesParameters::find().ETGEnableCylinderTracking)
+                {
+                    if(this.ETGDepositRate < 0)
+                    {
+                        this.ETGDepositRate = 0;
+                        throw error(strFmt("@ETG_New:DepositRateValue", this.ItemId));
+                    }
+                    this.ETGDepositAmount = this.ETGDepositRate * this.SalesQty;
+                }
+                break;
+
+            case fieldNum(SalesLine, SalesQty):
+                if(SalesParameters::find().ETGEnableCylinderTracking)
+                {
+                    this.ETGDepositAmount = this.ETGDepositRate * this.SalesQty;
+                }
+                break;
+            
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateField</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Validating SalesQty, ConnectinType fields
+    /// </summary>
+    /// <param name = "_fieldId">FieldId</param>
+    /// <returns>Boolean</returns>
+    public boolean  validateField(FieldId  _fieldId)
+    {
+        boolean ok = true;
+        
+        ok = next validateField(_fieldId);
+
+        if(ok)
+        {
+            switch(_fieldId)
+            {
+                case fieldNum(SalesLine, SalesQty):
+                case fieldNum(SalesLine, ETGConnectionType):
+                    if(SalesParameters::find().ETGEnableCylinderTracking == NoYes::Yes)
+                    {
+                        ok = this.etgValidateDepositAmt();
+                    }
+                    break;
+                //case fieldNum(SalesLine, ETGRefSalesId):
+                //    if(ETGACFParameters::find().EnableManageMultiCurrencyFeature == NoYes::Yes 
+                //        && this.ETGRefSalesId == this.SalesId)
+                //    {
+                //        ok = checkFailed(strFmt("Sales order %1 can not be selected", this.SalesId));
+                //    }
+                //    break;
+            }
+        }
+
+        return ok;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>etgValidateDepositAmt</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Contains the logic for validating deposit amount field
+    /// </summary>
+    /// <returns>Boolean</returns>
+    public boolean etgValidateDepositAmt()
+    {
+        boolean isValid = true;
+        SalesTable        salesTable        = this.salesTable();
+        InventTableModule inventTableModule = InventTableModule::find(this.ItemId, ModuleInventPurchSales::Sales);
+
+        if(this.ETGConnectionType == ETGConnectionType::Surrenderofcylinders
+            && inventTableModule.ETGDepositNeeded == NoYes::Yes
+            && this.SalesQty >= 0)
+        {
+            isValid = checkFailed(strFmt("@ETG_New:QtyValidation", this.ItemId));
+        }
+
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateWrite</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Validates the record before saving. We re-apply the agreement price
+    /// here to safely catch and revert any automated price changes from Batch/Serial updates.
+    /// </summary>
+    public boolean validateWrite(boolean _checkCues)
+    {
+        // 1. Standard D365 validation
+        boolean ret = next validateWrite(_checkCues);
+
+        // 2. Your EXISTING custom calculation (MUST remain uncommented so it doesn't break current processes)
+        ETGSalesLineDataEventHandler::recalcPrice(this);
+
+    
+     //  this.etgPreserveAgreementLinePrice();
+
+        return ret;
+    }
+
+    /// <summary>
+    /// Helper method to validate and preserve agreement price on Batch/Serial changes
+    /// </summary>
+ /*   public void etgPreserveAgreementLinePrice()
+    {
+    
+        if (curext() != 'O001')
+        {
+            return;
+        }
+
+   
+        if (this.MatchingAgreementLine == 0)
+        {
+            return;
+        }
+
+ 
+        InventDim currentInventDim  = this.inventDim();
+        InventDim origInventDim     = InventDim::find(this.orig().InventDimId);
+
+        if (currentInventDim.InventLocationId != origInventDim.InventLocationId ||
+        currentInventDim.InventSiteId     != origInventDim.InventSiteId)
+        {
+            return;
+        }
+
+   
+        AgreementLineQuantityCommitment agreementLine;
+
+        select firstonly PricePerUnit, LineDiscountPercent, LineDiscountAmount
+        from agreementLine
+        where agreementLine.RecId == this.MatchingAgreementLine;
+
+    
+        if (agreementLine.RecId != 0
+        && agreementLine.PricePerUnit != 0
+        && this.SalesPrice != agreementLine.PricePerUnit)
+        {
+            this.SalesPrice  = agreementLine.PricePerUnit;
+            this.LinePercent = agreementLine.LineDiscountPercent;
+            this.LineDisc    = agreementLine.LineDiscountAmount;
+        
+       
+            this.LineAmount  = this.calcLineAmountForced();
+        }
+    }
+*/
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

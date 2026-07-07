@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_CustPackingSlipJourTable_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tableStr(CustPackingSlipJour))]
+Final class ETG_CustPackingSlipJourTable_Extension
+{
+  /*  public void insert()
+    {
+        
+        boolean                            check;
+        SalesParmLine                      salesParmLine, salesParmLineLoc;
+        
+        ETG_QualitySubGrpView              ETG_QualitySubGrpView;
+        ETG_SalesLineQualityGrp            eTG_SalesLineQualityGrp;
+       
+        SalesLine                          salesLine, saleslineLoc;
+        SalesParmTable                  salesParmTable;
+        
+        ETG_PostPackingQualityGrp          etg_PostPackingQualityGrp;
+        SalesTable                         salestable;
+        SalesParmupdate                    salesParmupdateloc;
+        SalesParmTable                     salesParmTableLocal;
+        ETG_SalesAgreementHeader           etg_SalesAgreementHeader;
+        AgreementHeader                    agreementHeader;
+        SalesAgreementHeader               salesAgreementHeader;
+        boolean         updateStatus;
+        
+
+        next insert();
+
+        updateStatus    = true;
+      
+            while select * from salesParmLine
+                join etg_PostPackingQualityGrp
+                    where etg_PostPackingQualityGrp.InventTransId == salesParmLine.InventTransId
+                        && salesParmLine.ParmId == this.ParmId
+                        && salesParmLine.OrigSalesId ==  this.SalesId
+                        && etg_PostPackingQualityGrp.ResultValue
+                        &&  (etg_PostPackingQualityGrp.MaxRange >= etg_PostPackingQualityGrp.ResultValue && etg_PostPackingQualityGrp.MinRange <= etg_PostPackingQualityGrp.ResultValue)
+            {
+                select firstonly salesLine where salesLine.InventTransId == salesParmLine.InventTransId;
+                
+                updateStatus =     this.inserMarkupTrans(salesLine, etg_PostPackingQualityGrp, false);
+            }
+
+        while select * from salesParmLine
+                    join etg_PostPackingQualityGrp
+                        where etg_PostPackingQualityGrp.SalesId == salesParmLine.OrigSalesId
+                            && salesParmLine.ParmId == this.ParmId
+                            && salesParmLine.OrigSalesId ==  this.SalesId
+                            && etg_PostPackingQualityGrp.ResultValue
+                            &&  (etg_PostPackingQualityGrp.MaxRange >= etg_PostPackingQualityGrp.ResultValue && etg_PostPackingQualityGrp.MinRange <= etg_PostPackingQualityGrp.ResultValue)
+            {
+                select firstonly salesLine where salesLine.InventTransId == salesParmLine.InventTransId;
+                
+                updateStatus =  this.inserMarkupTrans(salesLine, etg_PostPackingQualityGrp, true); 
+            }
+
+
+            
+            salestable = SalesTable::find(this.SalesId);
+            if (salestable.agreementIsLinked())
+            {
+                select firstonly salesAgreementHeader where salesAgreementHeader.recid == salestable.MatchingAgreement;
+                select firstonly etg_SalesAgreementHeader where etg_SalesAgreementHeader.SalesAgreementId == salesAgreementHeader.SalesNumberSequence;
+
+                while select sum(DeliverNow) from salesParmLineLoc
+                    group by salesParmLineLoc.OrigSalesId, salesParmLineLoc.InventTransId
+                    where salesParmLineLoc.OrigSalesId == salestable.SalesId
+                {
+                    select firstonly SalesQty from salesLineloc where salesLineloc.InventTransId == salesParmLineLoc.InventTransId;
+
+                    if (salesLineloc.SalesQty == salesParmLineLoc.DeliverNow  && updateStatus)
+                    {
+                        if (etg_SalesAgreementHeader.RecId)
+                        {
+                            ttsbegin;
+                            etg_SalesAgreementHeader.selectForUpdate(true);
+                            etg_SalesAgreementHeader.QualityStatus =  ETG_QualityStatus::Verified;
+                            etg_SalesAgreementHeader.doUpdate();
+                            ttscommit;
+                        }
+                    }
+                    else
+                    {
+                        if (etg_SalesAgreementHeader.RecId)
+                        {
+                            ttsbegin;
+                            etg_SalesAgreementHeader.selectForUpdate(true);
+                            etg_SalesAgreementHeader.QualityStatus =  ETG_QualityStatus::None;
+                            etg_SalesAgreementHeader.doUpdate();
+                            ttscommit;
+                        }
+                    }
+                }
+            }
+    }*/
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>inserMarkupTrans</Name>
+				<Source><![CDATA[
+    public boolean inserMarkupTrans(salesline  _salesLine, ETG_PostPackingQualityGrp   _etg_PostPackingQualityGrp, boolean  _salestableMarkupTrans)
+    {
+        LineAmount                         charges, addcharges;
+        MarkupTrans                        markupTrans, markupTransloc;
+        boolean                             updateStatus;
+        ETGQualitySpecificationSubGroup    etgQualitySpecificationSubGroup;
+        SalesTable              salestable;
+                            
+        #define.Percent(100)
+        
+
+        if (_etg_PostPackingQualityGrp.SubGroupID)
+        {
+            charges = 0;
+            select firstonly etgQualitySpecificationSubGroup where etgQualitySpecificationSubGroup.SubGroupID == _etg_PostPackingQualityGrp.SubGroupID;
+
+            if (_salestableMarkupTrans)
+            {
+                salestable = SalesTable::find(_salesLine.SalesId);
+
+                select * from markupTrans
+                             where markupTrans.MarkupCode == etgQualitySpecificationSubGroup.SalesChargeCode
+                    && markupTrans.TransRecId == salestable.RecId;
+            }
+            else
+            {
+                select * from markupTrans
+                             where markupTrans.MarkupCode == etgQualitySpecificationSubGroup.SalesChargeCode
+                    && markupTrans.TransRecId == _salesLine.RecId;
+            }
+
+            if (_etg_PostPackingQualityGrp.Increment)
+            {
+                charges = _salesLine.LineAmount * _etg_PostPackingQualityGrp.Increment/#Percent;
+                addcharges  += charges;
+            }
+            if (_etg_PostPackingQualityGrp.FixedValue)
+            {
+                charges = _etg_PostPackingQualityGrp.FixedValue;
+                addcharges  += charges;
+            }
+
+            if (markupTrans.RecId)
+            {
+                ttsbegin;
+                markupTrans.selectForUpdate(true);
+                markupTrans.Value += charges;
+                markupTrans.doupdate();
+                ttscommit;
+            }
+            else
+            {
+                select count(RecId) from markupTransloc where markupTransloc.TransRecId == _salesLine.RecId;
+
+                //select count(RecId) from markupTransloc where markupTransloc.TransRecId == salestable.RecId;
+
+                
+                if (_salestableMarkupTrans)
+                {
+                    select count(RecId) from markupTransloc where markupTransloc.TransRecId == salestable.RecId;
+                    markupTrans.TransRecId      = salestable.RecId;
+                    markupTrans.TransTableId    = salestable.TableId;
+                    markupTrans.Value           = charges;
+                    markupTrans.LineNum         = markupTransloc.recid + 1;
+                }
+                else
+                {
+                    markupTrans.TransRecId      = _salesLine.RecId;
+                    markupTrans.TransTableId    = _salesLine.TableId;
+                    markupTrans.Value           = charges;
+                    markupTrans.LineNum         = markupTransloc.recid + 1;
+                }
+
+                markupTrans.MarkupCode      = etgQualitySpecificationSubGroup.SalesChargeCode;
+                markupTrans.Txt             = etgQualitySpecificationSubGroup.SubGroupDescription;
+                markupTrans.ModuleCategory  = HeadingLine::Line;
+                markupTrans.ModuleType      = MarkupModuleType::Cust;
+                markupTrans.MCROriginalMiscChargeValue  = markupTrans.Value;
+                markupTrans.doInsert();
+            }
+            markupTrans.clear();
+        }
+
+        if (!_etg_PostPackingQualityGrp.ResultValue)
+        {
+            updateStatus = false;
+        }
+             
+        if (_salesLine.RecId && addcharges)
+        {
+            ttsbegin;
+            _salesLine.selectForUpdate(true);
+            _salesLine.LineAmount += addcharges;
+            _salesLine.doUpdate();
+            ttscommit;
+            addcharges = 0;
+        }
+
+        return updateStatus;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

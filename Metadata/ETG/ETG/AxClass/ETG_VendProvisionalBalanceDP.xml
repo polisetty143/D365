@@ -1,0 +1,1508 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_VendProvisionalBalanceDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The <c>VendProvisionalBalanceDP</c> class retrieves the records for the <c>VendProvisionalBalance</c> report.
+/// </summary>
+[SRSReportQueryAttribute(queryStr(ETG_VendProvisionalBalance))]
+[SRSReportParameterAttribute(classStr(ETG_VendProvisionalBalanceContract))]
+public class ETG_VendProvisionalBalanceDP extends SRSReportDataProviderBase
+{
+    FromDate                fromDate;
+    FromDate                reportPeriodStartDate;
+    ToDate                  toDate;
+    NoneBeginTransEnd       noneBeginTransEnd;
+    VendMainAccount         groupBy;
+    NoYes                   includeDetails;
+    LedgerJournalId         invoicePoolJournalNum;
+    private boolean         skipInsert;
+    LedgerCurrencySelection ledgerCurrencySelection;
+    private boolean         isLedgerCurrencyAccounting;
+
+    ETG_VendProvisionalBalanceTmpProcessing     vendProvisionalBalanceTmpProcessing;
+    ETG_VendProvisionalBalanceTmp               vendProvisionalBalanceTmp;
+    ETG_VendProvisionalBalanceTransTmp          vendProvisionalBalanceTransTmp;
+
+    ETG_VendProvisionalBalanceTmpValue          filteredVendTable;
+    ETG_VendProvisionalBalanceTmpValue          filteredMainAccount;
+
+    boolean isFilteredVendTableAvailable;
+    boolean isFilteredMainAccountAvailable;
+
+    Counter  rowCount;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Retrieves records based on the specified parameters.
+    /// </summary>
+    public void processReport()
+    {
+        ETG_VendProvisionalBalanceContract contract = this.parmDataContract() as ETG_VendProvisionalBalanceContract;
+
+        // contract parameters
+        fromDate                = contract.parmFromDate();
+        reportPeriodStartDate   = contract.parmReportPeriodStartDate();
+        toDate                  = contract.parmToDate();
+        includeDetails          = contract.parmIncludeDetails();
+        noneBeginTransEnd       = contract.parmNoneBeginTransEnd();
+        groupBy                 = contract.parmGroupBy();
+        ledgerCurrencySelection = contract.parmCurrencySelection();
+        isLedgerCurrencyAccounting = (ledgerCurrencySelection == LedgerCurrencySelection::Accounting ? true : false);
+
+        this.populateFilterVendProvisionalBalanceTmpProcessing();
+        this.populateVendProvisionalBalanceTmpProcessing();
+        this.filterVendProvisionalBalanceTmpProcessing();
+
+        // Get the journal number that is used for all vendor invoice pool documents
+        invoicePoolJournalNum   = ledgerJournalTable::findVendorInvoicePool(false).JournalNum;
+
+        this.createVendTransTmp();
+
+        this.calculateAmounts(fromDate, reportPeriodStartDate);
+        this.insertVendProvisionalBalanceTmp();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>populateFilterVendProvisionalBalanceTmpProcessing</Name>
+				<Source><![CDATA[
+    private void populateFilterVendProvisionalBalanceTmpProcessing()
+    {
+        isFilteredVendTableAvailable    = this.populateFilterForVendTable(filteredVendTable);
+        isFilteredMainAccountAvailable  = this.populateFilterForMainAccount(filteredMainAccount);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>filterVendProvisionalBalanceTmpProcessing</Name>
+				<Source><![CDATA[
+    [SysObsoleteAttribute("filterVendProvisionalBalanceTmpProcessing will be deprecated. Use populateVendProvisionalBalanceTmpProcessing instead.", false, 30\6\2020)]
+    protected void filterVendProvisionalBalanceTmpProcessing()
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getBalanceByType</Name>
+				<Source><![CDATA[
+    [SysObsoleteAttribute("getBalanceByType will soon be deprecated. Use calculateAmounts instead.", false, 30\6\2020)]
+    protected void getBalanceByType(VendProvisionalBalanceTmpValue _tmpValue, TransDate _fromDate, DebitCredit _creditOrDebit)
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateAmounts</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///     Calculates the amounts that go in each field based on the given date parameters.
+    /// </summary>
+    /// <param name="_fromDate">
+    ///     The parmFrontDate() value from the report contract.
+    /// </param>
+    /// <param name="_reportPeriodStartDate">
+    ///     The parmReportPeriodStartDate from the report contract.
+    /// </param>
+    /// <param name = "_calculatePerPostingProfile">
+    ///     A boolean value which indicates whether to calculate the opening, debit, credit and reporting balances by posting profile; optional.
+    /// </param>
+    protected void calculateAmounts(TransDate _fromDate, TransDate _reportPeriodStartDate, boolean _calculatePerPostingProfile = true)
+    {
+        if (_calculatePerPostingProfile)
+        {
+            this.calculateOpeningBalancePerPostingProfile(_fromDate);
+            this.calculateBalancesPerPostingProfile(_fromDate);
+            this.calculateReportingBalancesPerPostingProfile(_reportPeriodStartDate);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateOpeningBalancePerPostingProfile</Name>
+				<Source><![CDATA[
+    private void calculateOpeningBalancePerPostingProfile(TransDate _fromDate)
+    {
+        ETG_VendProvisionalBalanceTmpValue vendProvisionalBalanceTmpValue;
+
+        insert_recordset vendProvisionalBalanceTmpValue
+            (AccountNum,
+            MainAccountId,
+            Location,
+            PostingProfile,
+            IsSummaryAccount,
+            Amount,
+            ReportingCurrencyAmount)
+            select AccountNum, MainAccountId
+            from vendProvisionalBalanceTmpProcessing
+            group by AccountNum, MainAccountId
+            join Location, PostingProfile, IsSummaryAccount, sum(AmountAccounting), sum(AmountReporting)
+            from vendProvisionalBalanceTransTmp
+            group by AccountNum, Location, PostingProfile, IsSummaryAccount
+            where vendProvisionalBalanceTransTmp.AccountNum         == vendProvisionalBalanceTmpProcessing.AccountNum
+                && vendProvisionalBalanceTransTmp.Location          == vendProvisionalBalanceTmpProcessing.Location
+                && vendProvisionalBalanceTransTmp.PostingProfile    == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && vendProvisionalBalanceTransTmp.IsSummaryAccount  == vendProvisionalBalanceTmpProcessing.IsSummaryAccount
+                && vendProvisionalBalanceTransTmp.TransDate         < _fromDate;
+        
+        /*
+        while select AccountNum, MainAccountId
+            from vendProvisionalBalanceTmpProcessing
+            group by AccountNum, MainAccountId
+            join Location, PostingProfile, IsSummaryAccount, sum(AmountAccounting), sum(AmountReporting)
+            from vendProvisionalBalanceTransTmp
+            group by AccountNum, Location, PostingProfile, IsSummaryAccount
+            where vendProvisionalBalanceTransTmp.AccountNum         == vendProvisionalBalanceTmpProcessing.AccountNum
+                && vendProvisionalBalanceTransTmp.PostingProfile    == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && vendProvisionalBalanceTransTmp.Location          == vendProvisionalBalanceTmpProcessing.Location
+                && vendProvisionalBalanceTransTmp.IsSummaryAccount  == vendProvisionalBalanceTmpProcessing.IsSummaryAccount
+                && vendProvisionalBalanceTransTmp.TransDate         < _fromDate
+        {
+            vendProvisionalBalanceTmpValue.clear();
+            vendProvisionalBalanceTmpValue.AccountNum               = vendProvisionalBalanceTmpProcessing.AccountNum;
+            vendProvisionalBalanceTmpValue.MainAccountId            = vendProvisionalBalanceTmpProcessing.MainAccountId;
+            vendProvisionalBalanceTmpValue.Location                 = vendProvisionalBalanceTmpProcessing.Location;
+            vendProvisionalBalanceTmpValue.PostingProfile           = vendProvisionalBalanceTmpProcessing.PostingProfile;
+            vendProvisionalBalanceTmpValue.IsSummaryAccount         = vendProvisionalBalanceTmpProcessing.IsSummaryAccount;
+            vendProvisionalBalanceTmpValue.Amount                   =  vendProvisionalBalanceTransTmp.AmountAccounting;
+            vendProvisionalBalanceTmpValue.ReportingCurrencyAmount  = vendProvisionalBalanceTransTmp.AmountReporting;
+
+
+            vendProvisionalBalanceTmpValue.insert();
+        }
+        */
+        update_recordset vendProvisionalBalanceTmpProcessing
+            setting
+                OpeningBalance = vendProvisionalBalanceTmpValue.Amount,
+                OpeningBalanceReporting = vendProvisionalBalanceTmpValue.ReportingCurrencyAmount
+            join sum(Amount), sum(ReportingCurrencyAmount)
+            from vendProvisionalBalanceTmpValue
+            where vendProvisionalBalanceTmpValue.AccountNum == vendProvisionalBalanceTmpProcessing.AccountNum
+                && vendProvisionalBalanceTmpValue.Location  ==  vendProvisionalBalanceTmpProcessing.Location
+                && vendProvisionalBalanceTmpValue.PostingProfile == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && vendProvisionalBalanceTmpValue.IsSummaryAccount == vendProvisionalBalanceTmpProcessing.IsSummaryAccount;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateBalancesPerPostingProfile</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculates the debit and credit amount based on the given from date
+    /// and the class variable toDate
+    /// </summary>
+    /// <param name="_fromDate">
+    /// The date to calculate from
+    /// </param>
+    private void calculateBalancesPerPostingProfile(TransDate _fromDate)
+    {
+        ETG_VendProvisionalBalanceTmpValue vendProvisionalBalanceTmpValue = this.getVendProvisionalBalanceTmpSumValue(_fromDate);
+
+        update_recordset vendProvisionalBalanceTmpProcessing
+            setting
+                AmountDebit = vendProvisionalBalanceTmpValue.Amount,
+                AmountDebitReporting = vendProvisionalBalanceTmpValue.ReportingCurrencyAmount
+            join vendProvisionalBalanceTmpValue
+            where VendProvisionalBalanceTmpValue.AccountNum == vendProvisionalBalanceTmpProcessing.AccountNum
+                && VendProvisionalBalanceTmpValue.Location == vendProvisionalBalanceTmpProcessing.Location
+                && VendProvisionalBalanceTmpValue.PostingProfile == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && VendProvisionalBalanceTmpValue.IsSummaryAccount == vendProvisionalBalanceTmpProcessing.IsSummaryAccount
+                && vendProvisionalBalanceTmpValue.IsCredit == NoYes::No;
+
+        update_recordset vendProvisionalBalanceTmpProcessing
+            setting
+                AmountCredit = vendProvisionalBalanceTmpValue.Amount,
+                AmountCreditReporting = vendProvisionalBalanceTmpValue.ReportingCurrencyAmount
+            join vendProvisionalBalanceTmpValue
+            where VendProvisionalBalanceTmpValue.AccountNum == vendProvisionalBalanceTmpProcessing.AccountNum
+                && VendProvisionalBalanceTmpValue.Location == vendProvisionalBalanceTmpProcessing.Location
+                && VendProvisionalBalanceTmpValue.PostingProfile == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && VendProvisionalBalanceTmpValue.IsSummaryAccount == vendProvisionalBalanceTmpProcessing.IsSummaryAccount
+                && vendProvisionalBalanceTmpValue.IsCredit == NoYes::Yes;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateReportingBalancesPerPostingProfile</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculates the debit and credit report period amount based on the given from date
+    /// and the class variable toDate
+    /// </summary>
+    /// <param name="_fromDate">
+    /// The date to calculate from
+    /// </param>
+    private void calculateReportingBalancesPerPostingProfile(TransDate _fromDate)
+    {
+        ETG_VendProvisionalBalanceTmpValue vendProvisionalBalanceTmpValue = this.getVendProvisionalBalanceTmpSumValue(_fromDate);
+
+        update_recordset vendProvisionalBalanceTmpProcessing
+            setting
+                AmountDebitReportPeriod = vendProvisionalBalanceTmpValue.Amount,
+                AmountDebitReportingReportPeriod = vendProvisionalBalanceTmpValue.ReportingCurrencyAmount
+            join vendProvisionalBalanceTmpValue
+            where VendProvisionalBalanceTmpValue.AccountNum == vendProvisionalBalanceTmpProcessing.AccountNum    
+                && VendProvisionalBalanceTmpValue.Location == vendProvisionalBalanceTmpProcessing.Location
+                && VendProvisionalBalanceTmpValue.PostingProfile == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && VendProvisionalBalanceTmpValue.IsSummaryAccount == vendProvisionalBalanceTmpProcessing.IsSummaryAccount
+                && vendProvisionalBalanceTmpValue.IsCredit == NoYes::No;
+
+        update_recordset vendProvisionalBalanceTmpProcessing
+            setting
+                AmountCreditReportPeriod = vendProvisionalBalanceTmpValue.Amount,
+                AmountCreditReportingReportPeriod = vendProvisionalBalanceTmpValue.ReportingCurrencyAmount
+            join vendProvisionalBalanceTmpValue
+            where VendProvisionalBalanceTmpValue.AccountNum == vendProvisionalBalanceTmpProcessing.AccountNum
+                && VendProvisionalBalanceTmpValue.Location == vendProvisionalBalanceTmpProcessing.Location
+                && VendProvisionalBalanceTmpValue.PostingProfile == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && VendProvisionalBalanceTmpValue.IsSummaryAccount == vendProvisionalBalanceTmpProcessing.IsSummaryAccount
+                && vendProvisionalBalanceTmpValue.IsCredit == NoYes::Yes;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getVendProvisionalBalanceTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the data for the report from the temporary table.
+    /// </summary>
+    /// <returns>
+    /// The temporary <c>VendProvisionalBalanceTmp</c> table.
+    /// </returns>
+    [SRSReportDataSetAttribute('VendProvisionalBalanceTmp')]
+    public ETG_VendProvisionalBalanceTmp getVendProvisionalBalanceTmp()
+    {
+        select vendProvisionalBalanceTmp;
+        return vendProvisionalBalanceTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>hasFilteredTable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Checks if the query filters on a given tableId
+    /// </summary>
+    /// <param name="_sourceQuery">
+    /// The query to check for filters
+    /// </param>
+    /// <param name="_tableId">
+    /// The tableId to look for filters on
+    /// </param>
+    /// <returns>
+    /// boolean: If the query has a filter on the given tableID
+    /// </returns>
+    private boolean hasFilteredTable(Query _sourceQuery, TableId _tableId)
+    {
+        QueryBuildDataSource source_qbds;
+
+        QueryBuildRange sourceRange;
+        QueryFilter dynamicQueryFilter;
+
+        int rangeCount;
+        int queryFilterCount;
+        int i;
+
+        if (_sourceQuery != null)
+        {
+            source_qbds = _sourceQuery.dataSourceTable(_tableId);
+
+            if (source_qbds == null)
+            {
+                return false;
+            }
+
+            rangeCount = source_qbds.rangeCount();
+            for (i = 1; i <= rangeCount; i++)
+            {
+                sourceRange = source_qbds.range(i);
+
+                if (sourceRange != null
+                    && sourceRange.value() != '')
+                {
+                    return true;
+                }
+            }
+
+            queryFilterCount = _sourceQuery.queryFilterCount();
+            for (i = 1; i <= queryFilterCount; i++)
+            {
+                dynamicQueryFilter = _sourceQuery.queryFilter(i);
+
+                if (dynamicQueryFilter != null && dynamicQueryFilter.value() != '' && dynamicQueryFilter.dataSource().table() == _tableId)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertVendProvisionalBalanceTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///     Inserts records into the <c>vendProvisionalBalanceTmp</c> temporary table.
+    /// </summary>
+    protected void insertVendProvisionalBalanceTmp()
+    {
+        #LOCALMACRO.MainInsertAccounting
+            insert_recordset vendProvisionalBalanceTmp
+                (AccountNum, MainAccountId, Location, MainAccountName, VendAccountName, OpeningBalance, AmountDebit, AmountDebitReportPeriod,
+                        AmountCredit, AmountCreditReportPeriod)
+                select AccountNum, MainAccountId, Location, MainAccountName, VendAccountName, OpeningBalance, AmountDebit, AmountDebitReportPeriod,
+                        AmountCredit, AmountCreditReportPeriod
+                from vendProvisionalBalanceTmpProcessing
+                group by AccountNum, MainAccountId, Location, MainAccountName, VendAccountName, OpeningBalance, AmountDebit, AmountDebitReportPeriod,
+                        AmountCredit, AmountCreditReportPeriod
+        ENDMACRO
+
+        #LOCALMACRO.MainInsertReporting
+            insert_recordset vendProvisionalBalanceTmp
+                (AccountNum, MainAccountId, Location, MainAccountName, VendAccountName, OpeningBalanceReporting, AmountDebitReporting, AmountDebitReportingReportPeriod,
+                        AmountCreditReporting, AmountCreditReportingReportPeriod)
+                select AccountNum, MainAccountId, Location, MainAccountName, VendAccountName, OpeningBalanceReporting, AmountDebitReporting, AmountDebitReportingReportPeriod,
+                        AmountCreditReporting, AmountCreditReportingReportPeriod
+                from vendProvisionalBalanceTmpProcessing
+                group by AccountNum, MainAccountId, Location, MainAccountName, VendAccountName, OpeningBalanceReporting, AmountDebitReporting, AmountDebitReportingReportPeriod,
+                        AmountCreditReporting, AmountCreditReportingReportPeriod
+        ENDMACRO
+
+        if(!this.parmSkipInsert())
+        {
+            switch (noneBeginTransEnd)
+            {
+                case NoneBeginTransEnd::None:
+                    if(isLedgerCurrencyAccounting)
+                    {
+                        #MainInsertAccounting
+                        where (vendProvisionalBalanceTmpProcessing.OpeningBalance != 0 ||
+                            vendProvisionalBalanceTmpProcessing.AmountCredit != 0 ||
+                            vendProvisionalBalanceTmpProcessing.AmountDebit != 0 ||
+                            vendProvisionalBalanceTmpProcessing.AmountDebitReportPeriod != 0 ||
+                            vendProvisionalBalanceTmpProcessing.AmountCreditReportPeriod != 0);
+                    }
+                    else
+                    {
+                        #MainInsertReporting
+                        where (vendProvisionalBalanceTmpProcessing.OpeningBalanceReporting != 0 ||
+                            vendProvisionalBalanceTmpProcessing.AmountCreditReporting != 0 ||
+                            vendProvisionalBalanceTmpProcessing.AmountDebitReporting != 0 ||
+                            vendProvisionalBalanceTmpProcessing.AmountDebitReportingReportPeriod != 0 ||
+                            vendProvisionalBalanceTmpProcessing.AmountCreditReportingReportPeriod != 0);
+                    }
+                    break;
+
+                case NoneBeginTransEnd::BeginBalance:
+                    if(isLedgerCurrencyAccounting)
+                    {
+                        #MainInsertAccounting
+                        where (vendProvisionalBalanceTmpProcessing.OpeningBalance != 0);
+                    }
+                    else
+                    {
+                        #MainInsertReporting
+                        where (vendProvisionalBalanceTmpProcessing.OpeningBalanceReporting != 0);
+                    }
+                    break;
+
+                case NoneBeginTransEnd::Transactions:
+                    if(isLedgerCurrencyAccounting)
+                    {
+                        #MainInsertAccounting
+                        where (vendProvisionalBalanceTmpProcessing.AmountCredit != 0 ||
+                            vendProvisionalBalanceTmpProcessing.AmountDebit != 0);
+                    }
+                    else
+                    {
+                        #MainInsertReporting
+                        where (vendProvisionalBalanceTmpProcessing.AmountCreditReporting != 0 ||
+                            vendProvisionalBalanceTmpProcessing.AmountDebitReporting != 0);
+                    }
+                    break;
+
+                case NoneBeginTransEnd::EndBalance:
+                    if(isLedgerCurrencyAccounting)
+                    {
+                        #MainInsertAccounting
+                        where ((vendProvisionalBalanceTmpProcessing.OpeningBalance + vendProvisionalBalanceTmpProcessing.AmountDebit -
+                            vendProvisionalBalanceTmpProcessing.AmountCredit) != 0);
+                    }
+                    else
+                    {
+                        #MainInsertReporting
+                        where ((vendProvisionalBalanceTmpProcessing.OpeningBalanceReporting + vendProvisionalBalanceTmpProcessing.AmountDebitReporting -
+                            vendProvisionalBalanceTmpProcessing.AmountCreditReporting) != 0);
+                    }
+                    break;
+            }
+        }
+
+        this.setClosingBalanceAndSumOnVendProvisionalBalanceTmp();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setClosingBalanceAndSumOnVendProvisionalBalanceTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculates and sets the closing balance and sum amount fields on the <c>VendProvisionalBalanceTmp</c>, based on other fields on the record.
+    /// </summary>
+    private void setClosingBalanceAndSumOnVendProvisionalBalanceTmp()
+    {
+        update_recordset vendProvisionalBalanceTmp
+            setting
+                ClosingBalance = (vendProvisionalBalanceTmp.OpeningBalance + vendProvisionalBalanceTmp.AmountDebit - vendProvisionalBalanceTmp.AmountCredit),
+                SumAmount = (vendProvisionalBalanceTmp.AmountDebit - vendProvisionalBalanceTmp.AmountCredit),
+                ClosingBalanceReporting = (vendProvisionalBalanceTmp.OpeningBalanceReporting + vendProvisionalBalanceTmp.AmountDebitReporting - vendProvisionalBalanceTmp.AmountCreditReporting),
+                SumAmountReporting = (vendProvisionalBalanceTmp.AmountDebitReporting - vendProvisionalBalanceTmp.AmountCreditReporting);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createVendTransTmp</Name>
+				<Source><![CDATA[
+    private void createVendTransTmp()
+    {
+        this.insertAccountingSummaryAmount();
+        this.insertAccountingArrivalAmount();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertAccountingSummaryAmount</Name>
+				<Source><![CDATA[
+    private void insertAccountingSummaryAmount()
+    {
+        VendTrans vendTrans;
+        LedgerJournalTable ledgerJournalTable;
+        Ledgerjournalvoucherchanged ledgerjournalvoucherchanged;
+        DimensionAttributeValueSetItem  dimensionAttributeValueSetItem;
+        DimensionAttributeValue              dimensionAttributeValue;
+        DimensionAttribute                       dimensionAttribute;
+
+        // Insert summary transactions with arrival of false.
+        // This code includes summary exchange adjustement transactions.
+     
+        insert_recordset vendProvisionalBalanceTransTmp(
+            AccountNum,
+            Location,
+            IsSummaryAccount,
+            PostingProfile,
+            AmountAccounting,
+            AmountReporting,
+            Correct,
+            TransDate 
+            )
+            select AccountNum,Location, IsSummaryAccount from vendProvisionalBalanceTmpProcessing
+            where vendProvisionalBalanceTmpProcessing.IsSummaryAccount == NoYes::Yes
+            join PostingProfile, AmountMST, ReportingCurrencyAmount, Correct, TransDate from vendTrans
+            where vendTrans.AccountNum == vendProvisionalBalanceTmpProcessing.AccountNum
+                && vendTrans.PostingProfile == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && vendTrans.Arrival == NoYes::No
+                && vendTrans.TransDate <= toDate
+            join dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                                == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == vendTrans.DefaultDimension
+                 && dimensionAttributeValueSetItem.DisplayValue == vendProvisionalBalanceTmpProcessing.Location;
+        
+        while  select AccountNum,Location, IsSummaryAccount from vendProvisionalBalanceTmpProcessing
+            where vendProvisionalBalanceTmpProcessing.IsSummaryAccount == NoYes::Yes
+            && vendProvisionalBalanceTmpProcessing.Location == ""
+            join PostingProfile, DefaultDimension,AmountMST, ReportingCurrencyAmount, Correct, TransDate from vendTrans
+            where vendTrans.AccountNum == vendProvisionalBalanceTmpProcessing.AccountNum
+                && vendTrans.PostingProfile == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && vendTrans.Arrival == NoYes::No
+                && vendTrans.TransDate <= toDate
+        {
+            select dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                   == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == vendTrans.DefaultDimension;
+                 //&& dimensionAttributeValueSetItem.DisplayValue == vendProvisionalBalanceTmpProcessing.Location;
+            if(dimensionAttributeValueSetItem.RecId == 0)
+            {
+                vendProvisionalBalanceTransTmp.clear();
+                vendProvisionalBalanceTransTmp.AccountNum                      = vendProvisionalBalanceTmpProcessing.AccountNum;
+                vendProvisionalBalanceTransTmp.IsSummaryAccount                = vendProvisionalBalanceTmpProcessing.IsSummaryAccount;
+                vendProvisionalBalanceTransTmp.PostingProfile                  = vendTrans.PostingProfile;
+                vendProvisionalBalanceTransTmp.AmountAccounting                = vendTrans.AmountMST;
+                vendProvisionalBalanceTransTmp.AmountReporting                 = vendTrans.AmountCur;
+                vendProvisionalBalanceTransTmp.Correct                         = vendTrans.Correct;
+                vendProvisionalBalanceTransTmp.TransDate                       = vendTrans.TransDate;
+                vendProvisionalBalanceTransTmp.Location                        = dimensionAttributeValue.DisplayValue;
+
+                vendProvisionalBalanceTransTmp.insert();
+            }
+        } 
+        
+        // Insert arrival transactions that become approved based on approved dates
+        // except transactions which are in invoice pool.
+        insert_recordset vendProvisionalBalanceTransTmp(
+            AccountNum,
+            Location,
+            IsSummaryAccount,
+            PostingProfile,
+            AmountAccounting,
+            AmountReporting,
+            Correct,
+            TransDate)
+            select AccountNum, Location, IsSummaryAccount from vendProvisionalBalanceTmpProcessing
+            where vendProvisionalBalanceTmpProcessing.IsSummaryAccount == NoYes::Yes
+            join PostingProfile, AmountMST, ReportingCurrencyAmount, Correct, ApprovedDate from vendTrans
+            where vendTrans.AccountNum == vendProvisionalBalanceTmpProcessing.AccountNum
+                && vendTrans.PostingProfile == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && (!invoicePoolJournalNum || vendTrans.JournalNum != invoicePoolJournalNum)
+                && vendTrans.TransType != LedgerTransType::ExchAdjustment
+                && vendTrans.Arrival == NoYes::Yes
+                && vendTrans.Approved == NoYes::Yes
+                && vendTrans.ApprovedDate <= toDate
+            join dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                                == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == vendTrans.DefaultDimension
+                && dimensionAttributeValueSetItem.DisplayValue == vendProvisionalBalanceTmpProcessing.Location;
+
+
+        while  select AccountNum, Location, IsSummaryAccount from vendProvisionalBalanceTmpProcessing
+            where vendProvisionalBalanceTmpProcessing.IsSummaryAccount == NoYes::Yes
+            join PostingProfile, AmountMST, ReportingCurrencyAmount, Correct, ApprovedDate from vendTrans
+            where vendTrans.AccountNum == vendProvisionalBalanceTmpProcessing.AccountNum
+                && vendTrans.PostingProfile == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && (!invoicePoolJournalNum || vendTrans.JournalNum != invoicePoolJournalNum)
+                && vendTrans.TransType != LedgerTransType::ExchAdjustment
+                && vendTrans.Arrival == NoYes::Yes
+                && vendTrans.Approved == NoYes::Yes
+                && vendTrans.ApprovedDate <= toDate
+        {
+            select dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                   == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == vendTrans.DefaultDimension;
+            //&& dimensionAttributeValueSetItem.DisplayValue == vendProvisionalBalanceTmpProcessing.Location;
+            if(dimensionAttributeValueSetItem.RecId == 0)
+            {
+                vendProvisionalBalanceTransTmp.clear();
+                vendProvisionalBalanceTransTmp.AccountNum                      = vendProvisionalBalanceTmpProcessing.AccountNum;
+                vendProvisionalBalanceTransTmp.IsSummaryAccount                = vendProvisionalBalanceTmpProcessing.IsSummaryAccount;
+                vendProvisionalBalanceTransTmp.PostingProfile                  = vendTrans.PostingProfile;
+                vendProvisionalBalanceTransTmp.AmountAccounting                = vendTrans.AmountMST;
+                vendProvisionalBalanceTransTmp.AmountReporting                 = vendTrans.AmountCur;
+                vendProvisionalBalanceTransTmp.Correct                         = vendTrans.Correct;
+                vendProvisionalBalanceTransTmp.TransDate                       = vendTrans.TransDate;
+                vendProvisionalBalanceTransTmp.Location                        = dimensionAttributeValue.DisplayValue;
+
+                vendProvisionalBalanceTransTmp.insert();
+            }
+        }
+
+        // Insert approved transaction in history but currenlty approved value of false set by UI
+        insert_recordset vendProvisionalBalanceTransTmp(
+            AccountNum,
+            Location,
+            IsSummaryAccount,
+            PostingProfile,
+            AmountAccounting,
+            AmountReporting,
+            Correct,
+            TransDate)
+            select AccountNum, Location, IsSummaryAccount from vendProvisionalBalanceTmpProcessing
+            where vendProvisionalBalanceTmpProcessing.IsSummaryAccount == NoYes::Yes
+            join PostingProfile, AmountMST, ReportingCurrencyAmount, Correct from vendTrans
+            where vendTrans.AccountNum == vendProvisionalBalanceTmpProcessing.AccountNum
+                && vendTrans.PostingProfile == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && (!invoicePoolJournalNum || vendTrans.JournalNum != invoicePoolJournalNum)
+                && vendTrans.TransType != LedgerTransType::ExchAdjustment
+                && vendTrans.Arrival == NoYes::Yes
+                && vendTrans.Approved == NoYes::No
+            join ledgerJournalTable
+            where ledgerJournalTable.JournalNum == vendTrans.journalNum
+                && ledgerJournalTable.JournalType == LedgerJournalType::Approval
+                && ledgerJournalTable.Posted == NoYes::Yes
+            join ToDate from ledgerjournalvoucherchanged
+            where ledgerjournalvoucherchanged.JournalNum == ledgerJournalTable.JournalNum
+                && ledgerjournalvoucherchanged.ToDate <= toDate
+            join dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                                == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == vendTrans.DefaultDimension
+                && dimensionAttributeValueSetItem.DisplayValue == vendProvisionalBalanceTmpProcessing.Location;
+
+        while  select AccountNum, Location, IsSummaryAccount from vendProvisionalBalanceTmpProcessing
+            where vendProvisionalBalanceTmpProcessing.IsSummaryAccount == NoYes::Yes
+            join PostingProfile, AmountMST, ReportingCurrencyAmount, Correct from vendTrans
+            where vendTrans.AccountNum == vendProvisionalBalanceTmpProcessing.AccountNum
+                && vendTrans.PostingProfile == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && (!invoicePoolJournalNum || vendTrans.JournalNum != invoicePoolJournalNum)
+                && vendTrans.TransType != LedgerTransType::ExchAdjustment
+                && vendTrans.Arrival == NoYes::Yes
+                && vendTrans.Approved == NoYes::No
+            join ledgerJournalTable
+            where ledgerJournalTable.JournalNum == vendTrans.journalNum
+                && ledgerJournalTable.JournalType == LedgerJournalType::Approval
+                && ledgerJournalTable.Posted == NoYes::Yes
+            join ToDate from ledgerjournalvoucherchanged
+            where ledgerjournalvoucherchanged.JournalNum == ledgerJournalTable.JournalNum
+                && ledgerjournalvoucherchanged.ToDate <= toDate
+        {
+            select dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                   == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == vendTrans.DefaultDimension;
+            //&& dimensionAttributeValueSetItem.DisplayValue == vendProvisionalBalanceTmpProcessing.Location;
+            if(dimensionAttributeValueSetItem.RecId == 0)
+            {
+                vendProvisionalBalanceTransTmp.clear();
+                vendProvisionalBalanceTransTmp.AccountNum                      = vendProvisionalBalanceTmpProcessing.AccountNum;
+                vendProvisionalBalanceTransTmp.IsSummaryAccount                = vendProvisionalBalanceTmpProcessing.IsSummaryAccount;
+                vendProvisionalBalanceTransTmp.PostingProfile                  = vendTrans.PostingProfile;
+                vendProvisionalBalanceTransTmp.AmountAccounting                = vendTrans.AmountMST;
+                vendProvisionalBalanceTransTmp.AmountReporting                 = vendTrans.AmountCur;
+                vendProvisionalBalanceTransTmp.Correct                         = vendTrans.Correct;
+                vendProvisionalBalanceTransTmp.TransDate                       = vendTrans.TransDate;
+                vendProvisionalBalanceTransTmp.Location                        = dimensionAttributeValue.DisplayValue;
+
+                vendProvisionalBalanceTransTmp.insert();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertAccountingArrivalAmount</Name>
+				<Source><![CDATA[
+    private void insertAccountingArrivalAmount()
+    {
+        NoYes yes = NoYes::Yes;
+        VendTrans vendTrans;
+        LedgerJournalTable ledgerJournalTable;
+        Ledgerjournalvoucherchanged ledgerjournalvoucherchanged;
+        DimensionAttributeValueSetItem  dimensionAttributeValueSetItem;
+        DimensionAttributeValue              dimensionAttributeValue;
+        DimensionAttribute                       dimensionAttribute;
+
+
+        // Insert all transactions with arrival of true
+        insert_recordset vendProvisionalBalanceTransTmp(
+            AccountNum,
+            Location,
+            IsSummaryAccount,
+            PostingProfile,
+            AmountAccounting,
+            AmountReporting,
+            Correct,
+            TransDate)
+            select AccountNum, Location, IsSummaryAccount from vendProvisionalBalanceTmpProcessing
+            where vendProvisionalBalanceTmpProcessing.IsSummaryAccount == NoYes::No
+            join PostingProfile, AmountMST, ReportingCurrencyAmount, Correct, TransDate from vendTrans
+            where vendTrans.AccountNum == vendProvisionalBalanceTmpProcessing.AccountNum
+                && vendTrans.PostingProfile == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && vendTrans.TransType != LedgerTransType::ExchAdjustment
+                && vendTrans.Arrival == NoYes::Yes
+                && vendTrans.TransDate <= toDate
+            join dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                                == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == vendTrans.DefaultDimension
+            && dimensionAttributeValueSetItem.DisplayValue == vendProvisionalBalanceTmpProcessing.Location;
+
+        while  select AccountNum, Location, IsSummaryAccount from vendProvisionalBalanceTmpProcessing
+            where vendProvisionalBalanceTmpProcessing.IsSummaryAccount == NoYes::No
+            join PostingProfile, AmountMST, ReportingCurrencyAmount, Correct, TransDate from vendTrans
+            where vendTrans.AccountNum == vendProvisionalBalanceTmpProcessing.AccountNum
+                && vendTrans.PostingProfile == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && vendTrans.TransType != LedgerTransType::ExchAdjustment
+                && vendTrans.Arrival == NoYes::Yes
+                && vendTrans.TransDate <= toDate
+        {
+            select dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                   == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == vendTrans.DefaultDimension;
+            //&& dimensionAttributeValueSetItem.DisplayValue == vendProvisionalBalanceTmpProcessing.Location;
+            if(dimensionAttributeValueSetItem.RecId == 0)
+            {
+                vendProvisionalBalanceTransTmp.clear();
+                vendProvisionalBalanceTransTmp.AccountNum                      = vendProvisionalBalanceTmpProcessing.AccountNum;
+                vendProvisionalBalanceTransTmp.IsSummaryAccount                = vendProvisionalBalanceTmpProcessing.IsSummaryAccount;
+                vendProvisionalBalanceTransTmp.PostingProfile                  = vendTrans.PostingProfile;
+                vendProvisionalBalanceTransTmp.AmountAccounting                = vendTrans.AmountMST;
+                vendProvisionalBalanceTransTmp.AmountReporting                 = vendTrans.AmountCur;
+                vendProvisionalBalanceTransTmp.Correct                         = vendTrans.Correct;
+                vendProvisionalBalanceTransTmp.TransDate                       = vendTrans.TransDate;
+                vendProvisionalBalanceTransTmp.Location                        = dimensionAttributeValue.DisplayValue;
+
+                vendProvisionalBalanceTransTmp.insert();
+            }
+        }
+
+        // Insert arrival transaction that become approved based on approved dates for arrival reversal
+        // except transactions which are in invoice pool.
+        insert_recordset vendProvisionalBalanceTransTmp(
+            AccountNum,
+            Location,
+            IsSummaryAccount,
+            PostingProfile,
+            AmountAccounting,
+            AmountReporting,
+            Correct,
+            TransDate,
+            IsReversalTransaction)
+            select AccountNum, Location, IsSummaryAccount from vendProvisionalBalanceTmpProcessing
+            where vendProvisionalBalanceTmpProcessing.IsSummaryAccount == NoYes::No
+            join PostingProfile, AmountMST, ReportingCurrencyAmount, Correct, ApprovedDate, yes from vendTrans
+            where vendTrans.AccountNum == vendProvisionalBalanceTmpProcessing.AccountNum
+                && vendTrans.PostingProfile == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && vendTrans.TransType != LedgerTransType::ExchAdjustment
+                && (!invoicePoolJournalNum || vendTrans.JournalNum != invoicePoolJournalNum)
+                && vendTrans.Arrival == NoYes::Yes
+                && vendTrans.Approved == NoYes::Yes
+                && vendTrans.ApprovedDate <= toDate
+                        join dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                                == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == vendTrans.DefaultDimension
+                 && dimensionAttributeValueSetItem.DisplayValue == vendProvisionalBalanceTmpProcessing.Location;
+
+
+        while  select AccountNum, Location, IsSummaryAccount from vendProvisionalBalanceTmpProcessing
+            where vendProvisionalBalanceTmpProcessing.IsSummaryAccount == NoYes::No
+            join PostingProfile, AmountMST, ReportingCurrencyAmount, Correct, ApprovedDate from vendTrans
+            where vendTrans.AccountNum == vendProvisionalBalanceTmpProcessing.AccountNum
+                && vendTrans.PostingProfile == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && vendTrans.TransType != LedgerTransType::ExchAdjustment
+                && (!invoicePoolJournalNum || vendTrans.JournalNum != invoicePoolJournalNum)
+                && vendTrans.Arrival == NoYes::Yes
+                && vendTrans.Approved == NoYes::Yes
+                && vendTrans.ApprovedDate <= toDate
+        {
+            select dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                   == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == vendTrans.DefaultDimension;
+            //&& dimensionAttributeValueSetItem.DisplayValue == vendProvisionalBalanceTmpProcessing.Location;
+            if(dimensionAttributeValueSetItem.RecId == 0)
+            {
+                vendProvisionalBalanceTransTmp.clear();
+                vendProvisionalBalanceTransTmp.AccountNum                      = vendProvisionalBalanceTmpProcessing.AccountNum;
+                vendProvisionalBalanceTransTmp.IsSummaryAccount                = vendProvisionalBalanceTmpProcessing.IsSummaryAccount;
+                vendProvisionalBalanceTransTmp.PostingProfile                  = vendTrans.PostingProfile;
+                vendProvisionalBalanceTransTmp.AmountAccounting                = vendTrans.AmountMST;
+                vendProvisionalBalanceTransTmp.AmountReporting                 = vendTrans.AmountCur;
+                vendProvisionalBalanceTransTmp.Correct                         = vendTrans.Correct;
+                vendProvisionalBalanceTransTmp.TransDate                       = vendTrans.TransDate;
+                vendProvisionalBalanceTransTmp.Location                        = dimensionAttributeValue.DisplayValue;
+                vendProvisionalBalanceTransTmp.IsReversalTransaction           = NoYes::Yes; 
+                vendProvisionalBalanceTransTmp.insert();
+            }
+        }
+
+        // Insert approved transaction in history but currenlty approved value of false set by UI for arrival reversal
+        // except transactions which are in invoice pool.
+        insert_recordset vendProvisionalBalanceTransTmp(
+            AccountNum,
+            Location,
+            IsSummaryAccount,
+            PostingProfile,
+            AmountAccounting,
+            AmountReporting,
+            Correct,
+            TransDate,
+            IsReversalTransaction)
+            select AccountNum, Location,IsSummaryAccount from vendProvisionalBalanceTmpProcessing
+            where vendProvisionalBalanceTmpProcessing.IsSummaryAccount == NoYes::No
+            join PostingProfile, AmountMST, ReportingCurrencyAmount, Correct from vendTrans
+            where vendTrans.AccountNum == vendProvisionalBalanceTmpProcessing.AccountNum
+                && vendTrans.PostingProfile == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && vendTrans.TransType != LedgerTransType::ExchAdjustment
+                && (!invoicePoolJournalNum || vendTrans.JournalNum != invoicePoolJournalNum)
+                && vendTrans.Arrival == NoYes::Yes
+                && vendTrans.Approved  == NoYes::No
+            join ledgerJournalTable
+            where ledgerJournalTable.JournalNum == vendTrans.journalNum
+                && ledgerJournalTable.JournalType == LedgerJournalType::Approval
+                && ledgerJournalTable.Posted == NoYes::Yes
+            join ToDate, yes from ledgerjournalvoucherchanged
+            where ledgerjournalvoucherchanged.JournalNum == ledgerJournalTable.JournalNum
+                && ledgerjournalvoucherchanged.ToDate <= toDate
+                        join dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue      == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                   == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == vendTrans.DefaultDimension
+                && dimensionAttributeValueSetItem.DisplayValue == vendProvisionalBalanceTmpProcessing.Location;
+
+
+        while              select AccountNum, Location,IsSummaryAccount from vendProvisionalBalanceTmpProcessing
+            where vendProvisionalBalanceTmpProcessing.IsSummaryAccount == NoYes::No
+            join PostingProfile, AmountMST, ReportingCurrencyAmount, Correct from vendTrans
+            where vendTrans.AccountNum == vendProvisionalBalanceTmpProcessing.AccountNum
+                && vendTrans.PostingProfile == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && vendTrans.TransType != LedgerTransType::ExchAdjustment
+                && (!invoicePoolJournalNum || vendTrans.JournalNum != invoicePoolJournalNum)
+                && vendTrans.Arrival == NoYes::Yes
+                && vendTrans.Approved  == NoYes::No
+            join ledgerJournalTable
+            where ledgerJournalTable.JournalNum == vendTrans.journalNum
+                && ledgerJournalTable.JournalType == LedgerJournalType::Approval
+                && ledgerJournalTable.Posted == NoYes::Yes
+            join ToDate from ledgerjournalvoucherchanged
+            where ledgerjournalvoucherchanged.JournalNum == ledgerJournalTable.JournalNum
+                && ledgerjournalvoucherchanged.ToDate <= toDate
+        {
+            select dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                   == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == vendTrans.DefaultDimension;
+            //&& dimensionAttributeValueSetItem.DisplayValue == vendProvisionalBalanceTmpProcessing.Location;
+            if(dimensionAttributeValueSetItem.RecId == 0)
+            {
+                vendProvisionalBalanceTransTmp.clear();
+                vendProvisionalBalanceTransTmp.AccountNum                      = vendProvisionalBalanceTmpProcessing.AccountNum;
+                vendProvisionalBalanceTransTmp.IsSummaryAccount                = vendProvisionalBalanceTmpProcessing.IsSummaryAccount;
+                vendProvisionalBalanceTransTmp.PostingProfile                  = vendTrans.PostingProfile;
+                vendProvisionalBalanceTransTmp.AmountAccounting                = vendTrans.AmountMST;
+                vendProvisionalBalanceTransTmp.AmountReporting                 = vendTrans.AmountCur;
+                vendProvisionalBalanceTransTmp.Correct                         = vendTrans.Correct;
+                vendProvisionalBalanceTransTmp.TransDate                       = vendTrans.TransDate;
+                vendProvisionalBalanceTransTmp.Location                        = dimensionAttributeValue.DisplayValue;
+                vendProvisionalBalanceTransTmp.IsReversalTransaction           = NoYes::Yes;
+                vendProvisionalBalanceTransTmp.insert();
+            }
+        }
+
+        insert_recordset vendProvisionalBalanceTransTmp(
+            AccountNum,
+            IsSummaryAccount,
+            PostingProfile,
+            AmountAccounting,
+            AmountReporting,
+            Correct,
+            TransDate,
+            Location)
+            select AccountNum, IsSummaryAccount from vendProvisionalBalanceTmpProcessing
+            where vendProvisionalBalanceTmpProcessing.IsSummaryAccount       == NoYes::No
+            join PostingProfile, AmountMST, ReportingCurrencyAmount, Correct, TransDate from vendTrans
+            where vendTrans.AccountNum                                       == vendProvisionalBalanceTmpProcessing.AccountNum
+                && vendTrans.PostingProfile                                  == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && vendTrans.TransType                                       == LedgerTransType::ExchAdjustment
+                && vendTrans.Arrival                                         == NoYes::Yes
+                && vendTrans.Approved                                        == NoYes::Yes
+                && vendTrans.TransDate <= toDate
+            join DisplayValue from dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute              == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                   == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == vendTrans.DefaultDimension
+                && dimensionAttributeValueSetItem.DisplayValue == vendProvisionalBalanceTmpProcessing.Location;
+
+        while              select AccountNum, IsSummaryAccount from vendProvisionalBalanceTmpProcessing
+            where vendProvisionalBalanceTmpProcessing.IsSummaryAccount       == NoYes::No
+            join PostingProfile, AmountMST, ReportingCurrencyAmount, Correct, TransDate from vendTrans
+            where vendTrans.AccountNum                                       == vendProvisionalBalanceTmpProcessing.AccountNum
+                && vendTrans.PostingProfile                                  == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && vendTrans.TransType                                       == LedgerTransType::ExchAdjustment
+                && vendTrans.Arrival                                         == NoYes::Yes
+                && vendTrans.Approved                                        == NoYes::Yes
+                && vendTrans.TransDate <= toDate
+        {
+            select dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                   == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == vendTrans.DefaultDimension;
+            //&& dimensionAttributeValueSetItem.DisplayValue == vendProvisionalBalanceTmpProcessing.Location;
+            if(dimensionAttributeValueSetItem.RecId == 0)
+            {
+                vendProvisionalBalanceTransTmp.clear();
+                vendProvisionalBalanceTransTmp.AccountNum                      = vendProvisionalBalanceTmpProcessing.AccountNum;
+                vendProvisionalBalanceTransTmp.IsSummaryAccount                = vendProvisionalBalanceTmpProcessing.IsSummaryAccount;
+                vendProvisionalBalanceTransTmp.PostingProfile                  = vendTrans.PostingProfile;
+                vendProvisionalBalanceTransTmp.AmountAccounting                = vendTrans.AmountMST;
+                vendProvisionalBalanceTransTmp.AmountReporting                 = vendTrans.AmountCur;
+                vendProvisionalBalanceTransTmp.Correct                         = vendTrans.Correct;
+                vendProvisionalBalanceTransTmp.TransDate                       = vendTrans.TransDate;
+                vendProvisionalBalanceTransTmp.Location                        = dimensionAttributeValue.DisplayValue;
+                vendProvisionalBalanceTransTmp.insert();
+            }
+        }
+
+        this.updateReverseAmountInArrivalAccount();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateReverseAmountInArrivalAccount</Name>
+				<Source><![CDATA[
+    private void updateReverseAmountInArrivalAccount()
+    {
+        update_recordset vendProvisionalBalanceTransTmp
+            setting
+                AmountAccounting = vendProvisionalBalanceTransTmp.AmountAccounting * -1,
+                AmountReporting = vendProvisionalBalanceTransTmp.AmountReporting * -1
+            where vendProvisionalBalanceTransTmp.IsSummaryAccount       == NoYes::No
+                && vendProvisionalBalanceTransTmp.isReversalTransaction == NoYes::Yes;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>populateVendProvisionalBalanceTmpProcessing</Name>
+				<Source><![CDATA[
+    protected void populateVendProvisionalBalanceTmpProcessing()
+    {
+        VendTable                           vendTable;
+        VendTrans                           vendTrans;
+        MainAccount                         mainAccount;
+        DirPartyTable                       dirPartyTable;
+        VendLedgerAccounts                  vendLedgerAccounts;
+        DimensionAttributeValueCombination  dimensionAttributeValueCombination;
+        DimensionAttributeValue              dimensionAttributeValue;
+        DimensionAttribute                       dimensionAttribute;
+
+        const boolean SummaryAcc = true;
+        const boolean ArrivalAcc = false;
+        
+        // The following set of queries populate the Processing table with PostingProfile and most specific AccountCode for the Vendor's Summary and Arrival accounts
+        if (isFilteredVendTableAvailable)
+        {
+            // Summary account
+            insert_recordset vendProvisionalBalanceTmpProcessing
+                (AccountNum,
+                VendGroup,
+                VendAccountName,
+                AccountCode,
+                PostingProfile,
+                IsSummaryAccount
+               )
+                select AccountNum from filteredVendTable
+                group by filteredVendTable.AccountNum, vendTable.VendGroup, vendLedgerAccounts.PostingProfile
+                join VendGroup from vendTable
+                where vendTable.AccountNum == filteredVendTable.AccountNum
+                join maxOf(Name) from dirPartyTable
+                where dirPartyTable.RecId == vendTable.Party
+                join minOf(AccountCode), PostingProfile, SummaryAcc from vendLedgerAccounts
+                where vendLedgerAccounts.SummaryLedgerDimension != 0
+                    && ((vendLedgerAccounts.AccountCode == TableGroupAll::Table && vendLedgerAccounts.Num == vendTable.AccountNum)
+                        || (vendLedgerAccounts.AccountCode == TableGroupAll::GroupId && vendLedgerAccounts.Num == vendTable.VendGroup)
+                        || (vendLedgerAccounts.AccountCode == TableGroupAll::All));  
+
+            while select AccountNum from filteredVendTable
+                group by filteredVendTable.AccountNum, vendTable.VendGroup, vendLedgerAccounts.PostingProfile
+                join VendGroup from vendTable
+                where vendTable.AccountNum == filteredVendTable.AccountNum
+                join maxOf(Name) from dirPartyTable
+                where dirPartyTable.RecId == vendTable.Party
+                join minOf(AccountCode), PostingProfile from vendLedgerAccounts
+                where vendLedgerAccounts.SummaryLedgerDimension != 0
+                    && ((vendLedgerAccounts.AccountCode == TableGroupAll::Table && vendLedgerAccounts.Num == vendTable.AccountNum)
+                        || (vendLedgerAccounts.AccountCode == TableGroupAll::GroupId && vendLedgerAccounts.Num == vendTable.VendGroup)
+                        || (vendLedgerAccounts.AccountCode == TableGroupAll::All))
+            {
+                while select DisplayValue from dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                 == 'Locations'
+                {
+                    vendProvisionalBalanceTmpProcessing.clear();
+                    vendProvisionalBalanceTmpProcessing.AccountNum              =    filteredVendTable.AccountNum;
+                    vendProvisionalBalanceTmpProcessing.VendGroup               = vendTable.VendGroup;
+                    vendProvisionalBalanceTmpProcessing.VendAccountName         = dirPartyTable.Name;
+                    vendProvisionalBalanceTmpProcessing.AccountCode             =  vendLedgerAccounts.AccountCode;
+                    vendProvisionalBalanceTmpProcessing.PostingProfile          =  vendLedgerAccounts.PostingProfile;
+                    vendProvisionalBalanceTmpProcessing.IsSummaryAccount        =  SummaryAcc;
+                    vendProvisionalBalanceTmpProcessing.Location                =   dimensionAttributeValue.DisplayValue;
+                    vendProvisionalBalanceTmpProcessing.insert();
+                }
+            }
+
+            // Arrival account
+            insert_recordset vendProvisionalBalanceTmpProcessing
+                (AccountNum,
+                VendGroup,
+                VendAccountName,
+                AccountCode,
+                PostingProfile,
+                IsSummaryAccount
+               )
+                select AccountNum from filteredVendTable
+                group by filteredVendTable.AccountNum, vendTable.VendGroup, vendLedgerAccounts.PostingProfile
+                join VendGroup from vendTable
+                where vendTable.AccountNum == filteredVendTable.AccountNum
+                join maxOf(Name) from dirPartyTable
+                where dirPartyTable.RecId == vendTable.Party
+                join minOf(AccountCode), PostingProfile, ArrivalAcc from vendLedgerAccounts
+                where vendLedgerAccounts.PurchasingLedgerDimension != 0
+                    && ((vendLedgerAccounts.AccountCode == TableGroupAll::Table && vendLedgerAccounts.Num == vendTable.AccountNum)
+                        || (vendLedgerAccounts.AccountCode == TableGroupAll::GroupId && vendLedgerAccounts.Num == vendTable.VendGroup)
+                        || (vendLedgerAccounts.AccountCode == TableGroupAll::All)); 
+
+            while select AccountNum from filteredVendTable
+                group by filteredVendTable.AccountNum, vendTable.VendGroup, vendLedgerAccounts.PostingProfile
+                join VendGroup from vendTable
+                where vendTable.AccountNum == filteredVendTable.AccountNum
+                join maxOf(Name) from dirPartyTable
+                where dirPartyTable.RecId == vendTable.Party
+                join minOf(AccountCode), PostingProfile from vendLedgerAccounts
+                where vendLedgerAccounts.PurchasingLedgerDimension != 0
+                    && ((vendLedgerAccounts.AccountCode == TableGroupAll::Table && vendLedgerAccounts.Num == vendTable.AccountNum)
+                        || (vendLedgerAccounts.AccountCode == TableGroupAll::GroupId && vendLedgerAccounts.Num == vendTable.VendGroup)
+                        || (vendLedgerAccounts.AccountCode == TableGroupAll::All))
+            {
+                while select DisplayValue from dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                 == 'Locations'
+                {
+                    vendProvisionalBalanceTmpProcessing.clear();
+                    vendProvisionalBalanceTmpProcessing.AccountNum              =    filteredVendTable.AccountNum;
+                    vendProvisionalBalanceTmpProcessing.VendGroup               = vendTable.VendGroup;
+                    vendProvisionalBalanceTmpProcessing.VendAccountName         = dirPartyTable.Name;
+                    vendProvisionalBalanceTmpProcessing.AccountCode             =  vendLedgerAccounts.AccountCode;
+                    vendProvisionalBalanceTmpProcessing.PostingProfile          =  vendLedgerAccounts.PostingProfile;
+                    vendProvisionalBalanceTmpProcessing.IsSummaryAccount        =  ArrivalAcc;
+                    vendProvisionalBalanceTmpProcessing.Location                =   dimensionAttributeValue.DisplayValue;
+                    vendProvisionalBalanceTmpProcessing.insert();
+                }
+            }
+        }
+        else
+        {
+
+            // Summary account
+            
+            insert_recordset vendProvisionalBalanceTmpProcessing
+                (AccountNum,
+                VendGroup,
+                VendAccountName,
+                AccountCode,
+                PostingProfile,
+                IsSummaryAccount
+               )
+                select AccountNum, VendGroup from vendTable
+                group by vendTable.AccountNum, vendTable.VendGroup, vendLedgerAccounts.PostingProfile
+                join maxOf(Name) from dirPartyTable
+                where dirPartyTable.RecId == vendTable.Party
+                join minOf(AccountCode), PostingProfile, SummaryAcc from vendLedgerAccounts
+                where vendLedgerAccounts.SummaryLedgerDimension != 0
+                    && ((vendLedgerAccounts.AccountCode == TableGroupAll::Table && vendLedgerAccounts.Num == vendTable.AccountNum)
+                        || (vendLedgerAccounts.AccountCode == TableGroupAll::GroupId && vendLedgerAccounts.Num == vendTable.VendGroup)
+                || (vendLedgerAccounts.AccountCode == TableGroupAll::All))  ;
+             
+            while select AccountNum, VendGroup from vendTable
+                group by vendTable.AccountNum, vendTable.VendGroup, vendLedgerAccounts.PostingProfile
+                join maxOf(Name) from dirPartyTable
+                where dirPartyTable.RecId               == vendTable.Party
+                join minOf(AccountCode), PostingProfile from vendLedgerAccounts
+                where vendLedgerAccounts.SummaryLedgerDimension != 0
+                    && ((vendLedgerAccounts.AccountCode          == TableGroupAll::Table && vendLedgerAccounts.Num == vendTable.AccountNum)
+                        || (vendLedgerAccounts.AccountCode       == TableGroupAll::GroupId && vendLedgerAccounts.Num == vendTable.VendGroup)
+                || (vendLedgerAccounts.AccountCode               == TableGroupAll::All))
+            {
+                while select DisplayValue from dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                 == 'Locations'
+                {
+                    vendProvisionalBalanceTmpProcessing.clear();
+                    vendProvisionalBalanceTmpProcessing.AccountNum              =    vendTable.AccountNum;
+                    vendProvisionalBalanceTmpProcessing.VendGroup               = vendTable.VendGroup;
+                    vendProvisionalBalanceTmpProcessing.VendAccountName         = dirPartyTable.Name;
+                    vendProvisionalBalanceTmpProcessing.AccountCode             =  vendLedgerAccounts.AccountCode;
+                    vendProvisionalBalanceTmpProcessing.PostingProfile          =  vendLedgerAccounts.PostingProfile;
+                    vendProvisionalBalanceTmpProcessing.IsSummaryAccount        =  SummaryAcc;
+                    vendProvisionalBalanceTmpProcessing.Location                =   dimensionAttributeValue.DisplayValue;
+                    vendProvisionalBalanceTmpProcessing.insert();
+                }
+            }
+
+
+            // Arrival account
+            insert_recordset vendProvisionalBalanceTmpProcessing
+                (AccountNum,
+                VendGroup,
+                VendAccountName,
+                AccountCode,
+                PostingProfile,
+                IsSummaryAccount
+               )
+                select AccountNum, VendGroup from vendTable
+                group by vendTable.AccountNum, vendTable.VendGroup, vendLedgerAccounts.PostingProfile
+                join maxOf(Name) from dirPartyTable
+                where dirPartyTable.RecId == vendTable.Party
+                join minOf(AccountCode), PostingProfile, ArrivalAcc from vendLedgerAccounts
+                where vendLedgerAccounts.PurchasingLedgerDimension != 0
+                    && ((vendLedgerAccounts.AccountCode == TableGroupAll::Table && vendLedgerAccounts.Num == vendTable.AccountNum)
+                        || (vendLedgerAccounts.AccountCode == TableGroupAll::GroupId && vendLedgerAccounts.Num == vendTable.VendGroup)
+                        || (vendLedgerAccounts.AccountCode == TableGroupAll::All)) ;
+
+            while select AccountNum, VendGroup from vendTable
+                group by vendTable.AccountNum, vendTable.VendGroup, vendLedgerAccounts.PostingProfile
+                join maxOf(Name) from dirPartyTable
+                where dirPartyTable.RecId == vendTable.Party
+                join minOf(AccountCode), PostingProfile from vendLedgerAccounts
+                where vendLedgerAccounts.PurchasingLedgerDimension != 0
+                    && ((vendLedgerAccounts.AccountCode      == TableGroupAll::Table && vendLedgerAccounts.Num == vendTable.AccountNum)
+                        || (vendLedgerAccounts.AccountCode   == TableGroupAll::GroupId && vendLedgerAccounts.Num == vendTable.VendGroup)
+                        || (vendLedgerAccounts.AccountCode   == TableGroupAll::All))
+            {
+                while select DisplayValue from dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                 == 'Locations'
+                {
+                    vendProvisionalBalanceTmpProcessing.clear();
+                    vendProvisionalBalanceTmpProcessing.AccountNum              =    vendTable.AccountNum;
+                    vendProvisionalBalanceTmpProcessing.VendGroup               = vendTable.VendGroup;
+                    vendProvisionalBalanceTmpProcessing.VendAccountName         = dirPartyTable.Name;
+                    vendProvisionalBalanceTmpProcessing.AccountCode             =  vendLedgerAccounts.AccountCode;
+                    vendProvisionalBalanceTmpProcessing.PostingProfile          =  vendLedgerAccounts.PostingProfile;
+                    vendProvisionalBalanceTmpProcessing.IsSummaryAccount        =  ArrivalAcc;
+                    vendProvisionalBalanceTmpProcessing.Location                =   dimensionAttributeValue.DisplayValue;
+                    vendProvisionalBalanceTmpProcessing.insert();
+                }
+            }
+           
+        }
+        
+        
+
+
+        // The following set of queries update the Processing table with the MainAccountId and Name values for the Vendor's posting profile Summary and Arrival accounts
+        // Summary account
+        update_recordset vendProvisionalBalanceTmpProcessing
+            setting
+                MainAccountId           = mainAccount.MainAccountId,
+                MainAccountName         = mainAccount.Name
+            where vendProvisionalBalanceTmpProcessing.IsSummaryAccount == SummaryAcc
+            join vendLedgerAccounts
+            where vendLedgerAccounts.AccountCode      == vendProvisionalBalanceTmpProcessing.AccountCode
+                && vendLedgerAccounts.PostingProfile  == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && ((vendLedgerAccounts.AccountCode   == TableGroupAll::Table && vendLedgerAccounts.Num == vendProvisionalBalanceTmpProcessing.AccountNum)
+                    || (vendLedgerAccounts.AccountCode   == TableGroupAll::GroupId && vendLedgerAccounts.Num == vendProvisionalBalanceTmpProcessing.VendGroup)
+                    || (vendLedgerAccounts.AccountCode   == TableGroupAll::All))
+            join dimensionAttributeValueCombination
+            where dimensionAttributeValueCombination.RecId   == vendLedgerAccounts.SummaryLedgerDimension
+            join MainAccountId, Name from mainAccount
+            where mainAccount.RecId         == dimensionAttributeValueCombination.MainAccount;
+
+        // Arrival account
+        update_recordset vendProvisionalBalanceTmpProcessing
+            setting
+                MainAccountId           = mainAccount.MainAccountId,
+                MainAccountName         = mainAccount.Name
+            where vendProvisionalBalanceTmpProcessing.IsSummaryAccount == ArrivalAcc
+            join vendLedgerAccounts
+            where vendLedgerAccounts.AccountCode      == vendProvisionalBalanceTmpProcessing.AccountCode
+                && vendLedgerAccounts.PostingProfile  == vendProvisionalBalanceTmpProcessing.PostingProfile
+                && ((vendLedgerAccounts.AccountCode   == TableGroupAll::Table && vendLedgerAccounts.Num == vendProvisionalBalanceTmpProcessing.AccountNum)
+                    || (vendLedgerAccounts.AccountCode == TableGroupAll::GroupId && vendLedgerAccounts.Num == vendProvisionalBalanceTmpProcessing.VendGroup)
+                    || (vendLedgerAccounts.AccountCode == TableGroupAll::All))
+            join dimensionAttributeValueCombination
+            where dimensionAttributeValueCombination.RecId   == vendLedgerAccounts.PurchasingLedgerDimension
+            join MainAccountId, Name from mainAccount
+            where mainAccount.RecId == dimensionAttributeValueCombination.MainAccount;
+
+        if (isFilteredMainAccountAvailable)
+        {
+            this.deleteFromVendProvisionalBalanceTmpProcessingByMainAccount(filteredMainAccount);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>populateFilterForVendTable</Name>
+				<Source><![CDATA[
+    private boolean populateFilterForVendTable(ETG_VendProvisionalBalanceTmpValue _vendProvisionalBalanceTmpValue)
+    {
+        QueryRun queryRun                   = new QueryRun(this.parmQuery());
+        Query query                         = queryRun.query();
+        QueryBuildDataSource qbdsVendTable  = SysQuery::findOrCreateDataSource(query, tableNum(VendTable));
+
+        boolean hasFilteredTable            = this.hasFilteredTable(query, tableNum(VendTable));
+
+        if (hasFilteredTable)
+        {
+            qbdsVendTable.enabled(true);
+
+            RecordInsertList tmpValueRIL     = new RecordInsertList(tableNum(ETG_VendProvisionalBalanceTmpValue), false, false, false, false, true, _vendProvisionalBalanceTmpValue);
+
+            VendTable vendTable;
+            while (queryRun.next())
+            {
+                if (queryRun.changed(tableNum(VendTable)))
+                {
+                    vendTable               = queryRun.get(tableNum(VendTable));
+                    _vendProvisionalBalanceTmpValue.clear();
+                    _vendProvisionalBalanceTmpValue.AccountNum = vendTable.AccountNum;
+                    tmpValueRIL.add(_vendProvisionalBalanceTmpValue);
+                }
+            }
+
+            tmpValueRIL.insertDatabase();
+        }
+
+        return hasFilteredTable;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>populateFilterForMainAccount</Name>
+				<Source><![CDATA[
+    private boolean populateFilterForMainAccount(ETG_VendProvisionalBalanceTmpValue _vendProvisionalBalanceTmpValue)
+    {
+        QueryRun queryRun       = new QueryRun(this.parmQuery());
+        Query query = queryRun.query();
+        QueryBuildDataSource qbdsMainAccount = SysQuery::findOrCreateDataSource(query, tableNum(MainAccount));
+
+        boolean hasFilteredTable             = this.hasFilteredTable(query, tableNum(MainAccount));
+
+        if (hasFilteredTable)
+        {
+            qbdsMainAccount.enabled(true);
+
+            RecordInsertList tmpValueRIL = new RecordInsertList(tableNum(ETG_VendProvisionalBalanceTmpValue), false, false, false, false, true, _vendProvisionalBalanceTmpValue);
+
+            MainAccount mainAccount;
+            while (queryRun.next())
+            {
+                if (queryRun.changed(tableNum(MainAccount)))
+                {
+                    mainAccount = queryRun.get(tableNum(MainAccount));
+                    _vendProvisionalBalanceTmpValue.clear();
+                    _vendProvisionalBalanceTmpValue.MainAccountId = mainAccount.MainAccountId;
+                    tmpValueRIL.add(_vendProvisionalBalanceTmpValue);
+                }
+            }
+
+            tmpValueRIL.insertDatabase();
+        }
+
+        return hasFilteredTable;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>deleteFromVendProvisionalBalanceTmpProcessingByMainAccount</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///     Deletes the <c>VendProvisionalBalanceTmpProcessing</c> record if record with the same mainaccount exists in <c>VendProvisionalBalanceTmpValue</c>.
+    /// </summary>
+    /// <param name = "_vendProvisionalBalanceTmpProcessing">
+    ///     A <c>VendProvisionalBalanceTmpValue</c> table buffer.
+    /// </param>
+    /// <param name = "_skipDelete">
+    ///     A boolean flag to skip deletion; optional.
+    /// </param>
+    protected void deleteFromVendProvisionalBalanceTmpProcessingByMainAccount(ETG_VendProvisionalBalanceTmpValue _vendProvisionalBalanceTmpValue, boolean _skipDelete = false)
+    {
+        if (!_skipDelete)
+        {
+            delete_from vendProvisionalBalanceTmpProcessing
+            notexists join _vendProvisionalBalanceTmpValue
+            where _vendProvisionalBalanceTmpValue.MainAccountId     == vendProvisionalBalanceTmpProcessing.MainAccountId ;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmSkipInsert</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///     Gets or set the boolean for insertion.
+    /// </summary>
+    /// <param name = "_skipInsert">
+    ///     A boolean flag to skip insertion.
+    /// </param>
+    /// <returns>
+    ///     The current value of boolean skipInsert.
+    /// </returns>
+    public boolean parmSkipInsert(boolean _skipInsert = skipInsert)
+    {
+        skipInsert = _skipInsert;
+        return skipInsert;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getVendProvisionalBalanceTmpSumValue</Name>
+				<Source><![CDATA[
+    private ETG_VendProvisionalBalanceTmpValue     getVendProvisionalBalanceTmpSumValue(TransDate _fromDate)
+    {
+        NoYes yes                                = NoYes::Yes;
+        NoYes no                                 = NoYes::No;
+        ETG_VendProvisionalBalanceTmpValue vendProvisionalBalanceTmpValue;
+
+        if (ledgerCurrencySelection             != LedgerCurrencySelection::Reporting)
+        {
+            insert_recordset vendProvisionalBalanceTmpValue
+                (AccountNum,
+                MainAccountId,
+                Location,
+                PostingProfile,
+                IsSummaryAccount,
+                Amount,
+                IsCredit)
+                select AccountNum,MainAccountId from vendProvisionalBalanceTmpProcessing
+                group by AccountNum, MainAccountId
+                join  Location,PostingProfile, IsSummaryAccount, sum(AmountAccounting), no from vendProvisionalBalanceTransTmp
+                group by AccountNum, Location, PostingProfile, IsSummaryAccount
+                where vendProvisionalBalanceTransTmp.AccountNum             == vendProvisionalBalanceTmpProcessing.AccountNum
+                    && vendProvisionalBalanceTransTmp.Location        == vendProvisionalBalanceTmpProcessing.Location
+                    && vendProvisionalBalanceTransTmp.PostingProfile        == vendProvisionalBalanceTmpProcessing.PostingProfile
+                    && vendProvisionalBalanceTransTmp.IsSummaryAccount      == vendProvisionalBalanceTmpProcessing.IsSummaryAccount
+                    && vendProvisionalBalanceTransTmp.TransDate  >= _fromDate && vendProvisionalBalanceTransTmp.TransDate <= toDate
+                    && ((vendProvisionalBalanceTransTmp.AmountAccounting > 0 && vendProvisionalBalanceTransTmp.Correct      == no)
+                        || (vendProvisionalBalanceTransTmp.AmountAccounting < 0 && vendProvisionalBalanceTransTmp.Correct   == yes));
+
+            insert_recordset vendProvisionalBalanceTmpValue
+                (AccountNum,
+                
+                MainAccountId,
+                Location,
+                PostingProfile,
+                IsSummaryAccount,
+                Amount,
+                IsCredit)
+                select AccountNum, MainAccountId from vendProvisionalBalanceTmpProcessing
+                group by AccountNum, MainAccountId
+                join Location, PostingProfile, IsSummaryAccount, sum(AmountAccounting), yes from vendProvisionalBalanceTransTmp
+                group by AccountNum, Location, PostingProfile, IsSummaryAccount
+                where vendProvisionalBalanceTransTmp.AccountNum                 == vendProvisionalBalanceTmpProcessing.AccountNum
+                    && vendProvisionalBalanceTransTmp.Location            == vendProvisionalBalanceTmpProcessing.Location
+                    && vendProvisionalBalanceTransTmp.PostingProfile            == vendProvisionalBalanceTmpProcessing.PostingProfile
+                    && vendProvisionalBalanceTransTmp.IsSummaryAccount          == vendProvisionalBalanceTmpProcessing.IsSummaryAccount
+                    && vendProvisionalBalanceTransTmp.TransDate >= _fromDate && vendProvisionalBalanceTransTmp.TransDate <= toDate
+                    && ((vendProvisionalBalanceTransTmp.AmountAccounting < 0 && vendProvisionalBalanceTransTmp.Correct      == no)
+                        || (vendProvisionalBalanceTransTmp.AmountAccounting > 0 && vendProvisionalBalanceTransTmp.Correct   == yes));
+            select vendProvisionalBalanceTmpValue;
+        }
+        else
+        {
+            insert_recordset vendProvisionalBalanceTmpValue
+                (AccountNum,
+                
+                MainAccountId,
+                Location,
+                PostingProfile,
+                IsSummaryAccount,
+                ReportingCurrencyAmount,
+                IsCredit)
+                select AccountNum, MainAccountId from vendProvisionalBalanceTmpProcessing
+                group by AccountNum, MainAccountId
+                join Location, PostingProfile, IsSummaryAccount, sum(AmountReporting), no from vendProvisionalBalanceTransTmp
+                group by AccountNum, Location, PostingProfile, IsSummaryAccount
+                where vendProvisionalBalanceTransTmp.AccountNum                 == vendProvisionalBalanceTmpProcessing.AccountNum
+                    && vendProvisionalBalanceTransTmp.Location            == vendProvisionalBalanceTmpProcessing.Location
+                    && vendProvisionalBalanceTransTmp.PostingProfile            == vendProvisionalBalanceTmpProcessing.PostingProfile
+                    && vendProvisionalBalanceTransTmp.IsSummaryAccount          == vendProvisionalBalanceTmpProcessing.IsSummaryAccount
+                    && vendProvisionalBalanceTransTmp.TransDate >= _fromDate && vendProvisionalBalanceTransTmp.TransDate <= toDate
+                    && ((vendProvisionalBalanceTransTmp.AmountReporting > 0 && vendProvisionalBalanceTransTmp.Correct           == no)
+                        || (vendProvisionalBalanceTransTmp.AmountReporting < 0 && vendProvisionalBalanceTransTmp.Correct        == yes));
+            select vendProvisionalBalanceTmpValue;
+
+            insert_recordset vendProvisionalBalanceTmpValue
+                (AccountNum,
+                
+                MainAccountId,
+                Location,
+                PostingProfile,
+                IsSummaryAccount,
+                ReportingCurrencyAmount,
+                IsCredit)
+                select AccountNum, MainAccountId from vendProvisionalBalanceTmpProcessing
+                group by AccountNum, MainAccountId
+                join Location, PostingProfile, IsSummaryAccount, sum(AmountReporting), yes from vendProvisionalBalanceTransTmp
+                group by AccountNum, Location, PostingProfile, IsSummaryAccount
+                where vendProvisionalBalanceTransTmp.AccountNum             == vendProvisionalBalanceTmpProcessing.AccountNum
+                    && vendProvisionalBalanceTransTmp.Location        == vendProvisionalBalanceTmpProcessing.Location
+                    && vendProvisionalBalanceTransTmp.PostingProfile        == vendProvisionalBalanceTmpProcessing.PostingProfile
+                    && vendProvisionalBalanceTransTmp.IsSummaryAccount      == vendProvisionalBalanceTmpProcessing.IsSummaryAccount
+                    && vendProvisionalBalanceTransTmp.TransDate >= _fromDate && vendProvisionalBalanceTransTmp.TransDate <= toDate
+                    && ((vendProvisionalBalanceTransTmp.AmountReporting < 0 && vendProvisionalBalanceTransTmp.Correct       == no)
+                        || (vendProvisionalBalanceTransTmp.AmountReporting > 0 && vendProvisionalBalanceTransTmp.Correct    == yes));
+            select  vendProvisionalBalanceTransTmp;
+        }
+             
+        update_recordset vendProvisionalBalanceTmpValue
+            setting
+                Amount                                                       = vendProvisionalBalanceTmpValue.Amount * -1,
+                ReportingCurrencyAmount                                      = vendProvisionalBalanceTmpValue.ReportingCurrencyAmount * -1
+            where vendProvisionalBalanceTmpValue.IsCredit                   == yes;
+
+        return vendProvisionalBalanceTmpValue;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

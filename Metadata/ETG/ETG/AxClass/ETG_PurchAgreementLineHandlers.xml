@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_PurchAgreementLineHandlers</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_PurchAgreementLineHandlers
+{
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>ALine_OnWritten</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataSourceEventHandler(formDataSourceStr(PurchAgreement, ALine), FormDataSourceEventType::Written)]
+    public static void ALine_OnWritten(FormDataSource sender, FormDataSourceEventArgs e)
+    {
+        ETG_PurchaseAgreementLine   purchaseAgreementLine;
+        AgreementLine           agreementline   = sender.cursor();
+
+        FormDataSource          purchaseAgreementHeader_ds       = sender.formRun().dataSource('ETG_PurchaseAgreementHeader');
+        ETG_PurchaseAgreementHeader    purchaseAgreementHeaderETG   = purchaseAgreementHeader_ds.cursor();
+      
+        purchaseAgreementLine.PurchAgreementId = purchaseAgreementHeaderETG.PurchAgreementId;
+        purchaseAgreementLine.PurchaseAgreementLine = agreementline.RecId;
+        purchaseAgreementLine.insert();
+
+        //CS - Abhinav - create rate card master on agreement line insert
+        if(ETGCanadaParameters::find().EnableRateCardChanges)
+        {
+            ETGRateCardMasterHelper rateCardMasterHelper = ETGRateCardMasterHelper::construct();
+            rateCardMasterHelper.parmAgreementLine(agreementLine);
+            rateCardMasterHelper.run();
+        }
+        //CE
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>AgreementLine_ItemId_OnLookup</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(PurchAgreement, AgreementLine_ItemId), FormControlEventType::Lookup)]
+    public static void AgreementLine_ItemId_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        if(ETGCanadaParameters::find().EnablePurchAgreementLookup)
+        {
+            SysTableLookup          sysTableLookup;
+            Query                   query = new Query();
+            QueryBuildDataSource    inventTableDS;
+            QueryBuildDataSource    itemGroupItemDS;
+            QueryBuildDataSource    itemGroupDS;
+
+            sysTableLookup = SysTableLookup::newParameters(tableNum(InventTable),sender);
+            sysTableLookup.parmQuery(query);
+            sysTableLookup.parmUseLookupValue(true);
+
+            inventTableDS = query.addDataSource(tableNum(InventTable));
+            itemGroupItemDS = inventTableDS.addDataSource(tableNum(InventItemGroupItem));
+            itemGroupItemDS.relations(true);
+            itemGroupItemDS.joinMode(JoinMode::ExistsJoin);
+
+            itemGroupDS = itemGroupItemDS.addDataSource(tableNum(InventItemGroup));
+            itemGroupDS.relations(true);
+            itemGroupDS.joinMode(JoinMode::ExistsJoin);
+
+            itemGroupDS.addRange(fieldNum(InventItemGroup,IsFGItem)).value(queryValue(NoYes::No));
+
+            sysTableLookup.addLookupfield(fieldNum(InventTable, ItemId));
+            sysTableLookup.addLookupfield(fieldNum(InventTable,NameAlias));
+            //sysTableLookup.addLookupfield(fieldNum(InventItemGroupItem,ItemGroupId));
+
+            FormControlCancelableSuperEventArgs cancelArgs = e as FormControlCancelableSuperEventArgs;
+            cancelArgs.CancelSuperCall();
+
+            sysTableLookup.performFormLookup();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

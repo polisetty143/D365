@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGVendAccountStatementBatch</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGVendAccountStatementBatch extends RunBaseBatch
+{
+    VendGroupId vendGroupId;
+    protected static const str vendGroupConvert = 'Vendor group';
+    TransDate fromDate;
+    TransDate toDate;
+    DialogRunbase dialog;
+    DialogField vendGroupField;
+    DialogField fromDateField;
+    DialogField toDateField;
+
+    #define.CurrentVersion(1)
+    #LOCALMACRO.CurrentList
+    vendGroupId
+    #ENDMACRO
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>canRunInNewSession</Name>
+				<Source><![CDATA[
+    protected boolean canRunInNewSession()
+    {
+        return false;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args args)
+    {
+        ETGVendAccountStatementBatch accountStatementBatch = new ETGVendAccountStatementBatch();
+        if(accountStatementBatch.prompt())
+        {
+            accountStatementBatch.runOperation();
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    public void run()
+    {
+        VendTable                    vendTable;
+        SrsReportRunService          reportRunService;
+        SRSPrintDestinationSettings  printDestinationSettings;
+        ETG_VendAccountStatementBalanceContract rdpContract;
+        ETGVendAccountStController1 controller;
+        ETGVendAccountStContract1    reportDataContract;
+        System.IO.MemoryStream       stream;
+        str                          fileName, downloadUrl;
+
+        while select vendTable
+            where vendTable.VendGroup == vendGroupId
+        {
+            // Initialize the report contract
+            rdpContract = new ETG_VendAccountStatementBalanceContract();
+
+            //  Set required report parameters
+            rdpContract.parmFromDate(fromDate);
+            rdpContract.parmToDate(toDate);
+            rdpContract.parmVendorAccount(vendTable.AccountNum);
+            // If your RDP also has a parmCompany or similar, set it here too
+
+            // Initialize controller
+            controller = new ETGVendAccountStController1();
+            controller.parmReportName(ssrsReportStr(ETG_VendAccountStatementBalance, PrecisionDesign1));
+            controller.parmReportContract().parmRdpContract(rdpContract);
+
+            // Define print settings
+            fileName = strFmt("VendorAccountStatement_%1.xlsx", vendTable.AccountNum);
+            printDestinationSettings = new SRSPrintDestinationSettings();
+            printDestinationSettings.fileFormat(SRSReportFileFormat::Excel);
+            printDestinationSettings.parmFileName(fileName);
+            printDestinationSettings.printMediumType(SRSPrintMediumType::File);
+
+            // Prepare the report data contract
+            reportDataContract = new ETGVendAccountStContract1();
+            reportDataContract.unpack(controller.parmReportContract().pack());
+            reportDataContract.parmReportExecutionInfo(new SRSReportExecutionInfo());
+            reportDataContract.parmPrintSettings(printDestinationSettings);
+
+            // Run the report
+            reportRunService = new SrsReportRunService();
+            reportRunService.runReport(reportDataContract);
+
+            // Convert report to stream
+            stream = new System.IO.MemoryStream(reportDataContract.parmReportBytes());
+
+            // Send to temporary storage for download
+            downloadUrl = File::SendFileToTempStore(
+                stream,
+                printDestinationSettings.parmFileName(),
+                classStr(FileUploadTemporaryStorageStrategy),
+                true);
+
+            // Open PDF in browser (new tab)
+            new Browser().navigate(downloadUrl, true, false);
+        }
+
+        info("Report generation completed for all vendors in group " + vendGroupId);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>description</Name>
+				<Source><![CDATA[
+    public static ClassDescription description()
+    {
+        return "Vendor account statement";
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>pack</Name>
+				<Source><![CDATA[
+    public container pack()
+    {
+        return [#CurrentVersion, #CurrentList];
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>unpack</Name>
+				<Source><![CDATA[
+    public boolean unpack(container packedClass)
+    {
+        Integer version = conPeek(packedClass,1);
+        switch (version)
+        {
+            case #CurrentVersion:
+                [version,#CurrentList] = packedClass;
+                break;
+            default:
+                return false;
+        }
+        return true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>putToDialog</Name>
+				<Source><![CDATA[
+    public void putToDialog()
+    {
+        super();
+        vendGroupField.value(vendGroupId);
+        fromDateField.value(fromDate);
+        toDateField.value(toDate);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getFromDialog</Name>
+				<Source><![CDATA[
+    public boolean getFromDialog()
+    {
+        vendGroupId = vendGroupField.value();
+        fromDate = fromDateField.value();
+        toDate = toDateField.value();
+
+        return super();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dialog</Name>
+				<Source><![CDATA[
+    public Object dialog()
+    {
+        dialog = super();
+        vendGroupField = dialog.addFieldValue(IdentifierStr(VendGroupId), vendGroupId, "Vendor group");
+        fromDateField = dialog.addFieldValue(identifierStr(TransDate), fromDate, "From date");
+        toDateField = dialog.addFieldValue(identifierStr(TransDate), toDate, "To date");
+
+        return dialog;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmVendGroup</Name>
+				<Source><![CDATA[
+    public VendGroupId parmVendGroup(VendGroupId _vendGroupId = vendGroupId)
+    {
+        vendGroupId = _vendGroupId;
+        return vendGroupId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmFromDate</Name>
+				<Source><![CDATA[
+    public TransDate parmFromDate(TransDate _fromDate = fromDate)
+    {
+        fromDate = _fromDate;
+        return fromDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmToDate</Name>
+				<Source><![CDATA[
+    public TransDate parmToDate(TransDate _toDate = toDate)
+    {
+        toDate = _toDate;
+        return toDate;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

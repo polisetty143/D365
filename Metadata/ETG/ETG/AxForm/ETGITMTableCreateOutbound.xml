@@ -1,0 +1,604 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxForm xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V6">
+	<Name>ETGITMTableCreateOutbound</Name>
+	<SourceCode>
+		<Methods xmlns="">
+			<Method>
+				<Name>classDeclaration</Name>
+				<Source><![CDATA[
+[Form]
+public class ETGITMTableCreateOutbound extends FormRun
+{
+    private NumberSeqFormHandler numberSeqFormHandler;
+    private ETGITMTableFormOutbound shipTableForm;
+    private boolean foredit;
+
+}
+]]></Source>
+			</Method>
+			<Method>
+				<Name>canClose</Name>
+				<Source><![CDATA[
+    public boolean canClose()
+    {
+        if (element.closedOk() && !ITMTable_ds.validateWrite())
+        {
+            return false;
+        }
+    
+        ITMTable_ds.write();
+
+        if(!foredit)
+        {
+            if (numberSeqFormHandler)
+            {
+                numberSeqFormHandler.formMethodClose();
+            }
+        }
+    
+        if (!element.closedOk())
+        {
+            return true;
+        }
+    
+        return super();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>init</Name>
+				<Source><![CDATA[
+    public void init()
+    {
+        FormOpenMode FormOpenMode;
+
+        if (element.args().caller() is ETGITMTableFormOutbound)
+        {
+            shipTableForm = element.args().caller();
+
+            if (element.args().parmEnum() == FormOpenMode::ForEdit)
+            {
+                foredit = true;
+
+                ITMTable = shipTableForm.parmITMTable();
+
+            }
+        }
+        else
+        {
+            throw error("@SYS22539");
+        }
+
+        super();
+
+        if (foredit)
+        {
+            element.design().caption("@InboundTransportationManagement:EditShipment");
+
+            ITMTable_ds.autoSearch(true);
+
+            ITMTable_ShipId.allowEdit(ITMParameters::numRefShipId().NumberSequenceId != 0);
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>numberSeqFormHandler</Name>
+				<Source><![CDATA[
+    public NumberSeqFormHandler numberSeqFormHandler()
+    {
+        if (!numberSeqFormHandler)
+        {
+            numberSeqFormHandler = NumberSeqFormHandler::newForm(ITMParameters::numRefShipId().NumberSequenceId,
+                                                                 element,
+                                                                 ITMTable_ds,
+                                                                 fieldNum(ITMTable, ShipId)
+                                                                );
+        }
+        return numberSeqFormHandler;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    public void run()
+    {
+        if(!foredit)
+        {
+            ITMTable_ds.create();
+        }
+ 
+        super();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+		<DataSources xmlns="">
+			<DataSource>
+				<Name>ITMTable</Name>
+				<Methods>
+					<Method>
+						<Name>create</Name>
+						<Source><![CDATA[
+        public void create(boolean _append = false)
+        {
+            if (!ITMTable.ShipId)
+            {
+                super(_append);
+        
+                element.numberSeqFormHandler().formMethodDataSourceCreate();
+                if (shipTableForm.parmSalesTable())
+                {
+                    ITMTable.ShipVendAccount = shipTableForm.parmSalesTable().InvoiceAccount;
+                }
+            }
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>linkActive</Name>
+						<Source><![CDATA[
+        public void linkActive()
+        {
+            element.numberSeqFormHandler().formMethodDataSourceLinkActive();
+        
+            super();
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>write</Name>
+						<Source><![CDATA[
+        public void write()
+        {
+            if (!element.closedOk())
+            {
+                return;
+            }
+        
+            try
+            {
+                if(!foredit)
+                {
+                    ttsBegin;
+        
+                    element.numberSeqFormHandler().formMethodDataSourceWrite();
+        
+                    ITMTable.ETGLandedCostType = ETGLandedCostType::Outbound;
+                    ITMTable.insert();
+        
+                    ttsCommit;
+                }
+                else
+                {
+                    super();
+                }
+            }
+            catch (Exception::Error)
+            {
+                ITMTable.RecId = 0;
+                element.close();
+                throw Exception::Error;
+            }
+        
+            ITMTable_ds.refresh();
+        
+            if(!foredit)
+            {
+                shipTableForm.parmNewShipId(ITMTable.ShipId);
+            }
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>reread</Name>
+						<Source><![CDATA[
+        public void reread()
+        {
+            if (ITMTable.RecId)
+            {
+                super();
+            }
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>validateWrite</Name>
+						<Source><![CDATA[
+        public boolean validateWrite()
+        {
+            boolean ret;
+        
+            if (!element.closedOk())
+            {
+                return true;
+            }
+        
+            if (!foredit && ITMTable::find(ITMTable.ShipId))
+            {
+                return checkFailed(strfmt("@InboundTransportationManagement:ShipmentValueAlreadyExistsDot", ITMTable.ShipId));
+            }
+        
+            ret = super();
+        
+            if (ret && !foredit  && !element.numberSeqFormHandler().formMethodDataSourceValidateWrite())
+            {
+                ret = false;
+            }
+        
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>init</Name>
+						<Source><![CDATA[
+        public void init()
+        {
+            QueryBuildRange qbrShipId;
+        
+            super();
+        
+            qbrShipId = ITMTable_ds.query().dataSourceNo(1).addRange(fieldNum(ITMTable, ShipId));
+            qbrShipId.value(queryValue(ITMTable.ShipId));
+            qbrShipId.status(RangeStatus::Hidden);
+
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields />
+			</DataSource>
+		</DataSources>
+		<DataControls xmlns="" />
+		<Members xmlns="" />
+	</SourceCode>
+	<DataSources>
+		<AxFormDataSource xmlns="">
+			<Name>ITMTable</Name>
+			<Table>ITMTable</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>createdDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>dataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DlvModeId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Locked</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ITMBrokerAdvised</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ITMCustomerAppointment</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ITMDelAtWarehouse</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ITMDeliveryInstructions</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ITMDepartureDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ITMGoodsReleased</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ITMLocalTransportDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ITMLocalTransportTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ITMOriginalBOLSebt</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ITMOriginalDocsReceived</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ITMPurchStatus</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ITMVerificationDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipCustomsEntryId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipDescription</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipDocReceived</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipEstDlvDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipEstPortDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipFromPort</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipHAWB</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<AllowEdit>No</AllowEdit>
+					<DataField>ShipId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipIdExternal</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipJourneyId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipLocalForwarder</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipMAWB</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipMeasurement</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipMeasurementUnit</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipNoOfPallets</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipPending</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipRemarks</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipRental</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipStatus</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipStatusId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipTallyInNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipToPort</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipValuationDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipVendAccount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipVesselId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ShipVoyage</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<AutoNotify>No</AutoNotify>
+			<AutoSearch>No</AutoSearch>
+			<DelayActive>No</DelayActive>
+			<LinkType>Passive</LinkType>
+			<AllowDelete>No</AllowDelete>
+			<InsertAtEnd>No</InsertAtEnd>
+			<InsertIfEmpty>No</InsertIfEmpty>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+	</DataSources>
+	<Design>
+		<BackgroundColor xmlns="">WindowBackground</BackgroundColor>
+		<Caption xmlns="">@InboundTransportationManagement:CreateShipment</Caption>
+		<Frame xmlns="">Dialog</Frame>
+		<HideToolbar xmlns="">Yes</HideToolbar>
+		<Pattern xmlns="">Dialog</Pattern>
+		<PatternVersion xmlns="">1.2</PatternVersion>
+		<StatusBarStyle xmlns="">None</StatusBarStyle>
+		<Style xmlns="">Dialog</Style>
+		<WindowType xmlns="">Popup</WindowType>
+		<Controls xmlns="">
+			<AxFormControl xmlns=""
+				i:type="AxFormGroupControl">
+				<Name>DialogContent</Name>
+				<ElementPosition>715827882</ElementPosition>
+				<ExtendedStyle>tabularFields</ExtendedStyle>
+				<FilterExpression>%1</FilterExpression>
+				<HeightMode>SizeToAvailable</HeightMode>
+				<Pattern>FieldsFieldGroups</Pattern>
+				<PatternVersion>1.1</PatternVersion>
+				<Type>Group</Type>
+				<VerticalSpacing>-1</VerticalSpacing>
+				<WidthMode>SizeToAvailable</WidthMode>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ITMTable_ShipId</Name>
+						<AutoDeclaration>Yes</AutoDeclaration>
+						<ElementPosition>477218588</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<Type>String</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ShipId</DataField>
+						<DataSource>ITMTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ITMTable_ShipDescription</Name>
+						<ElementPosition>715827882</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<Type>String</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ShipDescription</DataField>
+						<DataSource>ITMTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ITMTable_ShipIdExternal</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ShipIdExternal</DataField>
+						<DataSource>ITMTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ITMTable_ShipVesselId</Name>
+						<ElementPosition>954437176</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<Type>String</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ShipVesselId</DataField>
+						<DataSource>ITMTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ITMTable_ShipVoyage</Name>
+						<ElementPosition>1193046470</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<Type>String</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ShipVoyage</DataField>
+						<DataSource>ITMTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ITMTable_ShipJourneyId</Name>
+						<ElementPosition>1431655764</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<Type>String</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ShipJourneyId</DataField>
+						<DataSource>ITMTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ITMTable_DlvModeId</Name>
+						<ElementPosition>1670265058</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<Type>String</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>DlvModeId</DataField>
+						<DataSource>ITMTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ITMTable_ShipVendAccount</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ShipVendAccount</DataField>
+						<DataSource>ITMTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ITMTable_ShipMAWB</Name>
+						<ElementPosition>1908874352</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<Type>String</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ShipMAWB</DataField>
+						<DataSource>ITMTable</DataSource>
+					</AxFormControl>
+				</Controls>
+				<ColumnsMode>Fill</ColumnsMode>
+				<FrameType>None</FrameType>
+				<Style>DialogContent</Style>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormButtonGroupControl">
+				<Name>ButtonGroup</Name>
+				<ElementPosition>1431655764</ElementPosition>
+				<FilterExpression>%1</FilterExpression>
+				<LeftMode>AutoRight</LeftMode>
+				<Type>ButtonGroup</Type>
+				<VerticalSpacing>-1</VerticalSpacing>
+				<WidthMode>SizeToAvailable</WidthMode>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormCommandButtonControl">
+						<Name>OK</Name>
+						<ElementPosition>1073741822</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<HeightMode>Auto</HeightMode>
+						<Type>CommandButton</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<WidthMode>Auto</WidthMode>
+						<FormControlExtension
+							i:nil="true" />
+						<Command>OK</Command>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormCommandButtonControl">
+						<Name>Cancel</Name>
+						<ElementPosition>1610612733</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<HeightMode>Auto</HeightMode>
+						<Type>CommandButton</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<WidthMode>Auto</WidthMode>
+						<FormControlExtension
+							i:nil="true" />
+						<Command>Cancel</Command>
+					</AxFormControl>
+				</Controls>
+				<ArrangeMethod>HorizontalRight</ArrangeMethod>
+				<Style>DialogCommitContainer</Style>
+			</AxFormControl>
+		</Controls>
+	</Design>
+	<Parts />
+</AxForm>

@@ -1,0 +1,341 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGBankAccountStatementDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///    The <c>BankAccountStatementDP</c> class handles the business logic for a
+///    <c>BankAccountStatement</c>report.
+/// </summary>
+[
+    SRSReportQueryAttribute(querystr(BankAccountStatement)),
+    SRSReportParameterAttribute(classstr(ETGBankAccountStatementContract))
+]
+class ETGBankAccountStatementDP extends SrsReportDataProviderPreProcessTempDB
+{
+    AmountCur                  currentBalance;
+    TransDate                  fromDate;
+    TransDate                  toDate;
+    CompanyBankAccount         bankAccount;
+    BankAccountStatementTmp    bankAccountStatementTmp;
+    DimensionSetName           financialDimensionSet;
+    boolean                    financialDimensions;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>calculateOpeningBalanceForBankAccount</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Calculates the opening balance from fromDate.
+    /// </summary>
+    /// <returns>
+    ///    The opening balance.
+    /// </returns>
+    private AmountCur calculateOpeningBalanceForBankAccount()
+    {
+        BankAccountTrans bankAccountTrans;
+
+        select sum(AmountCur), sum(AmountCorrect),Txt from bankAccountTrans
+            where bankAccountTrans.AccountId == bankAccount
+                && bankAccountTrans.TransDate < fromDate;
+       
+
+        return bankAccountTrans.AmountCur + bankAccountTrans.AmountCorrect;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createBankAccountStatementTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adds the records to the <c>BankAccountStatementTmp</c> table.
+    /// </summary>
+    private void createBankAccountStatementTmp()
+    {
+        BankAccountTable bankAccountTable;
+        BankAccountTrans bankAccountTrans;
+
+        
+        while select  BankTransType, DefaultDimension,TransDate,Voucher,DepositNum,
+            PaymReference, PaymentMode, AmountCur, AmountCorrect,AmountMST, AmountReportingCurrency, Txt
+        from bankAccountTrans
+            where bankAccountTrans.AccountId == bankAccount
+                && bankAccountTrans.TransDate >= fromDate
+                && bankAccountTrans.TransDate <= toDate
+        join
+            AccountID,
+            Name,
+            CurrencyCode
+        from bankAccountTable
+            where bankAccountTable.AccountID == bankAccount
+        {
+            bankAccountStatementTmp.clear();
+            bankAccountStatementTmp.FromDate        = fromDate;
+            bankAccountStatementTmp.ToDate          = toDate;
+            bankAccountStatementTmp.CurrentBalance  = currentBalance;
+            bankAccountStatementTmp.BankTransType   = bankAccountTrans.BankTransType;
+            bankAccountStatementTmp.DefaultDimension= bankAccountTrans.DefaultDimension;
+            bankAccountStatementTmp.TransDate       = bankAccountTrans.TransDate;
+            bankAccountStatementTmp.Voucher         = bankAccountTrans.Voucher;
+            bankAccountStatementTmp.DepositNum      = bankAccountTrans.DepositNum;
+            bankAccountStatementTmp.PaymReference   = bankAccountTrans.PaymReference;
+            bankAccountStatementTmp.PaymentMode     = bankAccountTrans.PaymentMode;
+            bankAccountStatementTmp.AmountCur       = bankAccountTrans.AmountCur;
+            bankAccountStatementTmp.AmountCorrect   = bankAccountTrans.AmountCorrect;
+            bankAccountStatementTmp.AmountMST       = bankAccountTrans.AmountMST;
+            bankAccountStatementTmp.AmountMSTSecond = bankAccountTrans.AmountCur;
+            bankAccountStatementTmp.AccountID       = bankAccountTable.AccountID;
+            bankAccountStatementTmp.Name            = bankAccountTable.Name;
+            bankAccountStatementTmp.CurrencyCode    = bankAccountTable.CurrencyCode;
+            bankAccountStatementTmp.Txt             = bankAccountTrans.Txt;
+            bankAccountStatementTmp.CompanyLogo     = FormLetter::companyLogo();
+
+            bankAccountStatementTmp.insert();
+        }
+
+        select count(RecId) from bankAccountStatementTmp;
+
+        if (bankAccountStatementTmp.RecId == 0)
+        {
+            bankAccountTable = BankAccountTable::find(bankAccount);
+            bankAccountStatementTmp.AccountID = bankAccountTable.AccountID;
+            bankAccountStatementTmp.Name = bankAccountTable.Name;
+            bankAccountStatementTmp.CurrencyCode = bankAccountTable.CurrencyCode;
+            bankAccountStatementTmp.CurrentBalance = currentBalance;
+            bankAccountStatementTmp.Txt    = bankAccountTrans.Txt;
+            bankAccountStatementTmp.insert();
+        }
+        if (financialDimensions == NoYes::Yes)
+        {
+            this.updateFinancialDimensions();
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateFinancialDimensions</Name>
+				<Source><![CDATA[
+    public void updateFinancialDimensions()
+    {
+        FinancialDimensionSetEntity     financialDimEntity;
+
+        if (financialDimensionSet)
+        {
+            select firstonly financialDimEntity
+                where financialDimEntity.Name == financialDimensionSet;
+
+            ttsbegin;
+            while select forupdate bankAccountStatementTmp
+            {
+                if (financialDimEntity.SegmentName01)
+                {
+                    bankAccountStatementTmp.SegmentValue01   = this.getFinDimValue(bankAccountStatementTmp.DefaultDimension, financialDimEntity.SegmentName01);
+                    bankAccountStatementTmp.SegmentName01    = financialDimEntity.SegmentName01;
+                }
+                if (financialDimEntity.SegmentName02)
+                {
+                    bankAccountStatementTmp.SegmentValue02   = this.getFinDimValue(bankAccountStatementTmp.DefaultDimension, financialDimEntity.SegmentName02);
+                    bankAccountStatementTmp.SegmentName02    = financialDimEntity.SegmentName02;
+                }
+                if (financialDimEntity.SegmentName03)
+                {
+                    bankAccountStatementTmp.SegmentValue03   = this.getFinDimValue(bankAccountStatementTmp.DefaultDimension, financialDimEntity.SegmentName03);
+                    bankAccountStatementTmp.SegmentName03    = financialDimEntity.SegmentName03;
+                }
+                if (financialDimEntity.SegmentName04)
+                {
+                    bankAccountStatementTmp.SegmentValue04   = this.getFinDimValue(bankAccountStatementTmp.DefaultDimension, financialDimEntity.SegmentName04);
+                    bankAccountStatementTmp.SegmentName04    = financialDimEntity.SegmentName04;
+                }
+                if (financialDimEntity.SegmentName05)
+                {
+                    bankAccountStatementTmp.SegmentValue05   = this.getFinDimValue(bankAccountStatementTmp.DefaultDimension, financialDimEntity.SegmentName05);
+                    bankAccountStatementTmp.SegmentName05    = financialDimEntity.SegmentName05;
+                }
+                if (financialDimEntity.SegmentName06)
+                {
+                    bankAccountStatementTmp.SegmentValue06   = this.getFinDimValue(bankAccountStatementTmp.DefaultDimension, financialDimEntity.SegmentName06);
+                    bankAccountStatementTmp.SegmentName06    = financialDimEntity.SegmentName06;
+                }
+                if (financialDimEntity.SegmentName07)
+                {
+                    bankAccountStatementTmp.SegmentValue07   = this.getFinDimValue(bankAccountStatementTmp.DefaultDimension, financialDimEntity.SegmentName07);
+                    bankAccountStatementTmp.SegmentName07    = financialDimEntity.SegmentName07;
+                }
+                if (financialDimEntity.SegmentName08)
+                {
+                    bankAccountStatementTmp.SegmentValue08   = this.getFinDimValue(bankAccountStatementTmp.DefaultDimension, financialDimEntity.SegmentName08);
+                    bankAccountStatementTmp.SegmentName08    = financialDimEntity.SegmentName08;
+                }
+                if (financialDimEntity.SegmentName09)
+                {
+                    bankAccountStatementTmp.SegmentValue09   = this.getFinDimValue(bankAccountStatementTmp.DefaultDimension, financialDimEntity.SegmentName09);
+                    bankAccountStatementTmp.SegmentName09    = financialDimEntity.SegmentName09;
+                }
+                if (financialDimEntity.SegmentName10)
+                {
+                    bankAccountStatementTmp.SegmentValue10   = this.getFinDimValue(bankAccountStatementTmp.DefaultDimension, financialDimEntity.SegmentName10);
+                    bankAccountStatementTmp.SegmentName10    = financialDimEntity.SegmentName10;
+                }
+                if (financialDimEntity.SegmentName11)
+                {
+                    bankAccountStatementTmp.SegmentValue11   = this.getFinDimValue(bankAccountStatementTmp.DefaultDimension, financialDimEntity.SegmentName11);
+                    bankAccountStatementTmp.SegmentName11    = financialDimEntity.SegmentName11;
+                }
+               
+                bankAccountStatementTmp.update();
+            }
+            ttscommit;
+        }
+    
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getFinDimValue</Name>
+				<Source><![CDATA[
+    public Description getFinDimValue(DimensionDefault _defaultDimension, Name     _dimensionName)
+    {
+        DimensionAttributeValueSetStorage   dimStorage;
+        DimensionAttribute                  dimAttribute;
+        DimensionValue                      displayValue = '';
+        Description                         dimDescription = "";
+        int                                 i;
+        
+        dimStorage = DimensionAttributeValueSetStorage::find(_defaultDimension);
+        for (i= 1 ; i<= dimStorage.elements() ; i++)
+        {
+            dimAttribute    = DimensionAttribute::find(dimStorage.getAttributeByIndex(i));
+            
+            if(dimAttribute.Name == _dimensionName)
+            {
+                displayValue    = dimStorage.getDisplayValueByIndex(i);
+                dimDescription  = DimensionFinancialTag::findByFinancialTagCategoryAndValue(dimAttribute.financialTagCategory(), displayValue).Description;
+                if (dimDescription == '')
+                {
+                    dimDescription  = this.getFinDimValueDescription(dimAttribute.ViewName, displayValue);
+                }
+            }
+        }
+
+        return  dimDescription;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getFinDimValueDescription</Name>
+				<Source><![CDATA[
+    public Description getFinDimValueDescription(TableNameShort     _ViewName, DimensionValue   _displayValue)
+    {
+        DimAttributeInventTable         inventTable;
+        DimAttributeHcmWorker           worker;
+        DimAttributeCustTable           custTable;
+        DimAttributeVendTable           dimVendTable;
+        DimAttributeAssetTable          assetTable;
+        DimAttributeOMBusinessUnit      businessUnit;
+        DimAttributeOMCostCenter        costCenter;
+        DimAttributeOMDepartment        department;
+        Description                     dimDescription = '';
+
+        switch (_ViewName)
+        {
+            case  "DimAttributeInventTable":
+                select Name from inventTable
+                    where inventTable.value == _displayValue;
+                dimDescription = inventTable.Name;
+                break;
+            case  "DimAttributeHcmWorker":
+                select Name from worker
+                    where worker.value == _displayValue;
+                dimDescription = worker.Name;
+                break;
+            case  "DimAttributeCustTable":
+                select  Name from custTable
+                    where custTable.value == _displayValue;
+                dimDescription = custTable.Name;
+                break;
+            case  "DimAttributeVendTable":
+                select Name from dimVendTable
+                    where dimVendTable.value == _displayValue;
+                dimDescription = dimVendTable.Name;
+                break;
+            case  "DimAttributeAssetTable":
+                select Name from assetTable
+                    where assetTable.value == _displayValue;
+                dimDescription = assetTable.Name;
+                break;
+            case  "DimAttributeOMBusinessUnit":
+                select Name from businessUnit
+                    where businessUnit.value == _displayValue;
+                dimDescription = businessUnit.Name;
+                break;
+            case  "DimAttributeOMCostCenter":
+                select  Name from costCenter
+                    where costCenter.value == _displayValue;
+                dimDescription = costCenter.Name;
+                break;
+            case  "DimAttributeOMDepartment":
+                select  Name from department
+                    where department.value == _displayValue;
+                dimDescription = department.Name;
+                break;
+        }
+          
+        return      dimDescription;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getBankAccountStatementTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Retrieves the temporary table for SQL Server Reporting Services reports.
+    /// </summary>
+    /// <returns>
+    ///    The <c>BankAccountStatementTmp</c> temporary table.
+    /// </returns>
+    [SrsReportDataSetAttribute(tablestr(BankAccountStatementTmp))]
+    public BankAccountStatementTmp getBankAccountStatementTmp()
+    {
+        select bankAccountStatementTmp;
+
+        return bankAccountStatementTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Processes the business logic that is used to populate a <c>BankAccountStatementTmp</c> temporary
+    ///    table.
+    /// </summary>
+    public void processReport()
+    {
+        ETGBankAccountStatementContract contract = this.parmDataContract() as ETGBankAccountStatementContract;
+
+        fromDate                = contract.parmFromDate();
+        toDate                  = contract.parmToDate() ? contract.parmToDate() : dateMax();
+        bankAccount             = contract.parmBankAccount();
+        financialDimensionSet   = contract.parmFinancialDimSet();
+        financialDimensions     = contract.parmFinancialDimensions();
+
+        currentBalance = this.calculateOpeningBalanceForBankAccount();
+
+        this.createBankAccountStatementTmp();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

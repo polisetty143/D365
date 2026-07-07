@@ -1,0 +1,346 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_EstimationVsActualDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The <c>ETG_EstimationVsActualDP</c> class is the report data provider class for Purchase register report
+/// </summary>
+[
+   SRSReportParameterAttribute(classStr(ETG_EstimationVsActualContract))
+    ]
+    class ETG_EstimationVsActualDP extends SrsReportDataProviderPreProcessTempDB
+{
+    ETG_EstimationVsActualTmp       EstimationVsActualTmp;
+    ETGSRSReportMultiParametersTmp  ssrsReportMultiParametersTmp;
+    CreatedTransactionId            currentTransactionId, currentTransactionIdGRN, currentTransactionIdChrg;
+    ETG_EstimationVsActualContract  contract;
+    FromDate                        fromDate;
+    ToDate                          toDate;
+    ETG_Agreement                   etg_Agreement;
+    ETG_AccrualType                 etg_AccrualType;
+    utcDateTime                     utcFromDate, utcToDate;
+   
+   
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGEstimationVsActualTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tablestr(ETG_EstimationVsActualTmp))]
+    public ETG_EstimationVsActualTmp getETGEstimationVsActualTmp()
+    {
+        select EstimationVsActualTmp;
+        return EstimationVsActualTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        
+                
+        contract            = this.parmDataContract() as ETG_EstimationVsActualContract;
+        etg_Agreement       = contract.parmAgreement();
+        etg_AccrualType     = contract.parmAccrualType();
+        fromDate            = contract.parmFromDate();
+        toDate              = contract.parmToDate();
+
+        utcFromDate = DateTimeUtil::newDateTime(fromDate, 0,DateTimeUtil::getClientMachineTimeZone());
+        utcToDate   = DateTimeUtil::newDateTime(toDate, 86399,DateTimeUtil::getClientMachineTimeZone());
+
+        if(etg_Agreement == ETG_Agreement::Blank || etg_Agreement == ETG_Agreement::Purchase)
+        {
+            this.getPurchaseAgreementData();
+        }
+        if(etg_Agreement == ETG_Agreement::Blank || etg_Agreement == ETG_Agreement::Sales)
+        {
+            this.getSalesAgreementData();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getSalesAgreementData</Name>
+				<Source><![CDATA[
+    public void getSalesAgreementData()
+    {
+        DefaultDimensionView        defaultDimesnionView;
+        SalesAgreementHeader            salesAgreementHeader;
+        AgreementLine                   AgreementLine;
+        ETG_ChargeCodes                 etg_ChargeCodes;
+        ETG_Chargecodelines             etg_ChargeCodeLines;
+        ETG_ActualAgreementNew          etg_ActualAgreementNew;
+        LedgerJournalTable              ledgerJournalTable;
+        LedgerJournalTrans              ledgerJournalTrans;
+
+        while select salesAgreementHeader
+            join AgreementLine
+            where AgreementLine.Agreement == salesAgreementHeader.RecId
+            && salesAgreementHeader.CreatedDateTime >= utcFromDate
+            && salesAgreementHeader.CreatedDateTime <= utcToDate
+            join etg_ChargeCodes
+                where etg_ChargeCodes.PurchNumberSequence ==salesAgreementHeader.SalesNumberSequence
+                join etg_ChargeCodeLines
+                    where etg_ChargeCodeLines.PurchNumberSequence == etg_ChargeCodes.PurchNumberSequence
+                    && etg_ChargeCodeLines.ETG_Estimation         == etg_ChargeCodes.ETG_Estimation
+        {
+            EstimationVsActualTmp.ContractNo    = salesAgreementHeader.SalesNumberSequence;
+            EstimationVsActualTmp.ContractDate  = salesAgreementHeader.DefaultAgreementLineEffectiveDate;
+            EstimationVsActualTmp.AccrualType   = etg_AccrualType;
+
+            select firstonly defaultDimesnionView
+                where defaultDimesnionView.Name == "Item"
+                && defaultDimesnionView.DefaultDimension == AgreementLine.DefaultDimension;
+            EstimationVsActualTmp.Commodity   = defaultDimesnionView.DisplayValue;//dimensionAttributeValueSetItem.DisplayValue;
+           
+            select firstonly defaultDimesnionView
+                where defaultDimesnionView.Name == "Region"
+                && defaultDimesnionView.DefaultDimension == AgreementLine.DefaultDimension;
+            EstimationVsActualTmp.Origin               = defaultDimesnionView.DisplayValue;//dimensionAttributeValueSetItem.DisplayValue;
+
+            EstimationVsActualTmp.CompanyLogo          = FormLetter::companyLogo();
+
+            //while select etg_ChargeCodes
+            //    where etg_ChargeCodes.PurchNumberSequence ==salesAgreementHeader.SalesNumberSequence
+            //    join etg_ChargeCodeLines
+            //        where etg_ChargeCodeLines.PurchNumberSequence == etg_ChargeCodes.PurchNumberSequence
+            //        && etg_ChargeCodeLines.ETG_Estimation         == etg_ChargeCodes.ETG_Estimation
+            {                
+                EstimationVsActualTmp.LineEstamation = etg_ChargeCodeLines.ETGLineestimationno;
+                EstimationVsActualTmp.InvoiceNo     = etg_ChargeCodeLines.InvoiceId;
+                EstimationVsActualTmp.ExpHead       = etg_ChargeCodes.TransTxt;
+
+                EstimationVsActualTmp.AccuralQty    = etg_ChargeCodeLines.Qty;
+                EstimationVsActualTmp.AccuralExpMT  = etg_ChargeCodeLines.Value;
+                EstimationVsActualTmp.AccuralAmount    = etg_ChargeCodeLines.AmountMST;
+
+                select sum(Qty),sum(AmountMST) from  etg_ActualAgreementNew
+                    where etg_ActualAgreementNew.PurchNumberSequence == etg_ChargeCodes.PurchNumberSequence
+                    && etg_ActualAgreementNew.ETG_Estimation         == etg_ChargeCodes.ETG_Estimation
+                    && etg_ActualAgreementNew.PurchId                == etg_ChargeCodeLines.PurchId
+                    && etg_ActualAgreementNew.ETGLineestimationno==etg_ChargeCodeLines.ETGLineestimationno
+                    && etg_ActualAgreementNew.Posted                 == NoYes::Yes;
+                       EstimationVsActualTmp.ActualQty     = etg_ActualAgreementNew.Qty;
+                EstimationVsActualTmp.ActualAmount  = etg_ActualAgreementNew.AmountMST;//
+                if(EstimationVsActualTmp.ActualQty)
+                {
+                    EstimationVsActualTmp.ActualExpMT   = EstimationVsActualTmp.ActualAmount/EstimationVsActualTmp.ActualQty;
+                    //EstimationVsActualTmp.ExpMt   = EstimationVsActualTmp.ActualAmount/EstimationVsActualTmp.ActualQty;
+                }
+                
+                EstimationVsActualTmp.AccrualReversedExpMT  = EstimationVsActualTmp.AccuralExpMT;
+                EstimationVsActualTmp.AccrualReversedQty    = EstimationVsActualTmp.ActualQty;
+                EstimationVsActualTmp.AccrualReversedAmount = EstimationVsActualTmp.AccrualReversedQty*EstimationVsActualTmp.AccrualReversedExpMT;
+
+                EstimationVsActualTmp.AccuralOverQty    = EstimationVsActualTmp.ActualQty;
+                EstimationVsActualTmp.AccuralOverAmount = EstimationVsActualTmp.AccrualReversedAmount - EstimationVsActualTmp.ActualAmount;;
+                if(EstimationVsActualTmp.AccuralOverQty)
+                {
+                    EstimationVsActualTmp.AccuralOverExpMt  = EstimationVsActualTmp.AccuralOverAmount/EstimationVsActualTmp.AccuralOverQty;
+                }                
+
+                EstimationVsActualTmp.AccuralClosingQty     = EstimationVsActualTmp.AccuralQty - EstimationVsActualTmp.AccrualReversedQty;
+                EstimationVsActualTmp.AccuralClosingAmount  = EstimationVsActualTmp.AccuralAmount - EstimationVsActualTmp.AccrualReversedAmount;
+                if(EstimationVsActualTmp.AccuralClosingQty)
+                {
+                    EstimationVsActualTmp.AccuralClosingExpMT  = EstimationVsActualTmp.AccuralClosingAmount/EstimationVsActualTmp.AccuralClosingQty;
+                }
+                //if(etg_AccrualType == ETG_AccrualType::ClosedAccrual)
+                //{
+                //    if(EstimationVsActualTmp.AccuralClosingQty == 0)
+                //    {
+                //        EstimationVsActualTmp.insert();
+                //    }
+                //}
+                //else if(etg_AccrualType == ETG_AccrualType::OpenAccruals)
+                //{
+                //    if(EstimationVsActualTmp.AccuralClosingQty != 0)
+                //    {
+                //        EstimationVsActualTmp.insert();
+                //    }
+                //}
+                //else
+                //{
+                //    EstimationVsActualTmp.insert();
+                //}
+                
+            }
+           // if(!EstimationVsActualTmp.RecId)
+            {
+                if(etg_AccrualType == ETG_AccrualType::ClosedAccrual)
+                {
+                    if(EstimationVsActualTmp.AccuralClosingQty == 0)
+                    {
+                        EstimationVsActualTmp.insert();
+                    }
+                }
+                else if(etg_AccrualType == ETG_AccrualType::OpenAccruals)
+                {
+                    if(EstimationVsActualTmp.AccuralClosingQty != 0)
+                    {
+                        EstimationVsActualTmp.insert();
+                    }
+                }
+                else
+                {
+                    EstimationVsActualTmp.insert();
+                }
+            }            
+            EstimationVsActualTmp.clear();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getPurchaseAgreementData</Name>
+				<Source><![CDATA[
+    public void getPurchaseAgreementData()
+    {
+        DefaultDimensionView        defaultDimesnionView;
+        PurchAgreementHeader            purchAgreementHeader;
+        AgreementLine                   AgreementLine;
+        ETG_ChargeCodes                 etg_ChargeCodes;
+        ETG_Chargecodelines             etg_ChargeCodeLines;
+        ETG_ActualAgreementNew          etg_ActualAgreementNew;
+        LedgerJournalTable              ledgerJournalTable;
+        LedgerJournalTrans              ledgerJournalTrans;
+        boolean                         chargeCodeLines;
+
+        while select purchAgreementHeader
+            join AgreementLine
+            where AgreementLine.Agreement == purchAgreementHeader.RecId
+            && purchAgreementHeader.CreatedDateTime >= utcFromDate
+            && purchAgreementHeader.CreatedDateTime <= utcToDate
+            join etg_ChargeCodes
+                where etg_ChargeCodes.PurchNumberSequence == purchAgreementHeader.PurchNumberSequence
+            join etg_ChargeCodeLines
+                where etg_ChargeCodeLines.PurchNumberSequence == etg_ChargeCodes.PurchNumberSequence
+                && etg_ChargeCodeLines.ETG_Estimation         == etg_ChargeCodes.ETG_Estimation
+        {
+            EstimationVsActualTmp.ContractNo    = purchAgreementHeader.PurchNumberSequence;
+            EstimationVsActualTmp.ContractDate  = purchAgreementHeader.DefaultAgreementLineEffectiveDate;
+
+            EstimationVsActualTmp.CompanyLogo          = FormLetter::companyLogo();
+
+            select firstonly defaultDimesnionView
+                where defaultDimesnionView.Name == "Item"
+                && defaultDimesnionView.DefaultDimension == AgreementLine.DefaultDimension;
+            EstimationVsActualTmp.Commodity   = defaultDimesnionView.DisplayValue;//dimensionAttributeValueSetItem.DisplayValue;
+                       
+            EstimationVsActualTmp.AccrualType   = etg_AccrualType;
+
+            select firstonly defaultDimesnionView
+                where defaultDimesnionView.Name == "Region"
+                && defaultDimesnionView.DefaultDimension == AgreementLine.DefaultDimension;
+            EstimationVsActualTmp.Origin               = defaultDimesnionView.DisplayValue;//dimensionAttributeValueSetItem.DisplayValue;
+
+            //while select etg_ChargeCodes
+            //    where etg_ChargeCodes.PurchNumberSequence == purchAgreementHeader.PurchNumberSequence
+            //    join etg_ChargeCodeLines
+            //        where etg_ChargeCodeLines.PurchNumberSequence == etg_ChargeCodes.PurchNumberSequence
+            //        && etg_ChargeCodeLines.ETG_Estimation         == etg_ChargeCodes.ETG_Estimation
+            {
+                EstimationVsActualTmp.LineEstamation  = etg_ChargeCodeLines.ETGLineestimationno;
+                EstimationVsActualTmp.InvoiceNo     = etg_ChargeCodeLines.InvoiceId;
+                EstimationVsActualTmp.ExpHead       = etg_ChargeCodes.TransTxt;
+                EstimationVsActualTmp.AccuralQty    = etg_ChargeCodeLines.Qty;
+                EstimationVsActualTmp.AccuralExpMT  = etg_ChargeCodeLines.Value;
+                //EstimationVsActualTmp.AccuralAmount = etg_ChargeCodeLines.Amountinaccountingcurrency;
+                EstimationVsActualTmp.AccuralExpMT  = etg_ChargeCodeLines.AmountMST;
+
+
+                EstimationVsActualTmp.ExpHead       = etg_ChargeCodes.TransTxt;
+                EstimationVsActualTmp.AccuralQty    = etg_ChargeCodeLines.Qty;
+                EstimationVsActualTmp.AccuralExpMT  = etg_ChargeCodeLines.Value;
+               // EstimationVsActualTmp.AccuralAmount = etg_ChargeCodeLines.Amountinaccountingcurrency;
+                EstimationVsActualTmp.AccuralAmount = etg_ChargeCodeLines.AmountMST;
+
+
+             select sum(Qty),sum(AmountMST) from  etg_ActualAgreementNew
+                    where etg_ActualAgreementNew.PurchNumberSequence == etg_ChargeCodes.PurchNumberSequence
+                    && etg_ActualAgreementNew.ETG_Estimation == etg_ChargeCodes.ETG_Estimation
+                    && etg_ActualAgreementNew.PurchId        == etg_ChargeCodeLines.PurchId
+                    && etg_ActualAgreementNew.ETGLineestimationno==etg_ChargeCodeLines.ETGLineestimationno
+                    && etg_ActualAgreementNew.Posted         == NoYes::Yes;
+                EstimationVsActualTmp.ActualQty     = etg_ActualAgreementNew.Qty;
+                EstimationVsActualTmp.ActualAmount  = etg_ActualAgreementNew.AmountMST;
+                if(EstimationVsActualTmp.ActualQty)
+                {
+                    EstimationVsActualTmp.ActualExpMT   = EstimationVsActualTmp.ActualAmount/EstimationVsActualTmp.ActualQty;
+                   // EstimationVsActualTmp.ExpMt   = EstimationVsActualTmp.ActualAmount/EstimationVsActualTmp.ActualQty;
+      
+                }
+
+                EstimationVsActualTmp.AccrualReversedExpMT  = EstimationVsActualTmp.AccuralExpMT;
+                EstimationVsActualTmp.AccrualReversedQty    = EstimationVsActualTmp.ActualQty;
+                EstimationVsActualTmp.AccrualReversedAmount = EstimationVsActualTmp.AccrualReversedQty*EstimationVsActualTmp.AccrualReversedExpMT;
+
+                EstimationVsActualTmp.AccuralOverQty    = EstimationVsActualTmp.ActualQty;
+                EstimationVsActualTmp.AccuralOverAmount = EstimationVsActualTmp.AccrualReversedAmount - EstimationVsActualTmp.ActualAmount;;
+                if(EstimationVsActualTmp.AccuralOverQty)
+                {
+                    EstimationVsActualTmp.AccuralOverExpMt  = EstimationVsActualTmp.AccuralOverAmount/EstimationVsActualTmp.AccuralOverQty;
+                }
+
+                EstimationVsActualTmp.AccuralClosingQty = EstimationVsActualTmp.AccuralQty - EstimationVsActualTmp.AccrualReversedQty;
+                EstimationVsActualTmp.AccuralClosingAmount = EstimationVsActualTmp.AccuralAmount - EstimationVsActualTmp.AccrualReversedAmount;
+                if(EstimationVsActualTmp.AccuralClosingQty)
+                {
+                    EstimationVsActualTmp.AccuralClosingExpMT  = EstimationVsActualTmp.AccuralClosingAmount/EstimationVsActualTmp.AccuralClosingQty;
+                }
+                //if(etg_AccrualType == ETG_AccrualType::ClosedAccrual)
+                //{
+                //    if(EstimationVsActualTmp.AccuralClosingQty == 0)
+                //    {
+                //        EstimationVsActualTmp.insert();
+                //    }
+                //}
+                //else if(etg_AccrualType == ETG_AccrualType::OpenAccruals)
+                //{
+                //    if(EstimationVsActualTmp.AccuralClosingQty != 0)
+                //    {
+                //        EstimationVsActualTmp.insert();
+                //    }
+                //}
+                //else
+                //{
+                //    EstimationVsActualTmp.insert();
+                //}
+            }
+            //if(!EstimationVsActualTmp.RecId)
+            {
+                if(etg_AccrualType == ETG_AccrualType::ClosedAccrual)
+                {
+                    if(EstimationVsActualTmp.AccuralClosingQty == 0)
+                    {
+                        EstimationVsActualTmp.insert();
+                    }
+                }
+                else if(etg_AccrualType == ETG_AccrualType::OpenAccruals)
+                {
+                    if(EstimationVsActualTmp.AccuralClosingQty != 0)
+                    {
+                        EstimationVsActualTmp.insert();
+                    }
+                }
+                else
+                {
+                    EstimationVsActualTmp.insert();
+                }
+            }
+            EstimationVsActualTmp.clear();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

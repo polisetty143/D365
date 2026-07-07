@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ProdJournalTransBomFormEventHandler</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+Final class ProdJournalTransBomFormEventHandler
+{
+
+    
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>ItemId_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataFieldEventHandler(formDataFieldStr(ProdJournalTransBOM, ProdJournalBOM, ItemId), FormDataFieldEventType::Modified)]
+    public static void ItemId_OnModified(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        ProdJournalBOM          prodJournalBOMLoc, prodJournalBOMLocc;
+        ProdJournalTable        prodJournalTable, prodJournalTableloc;
+        InventItemGroupItem     inventItemGroupItem, inventItemGroupItemloc;
+        Qty                     proposal, consump;
+        FormDataSource prodJournalBOM_ds = sender.datasource();
+
+        ProdJournalBOM          prodJournalBOM = prodJournalBOM_ds.cursor();
+
+
+            proposal = 0 ; consump = 0 ;
+           // prodJournalBOM = this.cursor();
+
+            select firstonly  BOMProposal from prodJournalBOMLoc order by prodJournalBOMLoc.JournalId asc
+                join prodJournalTable
+                    where prodJournalTable.ProdId == prodJournalBOMLoc.ProdId
+                         && prodJournalTable.ProdId == prodJournalBOM.ProdId
+                         && prodJournalTable.Posted == NoYes::Yes
+                join inventItemGroupItem
+                    where  inventItemGroupItem.ItemId == prodJournalBOMLoc.ItemId
+                        && inventItemGroupItem.ItemGroupId == "RM"
+                        && inventItemGroupItem.ItemId == prodJournalBOM.ItemId;
+
+            proposal = prodJournalBOMLoc.BOMProposal;
+
+            while select * from prodJournalBOMLocc
+                  where prodJournalBOMLocc.ProdId == prodJournalBOM.ProdId && prodJournalBOMLocc.ItemId == prodJournalBOM.ItemId
+            {
+                if (ProdJournalTable::find(prodJournalBOMLocc.JournalId).Posted == NoYes::Yes)
+                {
+                    if (InventItemGroupItem::itemGroupId(prodJournalBOMLocc.ItemId, prodJournalBOMLocc.DataAreaId) == "RM")
+                    {
+                        consump += prodJournalBOMLocc.BOMConsump;
+                    }
+                }
+            }
+
+            if ((proposal - consump) > 0)
+            {
+                prodJournalBOM.BOMProposal = proposal - consump;
+            }
+            else
+            {
+                prodJournalBOM.BOMProposal = 0;
+            }
+
+
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

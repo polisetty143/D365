@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_BuyerBankAccountUpdation</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETG_BuyerBankAccountUpdation extends RunBase
+{
+    CustInvoiceJour     custInvoiceJour;
+    CustBankAccountId   buyerBankAccount;
+    DialogRunBase       dialog;
+    DialogField         dialogbuyerBankAccount;
+
+    #define.CurrentVersion(1)
+    #define.Version1(1)
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Main method to run the process
+    /// </summary>
+    static void main(Args   _args)
+    {
+        ETG_BuyerBankAccountUpdation    buyerBankUpdation;
+        FormRun                         formRun;
+        FormDataSource                  formDataSource;
+        CustInvoiceJour                 custInvoiceJourLoc;
+
+        // Verify args
+        if (!_args)
+        {
+            throw error("Invalid arguments passed.");
+        }
+
+        // Get the form run instance
+        formRun = _args.caller() as FormRun;
+
+        if (!formRun)
+        {
+            throw error("Form is not open.");
+        }
+
+        // Get the correct data source from the form
+        formDataSource = formRun.dataSource(formDataSourceStr(CustInvoiceJournal, CustInvoiceJour));
+
+        if (!formDataSource)
+        {
+            throw error("Data source not found.");
+        }
+
+        // Get the currently selected record
+        custInvoiceJourLoc  =   formDataSource.cursor();
+
+        if (!custInvoiceJourLoc || !custInvoiceJourLoc.RecId)
+        {
+            throw error("No record selected.");
+        }
+
+        // Initialize the dialog and pass the selected record
+        buyerBankUpdation   =   new ETG_BuyerBankAccountUpdation();
+
+        buyerBankUpdation.parmCustInvoiceJour(custInvoiceJourLoc);
+
+        if (buyerBankUpdation.prompt())
+        {
+            buyerBankUpdation.run();
+            formDataSource.refresh();
+            formDataSource.research();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dialog</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Dialog for selecting a new buyer bank account
+    /// </summary>
+    public Object dialog()
+    {
+        dialog = super();
+
+        // Add Buyer bank account field to the dialog
+        dialogbuyerBankAccount = dialog.addField(extendedTypeStr(CustBankAccountId), 'Buyer bank account');
+
+        return dialog;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dialogPostRun</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Runs after the dialog is opened
+    /// </summary>
+    public void dialogPostRun(DialogRunBase _dialog)
+    {
+        super(_dialog);
+
+        // Register the lookup method on the dialog field
+        dialogbuyerBankAccount.registerOverrideMethod(
+            methodStr(FormStringControl, lookup),
+            methodStr(ETG_BuyerBankAccountUpdation, getBuyerBankAccountLookup),
+            this
+        );
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getBuyerBankAccountLookup</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Custom Lookup for Buyer Bank Account
+    /// </summary>
+    private void getBuyerBankAccountLookup(FormStringControl _control)
+    {
+        Query                   query;
+        QueryBuildDataSource    queryBuildDataSource;
+        QueryBuildRange         queryBuildRange;
+
+        query = new Query();
+
+        SysTableLookup sysTableLookup = SysTableLookup::newParameters(tableNum(CustBankAccount), _control, true);
+
+        // Define the lookup fields
+        sysTableLookup.addLookupField(fieldNum(CustBankAccount, AccountID), true); // Primary bank account
+        sysTableLookup.addLookupField(fieldNum(CustBankAccount, Name)); // Bank Name
+        sysTableLookup.addLookupField(fieldNum(CustBankAccount, BankGroupId)); // Bank Group ID
+
+        // Set up the query
+        queryBuildDataSource = query.addDataSource(tableNum(CustBankAccount));
+
+        queryBuildRange = queryBuildDataSource.addRange(fieldNum(CustBankAccount, CustAccount));
+        queryBuildRange.value(this.parmCustInvoiceJour().InvoiceAccount);
+
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.performFormLookup();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmCustInvoiceJour</Name>
+				<Source><![CDATA[
+    public CustInvoiceJour parmCustInvoiceJour(CustInvoiceJour  _custInvoiceJour =  custInvoiceJour)
+    {
+        custInvoiceJour = _custInvoiceJour;
+
+        return custInvoiceJour;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getFromDialog</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Retrieves selected values from the dialog
+    /// </summary>
+    public boolean getFromDialog()
+    {
+        buyerBankAccount = dialogbuyerBankAccount.value();
+
+        return true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Business logic to update the Buyer Bank Account
+    /// </summary>
+    public void run()
+    {
+        CustInvoiceJour custInvoiceJourBuyerBank;
+
+        // Select the correct record for update
+        ttsbegin;
+
+        select InvoiceId,ETG_BuyerBankDeatils from custInvoiceJourBuyerBank
+            where custInvoiceJourBuyerBank.InvoiceId == this.custInvoiceJour.InvoiceId;
+
+        custInvoiceJourBuyerBank.reread();
+
+        if (custInvoiceJourBuyerBank.RecId)   // Ensure record exists
+        {
+            custInvoiceJourBuyerBank.selectForUpdate(true);
+            custInvoiceJourBuyerBank.skipDatabaseLog(true);
+            custInvoiceJourBuyerBank.skipBusinessEvents(true);
+
+            custInvoiceJourBuyerBank.ETG_BuyerBankDeatils =   buyerBankAccount;
+
+            custInvoiceJourBuyerBank.doUpdate();  // Update properly
+        }
+        else
+        {
+            throw error("Customer invoice journal record not found or not selected.");
+        }
+
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>pack</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Pack method for serialization
+    /// </summary>
+    public container pack()
+    {
+        return [#CurrentVersion, custInvoiceJour.RecId, buyerBankAccount];
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>unpack</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Unpack method for deserialization
+    /// </summary>
+    public boolean unpack(container packedClass)
+    {
+        Version version = RunBase::getVersion(packedClass);
+
+        switch (version)
+        {
+            case #CurrentVersion:
+                [version, custInvoiceJour.RecId, buyerBankAccount] = packedClass;
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

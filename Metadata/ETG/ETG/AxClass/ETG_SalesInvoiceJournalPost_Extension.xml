@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesInvoiceJournalPost_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension class for SalesInvoiceJournalPost
+/// </summary>
+[ExtensionOf(classStr(SalesInvoiceJournalPost))]
+public final class ETG_SalesInvoiceJournalPost_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>endPost</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///     Ends the posting.
+    /// </summary>
+    protected void endPost()
+    {
+        next endPost();
+
+        SalesParmSubLine        etgSalesParmSubLine;
+        SalesParmLine           etgSalesParmLine;
+
+        ETG_CustInvBillOfLading     etgCustInvBillOfLading;
+        RecordInsertList            etgCustInvBillOfLadingList = new RecordInsertList(tableNum(ETG_CustInvBillOfLading));
+
+         select etgSalesParmSubLine group by ETG_BLnumber, ETG_BLDate, DocumentId
+            exists join etgSalesParmLine
+                where etgSalesParmLine.RecId        == etgSalesParmSubLine.LineRefRecId
+                    && etgSalesParmLine.ParmId      == salesParmTable.ParmId
+                    && etgSalesParmLine.TableRefId  == salesParmTable.TableRefId
+            && etgSalesParmSubLine.ETG_BLnumber;
+        {
+            etgCustInvBillOfLading.BLNumber         = etgSalesParmSubLine.ETG_BLnumber;
+            etgCustInvBillOfLading.BLDate           = etgSalesParmSubLine.ETG_BLDate;
+            etgCustInvBillOfLading.PackingSlipId    = etgSalesParmSubLine.DocumentId;
+            etgCustInvBillOfLading.InvoiceId        = CustInvoiceJour.InvoiceId;
+            etgCustInvBillOfLading.CustInvRefRecId  = CustInvoiceJour.RecId;
+
+            etgCustInvBillOfLadingList.add(etgCustInvBillOfLading);
+        }
+
+        etgCustInvBillOfLadingList.insertDatabase();
+
+        if(SalesParameters::find().ETGEnableCylinderTracking == NoYes::Yes  && curExt() != 'o018' && curExt() != 'o025')
+        {
+            ETGCreateFreeTextInvoice::createFreeTxtInv(CustInvoiceJour);
+        }
+
+        
+        //CS, DLT, 18022025 create vendor invoice journal for brokearges amount
+        if(ETGACFParameters::find().EnableBrokeragesAmount == NoYes::Yes)
+        {
+            ETGVendInvoiceJournalCreate::createCustInvJournal(custInvoiceJour);
+        }
+        //CE, DLT, 18022025 create vendor invoice journal for brokearges amount
+
+          
+        ////CS, DLT, 30072025 send sales invoice details to zambia fiscal edge integration
+        //if(LedgerParameters::find().ETGEnableFiscaleEdgeIntegration == NoYes::Yes)
+        //{
+        //    if (BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGZRASalesInvoiceBusinessEvent)))
+        //    {
+        //        ETGZRASalesInvoiceBusinessEvent::newFromCustInvoiceJour(custInvoiceJour).send();
+        //    }
+        //}
+        ////CS, DLT, 30072025 send sales invoice details to zambia fiscal edge integration
+
+        //DMS Reverse intergreation
+        if (ETGACFParameters::find().EnableDMSIntegration && BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGDMSRevereSalesAgreementIntegrationEventClass)))
+        {
+            SalesAgreementHeader salesAgreementHeader;
+            CustPackingSlipJour custPackingSlipJour; 
+           
+            CustPackingSlipTrans custPackingSlipTrans;
+            CustInvoiceTrans custInvoiceTrans;
+
+            select custInvoiceTrans
+                where custInvoiceTrans.InvoiceId == custInvoiceJour.InvoiceId;
+
+            select  custPackingSlipJour
+                        order by CustPackingSlipJour.PackingSlipId desc
+                        where custPackingSlipJour.SalesId == salesTable.SalesId;
+
+            if (salesTable.MatchingAgreement)
+            {
+                salesAgreementHeader = SalesAgreementHeader::find(salesTable.MatchingAgreement);
+
+                if (salesAgreementHeader)
+                {
+                    SalesLine salesLine;
+                    select firstOnly salesLine
+                        where salesLine.SalesId == salesTable.SalesId;
+                         
+                   str formattedDateTime = DateTimeUtil::toStr(custInvoiceJour.CreatedDateTime);
+
+            
+                        ETGDMSRevereSalesAgreementIntegrationContract contract = new ETGDMSRevereSalesAgreementIntegrationContract();
+
+                        contract.parmDealNumber(salesAgreementHeader.ETGDMSDealNumber);
+                        contract.parmDataAreaId(curExt());
+                        contract.parmDocumentNumber(CustInvoiceJour.InvoiceId);
+                        contract.parmDocumentDate(formattedDateTime);
+                        contract.parmActivityOwner(custInvoiceJour.CreatedBy);
+
+                        contract.parmOperationType("Invoice Posting - Invoiced");
+                        contract.parmActivityName("Sales Agreement Invoicing");
+                        contract.parmActivityRemarks(strFmt("The  packing slip %1 of sales order %2 is invoiced with invoice number %3",custPackingSlipJour.PackingSlipId,salesTable.SalesId,CustInvoiceJour.InvoiceId));
+
+                        ETGDMSRevereSalesAgreementIntegrationEventClass eventClass = ETGDMSRevereSalesAgreementIntegrationEventClass::newFromContract(contract);
+                        eventClass.send();
+                }
+            }
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

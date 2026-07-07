@@ -1,0 +1,324 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxForm xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V6">
+	<Name>ETGEntityMasterList</Name>
+	<SourceCode>
+		<Methods xmlns="">
+			<Method>
+				<Name>classDeclaration</Name>
+				<Source><![CDATA[
+[Form]
+public class ETGEntityMasterList extends FormRun
+{
+}
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processExcel</Name>
+				<Source><![CDATA[
+    // ==============================
+    // EXCEL PROCESSING METHOD
+    // ==============================
+    private void processExcel(System.IO.Stream _stream)
+    {
+        OfficeOpenXml.ExcelPackage package;
+        OfficeOpenXml.ExcelWorksheet worksheet;
+        ETGEntityMasterList entityRecord;
+
+        int rowCount;
+        int row;
+
+        str entityCode;
+        str entityName;
+        str country;
+        str localCurrency;
+        str standardName;
+        str country_1;
+
+        try
+        {
+            package = new OfficeOpenXml.ExcelPackage(_stream);
+            worksheet = package.get_Workbook().get_Worksheets().get_Item(1);
+
+            rowCount = worksheet.get_Dimension().get_End().get_Row();
+
+            ttsBegin;
+
+            for (row = 2; row <= rowCount; row++)
+            {
+                entityCode     = worksheet.get_Cells().get_Item(row, 1).get_Text();
+                entityName     = worksheet.get_Cells().get_Item(row, 2).get_Text();
+                country        = worksheet.get_Cells().get_Item(row, 3).get_Text();
+                localCurrency  = worksheet.get_Cells().get_Item(row, 4).get_Text();
+                standardName   = worksheet.get_Cells().get_Item(row, 5).get_Text();
+                country_1      = worksheet.get_Cells().get_Item(row, 6).get_Text();
+
+                if (!entityCode)
+                continue;
+
+                select firstOnly forUpdate entityRecord
+    where entityRecord.EntityCode == entityCode;
+
+                if (entityRecord)
+                {
+                    // UPDATE existing record
+                    entityRecord.EntityName     = entityName;
+                    entityRecord.Country        = country;
+                    entityRecord.LocalCurrency  = localCurrency;
+                    entityRecord.StandardName   = standardName;
+                    entityRecord.Country_1      = country_1;
+
+                    entityRecord.update();
+                }
+                else
+                {
+                    // INSERT new record
+                    entityRecord.clear();
+                    entityRecord.EntityCode     = entityCode;
+                    entityRecord.EntityName     = entityName;
+                    entityRecord.Country        = country;
+                    entityRecord.LocalCurrency  = localCurrency;
+                    entityRecord.StandardName   = standardName;
+                    entityRecord.Country_1      = country_1;
+
+                    entityRecord.insert();
+                }
+            }
+
+            ttsCommit;
+        }
+        catch (Exception::CLRError)
+        {
+            error(CLRInterop::getLastException().ToString());
+            ttsAbort;
+        }
+        catch (Exception::Error)
+        {
+            error("Excel upload failed.");
+            ttsAbort;
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+		<DataSources xmlns="" />
+		<DataControls xmlns="">
+			<Control>
+				<Name>UploadExcel</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        public void clicked()
+        {
+            super();
+
+            FileUploadTemporaryStorageResult uploadResult;
+            System.IO.Stream stream;
+
+            // Open file dialog
+            uploadResult = File::GetFileFromUser();
+
+            if (!uploadResult)
+            {
+                warning("No file selected.");
+                return;
+            }
+
+            stream = uploadResult.openResult();
+
+            // Call form method
+            element.processExcel(stream);
+
+            info("Excel upload completed successfully.");
+
+            // Refresh grid
+            ETGEntityMasterList_ds.research();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+		</DataControls>
+		<Members xmlns="" />
+	</SourceCode>
+	<DataSources>
+		<AxFormDataSource xmlns="">
+			<Name>ETGEntityMasterList</Name>
+			<Table>ETGEntityMasterList</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>Country</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Country_1</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>EntityCode</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>EntityName</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LocalCurrency</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>StandardName</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+	</DataSources>
+	<Design>
+		<Pattern xmlns="">SimpleList</Pattern>
+		<PatternVersion xmlns="">1.1</PatternVersion>
+		<Style xmlns="">SimpleList</Style>
+		<Controls xmlns="">
+			<AxFormControl xmlns=""
+				i:type="AxFormActionPaneControl">
+				<Name>FormActionPaneControl1</Name>
+				<Type>ActionPane</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormButtonGroupControl">
+						<Name>FormButtonGroupControl1</Name>
+						<Type>ButtonGroup</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonControl">
+								<Name>UploadExcel</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<Type>Button</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Text>Upload From Excel</Text>
+							</AxFormControl>
+						</Controls>
+					</AxFormControl>
+				</Controls>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGroupControl">
+				<Name>FormGroupControl1</Name>
+				<Pattern>CustomAndQuickFilters</Pattern>
+				<PatternVersion>1.1</PatternVersion>
+				<Type>Group</Type>
+				<WidthMode>SizeToAvailable</WidthMode>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl>
+						<Name>QuickFilterControl1</Name>
+						<FormControlExtension>
+							<Name>QuickFilterControl</Name>
+							<ExtensionComponents />
+							<ExtensionProperties>
+								<AxFormControlExtensionProperty>
+									<Name>targetControlName</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>placeholderText</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>defaultColumnName</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+							</ExtensionProperties>
+						</FormControlExtension>
+					</AxFormControl>
+				</Controls>
+				<ArrangeMethod>HorizontalLeft</ArrangeMethod>
+				<FrameType>None</FrameType>
+				<Style>CustomFilter</Style>
+				<ViewEditMode>Edit</ViewEditMode>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGridControl">
+				<Name>FormGridControl1</Name>
+				<Type>Grid</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGEntityMasterList_EntityCode</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>EntityCode</DataField>
+						<DataSource>ETGEntityMasterList</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGEntityMasterList_EntityName</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>EntityName</DataField>
+						<DataSource>ETGEntityMasterList</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGEntityMasterList_Country</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Country</DataField>
+						<DataSource>ETGEntityMasterList</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGEntityMasterList_LocalCurrency</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>LocalCurrency</DataField>
+						<DataSource>ETGEntityMasterList</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGEntityMasterList_StandardName</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>StandardName</DataField>
+						<DataSource>ETGEntityMasterList</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGEntityMasterList_Country_1</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Country_1</DataField>
+						<DataSource>ETGEntityMasterList</DataSource>
+					</AxFormControl>
+				</Controls>
+				<Style>Tabular</Style>
+			</AxFormControl>
+		</Controls>
+	</Design>
+	<Parts />
+</AxForm>

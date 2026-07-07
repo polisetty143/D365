@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_CreatelinesHelper</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_CreatelinesHelper
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>VendInvoiceTrans_onInserted</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [DataEventHandler(tableStr(VendInvoiceTrans), DataEventType::Inserted)]
+    public static void VendInvoiceTrans_onInserted(Common sender, DataEventArgs e)
+    {
+        ETG_Chargecodelines   eTG_Chargecodelines;
+        PurchAgreementHeader  purchAgreementHeader;
+        PurchTable            PurchTable;
+        ETG_ChargeCodes       eTG_ChargeCodes;
+        NumberSeq             numberSeq;
+        ETG_Parameters        eTG_Parameters;
+        ETGCreateJournalHelper  eTGCreateJournalHelper = new ETGCreateJournalHelper();
+        VendInvoiceTrans      vendInvoiceTrans = sender as VendInvoiceTrans;
+
+        select firstonly PurchTable 
+                   where PurchTable.PurchId == vendInvoiceTrans.PurchID;
+        select firstonly purchAgreementHeader 
+                   where PurchAgreementHeader.RecId == PurchTable.MatchingAgreement;
+        select firstonly eTG_Parameters;
+
+        while select eTG_ChargeCodes 
+               where eTG_ChargeCodes.PurchNumberSequence == purchAgreementHeader.PurchNumberSequence
+        {
+            eTG_Chargecodelines.PurchNumberSequence =  eTG_ChargeCodes.PurchNumberSequence;
+            eTG_Chargecodelines.MarkupCode          =  eTG_ChargeCodes.MarkupCode;
+            eTG_Chargecodelines.TransTxt            =  eTG_ChargeCodes.TransTxt;
+            eTG_Chargecodelines.CurrencyCode        =  eTG_ChargeCodes.CurrencyCode;
+            eTG_Chargecodelines.ExchangeRate        = eTG_ChargeCodes.ExchangeRate;
+            eTG_Chargecodelines.ReportingExchangeRate = eTG_ChargeCodes.ReportingExchangeRate;
+            eTG_Chargecodelines.Qty                 = vendInvoiceTrans.Qty;
+            eTG_Chargecodelines.PurchId             = vendInvoiceTrans.PurchID;
+            eTG_Chargecodelines.InvoiceId           = vendInvoiceTrans.InvoiceId;
+            eTG_Chargecodelines.Value               = eTG_ChargeCodes.Value;
+
+            if(eTG_ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Pcs)
+            {
+                eTG_Chargecodelines.AmountMST                  = eTG_ChargeCodes.Value * vendInvoiceTrans.Qty;
+                eTG_Chargecodelines.Amountinaccountingcurrency = eTG_Chargecodelines.AmountMST * eTG_ChargeCodes.ExchangeRate;
+                eTG_Chargecodelines.Amountinreportingcurrency  = eTG_Chargecodelines.AmountMST * eTG_ChargeCodes.ReportingExchangeRate;
+            }
+            else if(eTG_ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Fixed)
+            {
+                eTG_Chargecodelines.AmountMST                  = (eTG_ChargeCodes.Value/eTG_ChargeCodes.Qty)*(vendInvoiceTrans.Qty);
+                eTG_Chargecodelines.Amountinaccountingcurrency = eTG_Chargecodelines.AmountMST * eTG_ChargeCodes.ExchangeRate;
+                eTG_Chargecodelines.Amountinreportingcurrency  = eTG_Chargecodelines.AmountMST * eTG_ChargeCodes.ReportingExchangeRate;
+            }
+            else if(eTG_ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Percentage)
+            {
+                eTG_Chargecodelines.AmountMST                  = (eTG_ChargeCodes.AmountMST/eTG_ChargeCodes.Qty)* (vendInvoiceTrans.Qty);
+                eTG_Chargecodelines.Amountinaccountingcurrency = eTG_Chargecodelines.AmountMST * eTG_ChargeCodes.ExchangeRate;
+                eTG_Chargecodelines.Amountinreportingcurrency  = eTG_Chargecodelines.AmountMST * eTG_ChargeCodes.ReportingExchangeRate;
+            }
+            eTG_Chargecodelines.ETG_MarkupCategory  = eTG_ChargeCodes.ETG_MarkupCategory;
+            eTG_Chargecodelines.ETG_Estimation      = eTG_ChargeCodes.ETG_Estimation;
+            numberSeq = NumberSeq::newGetNum(PurchParameters::numReEstimseLines());
+            eTG_Chargecodelines.ETGLineestimationno = numberSeq.num();
+            eTG_Chargecodelines.insert();
+            if(eTG_Chargecodelines.Amountinaccountingcurrency > 0 && eTG_Parameters.Estimationautopost == NoYes::Yes)
+            {
+                eTGCreateJournalHelper.CreateLinesJnl(eTG_Chargecodelines.ETGLineestimationno);
+            }
+            if(eTG_Chargecodelines.Amountinaccountingcurrency == 0 && eTG_Parameters.Estimationautopost == NoYes::Yes)
+            {
+                info(strFmt("@ETG_New:ETGAutopostlable",eTG_Chargecodelines.ETGLineestimationno));
+            }
+
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>CustInvoiceTrans_onInserted</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [DataEventHandler(tableStr(CustInvoiceTrans), DataEventType::Inserted)]
+    public static void CustInvoiceTrans_onInserted(Common sender, DataEventArgs e)
+    {
+        ETG_Chargecodelines   eTG_Chargecodelines;
+        SalesAgreementHeader  salesAgreementHeader;
+        SalesTable            salesTable;
+        ETG_ChargeCodes       eTG_ChargeCodes;
+        ETG_Parameters        eTG_Parameters;
+        NumberSeq             numberSeq;
+        ETGCreateJournalHelper  eTGCreateJournalHelper = new ETGCreateJournalHelper();
+        CustInvoiceTrans      custInvoiceTrans = sender as CustInvoiceTrans;
+
+        select firstonly salesTable 
+                   where salesTable.SalesId == custInvoiceTrans.salesId;
+        select firstonly salesAgreementHeader 
+                   where salesAgreementHeader.RecId == salesTable.MatchingAgreement;
+        select firstonly eTG_Parameters;
+        while select eTG_ChargeCodes 
+               where eTG_ChargeCodes.PurchNumberSequence == salesAgreementHeader.SalesNumberSequence
+        {
+            eTG_Chargecodelines.PurchNumberSequence =  eTG_ChargeCodes.PurchNumberSequence;
+            eTG_Chargecodelines.MarkupCode          =  eTG_ChargeCodes.MarkupCode;
+            eTG_Chargecodelines.TransTxt            =  eTG_ChargeCodes.TransTxt;
+            eTG_Chargecodelines.CurrencyCode        =  eTG_ChargeCodes.CurrencyCode;
+            eTG_Chargecodelines.ExchangeRate        = eTG_ChargeCodes.ExchangeRate;
+            eTG_Chargecodelines.Qty                 = custInvoiceTrans.Qty;
+            eTG_Chargecodelines.PurchId             = custInvoiceTrans.SalesId;
+            eTG_Chargecodelines.InvoiceId           = custInvoiceTrans.InvoiceId;
+            eTG_Chargecodelines.Value               = eTG_ChargeCodes.Value;
+
+            if(eTG_ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Pcs)
+            {
+                eTG_Chargecodelines.AmountMST                  = eTG_ChargeCodes.Value * custInvoiceTrans.Qty;
+                eTG_Chargecodelines.Amountinaccountingcurrency = eTG_Chargecodelines.AmountMST * eTG_ChargeCodes.ExchangeRate;
+                eTG_Chargecodelines.Amountinreportingcurrency  = eTG_Chargecodelines.AmountMST * eTG_ChargeCodes.ReportingExchangeRate;
+            }
+            else if(eTG_ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Fixed)
+            {
+                eTG_Chargecodelines.AmountMST                  = (eTG_ChargeCodes.Value/eTG_ChargeCodes.Qty)*(custInvoiceTrans.Qty);
+                eTG_Chargecodelines.Amountinaccountingcurrency = eTG_Chargecodelines.AmountMST * eTG_ChargeCodes.ExchangeRate;
+                eTG_Chargecodelines.Amountinreportingcurrency  = eTG_Chargecodelines.AmountMST * eTG_ChargeCodes.ReportingExchangeRate;
+            }
+            else if(eTG_ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Percentage)
+            {
+                eTG_Chargecodelines.AmountMST                  = (eTG_ChargeCodes.AmountMST/eTG_ChargeCodes.Qty)* (custInvoiceTrans.Qty);
+                eTG_Chargecodelines.Amountinaccountingcurrency = eTG_Chargecodelines.AmountMST * eTG_ChargeCodes.ExchangeRate;
+                eTG_Chargecodelines.Amountinreportingcurrency  = eTG_Chargecodelines.AmountMST * eTG_ChargeCodes.ReportingExchangeRate;
+            }
+            eTG_Chargecodelines.ETG_MarkupCategory  = eTG_ChargeCodes.ETG_MarkupCategory;
+            eTG_Chargecodelines.ETG_Estimation      = eTG_ChargeCodes.ETG_Estimation;
+            numberSeq = NumberSeq::newGetNum(SalesParameters::numReEstimseLines());
+            eTG_Chargecodelines.ETGLineestimationno = numberSeq.num();
+            eTG_Chargecodelines.insert();
+
+            if(eTG_Chargecodelines.Amountinaccountingcurrency > 0 && eTG_Parameters.Estimationautopost == NoYes::Yes)
+            {
+                eTGCreateJournalHelper.CreateLinesJnl(eTG_Chargecodelines.ETGLineestimationno);
+            }
+            if(eTG_Chargecodelines.Amountinaccountingcurrency == 0 && eTG_Parameters.Estimationautopost == NoYes::Yes)
+            {
+                info(strFmt("@ETG_New:ETGAutopostlable",eTG_Chargecodelines.ETGLineestimationno));
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGUpdateGeneralJournalAccountEntryService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Insert the fileds in new table ETGGeneralJOurnalAccountEntryMMR and the ETGGeneralJournalAccountEntryEntity
+/// </summary>
+class ETGUpdateGeneralJournalAccountEntryService extends SysOperationServiceBase
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>process</Name>
+				<Source><![CDATA[
+    public void process()
+    {
+        ETGACFParameters aCFParameters = ETGACFParameters::find();
+        if (aCFParameters.EnablePowerBIFields)
+        {
+            ETGGeneralJOurnalAccountEntryMMR     gGeneralJOurnalAccountEntryMMR;
+            GeneralJournalAccountEntry           generalJournalAccountEntry;
+            GeneralJournalEntry                  generalJournalEntry;
+            DimensionAttributeValueSetStorage    dimStorage;
+            DimensionAttributeValue              dimAttributeValue;
+            str                                 custgroup,vendgroup,custName,custAccountNum,countryRegionId,vendcountrregionid;
+            str                                 sourceEntity,destEntity,OffsetCompany;
+            DataArea                            dataArea;
+            str                                 etgitemid;
+            AgreementLine                       aLine;
+
+            while select generalJournalAccountEntry
+                 join SubledgerVoucher, AccountingDate, SubledgerVoucherDataAreaId from  generalJournalEntry
+                where generalJournalEntry.RecId == generalJournalAccountEntry.GeneralJournalEntry
+                   && generalJournalEntry.SubledgerVoucherDataAreaId == curExt()
+              notexists join gGeneralJOurnalAccountEntryMMR
+                where gGeneralJOurnalAccountEntryMMR.GeneralJournalAccountEntryRecId  == GeneralJournalAccountEntry.RecId
+                   && gGeneralJOurnalAccountEntryMMR.GeneralJournalEntryRecId         == GeneralJournalAccountEntry.GeneralJournalEntry
+            {
+                if(GeneralJournalAccountEntry.RecId != gGeneralJOurnalAccountEntryMMR.GeneralJournalAccountEntryRecId)
+                {
+                    DimensionDefault  dimDefault = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(generalJournalAccountEntry.LedgerDimension);
+
+                    select firstonly name from  dataArea where dataArea.id == generalJournalEntry.SubledgerVoucherDataAreaId;
+
+                    gGeneralJOurnalAccountEntryMMR.Vertical      = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault, aCFParameters.Vertical);
+                    gGeneralJOurnalAccountEntryMMR.SubVertical   = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault, aCFParameters.SubVertical);
+                    gGeneralJOurnalAccountEntryMMR.Commodity     = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault, aCFParameters.MainCommodity);
+                    gGeneralJOurnalAccountEntryMMR.SubCommodity  = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault, aCFParameters.SubCommodity);
+                    gGeneralJOurnalAccountEntryMMR.IsReverse     = TransactionReversalTrans::findTransactionReversalTrans(tableNum(GeneralJournalAccountEntry), gGeneralJOurnalAccountEntryMMR.GeneralJournalAccountEntryRecId).Reversed;
+                    gGeneralJOurnalAccountEntryMMR.InterCompany  = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault, aCFParameters.Intercompany);
+
+                    gGeneralJOurnalAccountEntryMMR.StandardName  = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault, aCFParameters.Intercompany);
+                    gGeneralJOurnalAccountEntryMMR.StandardValue = ETGFinancialDimensionHelper::getDimensionDisplayStandardName(dimDefault,aCFParameters.Intercompany);
+
+                    gGeneralJOurnalAccountEntryMMR.Contract  = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(dimDefault, aCFParameters.Contract);
+
+                    etgitemid =   ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(dimDefault, aCFParameters.ItemId);
+
+
+                    if(etgitemid == "")
+                    {
+                        RefRecId  agreementHeaderRecId = PurchAgreementHeader::findAgreementId(gGeneralJOurnalAccountEntryMMR.Contract).RecId;
+                        if(!agreementHeaderRecId)
+                        {
+                            agreementHeaderRecId = SalesAgreementHeader::findAgreementId(gGeneralJOurnalAccountEntryMMR.Contract).RecId;
+                        }
+                        if(agreementHeaderRecId)
+                        {
+                            select firstonly ItemId from aLine where aLine.Agreement == agreementHeaderRecId;
+                            etgitemid = aLine.ItemId;
+                        }
+                    }
+
+                    gGeneralJOurnalAccountEntryMMR.ItemId  = etgitemid;
+
+                    dimStorage = DimensionAttributeValueSetStorage::find(dimDefault);
+
+                    select * from dimAttributeValue
+                   where dimAttributeValue.DisplayValue    ==   dimStorage.getDisplayValueByDimensionAttribute(DimensionAttribute::findByName(aCFParameters.ItemId).RecId);
+
+                    gGeneralJOurnalAccountEntryMMR.ItemDim = EcoResProductTranslation::findByProductLanguage(InventTable::find(dimAttributeValue.DisplayValue).Product, SystemParameters::getSystemLanguageId()).Name;
+
+                    gGeneralJOurnalAccountEntryMMR.LedgerDimension                 = generalJournalAccountEntry.LedgerDimension;
+                    gGeneralJOurnalAccountEntryMMR.DefaultDimension                = dimDefault;
+                    gGeneralJOurnalAccountEntryMMR.CurrecyLC                       = Ledger::accountingCurrency();
+                    gGeneralJOurnalAccountEntryMMR.GeneralJournalAccountEntryRecId = generalJournalAccountEntry.RecId;
+                    gGeneralJOurnalAccountEntryMMR.GeneralJournalEntryRecId        = generalJournalAccountEntry.GeneralJournalEntry;
+                    gGeneralJOurnalAccountEntryMMR.SubledgerVoucher                = generalJournalEntry.SubledgerVoucher;
+                    gGeneralJOurnalAccountEntryMMR.EntityName                      = dataArea.name;
+
+                    container custgrouploc                                         = this.getCustGroup(generalJournalEntry);
+                    container destEntitysource                                     = this.getDestsourceoffsetEntity(generalJournalEntry);
+                    container  vendorgroup                                         = this.getvendgroup(generalJournalEntry);
+
+                    custGroup                                                      = conPeek(custgrouploc, 1);
+                    custName                                                       = conPeek(custgrouploc, 2);
+                    custAccountNum                                                 = conPeek(custgrouploc, 3);
+                    countryRegionId                                                = conPeek(custgrouploc, 4);
+ 
+                    vendgroup                                                      =  conPeek(vendorgroup, 1);
+                    vendcountrregionid                                             =  conPeek(vendorgroup, 2);
+
+                    destEntity                                                     = conPeek(destEntitysource, 1);
+                    sourceEntity                                                   = conPeek(destEntitysource, 2);
+                    OffsetCompany                                                  = conPeek(destEntitysource, 3);
+
+                    gGeneralJOurnalAccountEntryMMR.CustName                        = custName;
+                    gGeneralJOurnalAccountEntryMMR.CustAccountNum                  = custAccountNum;
+                    gGeneralJOurnalAccountEntryMMR.countryRegionId                 = countryRegionId;
+                    gGeneralJOurnalAccountEntryMMR.VendGroup                       = vendgroup;
+                    gGeneralJOurnalAccountEntryMMR.VendorcountryRegionId           = vendcountrregionid;
+                    gGeneralJOurnalAccountEntryMMR.CustomerGroup                   = custgroup;
+                    gGeneralJOurnalAccountEntryMMR.DesttEntity                     = destEntity;
+                    gGeneralJOurnalAccountEntryMMR.SourceEntity                    = sourceEntity;
+                    gGeneralJOurnalAccountEntryMMR.OffsetComp                      = OffsetCompany;
+                    gGeneralJOurnalAccountEntryMMR.SubledgerVoucherDataAreaId      = generalJournalEntry.SubledgerVoucherDataAreaId;
+
+                    gGeneralJOurnalAccountEntryMMR.insert();
+                }
+            }
+
+        }
+        else
+        {
+            warning("@ETG_New:MMRPowerBIReportsnotenabled");
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getCustGroup</Name>
+				<Source><![CDATA[
+    protected container  getCustGroup(GeneralJournalEntry _generalJournalEntry)
+    {
+        CustTable                            custTable;
+        CustTrans                            custTrans;
+        str                                  custGroup,name,accountnum,countryRegionId,countryRegionIdname;
+
+        select firstonly custTrans 
+            where custTrans.Voucher == _generalJournalEntry.SubledgerVoucher
+            && custTrans.DataAreaId ==  _generalJournalEntry.SubledgerVoucherDataAreaId
+            && custTrans.TransDate == _generalJournalEntry.AccountingDate;
+
+        select firstonly custTable
+            where custTable.AccountNum == custTrans.AccountNum;
+
+        custGroup        = custTable.CustGroup;
+        name             = custTable.name();
+        accountnum       = custTable.AccountNum;
+        countryRegionId  = custTable.countryRegionId();
+
+        countryRegionIdname  = LogisticsAddressCountryRegionTranslation::find(countryRegionId).ShortName;
+
+        
+
+        return [custGroup, name,accountnum,countryRegionIdname];
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getvendgroup</Name>
+				<Source><![CDATA[
+    protected container getvendgroup(GeneralJournalEntry _generalJournalEntry)
+    {
+        VendTable                            vendTable;
+        VendTrans                            vendTrans;         
+        str                                  vendgrouploc,vendcontainer,vendcontainername;
+
+        select firstonly vendTrans
+            where vendTrans.Voucher == _generalJournalEntry.SubledgerVoucher
+            && vendTrans.DataAreaId == _generalJournalEntry.SubledgerVoucherDataAreaId
+            && vendTrans.TransDate  == _generalJournalEntry.AccountingDate;
+
+        select firstonly VendTable
+            where VendTable.AccountNum == vendTrans.AccountNum;
+
+        vendgrouploc  = vendTable.VendGroup;
+        vendcontainer = vendTable.countryRegionId();
+        vendcontainername = LogisticsAddressCountryRegionTranslation::find(vendcontainer).ShortName;
+
+        return [vendgrouploc,vendcontainername];
+    
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getDestsourceoffsetEntity</Name>
+				<Source><![CDATA[
+    protected container getDestsourceoffsetEntity(GeneralJournalEntry _generalJournalEntry)
+    {
+       
+        LedgerJournalTrans                   LedgerJournalTrans;
+
+        str          DestEntity,SourceEntity,OffsetCompany;
+
+        select firstonly LedgerJournalTrans
+            where LedgerJournalTrans.Voucher == _generalJournalEntry.SubledgerVoucher
+               && LedgerJournalTrans.TransDate == _generalJournalEntry.AccountingDate;
+
+        DestEntity    = LedgerJournalTrans.ETGICDestinationEntity;
+        SourceEntity  = LedgerJournalTrans.ETGICSourceEntity;
+        OffsetCompany = LedgerJournalTrans.OffsetCompany;
+
+        return [DestEntity, SourceEntity,OffsetCompany];
+    
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

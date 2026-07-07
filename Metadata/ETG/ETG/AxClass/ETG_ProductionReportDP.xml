@@ -1,0 +1,1216 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_ProductionReportDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[
+SRSReportQueryAttribute(queryStr(ETG_ProductionReportQuery)),
+SRSReportParameterAttribute(classStr(ETG_ProductionReportContract))
+]
+    class ETG_ProductionReportDP extends SRSReportDataProviderBase//SRSReportDataProviderBase
+{
+       
+    ETG_ProductionReportTmp     getProductionReportTmp;
+    UnitQty                     unitQty;
+    ProdReportedGood            reportedgood;
+    AmountCur                   wipQtyorg,wipValueOrg,fifowipOrg;
+    SalesQty                    WIPQtyglobal;
+    Amount                      WIPValueGlobal;
+                                  
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getProductionReportTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tablestr(ETG_ProductionReportTmp))]
+    public ETG_ProductionReportTmp getProductionReportTmp()
+    {
+        select getProductionReportTmp;
+        return getProductionReportTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    void processReport()
+    {
+        CreatedDateTime        fromDate;
+        CreatedDateTime        toDate;
+        InventSiteId           inventSiteId;
+        Query                  query;
+        QueryRun               queryRun;
+        QueryBuildDataSource   qbds;
+        ProdTable              prodTable;
+        ProdJournalBOM         prodJournalBom;
+        
+
+        ETG_ProductionReportContract   contract    =   this.parmDataContract();
+        fromDate    = contract.parmFromDate() ? DateTimeUtil::newDateTime(contract.parmFromDate(),0) : DateTimeUtil::minValue();
+        toDate      = contract.parmToDate() ? DateTimeUtil::newDateTime(contract.parmToDate(),86400) : DateTimeUtil::maxValue();
+
+        query       =  this.parmQuery();
+        query.dataSourceTable(tableNum(ProdTable)).addRange(fieldNum(ProdTable, CreatedDateTime)).value(SysQuery::range(fromDate, toDate));
+        queryRun    = new  QueryRun(query);
+        while(queryRun.next())
+        {
+            prodTable = queryRun.get(tableNum(ProdTable));
+            getProductionReportTmp.clear();
+            WIPQtyglobal = 0;
+            WIPValueGlobal = 0;
+            this.pickilingListData(prodTable);      //comsumption cost
+            this.rafData(prodTable);                // fineshed good
+
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>pickilingListData</Name>
+				<Source><![CDATA[
+    public void pickilingListData(ProdTable  _prodTable)
+    {
+        ProdJournalBOM              prodJournalBOM, prodJournalBOMloc,ProdJournalBOMOne;
+        ProdJournalTable            prodJournalTable, prodJournalTableloc;
+        InventDim                   inventdimloc;
+        ProdJournalProd             prodJournalProd;
+        InventItemGroupItem         inventItemGroupItem;
+        InventTable                 inventTable;
+        ETG_ProductionItemGrp       productionItemGrp;
+        ProdCalcTrans               prodCalcTrans;
+        Qty                         PerUnitPriceInput, quantity, realCostAmount, PlannedCostActivity, ActualCostActivity, journalCount;
+        Qty                         inputPlannedCost,inputActualCost,outputPlannedCost,outputActualCost,wip;
+        str                         costCentre,section;
+        boolean                     costgroup, wipQty, wipValFound;
+        ProdBOM                     prodBom, prodBomLoc;
+        InventSum                   inventsum;
+        PmfProdCoBy                 pmfProdCoBy;
+        PmfCoByProdCalcTrans        pmfCoByProdCalcTrans;
+        ProdRouteSchedulingView     prodRouteSchedulingView;
+        ProdParmReportFinished      prodParmReportFinished;
+        container                   con;
+        CompanyInfo                 companyInfo = CompanyInfo::find();
+        boolean                     calculateWIPValue = true;
+        DefaultDimensionView        defaultDimesnionView;
+        GeneralJournalEntry         generalEntry;
+        GeneralJournalAccountEntry  generalAccountEntry;
+        InventTransOrigin           inventtransorigin, inventtransoriginWIP;
+        InventTrans                 inventtrans,InventTransLoc, inventtransWIP;
+        InventSettlement            inventsettlement;
+
+        InventTrans                 inventTransLoc1,inventTransLoc2;
+        InventTransOrigin           inventTransOriginloc1,inventTransOriginloc2;
+        ProdJournalBOM              prodJournalBOMloc1,prodJournalBOMloc2;
+        ProdJournalTable            prodJournalTableloc1,prodJournalTableloc2,prodJournalTableloc3;
+        ProdJournalProd             prodJournalProdLoc1;
+        InventDimId                 inventdimid;
+        ItemId                      _itemid;
+        InventDim                   inventDimOne;
+        InventDim                   inventdimProd;
+        //ProdJournalProd         prodJournalProd;
+        boolean                     recFound;
+        container                   inventTransCon;
+
+
+        PerUnitPriceInput   = 0;
+        quantity            = 0;
+        wipQty = true;
+
+        //Fetch company information
+        getProductionReportTmp.CompanyLogo      = FormLetter::companyLogo();
+        getProductionReportTmp.CompanyAddress   = companyInfo.postalAddress().Address;
+        getProductionReportTmp.CompanyAddress   = strReplace(getProductionReportTmp.CompanyAddress,"\n"," ");
+        getProductionReportTmp.CompanyName      = companyInfo.Name;
+       
+        //////////////// Profitcenter///////
+
+        select firstonly defaultDimesnionView
+        where defaultDimesnionView.Name             == "ProfitCenter"  &&
+        defaultDimesnionView.DefaultDimension       == _prodTable.DefaultDimension;
+
+        getProductionReportTmp.ProfitCenter         = defaultDimesnionView.DisplayValue;
+
+        //////////////// Profitcenter///////
+
+        select  count(RecId) from prodJournalTableloc
+        where prodJournalTableloc.ProdId        ==  _prodTable.prodId  &&
+        prodJournalTableloc.JournalType         == ProdJournalType::Picklist;
+
+        while select  productionItemGrp 
+        where productionItemGrp.ETG_Qty         == ETG_Qty::BOMConsump
+        {
+           con += productionItemGrp.ItemGroupId;
+        }
+
+        //Production quantity
+
+        getProductionReportTmp.QtySched         = _prodTable.QtySched;
+
+        //Calculate WIP information
+
+        select sum(BOMConsump) from prodJournalBOM
+               where prodJournalBOM.prodId           == _prodTable.prodId
+              join prodJournalTable
+               where prodJournalTable.JournalId      == prodJournalBOM.JournalId &&
+               prodJournalTable.JournalType          == ProdJournalType::Picklist &&
+               prodJournalTable.Posted               == NoYes::Yes
+               join inventItemGroupItem
+               where inventItemGroupItem.ItemId      == prodJournalBOM.ItemId
+               join productionItemGrp
+               where inventItemGroupItem.ItemGroupId == productionItemGrp.ItemGroupId &&
+               productionItemGrp.ETG_Qty             == ETG_Qty::BOMConsump;
+
+        
+        select sum(QtyGood) from prodJournalProd
+                where prodJournalProd.ProdId            == _prodTable.ProdId
+                join prodJournalTable
+                where prodJournalTable.JournalId        == prodJournalProd.JournalId  &&
+                prodJournalTable.JournalType            == ProdJournalType::ReportFinished  &&
+                prodJournalTable.Posted                 == NoYes::Yes
+                join inventItemGroupItem
+                where inventItemGroupItem.ItemId        == prodJournalProd.ItemId
+                join productionItemGrp
+                where inventItemGroupItem.ItemGroupId   == productionItemGrp.ItemGroupId  &&
+                productionItemGrp.ETG_Qty               == ETG_Qty::QtyGood;
+
+                wip                 = prodJournalBOM.BOMConsump - prodJournalProd.QtyGood;
+                journalCount        = any2Real(prodJournalTableloc.RecId);
+        
+        
+        while select prodCalcTrans
+            where prodCalcTrans.CollectRefProdId    == _prodTable.ProdId &&
+                  prodCalcTrans.CalcType            ==  ItemCalcType::Item
+        {
+            inputPlannedCost    += prodCalcTrans.costPriceSum();
+            inputActualCost     += prodCalcTrans.RealCostAmount;
+
+            PerUnitPriceInput   += prodCalcTrans.costPricePcs();
+            quantity            = prodCalcTrans.Qty;
+            realCostAmount      += prodCalcTrans.RealCostAmount;
+            if (prodCalcTrans.CalcType == ItemCalcType::Process)
+            {
+                section             = prodRouteSchedulingView.WrkCtrId;
+                costCentre          = prodCalcTrans.CalcGroupId;
+                PlannedCostActivity += prodCalcTrans.costPriceSum();
+                ActualCostActivity  += prodCalcTrans.RealCostAmount;
+            }
+            costgroup = true;
+        }
+
+        while select pmfCoByProdCalcTrans
+            where pmfCoByProdCalcTrans.CollectRefProdId     == _prodTable.ProdId &&
+                  pmfCoByProdCalcTrans.CalcType             ==  ItemCalcType::Production
+        {
+            outputPlannedCost   += pmfCoByProdCalcTrans.costPriceSum();
+            outputActualCost    += pmfCoByProdCalcTrans.realCostAmountTotal();
+        }
+
+        getProductionReportTmp.VarianceCostInput    = inputPlannedCost - inputActualCost;
+        getProductionReportTmp.VarianceCostOutput   = outputPlannedCost - outputActualCost;
+        getProductionReportTmp.VarianceOutputInput  = getProductionReportTmp.VarianceCostOutput - getProductionReportTmp.VarianceCostInput;
+
+
+
+        while select * from prodJournalBOM
+                where prodJournalBOM.prodId             == _prodTable.prodId
+                join prodJournalTable
+                where prodJournalTable.JournalId        == prodJournalBOM.JournalId    &&
+                      prodJournalTable.JournalType      == ProdJournalType::Picklist   &&
+                      prodJournalTable.Posted           == NoYes::Yes
+        {
+            recFound = false;
+         while select InventTransOrigin
+                where InventTransOrigin.ReferenceId       == prodJournalBOM.ProdId       &&
+                      InventTransOrigin.ReferenceCategory ==  InventTransType::ProdLine  &&
+                      InventTransOrigin.InventTransId     ==   prodJournalBOM.InventTransId
+                join  InventTrans
+                where InventTrans.InventTransOrigin       == InventTransOrigin.RecId  &&
+                      InventTrans.ItemId                  ==  prodJournalBOM.ItemId   &&
+                      InventTrans.VoucherPhysical         ==  prodJournalBOM.Voucher  &&
+                      InventTrans.StatusIssue             != StatusIssue::OnOrder
+                      //abs(InventTrans.Qty)              == abs(prodJournalBOM.BOMConsump)
+            {
+                
+                InventDim inventdim                     = InventTrans.inventDim();
+                inventdimProd                           = prodJournalBOM.inventDim();
+
+                if(inventdim.configId     == inventdimProd.configId)
+                if(abs(InventTrans.Qty)   == abs(prodJournalBOM.BOMProposal))
+                {
+                    recFound = true;
+                    getProductionReportTmp.ProfitCenter      = defaultDimesnionView.DisplayValue;
+                    inventTable                              = InventTable::find(prodJournalBOM.ItemId);
+                    //InventDim inventdim                     = InventDim::find(prodJournalBOM.InventDimId);
+                    
+
+                select pmfProdCoBy
+                    where pmfProdCoBy.ItemId                        == prodJournalBom.ItemId
+                    join pmfCoByProdCalcTrans
+                    where pmfCoByProdCalcTrans.PmfIdRefCoByRecId    == pmfProdCoBy.RecId;
+          
+                select prodBom
+                      where prodBom.ProdId                          == _prodTable.prodId &&
+                      prodBom.ItemId                                == prodJournalBOM.ItemId;
+            
+                select prodCalcTrans
+                      join  prodBomLoc
+                      where prodBomLoc.RecId                      == prodCalcTrans.IdRefRecId  &&
+                            prodBomLoc.InventTransId              == prodJournalBOM.InventTransId &&
+                            prodCalcTrans.CollectRefProdId        == _prodTable.ProdId &&
+                            prodCalcTrans.Resource                == inventTable.ItemId  &&
+                            prodCalcTrans.CalcType                == ItemCalcType::Item;
+            
+                        //Production order information
+                        getProductionReportTmp.ProdId               = _prodTable.ProdId;
+                        getProductionReportTmp.ProdStatus           = enum2Str(_prodTable.ProdStatus);
+                        getProductionReportTmp.CreateDate           = _prodTable.CreatedDateTime;
+
+                        //Picking List information
+                        getProductionReportTmp.PickingListNo        = prodJournalBOM.JournalId;
+                        getProductionReportTmp.ItemId               = prodJournalBOM.ItemId;
+                        getProductionReportTmp.Name                 = inventTable.itemname();
+                        getProductionReportTmp.PostedDateTime       = prodJournalTable.PostedDateTime;
+                        getProductionReportTmp.BOMUnitId            = prodJournalBOM.BOMUnitId;
+                        getProductionReportTmp.BOMProposal          = prodJournalBOM.BOMProposal;
+                        getProductionReportTmp.BOMConsump           = (-1) * inventtrans.Qty;
+                        getProductionReportTmp.ItemGroupId          = inventTable.inventItemGroupItem().ItemGroupId;
+                        getProductionReportTmp.BOMVersion           = prodBom.BOMId;
+           
+
+                    //inventTransLoc1                             = InventTrans::findTransId(prodJournalBOM.InventTransId);
+                    //getProductionReportTmp.ActualCostInput      = 0;
+                    //if(inventTrans.CostAmountPosted!=0)
+                    {
+                        getProductionReportTmp.ActualCostInput  = inventTrans.CostAmountPosted ;                                    // S3 Request ID :#6638#   by Saumya D  4/22/22
+                    }
+            
+                    getProductionReportTmp.ActualCostFifoInput  = 0;
+                    if (inventTrans.CostAmountAdjustment    != 0 )
+                    {
+                        getProductionReportTmp.ActualCostFifoInput  = inventTrans.CostAmountPosted + inventTrans.CostAmountAdjustment;
+                    }
+                    else
+                    {
+                        getProductionReportTmp.ActualCostFifoInput  = inventTrans.CostAmountPosted;
+                    }
+                    ///This code is written by ETGsiva///
+                    ////Consumption cost
+                    if(prodJournalBOM.BOMConsump)
+                    {
+                        //select firstonly inventtransorigin
+                        //        where inventtransorigin.ReferenceId == prodCalcTrans.TransRefId &&
+                        //              inventtransorigin.ItemId      == prodCalcTrans.Resource;
+
+                        //select firstonly inventtrans
+                        //        where inventtrans.InventTransOrigin == inventtransorigin.RecId &&
+                        //              InventTrans.Qty               == prodCalcTrans.Qty;
+                   
+                        //if(prodCalcTrans.RealCostAmount > 0 && prodJournalBOM.BOMConsump > 0)
+                        {
+                            select generalEntry
+                                where generalEntry.SubledgerVoucher == prodJournalBOM.Voucher;
+
+                            select firstonly generalAccountEntry
+                               where generalAccountEntry.GeneralJournalEntry == generalEntry.RecId;
+
+                            if(generalEntry && generalAccountEntry && prodJournalBOM.BOMConsump!= 0)
+                            {
+                                wipValueOrg =  abs(generalAccountEntry.TransactionCurrencyAmount/prodJournalBOM.BOMConsump);
+                            }
+                        
+                            if(prodJournalBOM.BOMConsump != 0)
+                                getProductionReportTmp.PerUnitPriceInput                = getProductionReportTmp.ActualCostInput/getProductionReportTmp.BOMConsump ;     //S3 Commented By Saumya D  4/22/22
+                        }
+
+                                getProductionReportTmp.PlannedCostInput                 = getProductionReportTmp.PerUnitPriceInput * prodJournalBOM.BOMProposal;            //S3 Commented By Saumya D 4/22/22
+                
+                        if(getProductionReportTmp.BOMProposal!=0)
+                                getProductionReportTmp.PlannedMaterialperUnitPrice      = getProductionReportTmp.PlannedCostInput / getProductionReportTmp.BOMProposal; //s3 saumya 24/04/2022 #6638
+                
+                        if(getProductionReportTmp.BOMConsump!=0)
+                                getProductionReportTmp.ActualCostFifoInputPerUnit       = getProductionReportTmp.ActualCostFifoInput/getProductionReportTmp.BOMConsump;    //this.FIFOCostPrice(prodJournalBOM.ItemId,inventdim);     // S3 commented by saumya d
+                    }
+
+                    fifowipOrg  = inventTrans.CostAmountPosted + inventTrans.CostAmountAdjustment;
+
+                    if(_prodTable.ProdStatus == ProdStatus::StartedUp ||_prodTable.ProdStatus == ProdStatus::ReportedFinished)
+                    {
+                        getProductionReportTmp.WIPValue = 0;
+                        if((getProductionReportTmp.ItemGroupId == 'RM' || getProductionReportTmp.ItemGroupId == 'SFG' || getProductionReportTmp.ItemGroupId == 'FG') && WIPQtyglobal == 0)
+                        {
+                            if(_prodTable.ETGOrderType == ETGOrderType::Regular || _prodTable.ETGOrderType == ETGOrderType::None)
+                            {
+                                inventTransCon = conNull();
+                                while select * from ProdJournalBOMOne
+                                        where ProdJournalBOMOne.prodId           == _prodTable.prodId
+                                        join prodJournalTableloc1
+                                        where prodJournalTableloc1.JournalId     == ProdJournalBOMOne.JournalId
+                                                && prodJournalTableloc1.Posted           == NoYes::Yes
+                                        join inventItemGroupItem
+                                        where inventItemGroupItem.ItemId         == ProdJournalBOMOne.ItemId 
+                                            //&& (inventItemGroupItem.ItemGroupId   == "RM")
+                                {
+                                    
+                                    while select InventTransOriginWIP
+                                        where InventTransOriginWIP.ReferenceId       == ProdJournalBOMOne.ProdId       &&
+                                              InventTransOriginWIP.ReferenceCategory ==  InventTransType::ProdLine  &&
+                                              InventTransOriginWIP.InventTransId     ==   ProdJournalBOMOne.InventTransId
+                                        join  InventTransWIP
+                                        where InventTransWIP.InventTransOrigin       == InventTransOriginWIP.RecId  &&
+                                              InventTransWIP.ItemId                  ==  ProdJournalBOMOne.ItemId   &&
+                                              InventTransWIP.VoucherPhysical         ==  ProdJournalBOMOne.Voucher  &&
+                                              InventTransWIP.StatusIssue             != StatusIssue::OnOrder
+                                    {
+                                        if(conFind(inventTransCon, InventTransWIP.RecId) == 0)
+                                        {
+                                            inventTransCon += InventTransWIP.RecId;
+                                            getProductionReportTmp.WIPValue    += InventTransWIP.CostAmountPhysical;
+                                        }
+                                    }
+                                        if(inventItemGroupItem.ItemGroupId   == "RM")
+                                            getProductionReportTmp.WIPQty            += ProdJournalBOMOne.BOMConsump;
+                                }
+                            }
+                            else if (_prodTable.ETGOrderType == ETGOrderType::Rejection || _prodTable.ETGOrderType == ETGOrderType::Rework)
+                            {
+                                wipValFound = false;
+                                inventTransCon = conNull();
+                                while select *
+                                        from ProdJournalBOMOne
+                                        where ProdJournalBOMOne.prodId          == _prodTable.prodId
+                                        join prodJournalTableloc1
+                                        where prodJournalTableloc1.JournalId    == ProdJournalBOMOne.JournalId
+                                            && prodJournalTableloc1.Posted           == NoYes::Yes
+                                        join inventItemGroupItem
+                                        where inventItemGroupItem.ItemId        == ProdJournalBOMOne.ItemId 
+                                            //&& (inventItemGroupItem.ItemGroupId    == "RM" )
+                                {
+                                    while select InventTransOriginWIP
+                                        where InventTransOriginWIP.ReferenceId       == ProdJournalBOMOne.ProdId       &&
+                                              InventTransOriginWIP.ReferenceCategory ==  InventTransType::ProdLine  &&
+                                              InventTransOriginWIP.InventTransId     ==   ProdJournalBOMOne.InventTransId
+                                        join  InventTransWIP
+                                        where InventTransWIP.InventTransOrigin       == InventTransOriginWIP.RecId  &&
+                                              InventTransWIP.ItemId                  ==  ProdJournalBOMOne.ItemId   &&
+                                              InventTransWIP.VoucherPhysical         ==  ProdJournalBOMOne.Voucher  &&
+                                              InventTransWIP.StatusIssue             != StatusIssue::OnOrder
+                                    {
+                                        wipValFound = true;
+                                        if(conFind(inventTransCon, InventTransWIP.RecId) == 0)
+                                        {
+                                            inventTransCon += InventTransWIP.RecId;
+                                            getProductionReportTmp.WIPValue    += InventTransWIP.CostAmountPhysical;
+                                        }
+                                    }
+                                    if(inventItemGroupItem.ItemGroupId    == "RM" )
+                                        getProductionReportTmp.WIPQty            += ProdJournalBOMOne.BOMConsump;
+                                }
+                                inventTransCon = conNull();
+                                while select *
+                                        from ProdJournalBOMOne
+                                        where ProdJournalBOMOne.prodId          == _prodTable.prodId
+                                        join prodJournalTableloc1
+                                        where prodJournalTableloc1.JournalId    == ProdJournalBOMOne.JournalId
+                                            && prodJournalTableloc1.Posted           == NoYes::Yes
+                                        join inventItemGroupItem
+                                        where inventItemGroupItem.ItemId        == ProdJournalBOMOne.ItemId 
+                                            //&& (inventItemGroupItem.ItemGroupId   == "SFG" )
+                                {
+                                    if(wipValFound == false)
+                                    {
+                                    while select InventTransOriginWIP
+                                        where InventTransOriginWIP.ReferenceId       == ProdJournalBOMOne.ProdId       &&
+                                              InventTransOriginWIP.ReferenceCategory ==  InventTransType::ProdLine  &&
+                                              InventTransOriginWIP.InventTransId     ==   ProdJournalBOMOne.InventTransId
+                                        join  InventTransWIP
+                                        where InventTransWIP.InventTransOrigin       == InventTransOriginWIP.RecId  &&
+                                              InventTransWIP.ItemId                  ==  ProdJournalBOMOne.ItemId   &&
+                                              InventTransWIP.VoucherPhysical         ==  ProdJournalBOMOne.Voucher  &&
+                                              InventTransWIP.StatusIssue             != StatusIssue::OnOrder
+                                    {
+                                        wipValFound = true;
+                                        if(conFind(inventTransCon, InventTransWIP.RecId) == 0)
+                                        {
+                                            inventTransCon += InventTransWIP.RecId;
+                                            getProductionReportTmp.WIPValue    += InventTransWIP.CostAmountPhysical;
+                                        }
+                                    }
+                                    }
+                                    if(inventItemGroupItem.ItemGroupId   == "SFG" )
+                                        getProductionReportTmp.WIPQty            += ProdJournalBOMOne.BOMConsump;
+                                }
+                                inventTransCon = conNull();
+                                while select *
+                                        from ProdJournalBOMOne
+                                        where ProdJournalBOMOne.prodId          == _prodTable.prodId
+                                        join prodJournalTableloc1
+                                        where prodJournalTableloc1.JournalId    == ProdJournalBOMOne.JournalId
+                                        && prodJournalTableloc1.Posted           == NoYes::Yes
+                                        join inventItemGroupItem
+                                        where inventItemGroupItem.ItemId        == ProdJournalBOMOne.ItemId
+                                            //&& (inventItemGroupItem.ItemGroupId   == "FG")
+                                {
+                                    if(wipValFound == false)
+                                    {
+                                        while select InventTransOriginWIP
+                                        where InventTransOriginWIP.ReferenceId       == ProdJournalBOMOne.ProdId       &&
+                                              InventTransOriginWIP.ReferenceCategory ==  InventTransType::ProdLine  &&
+                                              InventTransOriginWIP.InventTransId     ==   ProdJournalBOMOne.InventTransId
+                                        join  InventTransWIP
+                                        where InventTransWIP.InventTransOrigin       == InventTransOriginWIP.RecId  &&
+                                              InventTransWIP.ItemId                  ==  ProdJournalBOMOne.ItemId   &&
+                                              InventTransWIP.VoucherPhysical         ==  ProdJournalBOMOne.Voucher  &&
+                                              InventTransWIP.StatusIssue             != StatusIssue::OnOrder
+                                    {
+                                        wipValFound = true;
+                                        if(conFind(inventTransCon, InventTransWIP.RecId) == 0)
+                                        {
+                                            inventTransCon += InventTransWIP.RecId;
+                                            getProductionReportTmp.WIPValue    += InventTransWIP.CostAmountPhysical;
+                                        }
+                                    }
+                                    }
+                                    if(inventItemGroupItem.ItemGroupId   == "FG")
+                                        getProductionReportTmp.WIPQty            += ProdJournalBOMOne.BOMConsump;
+                                }
+
+                            }
+                            //prodJournalProd.
+
+                            select sum(QtyGood) from prodJournalProd
+                                     where prodJournalProd.ProdId               == _prodTable.ProdId
+                                     join prodJournalTableloc3
+                                     where prodJournalTableloc3.JournalId       == prodJournalProd.JournalId  &&
+                                     prodJournalTableloc3.JournalType           == ProdJournalType::ReportFinished  &&
+                                     prodJournalTableloc3.Posted                == NoYes::Yes;
+
+                            //if(ProdJournalBOMOne.BOMConsump != (prodJournalProd.QtyGood + WIPQtyglobal))
+                                    {
+                                        getProductionReportTmp.WIPQty          -= prodJournalProd.QtyGood;
+                                        WIPQtyglobal                           += getProductionReportTmp.WIPQty;
+                                    }
+                            if(WIPValueGlobal == 0)
+                            {
+                                WIPValueGlobal = getProductionReportTmp.WIPValue;
+                            }
+                            else
+                            {
+                                getProductionReportTmp.WIPValue = 0;
+                            }
+
+                            if(getProductionReportTmp.WIPQty == 0 && _prodTable.ProdStatus == ProdStatus::Completed)
+                                    {
+                                        getProductionReportTmp.WIPValue = 0;
+                                    }
+                        }
+                        //getProductionReportTmp.WIPValue     = getProductionReportTmp.PerUnitPriceInput  * getProductionReportTmp.WIPQty;
+                        //getProductionReportTmp.FIFOWIPValue = getProductionReportTmp.ActualCostFifoInput * getProductionReportTmp.WIPQty;
+                                  //getProductionReportTmp.WIPValue               += inventtrans.CostAmountPhysical;
+                    }
+
+                    /// Saumya ticket id 6638 - end
+            
+
+                    // written by saumya ticket id #6638
+                    /*          
+                    select * from prodJournalBOMloc
+                    order by JournalId desc
+                    where prodJournalBOMloc.ProdId  == prodJournalBOM.ProdId &&
+                          prodJournalBOMloc.LineNum == 1;
+
+                    if (prodJournalBOM.JournalId == prodJournalBOMloc.JournalId && journalCount > 1 && calculateWIPValue)
+                    {
+                        if(conFind(con,inventTable.inventItemGroupItem().ItemGroupId) && calculateWIPValue)
+                        {
+                            calculateWIPValue                       = false;
+                        }
+                    }
+                    if(journalCount == 1 && conFind(con,inventTable.inventItemGroupItem().ItemGroupId))
+                    {
+                        if (wipQty)
+                        {
+                            wipQty = false;
+                            //getProductionReportTmp.WIPQty = wip;     // commented by Saumya ticket id 6638
+                        }
+                        if (getProductionReportTmp.WIPQty )
+                        {
+                            // getProductionReportTmp.WIPValue         = getProductionReportTmp.PerUnitPriceInput * wip ;   // commented by saumya tickit id 6638
+                        }
+                    }
+                    */
+
+                    //Activity cost
+                    getProductionReportTmp.CostCenter           = enum2Str(costCentre);
+                    getProductionReportTmp.Section              = prodRouteSchedulingView.WrkCtrId;
+                    getProductionReportTmp.PlannedCostActivity  = PlannedCostActivity;
+                    getProductionReportTmp.ActualCostActivity   = ActualCostActivity;
+                    getProductionReportTmp.Variance             = PlannedCostActivity - ActualCostActivity;
+           
+                    getProductionReportTmp.CostAllocation       = prodCalcTrans.PmfCostAllocationPct;
+
+                    //Fill RAF inventory dimensions
+                    getProductionReportTmp.ConfigIdPickingList          = inventdim.configId;
+                    getProductionReportTmp.InventColorIdPickingList     = inventdim.InventColorId;
+                    getProductionReportTmp.InventSizeIdPickingList      = inventdim.InventSizeId;
+                    getProductionReportTmp.InventStyleIdPickingList     = inventdim.InventStyleId;
+                    getProductionReportTmp.InventSiteIdPickingList      = inventdim.InventSiteId;
+                    getProductionReportTmp.InventLocationIdPickingList  = inventdim.inventLocationId;
+                    getProductionReportTmp.WMSLocationIdPickingList     = inventdim.wMSLocationId;
+                    getProductionReportTmp.inventBatchIdPickingList     = inventdim.inventBatchId;
+
+                    getProductionReportTmp.insert();
+            
+                    getProductionReportTmp.clear();
+                }
+            }
+            if(recFound == false)
+            {
+                while select InventTransOrigin
+                where InventTransOrigin.ReferenceId   == prodJournalBOM.ProdId   &&
+                      InventTransOrigin.ReferenceCategory ==  InventTransType::ProdLine &&
+                      InventTransOrigin.InventTransId ==   prodJournalBOM.InventTransId
+            join InventTrans
+                where InventTrans.InventTransOrigin     == InventTransOrigin.RecId  &&
+                      InventTrans.ItemId                ==  prodJournalBOM.ItemId   &&
+                      InventTrans.VoucherPhysical         ==  prodJournalBOM.Voucher  &&
+                      InventTrans.StatusIssue             != StatusIssue::OnOrder
+                {
+                    recFound = true;
+                    InventDim inventdim                     = InventTrans.inventDim();
+                    inventdimProd                           = prodJournalBOM.inventDim();
+                    if(inventdim.configId == inventdimProd.configId)
+                //if(abs(InventTrans.Qty)              == abs(prodJournalBOM.BOMProposal))
+                    {
+                        getProductionReportTmp.ProfitCenter     = defaultDimesnionView.DisplayValue;
+                        inventTable                             = InventTable::find(prodJournalBOM.ItemId);
+                        //InventDim inventdim                     = InventDim::find(prodJournalBOM.InventDimId);
+                    
+
+                        select pmfProdCoBy
+                    where pmfProdCoBy.ItemId                        == prodJournalBom.ItemId
+                join pmfCoByProdCalcTrans
+                    where pmfCoByProdCalcTrans.PmfIdRefCoByRecId    == pmfProdCoBy.RecId;
+          
+                        select prodBom
+                where prodBom.ProdId == _prodTable.prodId &&
+                      prodBom.ItemId == prodJournalBOM.ItemId;
+            
+                        select prodCalcTrans
+                join prodBomLoc
+                    where prodBomLoc.RecId                  == prodCalcTrans.IdRefRecId  &&
+                          prodBomLoc.InventTransId          == prodJournalBOM.InventTransId &&
+                          prodCalcTrans.CollectRefProdId    == _prodTable.ProdId &&
+                          prodCalcTrans.Resource            == inventTable.ItemId  &&
+                          prodCalcTrans.CalcType            == ItemCalcType::Item;
+            
+                        //Production order information
+                        getProductionReportTmp.ProdId               = _prodTable.ProdId;
+                        getProductionReportTmp.ProdStatus           = enum2Str(_prodTable.ProdStatus);
+                        getProductionReportTmp.CreateDate           = _prodTable.CreatedDateTime;
+
+                        //Picking List information
+                        getProductionReportTmp.PickingListNo        = prodJournalBOM.JournalId;
+                        getProductionReportTmp.ItemId               = prodJournalBOM.ItemId;
+                        getProductionReportTmp.Name                 = inventTable.itemname();
+                        getProductionReportTmp.PostedDateTime       = prodJournalTable.PostedDateTime;
+                        getProductionReportTmp.BOMUnitId            = prodJournalBOM.BOMUnitId;
+                        getProductionReportTmp.BOMProposal          = prodJournalBOM.BOMProposal;
+                        getProductionReportTmp.BOMConsump           = (-1) * inventtrans.Qty;
+                        getProductionReportTmp.ItemGroupId          = inventTable.inventItemGroupItem().ItemGroupId;
+                        getProductionReportTmp.BOMVersion           = prodBom.BOMId;
+           
+
+                        //inventTransLoc1                             = InventTrans::findTransId(prodJournalBOM.InventTransId);
+                        //getProductionReportTmp.ActualCostInput      = 0;
+                        //if(inventTrans.CostAmountPosted!=0)
+                        {
+                            getProductionReportTmp.ActualCostInput  = inventTrans.CostAmountPosted ;                                    // S3 Request ID :#6638#   by Saumya D  4/22/22
+                        }
+            
+                        getProductionReportTmp.ActualCostFifoInput  = 0;
+                        if (inventTrans.CostAmountAdjustment    != 0 )
+                        {
+                            getProductionReportTmp.ActualCostFifoInput  = inventTrans.CostAmountPosted + inventTrans.CostAmountAdjustment;
+                        }
+                        else
+                        {
+                            getProductionReportTmp.ActualCostFifoInput  = inventTrans.CostAmountPosted;
+                        }
+                        ///This code is written by ETGsiva///
+                        ////Consumption cost
+                        if(prodJournalBOM.BOMConsump)
+                        {
+                            //select firstonly inventtransorigin
+                            //        where inventtransorigin.ReferenceId == prodCalcTrans.TransRefId &&
+                            //              inventtransorigin.ItemId      == prodCalcTrans.Resource;
+
+                            //select firstonly inventtrans
+                            //        where inventtrans.InventTransOrigin == inventtransorigin.RecId &&
+                            //              InventTrans.Qty               == prodCalcTrans.Qty;
+                   
+                            //if(prodCalcTrans.RealCostAmount > 0 && prodJournalBOM.BOMConsump > 0)
+                            {
+                                select generalEntry
+                        where generalEntry.SubledgerVoucher == prodJournalBOM.Voucher;
+
+                                select firstonly generalAccountEntry
+                        where generalAccountEntry.GeneralJournalEntry == generalEntry.RecId;
+
+                                if(generalEntry && generalAccountEntry && prodJournalBOM.BOMConsump!= 0)
+                                {
+                                    wipValueOrg =  abs(generalAccountEntry.TransactionCurrencyAmount/prodJournalBOM.BOMConsump);
+                                }
+                        
+                                if(prodJournalBOM.BOMConsump != 0)
+                        getProductionReportTmp.PerUnitPriceInput    = getProductionReportTmp.ActualCostInput/getProductionReportTmp.BOMConsump ;     //S3 Commented By Saumya D  4/22/22
+                            }
+
+                            getProductionReportTmp.PlannedCostInput             = getProductionReportTmp.PerUnitPriceInput * prodJournalBOM.BOMProposal;            //S3 Commented By Saumya D 4/22/22
+                
+                            if(getProductionReportTmp.BOMProposal!=0)
+                    getProductionReportTmp.PlannedMaterialperUnitPrice      = getProductionReportTmp.PlannedCostInput / getProductionReportTmp.BOMProposal; //s3 saumya 24/04/2022 #6638
+                
+                            if(getProductionReportTmp.BOMConsump!=0)
+                    getProductionReportTmp.ActualCostFifoInputPerUnit       = getProductionReportTmp.ActualCostFifoInput/getProductionReportTmp.BOMConsump;    //this.FIFOCostPrice(prodJournalBOM.ItemId,inventdim);     // S3 commented by saumya d
+                        }
+                        fifowipOrg  = inventTrans.CostAmountPosted + inventTrans.CostAmountAdjustment;
+                        if(_prodTable.ProdStatus == ProdStatus::StartedUp ||_prodTable.ProdStatus == ProdStatus::ReportedFinished)
+                        {
+                            getProductionReportTmp.WIPValue = 0;
+                            if((getProductionReportTmp.ItemGroupId == 'RM' || getProductionReportTmp.ItemGroupId == 'SFG' || getProductionReportTmp.ItemGroupId == 'FG') && WIPQtyglobal == 0)
+                            {
+                                if(_prodTable.ETGOrderType == ETGOrderType::Regular || _prodTable.ETGOrderType == ETGOrderType::None)
+                                {
+                                    inventTransCon = conNull();
+                                    while select *
+                                        from ProdJournalBOMOne
+                                        where ProdJournalBOMOne.prodId          == _prodTable.prodId
+                                        join prodJournalTableloc1
+                                        where prodJournalTableloc1.JournalId    == ProdJournalBOMOne.JournalId
+                                            && prodJournalTableloc1.Posted      == NoYes::Yes
+                                        join inventItemGroupItem
+                                        where inventItemGroupItem.ItemId        == ProdJournalBOMOne.ItemId 
+                                        //&& (inventItemGroupItem.ItemGroupId   == "RM")
+                                    {
+                                        
+                                        while select InventTransOriginWIP
+                                        where InventTransOriginWIP.ReferenceId       == ProdJournalBOMOne.ProdId       &&
+                                              InventTransOriginWIP.ReferenceCategory ==  InventTransType::ProdLine  &&
+                                              InventTransOriginWIP.InventTransId     ==   ProdJournalBOMOne.InventTransId
+                                        join  InventTransWIP
+                                        where InventTransWIP.InventTransOrigin       == InventTransOriginWIP.RecId  &&
+                                              InventTransWIP.ItemId                  ==  ProdJournalBOMOne.ItemId   &&
+                                              InventTransWIP.VoucherPhysical         ==  ProdJournalBOMOne.Voucher  &&
+                                              InventTransWIP.StatusIssue             != StatusIssue::OnOrder
+                                        {
+                                              if(conFind(inventTransCon, InventTransWIP.RecId) == 0)
+                                            {
+                                                inventTransCon += InventTransWIP.RecId;
+                                                getProductionReportTmp.WIPValue    += InventTransWIP.CostAmountPhysical;
+                                            }
+                                        }
+                                        if(inventItemGroupItem.ItemGroupId   == "RM")
+                                            getProductionReportTmp.WIPQty            += ProdJournalBOMOne.BOMConsump;
+                                    }
+                                   
+                                    
+                                }
+                                else if (_prodTable.ETGOrderType == ETGOrderType::Rejection || _prodTable.ETGOrderType == ETGOrderType::Rework)
+                                {
+                                    wipValFound = false;
+                                    inventTransCon = conNull();
+                                    while select *
+                                        from ProdJournalBOMOne
+                                    where ProdJournalBOMOne.prodId          == _prodTable.prodId
+                                    join prodJournalTableloc1
+                                    where prodJournalTableloc1.JournalId    == ProdJournalBOMOne.JournalId
+                                        && prodJournalTableloc1.Posted           == NoYes::Yes
+                                    join inventItemGroupItem
+                                    where inventItemGroupItem.ItemId        == ProdJournalBOMOne.ItemId 
+                                        //&& (inventItemGroupItem.ItemGroupId   == "RM" )
+                                    {
+                                        while select InventTransOriginWIP
+                                        where InventTransOriginWIP.ReferenceId       == ProdJournalBOMOne.ProdId       &&
+                                              InventTransOriginWIP.ReferenceCategory ==  InventTransType::ProdLine  &&
+                                              InventTransOriginWIP.InventTransId     ==   ProdJournalBOMOne.InventTransId
+                                        join  InventTransWIP
+                                        where InventTransWIP.InventTransOrigin       == InventTransOriginWIP.RecId  &&
+                                              InventTransWIP.ItemId                  ==  ProdJournalBOMOne.ItemId   &&
+                                              InventTransWIP.VoucherPhysical         ==  ProdJournalBOMOne.Voucher  &&
+                                              InventTransWIP.StatusIssue             != StatusIssue::OnOrder
+                                        {
+                                            wipValFound = true;
+                                            if(conFind(inventTransCon, InventTransWIP.RecId) == 0)
+                                            {
+                                                inventTransCon += InventTransWIP.RecId;
+                                                getProductionReportTmp.WIPValue    += InventTransWIP.CostAmountPhysical;
+                                            }
+                                        }
+                                        if(inventItemGroupItem.ItemGroupId   == "RM")
+                                            getProductionReportTmp.WIPQty            += ProdJournalBOMOne.BOMConsump;
+                                    }
+                                    inventTransCon = conNull();
+                                    while select *
+                                        from ProdJournalBOMOne
+                                    where ProdJournalBOMOne.prodId          == _prodTable.prodId
+                                    join prodJournalTableloc1
+                                    where prodJournalTableloc1.JournalId    == ProdJournalBOMOne.JournalId
+                                        && prodJournalTableloc1.Posted           == NoYes::Yes
+                                    join inventItemGroupItem
+                                    where inventItemGroupItem.ItemId        == ProdJournalBOMOne.ItemId 
+                                        //&& (inventItemGroupItem.ItemGroupId   == "SFG" )
+                                    {
+                                        if(wipValFound == false)
+                                        {
+                                        while select InventTransOriginWIP
+                                        where InventTransOriginWIP.ReferenceId       == ProdJournalBOMOne.ProdId       &&
+                                              InventTransOriginWIP.ReferenceCategory ==  InventTransType::ProdLine  &&
+                                              InventTransOriginWIP.InventTransId     ==   ProdJournalBOMOne.InventTransId
+                                        join  InventTransWIP
+                                        where InventTransWIP.InventTransOrigin       == InventTransOriginWIP.RecId  &&
+                                              InventTransWIP.ItemId                  ==  ProdJournalBOMOne.ItemId   &&
+                                              InventTransWIP.VoucherPhysical         ==  ProdJournalBOMOne.Voucher  &&
+                                              InventTransWIP.StatusIssue             != StatusIssue::OnOrder
+                                        {
+                                            wipValFound = true;
+                                            if(conFind(inventTransCon, InventTransWIP.RecId) == 0)
+                                            {
+                                                inventTransCon += InventTransWIP.RecId;
+                                                getProductionReportTmp.WIPValue    += InventTransWIP.CostAmountPhysical;
+                                            }
+                                        }
+                                        }
+                                        if (inventItemGroupItem.ItemGroupId   == "SFG" )
+                                            getProductionReportTmp.WIPQty            += ProdJournalBOMOne.BOMConsump;
+                                    }
+                                    inventTransCon = conNull();
+                                    while select *
+                                        from ProdJournalBOMOne
+                                    where ProdJournalBOMOne.prodId          == _prodTable.prodId
+                                    join prodJournalTableloc1
+                                    where prodJournalTableloc1.JournalId    == ProdJournalBOMOne.JournalId
+                                        && prodJournalTableloc1.Posted           == NoYes::Yes
+                                    join inventItemGroupItem
+                                    where inventItemGroupItem.ItemId        == ProdJournalBOMOne.ItemId 
+                                        //&& (inventItemGroupItem.ItemGroupId   == "FG")
+                                    {
+                                        if(wipValFound== false)
+                                        {
+                                        while select InventTransOriginWIP
+                                        where InventTransOriginWIP.ReferenceId       == ProdJournalBOMOne.ProdId       &&
+                                              InventTransOriginWIP.ReferenceCategory ==  InventTransType::ProdLine  &&
+                                              InventTransOriginWIP.InventTransId     ==   ProdJournalBOMOne.InventTransId
+                                        join  InventTransWIP
+                                        where InventTransWIP.InventTransOrigin       == InventTransOriginWIP.RecId  &&
+                                              InventTransWIP.ItemId                  ==  ProdJournalBOMOne.ItemId   &&
+                                              InventTransWIP.VoucherPhysical         ==  ProdJournalBOMOne.Voucher  &&
+                                              InventTransWIP.StatusIssue             != StatusIssue::OnOrder
+                                        {
+                                            wipValFound = true;
+                                            if(conFind(inventTransCon, InventTransWIP.RecId) == 0)
+                                            {
+                                                inventTransCon += InventTransWIP.RecId;
+                                                getProductionReportTmp.WIPValue    += InventTransWIP.CostAmountPhysical;
+                                            }
+                                        }
+                                        }
+                                        if(inventItemGroupItem.ItemGroupId   == "FG")
+                                            getProductionReportTmp.WIPQty            += ProdJournalBOMOne.BOMConsump;
+                                    }
+
+                                }
+                                //prodJournalProd.
+                                select sum(QtyGood) from prodJournalProd
+                            where prodJournalProd.ProdId            == _prodTable.ProdId
+                        join prodJournalTableloc3
+                            where prodJournalTableloc3.JournalId        == prodJournalProd.JournalId  &&
+                                  prodJournalTableloc3.JournalType      == ProdJournalType::ReportFinished  &&
+                                  prodJournalTableloc3.Posted           == NoYes::Yes;
+
+                                //if(ProdJournalBOMOne.BOMConsump != (prodJournalProd.QtyGood + WIPQtyglobal))
+                                {
+                                    getProductionReportTmp.WIPQty   -= prodJournalProd.QtyGood;
+                                    WIPQtyglobal                    += getProductionReportTmp.WIPQty;
+                                }
+                                if(WIPValueGlobal == 0)
+                                {
+                                    WIPValueGlobal = getProductionReportTmp.WIPValue;
+                                }
+                                else
+                                {
+                                    getProductionReportTmp.WIPValue = 0;
+                                }
+                                if(getProductionReportTmp.WIPQty == 0 && _prodTable.ProdStatus == ProdStatus::Completed)
+                                {
+                                    getProductionReportTmp.WIPValue = 0;
+                                }
+                            }
+
+                           // getProductionReportTmp.WIPValue     = getProductionReportTmp.PerUnitPriceInput  * getProductionReportTmp.WIPQty;
+                           // getProductionReportTmp.FIFOWIPValue = getProductionReportTmp.ActualCostFifoInput * getProductionReportTmp.WIPQty;
+                        }
+
+                        /// Saumya ticket id 6638 - end
+            
+
+                        // written by saumya ticket id #6638
+                        /*
+                        select * from prodJournalBOMloc
+                        order by JournalId desc
+                        where prodJournalBOMloc.ProdId  == prodJournalBOM.ProdId &&
+                        prodJournalBOMloc.LineNum == 1;
+
+                        if (prodJournalBOM.JournalId == prodJournalBOMloc.JournalId && journalCount > 1 && calculateWIPValue)
+                        {
+                        if(conFind(con,inventTable.inventItemGroupItem().ItemGroupId) && calculateWIPValue)
+                        {
+                        calculateWIPValue                       = false;
+                        }
+                        }
+                        if(journalCount == 1 && conFind(con,inventTable.inventItemGroupItem().ItemGroupId))
+                        {
+                        if (wipQty)
+                        {
+                        wipQty = false;
+                        //getProductionReportTmp.WIPQty = wip;     // commented by Saumya ticket id 6638
+                        }
+                        if (getProductionReportTmp.WIPQty )
+                        {
+                        // getProductionReportTmp.WIPValue         = getProductionReportTmp.PerUnitPriceInput * wip ;   // commented by saumya tickit id 6638
+                        }
+                        }
+                        */
+
+                        //Activity cost
+                        getProductionReportTmp.CostCenter           = enum2Str(costCentre);
+                        getProductionReportTmp.Section              = prodRouteSchedulingView.WrkCtrId;
+                        getProductionReportTmp.PlannedCostActivity  = PlannedCostActivity;
+                        getProductionReportTmp.ActualCostActivity   = ActualCostActivity;
+                        getProductionReportTmp.Variance             = PlannedCostActivity - ActualCostActivity;
+           
+                        getProductionReportTmp.CostAllocation       = prodCalcTrans.PmfCostAllocationPct;
+
+                        //Fill RAF inventory dimensions
+                        getProductionReportTmp.ConfigIdPickingList          = inventdim.configId;
+                        getProductionReportTmp.InventColorIdPickingList     = inventdim.InventColorId;
+                        getProductionReportTmp.InventSizeIdPickingList      = inventdim.InventSizeId;
+                        getProductionReportTmp.InventStyleIdPickingList     = inventdim.InventStyleId;
+                        getProductionReportTmp.InventSiteIdPickingList      = inventdim.InventSiteId;
+                        getProductionReportTmp.InventLocationIdPickingList  = inventdim.inventLocationId;
+                        getProductionReportTmp.WMSLocationIdPickingList     = inventdim.wMSLocationId;
+                        getProductionReportTmp.inventBatchIdPickingList     = inventdim.inventBatchId;
+
+                        getProductionReportTmp.insert();
+            
+                        getProductionReportTmp.clear();
+                    }
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>rafData</Name>
+				<Source><![CDATA[
+    public void rafData(ProdTable  _prodTable)
+    {
+        ProdParmReportFinished  prodParmReportFinished;
+        ProdJournalProd         prodJournalProd,prodJournalProdloc,prodJournalProdLoc1,prodJournalProdLoc2,ProdJournalProdLocal3, prodJournalProdLoc4;
+        InventTable             inventTable;
+        ProdBOM                 prodbom, prodBomLoc;
+        ProdRoute               prodRoute;
+        ProdRouteSchedulingView prodRouteSchedulingView;
+        ProdCalcTrans           prodCalcTrans;
+        PmfFormulaCoBy          pmfformCoBy;
+        
+        // CategoryTable         categoryTable;
+        PmfProdCoBy             pmfProdCoBy;
+        PmfCoByProdCalcTrans    pmfCoByProdCalcTrans;
+        ProdJournalBOM          prodJournalBOMLoc, prodJournalBOMLocc;
+        Qty                     proposal, goodqty, consump, PerUnitPriceInput, quantity, realCostAmount, PlannedCostActivity, ActualCostActivity ;
+        ProdJournalTable        prodJournalTable,prodJournalTableloc1,prodJournalTableloc2,prodJournalTableloc3;
+        InventItemGroupItem     inventItemGroupItem;
+        boolean                 CostAlocation;
+        InventSum               inventsum;
+        real                    wIPValue;
+        ProdTable               prodtable;
+        InventDim               inventdim,InventDimLoc;
+        InventDimId             inventDimId;
+        InventTrans             inventtrans;
+        InventTransOrigin       inventtransorigin, inventtransoriginloc,inventtransoriginloc1,inventtransoriginloc2;
+        //////code added bt siva dec2-2021 start//
+        GeneralJournalEntry             generalEntry;
+        GeneralJournalAccountEntry      generalAccountEntry;
+        real                            inputvalue,outputvalue,costalcate;
+        Qty                             wiplocal;
+        prodJournalBOM                  prodJournalBOM,prodJournalBOMLocOrg;
+        ETG_ProductionItemGrp           productionItemGrplocal;
+        InventTrans                     inventtransloc1,inventTransLoc2 ;
+        //////code added bt siva dec2-2021 End//
+        
+        InventDim                   inventdimprod;
+
+        CostAlocation = true;
+        
+        while select * from prodJournalProd
+                where prodJournalProd.ProdId            == _prodTable.ProdId
+            join prodJournalTable
+                where prodJournalTable.JournalId        == prodJournalProd.JournalId  &&
+                      prodJournalTable.JournalType      == ProdJournalType::ReportFinished  &&
+                      prodJournalTable.Posted           == NoYes::Yes
+        {
+
+            while select InventTransOrigin
+                where 
+                InventTransOrigin.ReferenceId   == prodJournalProd.ProdId   
+                && 
+                (InventTransOrigin.ReferenceCategory ==  InventTransType::Production  ||
+                InventTransOrigin.ReferenceCategory ==  InventTransType::PmfProdCoBy) 
+                && InventTransOrigin.InventTransId ==   prodJournalProd.InventTransId
+            join InventTrans
+                where InventTrans.InventTransOrigin     == InventTransOrigin.RecId  
+                      && InventTrans.ItemId                ==  prodJournalProd.ItemId  
+            //          && InventTrans.inventDimId           ==  prodJournalProd.InventDimId
+                      && InventTrans.VoucherPhysical       ==  prodJournalProd.Voucher
+            {
+                inventdimprod   =     prodJournalProd.inventDim();
+                inventdim       = InventDim::find(InventTrans.InventDimId);
+                if(inventdimprod.configId == inventdim.configId)
+                {
+                getProductionReportTmp.clear();
+                inventTable     = InventTable::find(prodJournalProd.ItemId);
+                
+                if(inventdim.RecId == 0)
+                inventdim   = InventDim::find(prodJournalProd.InventDimId);
+
+                select prodParmReportFinished
+                where prodParmReportFinished.ProdId         == _prodTable.prodId &&
+                      prodParmReportFinished.InventTransId  == prodJournalProd.InventTransId;
+
+                select prodBom
+                where prodBom.ProdId == _prodTable.prodId &&
+                      prodBom.ItemId == prodJournalProd.ItemId;
+
+                select prodRoute
+                where prodRoute.ProdId  == _prodTable.prodId;
+
+                select prodRouteSchedulingView
+                where prodRoute.ProdId  == _prodTable.prodId;
+
+                select pmfProdCoBy
+                    where pmfProdCoBy.ItemId        == prodJournalProd.ItemId &&
+                          pmfProdCoBy.InventTransId == prodJournalProd.InventTransId
+                join pmfCoByProdCalcTrans
+                    where pmfCoByProdCalcTrans.PmfIdRefCoByRecId == pmfProdCoBy.RecId &&
+                          pmfProdCoBy.ProdId                     == prodJournalProd.ProdId;
+
+                select prodCalcTrans
+                join prodBomLoc
+                    where prodBomLoc.RecId                  == prodCalcTrans.IdRefRecId &&
+                          prodCalcTrans.CollectRefProdId    == _prodTable.ProdId &&
+                          prodCalcTrans.Resource            == inventTable.ItemId &&
+                          prodCalcTrans.CalcType            == ItemCalcType::Production;
+
+                //Production order information
+                getProductionReportTmp.ProdId               = prodJournalProd.ProdId;
+                getProductionReportTmp.CreateDate           = _prodTable.CreatedDateTime;
+                getProductionReportTmp.ProdStatus           = enum2Str(_prodTable.ProdStatus);
+
+                //RAF information
+                getProductionReportTmp.RAFPostedDateTime    = prodJournalTable.PostedDateTime;
+                getProductionReportTmp.RAFItemId            = prodJournalProd.ItemId;
+                getProductionReportTmp.ItemGroupIdRAF       = inventTable.inventItemGroupItem().ItemGroupId;
+                getProductionReportTmp.RAFQtyGood           = inventtrans.Qty;  //prodJournalProd.QtyGood;
+                getProductionReportTmp.RAFQtyGoodAsPerBOM   = prodParmReportFinished.ETGBOMQty;
+                getProductionReportTmp.RAFProductionShift   = enum2Str(prodParmReportFinished.ETGProductionShift);
+                getProductionReportTmp.RAFName              = inventTable.itemname();
+                getProductionReportTmp.UnitId               = inventTable.InventUnitId();
+                getProductionReportTmp.RAFNo                = prodJournalProd.JournalId;
+                getProductionReportTmp.BOMVersion           = prodBom.BOMId;
+
+                //Activity information
+                getProductionReportTmp.ActivityType         = prodRoute.ProcessCategoryId;
+                // getProductionReportTmp.ActivityText         = CategoryTable::find(prodRoute.ProcessCategoryId).CategoryName;
+                if(getProductionReportTmp.RAFQtyGood)
+                {
+                    getProductionReportTmp.OutputActualCost     = inventtrans.CostAmountPosted;
+                }
+                if (getProductionReportTmp.RAFQtyGood &&inventTrans.CostAmountAdjustment!= 0 )
+                {
+                    getProductionReportTmp.OutputActualCostFifo     =  inventtrans.CostAmountPosted + inventtrans.CostAmountAdjustment ;     //s3 commented by Saumya D Request id 6638
+                    getProductionReportTmp.OutputActualCostPerUnit  =   getProductionReportTmp.OutputActualCostFifo/getProductionReportTmp.RAFQtyGood;
+           
+                }
+                else  if(getProductionReportTmp.RAFQtyGood)
+                {
+                    getProductionReportTmp.OutputActualCostFifo     =  inventtrans.CostAmountPosted;                                                   //s3 commented by Saumya D Request id 6638
+                    getProductionReportTmp.OutputActualCostPerUnit  =   getProductionReportTmp.OutputActualCostFifo/getProductionReportTmp.RAFQtyGood;
+                }
+
+                
+                if(getProductionReportTmp.RAFQtyGood)
+                {
+                    if (prodCalcTrans.CalcType == ItemCalcType::Production && prodCalcTrans)
+                    {
+                        //////code written by siva dec 2/2021
+           
+                        select prodtable
+                        where prodtable.ProdId == prodJournalProd.ProdId;
+
+                        while select * from prodJournalBOM
+                                where prodJournalBOM.prodId == prodtable.prodId
+                            join prodJournalTableLoc1
+                                where prodJournalTableLoc1.JournalId == prodJournalBOM.JournalId &&
+                                prodJournalTableLoc1.JournalType == ProdJournalType::Picklist &&
+                                prodJournalTableLoc1.Posted == NoYes::Yes
+                         wiplocal = prodJournalBOM.BOMConsump - prodJournalProd.QtyGood;
+
+                        if(prodtable.ProdStatus == ProdStatus::ReportedFinished &&
+                       getProductionReportTmp.RAFQtyGood != getProductionReportTmp.RAFQtyGoodAsPerBOM &&
+                       wiplocal > 0)
+                        {
+                            select sum(QtyGood)
+                            from prodJournalProdLoc
+                                    where prodJournalProdLoc.ProdId == prodtable.ProdId
+                                join prodJournalTableLoc2
+                                    where prodJournalTableLoc2.JournalId == prodJournalProdLoc.JournalId &&
+                                          prodJournalTableLoc2.JournalType == ProdJournalType::ReportFinished &&
+                                          prodJournalTableLoc2.Posted == NoYes::Yes
+                                join inventItemGroupItem
+                                    where inventItemGroupItem.ItemId == prodJournalProdLoc.ItemId
+                                join productionItemGrplocal
+                                    where inventItemGroupItem.ItemGroupId == productionItemGrplocal.ItemGroupId &&
+                                          productionItemGrplocal.ETG_Qty == ETG_Qty::QtyGood;
+
+                            while select * from prodJournalBOMLocOrg
+                                    where prodJournalBOMLocOrg.prodId == prodtable.prodId
+                                join prodJournalTableLoc3
+                                    where prodJournalTableLoc3.JournalId    == prodJournalBOMLocOrg.JournalId &&
+                                          prodJournalTableLoc3.JournalType  == ProdJournalType::Picklist &&
+                                          prodJournalTableLoc3.Posted       == NoYes::Yes
+                            select generalEntry
+                                    where generalEntry.SubledgerVoucher == prodJournalBOMLocOrg.Voucher;
+
+                            select firstonly generalAccountEntry
+                                where generalAccountEntry.GeneralJournalEntry == generalEntry.RecId;
+
+                            select sum(CostAllocationPct)
+                            from pmfProdCoBy
+                                where pmfProdCoBy.ProdId == prodtable.ProdId;
+
+                            inputvalue = abs(generalAccountEntry.TransactionCurrencyAmount);
+
+                            if(generalAccountEntry.TransactionCurrencyAmount > 0 && prodJournalBOMLocOrg.BOMConsump >0)
+                            {
+                                outputvalue = abs(generalAccountEntry.TransactionCurrencyAmount/prodJournalBOMLocOrg.BOMConsump)*wiplocal;
+                            }
+                            costalcate = pmfProdCoBy.CostAllocationPct;
+                            //getProductionReportTmp.OutputActualCost = (inputvalue - outputvalue) * costalcate;
+                            if( getProductionReportTmp.OutputActualCost > 0 && getProductionReportTmp.RAFQtyGood > 0)
+                            {
+                                getProductionReportTmp.OutputPricePerUnit = getProductionReportTmp.OutputActualCost/getProductionReportTmp.RAFQtyGood;
+                            }
+                            getProductionReportTmp.CostAllocation = pmfProdCoBy.CostAllocationPct;
+
+                            //////code added bt siva dec2-2021 End//
+
+                            getProductionReportTmp.OutputPlannedCost = getProductionReportTmp.RAFQtyGoodAsPerBOM * getProductionReportTmp.OutputPricePerUnit;
+                            //getProductionReportTmp.OutputActualCostFifo = this.FIFOCostPrice(prodJournalProd.ItemId,inventdim) * getProductionReportTmp.RAFQtyGood;
+                        }
+                        else
+                        {
+                            if( getProductionReportTmp.OutputActualCost > 0 && getProductionReportTmp.RAFQtyGood > 0)
+                            {
+                                getProductionReportTmp.OutputPricePerUnit   = getProductionReportTmp.OutputActualCost/getProductionReportTmp.RAFQtyGood;
+                            }
+                            //////code added bt siva dec2-2021 End//
+
+                            getProductionReportTmp.OutputPlannedCost    = getProductionReportTmp.RAFQtyGoodAsPerBOM * getProductionReportTmp.OutputPricePerUnit;
+                            if(inventtrans.CostAmountAdjustment)
+                            {
+                                //getProductionReportTmp.OutputActualCostFifo =  inventtrans.CostAmountPosted + inventtrans.CostAmountAdjustment ;     //s3 commented by Saumya D Request id 6638
+                                //getProductionReportTmp.OutputActualCostFifo = inventtrans.CostAmountStd;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        //select firstonly inventtrans
+                        //where inventtrans.inventDimId == inventdim.inventDimId;
+
+                        if( pmfCoByProdCalcTrans.realCostAmountTotal() > 0 && getProductionReportTmp.RAFQtyGoodAsPerBOM > 0 && getProductionReportTmp.RAFQtyGood > 0)
+                        {
+                            getProductionReportTmp.OutputActualCost     = inventtrans.CostAmountPosted;
+                            //getProductionReportTmp.OutputActualCost     = (pmfCoByProdCalcTrans.realCostAmountTotal()/getProductionReportTmp.RAFQtyGoodAsPerBOM)*getProductionReportTmp.RAFQtyGood;
+                        }
+                        if(getProductionReportTmp.OutputActualCost > 0 && getProductionReportTmp.RAFQtyGood > 0)
+                        {
+                            getProductionReportTmp.OutputPricePerUnit   = getProductionReportTmp.OutputActualCost/getProductionReportTmp.RAFQtyGood;
+                        }
+                        getProductionReportTmp.OutputPlannedCost    = getProductionReportTmp.RAFQtyGoodAsPerBOM * getProductionReportTmp.OutputPricePerUnit;
+                        if(inventtrans.CostAmountAdjustment)
+                        {
+                            //  getProductionReportTmp.OutputActualCostFifo = inventtrans.CostAmountStd;         // S3 commented by Saumya D
+                        }
+                        // getProductionReportTmp.OutputActualCostFifo = this.FIFOCostPrice(prodJournalProd.ItemId,inventdim) * getProductionReportTmp.RAFQtyGood;
+                        //getProductionReportTmp.OutputActualCostPerUnit = this.FIFOCostPrice(prodJournalProd.ItemId,inventdim);
+                    }
+                }
+                
+            
+                getProductionReportTmp.CostAllocation       = pmfCoByProdCalcTrans.PmfCostAllocationPct ? pmfCoByProdCalcTrans.PmfCostAllocationPct : pmfProdCoBy.CostAllocationPct;
+                getProductionReportTmp.VarianceCostOutput   = getProductionReportTmp.OutputPlannedCost-getProductionReportTmp.OutputActualCost;
+            
+                //Fill RAF inventory dimensions
+                getProductionReportTmp.ConfigIdRAF          = inventdim.configId;
+                getProductionReportTmp.InventColorIdRAF     = inventdim.InventColorId;
+                getProductionReportTmp.InventSizeIdRAF      = inventdim.InventSizeId;
+                getProductionReportTmp.InventStyleIdRAF     = inventdim.InventStyleId;
+                getProductionReportTmp.InventSiteIdRAF      = inventdim.InventSiteId;
+                getProductionReportTmp.InventLocationIdRAF  = inventdim.inventLocationId;
+                getProductionReportTmp.WMSLocationIdRAF     = inventdim.wMSLocationId;
+                getProductionReportTmp.inventBatchIdRAF     = inventdim.inventBatchId;
+           
+                getProductionReportTmp.insert();
+                }
+            }
+
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>FIFOCostPrice</Name>
+				<Source><![CDATA[
+    public CostPriceAverage FIFOCostPrice(ItemId _itemId,InventDim _inventDim)
+    {
+        InventDim       inventDimCriteria;
+        InventDimParm   inventDimParm;
+        InventOnHand    inventOnHand;
+        
+        inventDimCriteria.ConfigId       = _inventDim.configId;
+        inventDimCriteria.InventColorId  = _inventDim.InventColorId;
+        inventDimCriteria.InventSizeId   = _inventDim.InventSizeId;
+        inventDimCriteria.InventStyleId  = _inventDim.InventStyleId;
+
+        inventDimCriteria = InventDim::findOrCreate(inventDimCriteria);
+
+        inventDimParm.initFromInventDim(inventDimCriteria);
+
+        inventOnHand  = InventOnhand::newParameters(_itemId, inventDimCriteria, inventDimParm);
+       
+        return inventOnHand.costPricePcs();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

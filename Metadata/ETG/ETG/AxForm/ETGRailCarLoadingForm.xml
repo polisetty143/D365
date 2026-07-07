@@ -1,0 +1,1859 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxForm xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V6">
+	<Name>ETGRailCarLoadingForm</Name>
+	<SourceCode>
+		<Methods xmlns="">
+			<Method>
+				<Name>classDeclaration</Name>
+				<Source><![CDATA[
+[Form]
+public class ETGRailCarLoadingForm extends FormRun
+{
+
+
+}
+]]></Source>
+			</Method>
+			<Method>
+				<Name>lockForm</Name>
+				<Source><![CDATA[
+    public void lockForm()
+    {
+        ETGRailCarLoadingTable_ds.allowEdit(false);
+        ETGRailCarLoadingLineTable_ds.allowEdit(false);
+        ETGRailCarLoadingLineDetails_ds.allowEdit(false);
+        InventDim_ds.allowEdit(false);
+
+        //ETGRailCarLoadingTable_ds.allowCreate(false);
+        ETGRailCarLoadingLineTable_ds.allowCreate(false);
+        ETGRailCarLoadingLineDetails_ds.allowCreate(false);
+
+        ETGRailCarLoadingTable_ds.allowDelete(false);
+        ETGRailCarLoadingLineTable_ds.allowDelete(false);
+        ETGRailCarLoadingLineDetails_ds.allowDelete(false);
+
+        Submit.enabled(false);
+        LineDetailsFileUpload.enabled(false);
+        ETGRailCarLoadingTable_ds.refresh();
+        ETGRailCarLoadingLineTable_ds.refresh();
+        ETGRailCarLoadingLineDetails_ds.refresh();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>unlockForm</Name>
+				<Source><![CDATA[
+    public void unlockForm()
+    {
+        ETGRailCarLoadingTable_ds.allowEdit(true);
+        ETGRailCarLoadingLineTable_ds.allowEdit(true);
+        ETGRailCarLoadingLineDetails_ds.allowEdit(true);
+        InventDim_ds.allowEdit(true);
+
+        //ETGRailCarLoadingTable_ds.allowCreate(true);
+        ETGRailCarLoadingLineTable_ds.allowCreate(true);
+        ETGRailCarLoadingLineDetails_ds.allowCreate(true);
+
+        ETGRailCarLoadingTable_ds.allowDelete(true);
+        ETGRailCarLoadingLineTable_ds.allowDelete(true);
+        ETGRailCarLoadingLineDetails_ds.allowDelete(true);
+
+        Submit.enabled(true);
+        LineDetailsFileUpload.enabled(true);
+        ETGRailCarLoadingTable_ds.refresh();
+        ETGRailCarLoadingLineTable_ds.refresh();
+        ETGRailCarLoadingLineDetails_ds.refresh();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>init</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    public void init()
+    {
+        super();
+        LineDetailsFileUpload.enabled(true);
+ 
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateBottomGridButtons</Name>
+				<Source><![CDATA[
+    public void updateBottomGridButtons()
+    {
+        if (ETGRailCarLoadingTable.Submitted == NoYes::No)
+        {
+            boolean midHasLine = ETGRailCarLoadingLineTable_ds.cursor().RecId != 0;
+
+            // Enable New button on bottom grid only if mid grid has a selected line
+            ETGRailCarLoadingLineDetails_ds.allowCreate(midHasLine);
+
+            // Enable Delete button on bottom grid only if a bottom line is selected
+            ETGRailCarLoadingLineDetails_ds.allowDelete(
+        ETGRailCarLoadingLineDetails_ds.cursor().RecId != 0 && midHasLine
+                                                  );
+            Submit.enabled(ETGRailCarLoadingLineDetails_ds.cursor().RecId != 0 && midHasLine);
+            LineDetailsFileUpload.enabled(midHasLine);
+
+            ETGRailCarLoadingTable_ds.refresh();
+            ETGRailCarLoadingLineTable_ds.refresh();
+            ETGRailCarLoadingLineDetails_ds.refresh();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+		<DataSources xmlns="">
+			<DataSource>
+				<Name>ETGRailCarLoadingTable</Name>
+				<Methods>
+					<Method>
+						<Name>create</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        /// <param name = "_append"></param>
+        public void create(boolean _append = false)
+        {
+            ETGRailLoadingSerialNumber railLoadingSerialNumber;
+            NumberSequenceReference numberSequenceReference;
+
+            super(_append);
+
+            numberSequenceReference = NumberSeqReference::findReference(extendedTypeNum(ETGRailLoadingSerialNumber));
+            if (numberSequenceReference)
+            {
+                ttsbegin;
+                railLoadingSerialNumber = NumberSeq::newGetNum(numberSequenceReference).num();
+                ETGRailCarLoadingTable.ETGRailLoadingSerialNumber = railLoadingSerialNumber;
+                ttscommit;
+            }
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>active</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        /// <returns></returns>
+        public int active()
+        {
+            int ret;
+        
+            ret = super();
+          
+            if (ETGRailCarLoadingTable.Submitted == NoYes::Yes) 
+                {
+                    element.lockForm(); 
+                }
+            else 
+            { 
+                element.unlockForm();
+            }
+
+            // When header changes, update bottom grid button state            
+            element.updateBottomGridButtons();
+        
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>executeQuery</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void executeQuery()
+        {
+            super();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields>
+					<Field>
+						<DataField>SalesId</DataField>
+						<Methods>
+							<Method>
+								<Name>modified</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            public void modified()
+            {
+                SalesLine                       salesLine;
+                ETGRailCarLoadingLineTable      railLine;
+
+                super();
+
+                if (!ETGRailCarLoadingTable.SalesId)
+            return;
+
+                ttsbegin;
+
+                // Optional: delete existing lines for this header
+                delete_from railLine
+            where railLine.ETGRailLoadingSerialNumber == ETGRailCarLoadingTable.ETGRailLoadingSerialNumber;
+
+                // Loop through SalesLines
+                while select crossCompany salesLine
+            where salesLine.SalesId == ETGRailCarLoadingTable.SalesId
+                {
+                    railLine.clear();
+
+                    railLine.ETGRailLoadingSerialNumber = ETGRailCarLoadingTable.ETGRailLoadingSerialNumber; // header relation                   
+                    railLine.LineNum                    = salesLine.LineNum;
+                    railLine.ItemId                     = salesLine.ItemId;
+                    railLine.SalesQty                   = salesLine.SalesQty - salesLine.invoicedInTotal() - salesLine.deliveredInTotal()- salesLine.pickedInTotalSalesUnit()- salesLine.reservedPhysicalInSalesUnit()- salesLine.reservedOnOrderInSalesUnit();
+
+                    railLine.SalesUnit                  = salesLine.SalesUnit;
+                    railLine.SalesPrice                 = salesLine.SalesPrice;
+                    //railLine.InventDimId                = salesLine.InventDimId;
+
+                    // IMPORTANT: copy InventDimId directly
+                    InventDim sourceDim, targetDim;
+
+                    // Read InventDim from the source company 
+                    changecompany(salesLine.dataAreaId) 
+                    {   
+                        sourceDim = InventDim::find(salesLine.InventDimId); 
+                    }
+
+                    // Copy values into target buffer
+                    targetDim = sourceDim; 
+
+                    // Create or find matching InventDim in the current company 
+                    targetDim = InventDim::findOrCreate(targetDim);
+                    railLine.InventDimId   = targetDim.InventDimId;
+
+                    railLine.insert();
+                }
+
+                ttscommit;
+
+                // Refresh line datasource
+                ETGRailCarLoadingLineTable_ds.research();
+            
+
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+				</Fields>
+			</DataSource>
+			<DataSource>
+				<Name>ETGRailCarLoadingLineTable</Name>
+				<Methods>
+					<Method>
+						<Name>create</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        /// <param name = "_append"></param>
+        public void create(boolean _append = true)
+        {
+            super(_append);
+            //ETGRailCarLoadingLineTable.InventDimId = InventDim::findOrCreate(InventDim::construct()).inventDimId;
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>active</Name>
+						<Source><![CDATA[
+        public int active()
+        {
+            int ret = super();
+
+            element.updateBottomGridButtons();
+
+            //CS - BIN Qty Status activation - Abhinav
+            PartList partList = new PartList(this.formRun());
+            FormPartControl formpartcontrol = partList.getPartControlByFormName(formStr(ETGBinVolumeAvailableChartForm));
+            formpartcontrol.visible(ETGCanadaParameters::find().EnableBinQtyStatus);
+
+            if(ETGCanadaParameters::find().EnableBinQtyStatus)
+            {
+                InventDim inventdimLoc = InventDim_ds.cursor();
+                ETGBinQtyVisualChartHelperClass::populateBinQtyChartData(inventdimLoc,formpartcontrol,ETGCanadaParameters::find().DefaultEntityForDocuments);
+            }
+            //CE
+
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>executeQuery</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void executeQuery()
+        {
+            super();
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>delete</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void delete()
+        {
+            super();
+            element.updateBottomGridButtons();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields>
+					<Field>
+						<DataField>ItemId</DataField>
+						<Methods>
+							<Method>
+								<Name>modified</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            public void modified()
+            {
+                ETGRailCarLoadingLineTable      railLine        = ETGRailCarLoadingLineTable_ds.cursor();
+
+                super();
+                ETGCanadaParameters                     CanadaParameters    = ETGCanadaParameters::find();
+
+                // IMPORTANT: copy InventDimId directly
+                InventDim sourceDim, targetDim;  
+
+                if (CanadaParameters.DefaultEntityForDocuments)
+                {
+                    // Read InventDim from the source company
+                    changecompany(CanadaParameters.DefaultEntityForDocuments)
+                    {
+                        sourceDim = InventDim::find(InventTable::getInventDimId(ETGRailCarLoadinglineTable.ItemId));
+                    }
+                }
+                else 
+                {
+                    sourceDim = InventDim::find(InventTable::getInventDimId(ETGRailCarLoadinglineTable.ItemId));
+                }
+
+                // Copy values into target buffer
+                targetDim = sourceDim;
+
+                // Create or find matching InventDim in the current company
+                targetDim = InventDim::findOrCreate(targetDim);
+                railLine.InventDimId   = targetDim.InventDimId;
+                //railLine.update();
+
+
+            }
+
+]]></Source>
+							</Method>
+							<Method>
+								<Name>lookup</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            /// <param name = "_formControl"></param>
+            /// <param name = "_filterStr"></param>
+            public void lookup(FormControl _formControl, str _filterStr)
+            {
+                ETGCanadaParameters                     CanadaParameters    = ETGCanadaParameters::find();
+                // Run your custom lookup instead of the default one 
+                
+                if (CanadaParameters.DefaultEntityForDocuments)
+                {
+                    SysTableLookup          lookup = SysTableLookup::newParameters(tableNum(InventTable), _formControl);
+                    Query                   query  = new Query();
+                    query.allowCrossCompany(true);
+                    QueryBuildDataSource    qbds;
+
+                    lookup.addLookupfield(fieldNum(InventTable, ItemId));
+                    lookup.addlookupmethod(tableMethodStr(InventTable, itemName));
+                    lookup.addLookupfield(fieldNum(InventTable, dataAreaId)); // show company
+
+                    qbds = query.addDataSource(tableNum(InventTable));
+                    query.addCompanyRange(CanadaParameters.DefaultEntityForDocuments);
+
+                    lookup.parmQuery(query);
+                    lookup.performFormLookup();
+                }
+                else 
+                {
+                    super(_formControl, _filterStr);
+                }
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+				</Fields>
+			</DataSource>
+			<DataSource>
+				<Name>InventDim</Name>
+				<Methods>
+					<Method>
+						<Name>write</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void write()
+        {
+            super();
+            ETGRailCarLoadingLineTable.InventDimId =  InventDim::findOrCreate(this.cursor()).inventDimId;
+            //ETGRailCarLoadingLineTable.write();
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>validatewrite</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public boolean validatewrite()
+        {
+            return true;
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields>
+					<Field>
+						<DataField>inventBatchId</DataField>
+						<Methods>
+							<Method>
+								<Name>validate</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            /// <returns></returns>
+            public boolean validate()
+            {
+                return true;
+            }
+
+]]></Source>
+							</Method>
+							<Method>
+								<Name>lookup</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            /// <param name = "_formControl"></param>
+            /// <param name = "_filterStr"></param>
+            public void lookup(FormControl _formControl, str _filterStr)
+            {
+                ETGCanadaParameters                     CanadaParameters    = ETGCanadaParameters::find();
+                if (CanadaParameters.DefaultEntityForDocuments)
+                {
+                    changecompany(CanadaParameters.DefaultEntityForDocuments)
+                    {
+
+                        if (!ETGRailCarLoadingLineTable.ItemId)
+                        {
+                            warning("Select an item first.");
+                            return;
+                        }
+
+                        SysTableLookup          lookup = SysTableLookup::newParameters(tableNum(InventBatch), _formControl);
+                        Query                   query  = new Query();
+                        QueryBuildDataSource    qbds;
+                        //query.allowCrossCompany(true);
+
+                        // Fields to show in lookup
+                        lookup.addLookupField(fieldNum(InventBatch, inventBatchId));
+                        lookup.parmUseLookupValue(false);
+
+                        // Build query
+                        qbds = query.addDataSource(tableNum(InventBatch));
+                        qbds.addRange(fieldNum(InventBatch, ItemId)).value(queryValue(ETGRailCarLoadingLineTable.ItemId));
+                        // qbds.addRange(fieldNum(InventBatch, DataAreaId)).value(queryValue(CanadaParameters.DefaultEntityForDocuments));
+
+                        lookup.parmQuery(query);
+                        lookup.performFormLookup();
+                    }
+                }
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>InventLocationId</DataField>
+						<Methods>
+							<Method>
+								<Name>validate</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            /// <returns></returns>
+            public boolean validate()
+            {
+                return true;
+            }
+
+]]></Source>
+							</Method>
+							<Method>
+								<Name>lookup</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            /// <param name = "_formControl"></param>
+            /// <param name = "_filterStr"></param>
+            public void lookup(FormControl _formControl, str _filterStr)
+            {
+                ETGCanadaParameters                     CanadaParameters    = ETGCanadaParameters::find();
+                if (CanadaParameters.DefaultEntityForDocuments)
+                {
+                    changecompany(CanadaParameters.DefaultEntityForDocuments)
+                    {
+                        SysTableLookup lookup = SysTableLookup::newParameters(tableNum(InventLocation), _formControl); 
+                        Query query = new Query();
+                        QueryBuildDataSource qbds;
+                        //query.allowCrossCompany(true); 
+                        lookup.addLookupField(fieldNum(InventLocation, InventLocationId)); 
+                        lookup.addLookupField(fieldNum(InventLocation, Name));
+                        lookup.addLookupField(fieldNum(InventLocation, InventSiteId)); 
+                        //lookup.addLookupField(fieldNum(InventLocation, DataAreaId));
+                        qbds = query.addDataSource(tableNum(InventLocation));
+                        // Optional: filter by Site if you have it on the form 
+                        if (InventDim.InventSiteId) 
+                        { 
+                            qbds.addRange(fieldNum(InventLocation, InventSiteId)) .value(queryValue(InventDim.InventSiteId));
+                        } 
+                        
+                        lookup.parmQuery(query); 
+                        lookup.performFormLookup(); 
+                    }
+                }
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>inventSerialId</DataField>
+						<Methods>
+							<Method>
+								<Name>validate</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            /// <returns></returns>
+            public boolean validate()
+            {
+                return true;
+            }
+
+]]></Source>
+							</Method>
+							<Method>
+								<Name>lookup</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            /// <param name = "_formControl"></param>
+            /// <param name = "_filterStr"></param>
+            public void lookup(FormControl _formControl, str _filterStr)
+            {
+                ETGCanadaParameters                     CanadaParameters    = ETGCanadaParameters::find();
+                if (CanadaParameters.DefaultEntityForDocuments)
+                {
+                    changecompany(CanadaParameters.DefaultEntityForDocuments)
+                    {
+
+                        if (!ETGRailCarLoadingLineTable.ItemId)
+                        {
+                            warning("Select an item first.");
+                            return;
+                        }
+
+                        SysTableLookup          lookup = SysTableLookup::newParameters(tableNum(InventSerial), _formControl);
+                        Query                   query  = new Query();
+                        QueryBuildDataSource    qbds;
+                        //query.allowCrossCompany(true);
+
+                        // Fields to show in lookup
+                        lookup.addLookupField(fieldNum(InventSerial,InventSerialId));
+                        lookup.parmUseLookupValue(false);
+                        // Build query
+                        qbds = query.addDataSource(tableNum(InventSerial));
+                        qbds.addRange(fieldNum(InventSerial, ItemId)).value(queryValue(ETGRailCarLoadingLineTable.ItemId));
+                        lookup.parmQuery(query);
+                        lookup.performFormLookup();
+                    }
+                }
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>InventSiteId</DataField>
+						<Methods>
+							<Method>
+								<Name>validate</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            /// <returns></returns>
+            public boolean validate()
+            {                     
+                return true;
+            }
+
+]]></Source>
+							</Method>
+							<Method>
+								<Name>lookup</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            /// <param name = "_formControl"></param>
+            /// <param name = "_filterStr"></param>
+            public void lookup(FormControl _formControl, str _filterStr)
+            {
+                ETGCanadaParameters                     CanadaParameters    = ETGCanadaParameters::find();
+                if (CanadaParameters.DefaultEntityForDocuments)
+                {
+                    changecompany(CanadaParameters.DefaultEntityForDocuments)
+                    {
+                        SysTableLookup lookup = SysTableLookup::newParameters(tableNum(InventSite), _formControl);
+                        Query query = new Query();
+                        QueryBuildDataSource qbds;
+                        //query.allowCrossCompany(true);
+                        lookup.addLookupField(fieldNum(InventSite, SiteId));
+                        lookup.addLookupField(fieldNum(InventSite, Name));
+                        qbds = query.addDataSource(tableNum(InventSite));
+                        lookup.parmQuery(query);
+                        lookup.performFormLookup();
+                    }
+                }
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>wMSLocationId</DataField>
+						<Methods>
+							<Method>
+								<Name>lookup</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            /// <param name = "_formControl"></param>
+            /// <param name = "_filterStr"></param>
+            public void lookup(FormControl _formControl, str _filterStr)
+            {
+                ETGCanadaParameters                     CanadaParameters    = ETGCanadaParameters::find();
+                if (CanadaParameters.DefaultEntityForDocuments)
+                {
+                    changecompany(CanadaParameters.DefaultEntityForDocuments)
+                    { 
+                        SysTableLookup lookup = SysTableLookup::newParameters(tableNum(WMSLocation), _formControl);
+                        Query query = new Query();
+                        QueryBuildDataSource qbds; 
+                        lookup.addLookupField(fieldNum(WMSLocation, WMSLocationId)); 
+                        lookup.addLookupField(fieldNum(WMSLocation, InventLocationId)); 
+                        qbds = query.addDataSource(tableNum(WMSLocation)); 
+                        // Optional: filter by Warehouse
+                        if (InventDim.InventLocationId) 
+                        { 
+                            qbds.addRange(fieldNum(WMSLocation, InventLocationId)) .value(queryValue(InventDim.InventLocationId));
+                        } 
+                            lookup.parmQuery(query);
+                            lookup.performFormLookup();
+                    }
+                
+                }
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+				</Fields>
+			</DataSource>
+			<DataSource>
+				<Name>ETGRailCarLoadingLineDetails</Name>
+				<Methods>
+					<Method>
+						<Name>create</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        /// <param name = "_append"></param>
+        public void create(boolean _append = true)
+        {
+            super(_append);
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>write</Name>
+						<Source><![CDATA[
+        public void write()
+        {
+            super();
+            element.updateBottomGridButtons();
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>delete</Name>
+						<Source><![CDATA[
+        public void delete()
+        {
+            super();
+            element.updateBottomGridButtons();
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>validateWrite</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        /// <returns></returns>
+        public boolean validateWrite()
+        {
+            boolean ret;
+        
+            ret = super();
+
+            ETGRailCarLoadingLineTable line =
+                ETGRailCarLoadingLineTable::find(ETGRailCarLoadingLineDetails.ETGRailLoadingSerialNumber, ETGRailCarLoadingLineDetails.LineNum);
+
+            if (!line.RecId)
+        return ret;
+
+            ETGCanadaParameters                     CanadaParameters    = ETGCanadaParameters::find();
+            InventTableModule     inventTableModule;
+
+            if (CanadaParameters.DefaultEntityForDocuments)
+            {
+                // Read InventDim from the source company
+                changecompany(CanadaParameters.DefaultEntityForDocuments)
+                {
+
+                    // Fetch item for over-delivery %
+                    inventTableModule = InventTableModule::find(line.ItemId,ModuleInventPurchSales::sales);
+                }
+            }
+
+            // Open qty = ordered - delivered
+            real openQty = line.SalesQty;
+
+            // Over-delivery %
+
+            real overPct;
+            if (inventTableModule.recid)
+            {
+                overPct = inventTableModule.OverDeliveryPct;
+            }
+
+            // Allowed qty
+            real allowedQty = openQty + (openQty * overPct / 100);
+
+            // SUM all loaded qty for this SAME sales line across ALL rail loads
+            ETGRailCarLoadingLineDetails details;
+            real totalLoaded = 0;
+
+            select sum(Qty) from details
+        where details.ETGRailLoadingSerialNumber == line.ETGRailLoadingSerialNumber
+          && details.LineNum == line.LineNum
+          && details.RecId != ETGRailCarLoadingLineDetails.RecId;   // exclude current line
+
+            totalLoaded = details.Qty; // SUM result is stored in the field buffer
+
+            // Add current line qty
+            real newTotal = totalLoaded + ETGRailCarLoadingLineDetails.Qty;
+
+            // Validate
+            if (newTotal > allowedQty)
+            {
+                error(strFmt(
+            "Total loaded quantity %1 exceeds allowed quantity %2 for Sales Line %3 ",
+            newTotal,
+            allowedQty,
+            line.LineNum));
+
+                ret = false;
+            }
+        
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>active</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        /// <returns></returns>
+        public int active()
+        {
+            int ret;
+        
+            ret = super();
+            element.updateBottomGridButtons();
+        
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields />
+			</DataSource>
+		</DataSources>
+		<DataControls xmlns="">
+			<Control>
+				<Name>Submit</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void clicked()
+        {
+            super();
+
+
+            ETGCanadaParameters parameters = ETGCanadaParameters::find();
+
+            if (!parameters.DefaultEntityForDocuments)
+            {
+                warning("Default entity is not defined.");
+                return;
+            }
+
+            InventJournalId  journalId =
+            ETGRailCarTransferJournalService::createTransferJournal(
+                ETGRailCarLoadingTable,
+                parameters.DefaultEntityForDocuments);
+
+            info(strFmt("Transfer journal %1 created in company %2.",
+                    journalId,
+                    parameters.DefaultEntityForDocuments));
+
+            // Mark record as submitted ttsbegin;
+            ttsbegin;
+            ETGRailCarLoadingTable.Submitted = NoYes::Yes;
+            ETGRailCarLoadingTable.update(); 
+            ttscommit; 
+            // Lock the form for this record 
+            element.lockForm();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ETGRailCarLoadingTable_SalesId</Name>
+				<Type>String</Type>
+				<Methods>
+					<Method>
+						<Name>lookup</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void lookup()
+        {  
+            ETGCanadaParameters                     CanadaParameters    = ETGCanadaParameters::find();
+
+            if (CanadaParameters.DefaultEntityForDocuments)
+            {
+                Query query = new Query();
+                query.allowCrossCompany(true);
+                QueryBuildDataSource queryBuildDataSource;
+
+                queryBuildDataSource = query.addDataSource(tableNum(SalesTable));
+                queryBuildDataSource.addRange(fieldNum(SalesTable,SalesStatus)) .value(queryValue(enum2Str(SalesStatus::Backorder)));
+  
+                SysTableLookup sysTableLookup = SysTableLookup::newParameters(tableNum(SalesTable), this); 
+                sysTableLookup.addLookupField(fieldNum(SalesTable, SalesId));
+                sysTableLookup.addLookupField(fieldNum(SalesTable, CustAccount));
+                sysTableLookup.addLookupMethod(tableMethodStr(SalesTable,customerName));
+
+                query.addCompanyRange(CanadaParameters.DefaultEntityForDocuments);
+  
+                sysTableLookup.parmQuery(query);
+  
+                sysTableLookup.performFormLookup();
+            }
+  
+        
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>LineDetailsFileUpload</Name>
+				<Type>Custom</Type>
+				<Methods>
+					<Method>
+						<Name>OnUploadCompleted</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void OnUploadCompleted()
+        {
+            super();
+
+            ETGRailCarLoadingDetailsExcelUploader::processExcelFile(this, ETGRailCarLoadingTable.ETGRailLoadingSerialNumber);
+            ETGRailCarLoadingLineDetails_ds.research(true);
+            ETGRailCarLoadingLineDetails_ds.refresh();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+		</DataControls>
+		<Members xmlns="" />
+	</SourceCode>
+	<DataSources>
+		<AxFormDataSource xmlns="">
+			<Name>ETGRailCarLoadingTable</Name>
+			<Table>ETGRailCarLoadingTable</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGRailLoadingSerialNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGRailType</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SalesId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Submitted</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TransDate</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<Index>RailCarLoadingNumber</Index>
+			<InsertIfEmpty>No</InsertIfEmpty>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+		<AxFormDataSource xmlns="">
+			<Name>ETGRailCarLoadingLineTable</Name>
+			<Table>ETGRailCarLoadingLineTable</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGRailLoadingSerialNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ItemId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LineNum</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SalesPrice</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SalesQty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SalesUnit</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<JoinSource>ETGRailCarLoadingTable</JoinSource>
+			<CounterField>LineNum</CounterField>
+			<Index>RailLoadingLineTableIdx</Index>
+			<InsertIfEmpty>No</InsertIfEmpty>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+		<AxFormDataSource xmlns="">
+			<Name>InventDim</Name>
+			<Table>InventDim</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>configId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CreatedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventBatchId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventColorId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension1</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension10</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension11</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension12</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension2</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension3</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension4</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension5</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension6</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension7</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension8</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension9</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventDimId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventGtdId_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventLocationId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventOwnerId_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventProfileId_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventSerialId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventSiteId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventSizeId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventStatusId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventStyleId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventVersionId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LicensePlateId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ModifiedBy</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ModifiedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SHA1HashHex</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SHA3HashHex</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>wMSLocationId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>wMSPalletId</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<CrossCompanyAutoQuery>Yes</CrossCompanyAutoQuery>
+			<JoinSource>ETGRailCarLoadingLineTable</JoinSource>
+			<LinkType>InnerJoin</LinkType>
+			<InsertIfEmpty>No</InsertIfEmpty>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+		<AxFormDataSource xmlns="">
+			<Name>ETGRailCarLoadingLineDetails</Name>
+			<Table>ETGRailCarLoadingLineDetails</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGNumberOfBags</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGRailLoadingSerialNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGRailLoadNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGRailType</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGSealNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LineNum</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Qty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<JoinSource>ETGRailCarLoadingLineTable</JoinSource>
+			<LinkType>Active</LinkType>
+			<InsertIfEmpty>No</InsertIfEmpty>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+	</DataSources>
+	<Design>
+		<Caption xmlns="">@ETG_New:ETGRailCarLoading</Caption>
+		<Pattern xmlns="">SimpleListDetails</Pattern>
+		<PatternVersion xmlns="">1.3</PatternVersion>
+		<Style xmlns="">SimpleListDetails</Style>
+		<Controls xmlns="">
+			<AxFormControl xmlns=""
+				i:type="AxFormActionPaneControl">
+				<Name>FormActionPaneControl1</Name>
+				<Type>ActionPane</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormButtonGroupControl">
+						<Name>submitbtn</Name>
+						<Type>ButtonGroup</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonControl">
+								<Name>Submit</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<Type>Button</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Text>Submit</Text>
+							</AxFormControl>
+						</Controls>
+					</AxFormControl>
+				</Controls>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGroupControl">
+				<Name>FormGroupControl1</Name>
+				<HeightMode>SizeToAvailable</HeightMode>
+				<Type>Group</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl>
+						<Name>QuickFilterControl1</Name>
+						<WidthMode>SizeToAvailable</WidthMode>
+						<FormControlExtension>
+							<Name>QuickFilterControl</Name>
+							<ExtensionComponents />
+							<ExtensionProperties>
+								<AxFormControlExtensionProperty>
+									<Name>targetControlName</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>placeholderText</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>defaultColumnName</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+							</ExtensionProperties>
+						</FormControlExtension>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormGridControl">
+						<Name>FormGridControl1</Name>
+						<AllowEdit>No</AllowEdit>
+						<Type>Grid</Type>
+						<WidthMode>SizeToContent</WidthMode>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>ETGRailCarLoadingTable_ETGRailLoadingSerialNumber1</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>ETGRailLoadingSerialNumber</DataField>
+								<DataSource>ETGRailCarLoadingTable</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>ETGRailCarLoadingTable_SalesId1</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>SalesId</DataField>
+								<DataSource>ETGRailCarLoadingTable</DataSource>
+							</AxFormControl>
+						</Controls>
+						<DataSource>ETGRailCarLoadingTable</DataSource>
+						<MultiSelect>No</MultiSelect>
+						<ShowRowLabels>No</ShowRowLabels>
+						<Style>List</Style>
+					</AxFormControl>
+				</Controls>
+				<FrameType>None</FrameType>
+				<Style>SidePanel</Style>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGroupControl">
+				<Name>FormGroupControl3</Name>
+				<Pattern>FieldsFieldGroups</Pattern>
+				<PatternVersion>1.1</PatternVersion>
+				<Type>Group</Type>
+				<WidthMode>SizeToAvailable</WidthMode>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGRailCarLoadingTable_ETGRailLoadingSerialNumber</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ETGRailLoadingSerialNumber</DataField>
+						<DataSource>ETGRailCarLoadingTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormDateControl">
+						<Name>ETGRailCarLoadingTable_TransDate</Name>
+						<Type>Date</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>TransDate</DataField>
+						<DataSource>ETGRailCarLoadingTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGRailCarLoadingTable_SalesId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>SalesId</DataField>
+						<DataSource>ETGRailCarLoadingTable</DataSource>
+					</AxFormControl>
+				</Controls>
+				<ColumnsMode>Fill</ColumnsMode>
+				<FrameType>None</FrameType>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormTabControl">
+				<Name>FormTabControl1</Name>
+				<Type>Tab</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>FormTabPageControl1</Name>
+						<Pattern>ToolbarList</Pattern>
+						<PatternVersion>1.2</PatternVersion>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormActionPaneControl">
+								<Name>FormActionPaneControl2</Name>
+								<Type>ActionPane</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormActionPaneTabControl">
+										<Name>FormActionPaneTabControl1</Name>
+										<Type>ActionPaneTab</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<Controls>
+											<AxFormControl xmlns=""
+												i:type="AxFormButtonGroupControl">
+												<Name>FormButtonGroupControl1</Name>
+												<Type>ButtonGroup</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<Controls>
+													<AxFormControl xmlns=""
+														i:type="AxFormCommandButtonControl">
+														<Name>DeleteButton</Name>
+														<Type>CommandButton</Type>
+														<FormControlExtension
+															i:nil="true" />
+														<ButtonDisplay>TextWithImageLeft</ButtonDisplay>
+														<Command>DeleteRecord</Command>
+													</AxFormControl>
+												</Controls>
+											</AxFormControl>
+										</Controls>
+									</AxFormControl>
+								</Controls>
+								<DataSource>ETGRailCarLoadingLineTable</DataSource>
+								<Style>Strip</Style>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormGridControl">
+								<Name>FormGridControl2</Name>
+								<Type>Grid</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGRailCarLoadingLineTable_LineNum</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>LineNum</DataField>
+										<DataSource>ETGRailCarLoadingLineTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGRailCarLoadingLineTable_ItemId</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ItemId</DataField>
+										<DataSource>ETGRailCarLoadingLineTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGRailCarLoadingLineTable_SalesQty</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>SalesQty</DataField>
+										<DataSource>ETGRailCarLoadingLineTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGRailCarLoadingLineTable_SalesUnit</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>SalesUnit</DataField>
+										<DataSource>ETGRailCarLoadingLineTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGRailCarLoadingLineTable_SalesPrice</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>SalesPrice</DataField>
+										<DataSource>ETGRailCarLoadingLineTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormGroupControl">
+										<Name>ProductDimensions</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>Group</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<Controls>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>FormGroupControl2_configId</Name>
+												<Type>String</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>configId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>FormGroupControl2_InventSizeId</Name>
+												<Type>String</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventSizeId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>FormGroupControl2_InventColorId</Name>
+												<Type>String</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventColorId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>FormGroupControl2_InventStyleId</Name>
+												<Type>String</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventStyleId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>FormGroupControl2_InventVersionId</Name>
+												<Type>String</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventVersionId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+										</Controls>
+										<DataGroup>ProductDimensions</DataGroup>
+										<DataSource>InventDim</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormGroupControl">
+										<Name>StorageDimensions</Name>
+										<Type>Group</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<Controls>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>FormGroupControl2Copy1_InventSiteId</Name>
+												<Type>String</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventSiteId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>FormGroupControl2Copy1_InventLocationId</Name>
+												<Type>String</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventLocationId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>FormGroupControl2Copy1_wMSLocationId</Name>
+												<Type>String</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>wMSLocationId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>FormGroupControl2Copy1_InventStatusId</Name>
+												<AllowEdit>No</AllowEdit>
+												<Type>String</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventStatusId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>FormGroupControl2Copy1_LicensePlateId</Name>
+												<AllowEdit>No</AllowEdit>
+												<Type>String</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>LicensePlateId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+										</Controls>
+										<DataGroup>StorageDimensions</DataGroup>
+										<DataSource>InventDim</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormGroupControl">
+										<Name>TrackingDimensions</Name>
+										<Type>Group</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<Controls>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>StorageDimensionsCopy1_inventBatchId</Name>
+												<Type>String</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>inventBatchId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>StorageDimensionsCopy1_inventSerialId</Name>
+												<Type>String</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>inventSerialId</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>StorageDimensionsCopy1_InventProfileId_RU</Name>
+												<AllowEdit>No</AllowEdit>
+												<Type>String</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventProfileId_RU</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>StorageDimensionsCopy1_InventOwnerId_RU</Name>
+												<AllowEdit>No</AllowEdit>
+												<Type>String</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventOwnerId_RU</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>StorageDimensionsCopy1_InventGtdId_RU</Name>
+												<AllowEdit>No</AllowEdit>
+												<Type>String</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventGtdId_RU</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+											<AxFormControl xmlns=""
+												i:type="AxFormStringControl">
+												<Name>StorageDimensionsCopy1_InventDimension1</Name>
+												<AllowEdit>No</AllowEdit>
+												<Type>String</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<DataField>InventDimension1</DataField>
+												<DataSource>InventDim</DataSource>
+											</AxFormControl>
+										</Controls>
+										<DataGroup>TrackingDimensions</DataGroup>
+										<DataSource>InventDim</DataSource>
+									</AxFormControl>
+								</Controls>
+								<DataSource>ETGRailCarLoadingLineTable</DataSource>
+							</AxFormControl>
+						</Controls>
+						<Caption>@SYS121697</Caption>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>FormTabPageControl2</Name>
+						<Pattern>Custom</Pattern>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl>
+								<Name>LineDetailsFileUpload</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<HelpText>@SYS309953</HelpText>
+								<FormControlExtension>
+									<Name>FileUpload</Name>
+									<ExtensionComponents />
+									<ExtensionProperties>
+										<AxFormControlExtensionProperty>
+											<Name>fileTypesAccepted</Name>
+											<Type>String</Type>
+										</AxFormControlExtensionProperty>
+										<AxFormControlExtensionProperty>
+											<Name>fileNameLabel</Name>
+											<Type>String</Type>
+										</AxFormControlExtensionProperty>
+										<AxFormControlExtensionProperty>
+											<Name>browseText</Name>
+											<Type>String</Type>
+										</AxFormControlExtensionProperty>
+										<AxFormControlExtensionProperty>
+											<Name>style</Name>
+											<Type>Enum</Type>
+											<TypeName>FileUploadStyle</TypeName>
+											<Value>Minimal</Value>
+										</AxFormControlExtensionProperty>
+										<AxFormControlExtensionProperty>
+											<Name>baseFileUploadStrategyClassName</Name>
+											<Type>String</Type>
+											<Value>FileUploadTemporaryStorageStrategy</Value>
+										</AxFormControlExtensionProperty>
+										<AxFormControlExtensionProperty>
+											<Name>imageMaxWidth</Name>
+											<Type>Int32</Type>
+											<Value>0</Value>
+										</AxFormControlExtensionProperty>
+										<AxFormControlExtensionProperty>
+											<Name>imageMaxHeight</Name>
+											<Type>Int32</Type>
+											<Value>0</Value>
+										</AxFormControlExtensionProperty>
+									</ExtensionProperties>
+								</FormControlExtension>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormActionPaneControl">
+								<Name>FormActionPaneControl3</Name>
+								<Type>ActionPane</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormActionPaneTabControl">
+										<Name>FormActionPaneTabControl2</Name>
+										<Type>ActionPaneTab</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<Controls>
+											<AxFormControl xmlns=""
+												i:type="AxFormButtonGroupControl">
+												<Name>FormButtonGroupControl2</Name>
+												<Type>ButtonGroup</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<Controls>
+													<AxFormControl xmlns=""
+														i:type="AxFormCommandButtonControl">
+														<Name>NewFormCommandButtonControl1</Name>
+														<Type>CommandButton</Type>
+														<FormControlExtension
+															i:nil="true" />
+														<ButtonDisplay>TextWithImageLeft</ButtonDisplay>
+														<Command>New</Command>
+													</AxFormControl>
+													<AxFormControl xmlns=""
+														i:type="AxFormCommandButtonControl">
+														<Name>DeleteFormCommandButtonControl2</Name>
+														<Type>CommandButton</Type>
+														<FormControlExtension
+															i:nil="true" />
+														<ButtonDisplay>TextWithImageLeft</ButtonDisplay>
+														<Command>DeleteRecord</Command>
+													</AxFormControl>
+												</Controls>
+											</AxFormControl>
+										</Controls>
+									</AxFormControl>
+								</Controls>
+								<DataSource>ETGRailCarLoadingLineDetails</DataSource>
+								<Style>Strip</Style>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormGridControl">
+								<Name>FormGridControl3</Name>
+								<Type>Grid</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGRailCarLoadingLineDetails_LineNum</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>LineNum</DataField>
+										<DataSource>ETGRailCarLoadingLineDetails</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGRailCarLoadingLineDetails_ETGRailLoadNumber</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ETGRailLoadNumber</DataField>
+										<DataSource>ETGRailCarLoadingLineDetails</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGRailCarLoadingLineDetails_ETGRailType</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ETGRailType</DataField>
+										<DataSource>ETGRailCarLoadingLineDetails</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGRailCarLoadingLineDetails_Qty</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Qty</DataField>
+										<DataSource>ETGRailCarLoadingLineDetails</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormIntegerControl">
+										<Name>ETGRailCarLoadingLineDetails_ETGNumberOfBags</Name>
+										<Type>Integer</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ETGNumberOfBags</DataField>
+										<DataSource>ETGRailCarLoadingLineDetails</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGRailCarLoadingLineDetails_ETGSealNumber</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ETGSealNumber</DataField>
+										<DataSource>ETGRailCarLoadingLineDetails</DataSource>
+									</AxFormControl>
+								</Controls>
+								<DataSource>ETGRailCarLoadingLineDetails</DataSource>
+							</AxFormControl>
+						</Controls>
+						<Caption>@ETG_New:ETGRailCarLoadingDetails</Caption>
+					</AxFormControl>
+				</Controls>
+				<Style>FastTabs</Style>
+			</AxFormControl>
+		</Controls>
+	</Design>
+	<Parts>
+		<AxFormPartReference xmlns="">
+			<Name>ETGBinQtyAvailable</Name>
+			<DataSource>ETGRailCarLoadingLineTable</DataSource>
+			<DataSourceRelation>SelfLink</DataSourceRelation>
+			<MenuItemName>ETGBinVolumeAvailableChartMenuItem</MenuItemName>
+		</AxFormPartReference>
+	</Parts>
+</AxForm>

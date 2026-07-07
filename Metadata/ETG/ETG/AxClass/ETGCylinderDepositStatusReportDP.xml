@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCylinderDepositStatusReportDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This is an DP class for report CylinderDepositStatusReport
+/// </summary>
+[SRSReportParameterAttribute(classStr(ETGCylinderDepositStatusReportContract))]
+internal final class ETGCylinderDepositStatusReportDP extends SRSReportDataProviderBase
+{
+    FromDate                                fromDate;
+    ToDate                                  toDate;
+    List                                    custAccount = new List(Types::String);
+    NoYesId                                 deposit;
+    List                                    invoiceId = new List(Types::String);
+    List                                    size = new List(Types::String);
+    ETGCylinderDepositStatusReportContract  etgCylinderDepositStatusReportContract;
+    ETGCylinderDepositStatusReportTmp       etgCylinderDepositStatusReportTmp;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getTmpTable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets temporary table
+    /// </summary>
+    /// <returns>ETGCylinderDepositStatusReportTmp temporary tabble</returns>
+    [
+     SrsReportDataSetAttribute(tableStr(ETGCylinderDepositStatusReportTmp))
+    ]
+    public ETGCylinderDepositStatusReportTmp getTmpTable()
+    {
+        select * from etgCylinderDepositStatusReportTmp;
+        return etgCylinderDepositStatusReportTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Processes the business logic for report
+    /// </summary>
+    public void processReport()
+    {
+        Query                               query;
+        QueryRun                            queryRun;
+        QueryBuildDataSource                queryBuildDataSourceCustInvoiceJour, queryBuildDataSourceCustInvoiceTrans, qbds;
+        QueryBuildRange                     queryBuildRange,qbr;
+        CustInvoiceJour                     custInvoiceJour;
+        CustInvoiceTrans                    custInvoiceTrans;
+        CustPackingSlipTrans                custPackingSlipTrans;
+        SalesLine                           salesLine;
+        EcoResSize                          ecoResSize;
+        InventDim                           inventDim;
+        LedgerJournalTrans                  ledgerJournalTrans;
+        ListIterator                        custListIterator, invoiceListIterator, siezListIterator;
+        ListEnumerator                      listEnumerator;
+
+
+        etgCylinderDepositStatusReportContract = new ETGCylinderDepositStatusReportContract();
+        etgCylinderDepositStatusReportContract = this.parmDataContract() as ETGCylinderDepositStatusReportContract;
+
+        fromDate            = etgCylinderDepositStatusReportContract.parmFromDate();
+        toDate              = etgCylinderDepositStatusReportContract.parmToDate();
+        custAccount         = etgCylinderDepositStatusReportContract.parmCustAccount();
+        deposit             = etgCylinderDepositStatusReportContract.parmDeposit();
+        invoiceId           = etgCylinderDepositStatusReportContract.parmInvoiceId();
+        size                = etgCylinderDepositStatusReportContract.parmSize();
+
+        query = new Query();
+
+        queryBuildDataSourceCustInvoiceJour           = query.addDataSource(tableNum(CustInvoiceJour));
+        queryBuildDataSourceCustInvoiceTrans          = queryBuildDataSourceCustInvoiceJour.addDataSource(tableNum(CustInvoiceTrans));
+        queryBuildDataSourceCustInvoiceTrans.joinMode(JoinMode::InnerJoin);
+        queryBuildDataSourceCustInvoiceTrans.relations(true);
+        queryBuildDataSourceCustInvoiceTrans.addLink(fieldNum(CustInvoiceJour, SalesId), fieldNum(CustInvoiceTrans, SalesId));
+        queryBuildDataSourceCustInvoiceTrans.addLink(fieldNum(CustInvoiceJour, InvoiceId), fieldNum(CustInvoiceTrans, InvoiceId));
+        queryBuildDataSourceCustInvoiceTrans.addLink(fieldNum(CustInvoiceJour, InvoiceDate), fieldNum(CustInvoiceTrans, InvoiceDate));
+
+        query.dataSourceTable(tableNum(CustInvoiceJour)).addRange(fieldNum(CustInvoiceJour, InvoiceDate)).value(queryRange(fromDate, toDate));
+
+        if(custAccount != null)
+        {
+            listEnumerator = custAccount.getEnumerator();
+            while(listEnumerator.moveNext())
+            {
+                queryBuildDataSourceCustInvoiceJour.addRange(fieldNum(CustInvoiceJour, InvoiceAccount)).value(listEnumerator.current());
+            }
+        }
+
+        if(invoiceId != null)
+        {
+            listEnumerator = invoiceId.getEnumerator();
+            while(listEnumerator.moveNext())
+            {
+                queryBuildDataSourceCustInvoiceJour.addRange(fieldNum(CustInvoiceJour, InvoiceId)).value(listEnumerator.current());
+            }
+        }
+        queryBuildRange = queryBuildDataSourceCustInvoiceJour.addRange(fieldNum(CustInvoiceJour, SalesId));
+        queryBuildRange.value(SysQuery::valueNotEmptyString());
+
+        queryRun = new QueryRun(query);
+
+        while(queryRun.next())
+        {
+            etgCylinderDepositStatusReportTmp.clear();
+
+            custInvoiceJour         = queryRun.get(tableNum(CustInvoiceJour));
+            custInvoiceTrans        = queryRun.get(tableNum(CustInvoiceTrans));
+            salesLine               = SalesLine::findInventTransId(custInvoiceTrans.InventTransId);
+
+            etgCylinderDepositStatusReportTmp.CustName              = CustTable::find(custInvoiceJour.InvoiceAccount).name();
+            etgCylinderDepositStatusReportTmp.CustAccount           = CustTable::find(custInvoiceJour.InvoiceAccount).AccountNum;
+            etgCylinderDepositStatusReportTmp.ItemId                = custInvoiceTrans.ItemId;
+            etgCylinderDepositStatusReportTmp.ItemName              = custInvoiceTrans.itemName();
+            etgCylinderDepositStatusReportTmp.SalesId               = custInvoiceJour.SalesId;
+            etgCylinderDepositStatusReportTmp.InvoiceDate           = custInvoiceJour.InvoiceDate;
+            inventDim = custInvoiceTrans.inventDim();
+            etgCylinderDepositStatusReportTmp.InventSiteId          = inventDim.InventSiteId;
+            etgCylinderDepositStatusReportTmp.InventLocationId      = inventDim.InventLocationId;
+            etgCylinderDepositStatusReportTmp.wMSLocationId         = inventDim.wMSLocationId;
+            etgCylinderDepositStatusReportTmp.ETGBusinessSegment    = custInvoiceJour.ETGBusinessSegment;
+            etgCylinderDepositStatusReportTmp.ETGConnectionType     = custInvoiceTrans.ETGConnectionType;
+            etgCylinderDepositStatusReportTmp.ETGNoofCylinders      = custInvoiceTrans.Qty;
+            etgCylinderDepositStatusReportTmp.InvoiceId             = custInvoiceTrans.InvoiceId;
+            etgCylinderDepositStatusReportTmp.ETGDepositRate        = custInvoiceTrans.ETGDepositRate;
+            etgCylinderDepositStatusReportTmp.ETGDepositAmount      = custInvoiceTrans.ETGDepositAmount;
+
+
+            select firstonly JournalNum from ledgerJournalTrans where ledgerJournalTrans.MarkedInvoice == custInvoiceJour.InvoiceId;
+            etgCylinderDepositStatusReportTmp.JournalId = ledgerJournalTrans.JournalNum;
+
+            InventTableModule inventTableModule = InventTableModule::find(custInvoiceTrans.ItemId, ModuleInventPurchSales::Sales);
+            
+            etgCylinderDepositStatusReportTmp.ETGPackSize = inventTableModule.ETGPackSize;
+
+            if(custInvoiceTrans.ETGDepositAmount != 0 && custInvoiceTrans.ETGDepositRate != 0)
+            {
+                etgCylinderDepositStatusReportTmp.ETGDeposit = NoYes::Yes;
+            }
+
+            select  custPackingSlipTrans where custPackingSlipTrans.InventTransId == custInvoiceTrans.InventTransId;
+
+            etgCylinderDepositStatusReportTmp.DeliveryNoteNumber = custPackingSlipTrans.PackingSlipId;
+
+            if(salesLine.salesQty < 0)
+            {
+                etgCylinderDepositStatusReportTmp.MaterialReceivedNumber = custPackingSlipTrans.PackingSlipId;
+            }
+            else
+            {
+                etgCylinderDepositStatusReportTmp.MaterialReceivedNumber = custPackingSlipTrans.PackingSlipId;
+
+            }
+            etgCylinderDepositStatusReportTmp.insert();
+        }
+            
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSPAINInventValueContractApplicationDatesReportDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Data Provider class for the Operation Transactions Report specific to the ETGSPAIN model.
+/// </summary>
+[
+    SRSReportQuery(queryStr(ETGSPAINPurchOperationTableQuery))
+]
+class ETGSPAINInventValueContractApplicationDatesReportDP extends SrsReportDataProviderPreProcessTempDB
+{
+    protected ETGSPAINInventValueConAppTmp   ETGSPAINInventValueConAppTmp;
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGSPAINInventValueConAppTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Populates the temporary table <c>ETGSPAINInventValueConAppTmp</c> which will be displayed in the report.
+    /// </summary>
+    /// <returns>
+    /// The temporary table <c>ETGSPAINInventValueConAppTmp</c>.
+    /// </returns>
+    [
+        SRSReportDataSet('ETGSPAINInventValueConAppTmp')
+    ]
+    public ETGSPAINInventValueConAppTmp getETGSPAINInventValueConAppTmp()
+    {
+        select * from ETGSPAINInventValueConAppTmp;
+        return ETGSPAINInventValueConAppTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Processes the report by inserting data into the temporary table.
+    /// </summary>
+    public void processReport()
+    {
+        // Calculamos las fechas de los periodos
+        TransDate                   curDate          = DateTimeUtil::getToday(DateTimeUtil::getUserPreferredTimeZone());
+        TransDate                   datePeriod1Start = curDate;       // Fecha actual
+        TransDate                   datePeriod1End   = curDate - 30;  // Fecha actual - 30 días.
+        TransDate                   datePeriod2Start = curDate - 31;  // Fecha actual - 31 días.
+        TransDate                   datePeriod2End   = curDate - 60;  // Fecha actual - 60 días.
+        TransDate                   datePeriod3Start = curDate - 61;  // Fecha actual - 61 días.
+        TransDate                   datePeriod3End   = curDate - 90;  // Fecha actual - 90 días.
+        TransDate                   datePeriod4Start = curDate - 91;  // Fecha actual - 91 días.
+        TransDate                   datePeriod4End;
+
+        Qty                         qtyPeriod1;
+        Qty                         qtyPeriod2;
+        Qty                         qtyPeriod3;
+        Qty                         qtyPeriod4;
+        Qty                         qtyTotal;
+        Amount                      amount;
+        InventAverageCostPrice      avgCostPrice;
+
+        ETGSPAINPurchOperationTable      ETGSPAINPurchOperationTable;
+        
+        super();        
+
+        if (this.parmUserConnection())
+        {
+            ETGSPAINPurchOperationTable.setConnection(this.parmUserConnection());
+            ETGSPAINInventValueConAppTmp.setConnection(this.parmUserConnection());
+        }       
+
+        QueryRun queryRun = new QueryRun(this.parmQuery());
+
+        while (queryRun.next())
+        {
+            ETGSPAINPurchOperationTable = queryRun.get(tableNum(ETGSPAINPurchOperationTable));
+
+            // Calculamos cantidades por periodos
+            qtyPeriod1   = this.calcQtyPeriod(ETGSPAINPurchOperationTable, datePeriod1End, datePeriod1Start);
+            qtyPeriod2   = this.calcQtyPeriod(ETGSPAINPurchOperationTable, datePeriod2End, datePeriod2Start);
+            qtyPeriod3   = this.calcQtyPeriod(ETGSPAINPurchOperationTable, datePeriod3End, datePeriod3Start);
+            qtyPeriod4   = this.calcQtyPeriod(ETGSPAINPurchOperationTable, datePeriod4End, datePeriod4Start);
+
+            // Cantidad total
+            qtyTotal     = qtyPeriod1 + qtyPeriod2 + qtyPeriod3 + qtyPeriod4;
+
+            // Valor financiero
+            amount       = this.calcAmount(ETGSPAINPurchOperationTable, curDate);
+
+            // Precio medio ponderado
+            avgCostPrice = qtyTotal ? amount / qtyTotal : 0;
+            
+            // Guardamos el registro en la tabla
+            ETGSPAINInventValueConAppTmp.clear();
+            ETGSPAINInventValueConAppTmp.initValue();
+            ETGSPAINInventValueConAppTmp.OperationId = ETGSPAINPurchOperationTable.OperationId;
+            ETGSPAINInventValueConAppTmp.ItemId      = ETGSPAINPurchOperationTable.ItemId;
+            ETGSPAINInventValueConAppTmp.QtyPeriod1  = qtyPeriod1;
+            ETGSPAINInventValueConAppTmp.QtyPeriod2  = qtyPeriod2;
+            ETGSPAINInventValueConAppTmp.QtyPeriod3  = qtyPeriod3;
+            ETGSPAINInventValueConAppTmp.QtyPeriod4  = qtyPeriod4;
+            ETGSPAINInventValueConAppTmp.QtyTotal    = qtyTotal;
+            ETGSPAINInventValueConAppTmp.Amount      = amount;
+            ETGSPAINInventValueConAppTmp.AvgPrice    = avgCostPrice;
+            ETGSPAINInventValueConAppTmp.insert();
+        }        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calcQtyPeriod</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculates the total quantity for the specified period.
+    /// </summary>
+    /// <param name = "_ETGSPAINPurchOperationTable">Record of <c>ETGSPAINPurchOperationTable</c>.</param>
+    /// <param name = "_startDate">Start Date.</param>
+    /// <param name = "_endDate">End Date.</param>
+    /// <returns>Returns the total quantity.</returns>
+    private Qty calcQtyPeriod(ETGSPAINPurchOperationTable _ETGSPAINPurchOperationTable, TransDate _startDate, TransDate _endDate)
+    {
+        ETGSPAINInventTransApplication   ETGSPAINInventTransApplication;
+        InventDim                   inventDim;
+        InventTransOrigin           inventTransOrigin;
+        InventTrans                 inventTrans;
+
+        if (this.parmUserConnection())
+        {
+            ETGSPAINInventTransApplication.setConnection(this.parmUserConnection());
+            inventDim.setConnection(this.parmUserConnection());
+            inventTransOrigin.setConnection(this.parmUserConnection());
+            inventTrans.setConnection(this.parmUserConnection());
+        }        
+
+        select      sum(Qty)
+            from    inventTrans
+            where   inventTrans.ItemId        == _ETGSPAINPurchOperationTable.ItemId
+            &&      inventTrans.StatusReceipt == StatusReceipt::Purchased
+        join        inventTransOrigin
+            where   inventTransOrigin.RecId   == inventTrans.InventTransOrigin
+        exists join ETGSPAINInventTransApplication
+            where   ETGSPAINInventTransApplication.InventTransId       == inventTransOrigin.InventTransId
+            &&      ETGSPAINInventTransApplication.DateApplicationQty  >= _startDate
+            &&      ETGSPAINInventTransApplication.DateApplicationQty  <= _endDate
+        exists join inventDim
+            where   inventDim.inventDimId   == ETGSPAINInventTransApplication.inventDimId
+            &&      inventDim.inventBatchId == _ETGSPAINPurchOperationTable.OperationId;
+
+        return inventTrans.Qty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calcAmount</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculates the total amount.
+    /// </summary>
+    /// <param name = "_ETGSPAINPurchOperationTable">Record of <c>ETGSPAINPurchOperationTable</c>.</param>
+    /// <param name = "_curDate">Current date.</param>
+    /// <returns>Returns the total amount purchased.</returns>
+    private Qty calcAmount(ETGSPAINPurchOperationTable _ETGSPAINPurchOperationTable, TransDate _curDate)
+    {
+        ETGSPAINInventTransApplication   ETGSPAINInventTransApplication;
+        InventDim                   inventDim;
+        InventTransOrigin           inventTransOrigin;
+        InventTrans                 inventTrans;
+
+        if (this.parmUserConnection())
+        {
+            ETGSPAINInventTransApplication.setConnection(this.parmUserConnection());
+            inventDim.setConnection(this.parmUserConnection());
+            inventTransOrigin.setConnection(this.parmUserConnection());
+            inventTrans.setConnection(this.parmUserConnection());
+        }
+
+        select      sum(CostAmountPosted)
+            from    inventTrans
+            where   inventTrans.ItemId        == _ETGSPAINPurchOperationTable.ItemId
+            &&      inventTrans.StatusReceipt == StatusReceipt::Purchased
+        join        inventTransOrigin
+            where   inventTransOrigin.RecId   == inventTrans.InventTransOrigin
+        exists join ETGSPAINInventTransApplication
+            where   ETGSPAINInventTransApplication.InventTransId       == inventTransOrigin.InventTransId
+            &&      ETGSPAINInventTransApplication.DateApplicationQty  <= _curDate
+        exists join inventDim
+            where   inventDim.inventDimId   == ETGSPAINInventTransApplication.inventDimId
+            &&      inventDim.inventBatchId == _ETGSPAINPurchOperationTable.OperationId;
+
+        return inventTrans.CostAmountPosted;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

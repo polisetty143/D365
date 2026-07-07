@@ -1,0 +1,338 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGITMSalesLineSplitOut</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// this class will handle sales order lines split in case transfering partail quantity in voyage
+/// </summary>
+internal final class ETGITMSalesLineSplitOut
+{
+    SalesLine callerSalesLine;
+    SalesQty splitQty;
+    ITMId shipId;
+
+    TradeLineNumber newLineNumber;
+    InventTransId   inventTransId;
+
+    ETGOTMSalesTableFormDeliverySchedule salesTableForm_DeliverySchedule;
+    SalesLine salesLine;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>createNewSalesLine</Name>
+				<Source><![CDATA[
+    private void createNewSalesLine()
+    {
+        SalesLine tmp;
+    
+        NumberSeq numberSeq;
+    
+        ETGOTMSalesLineWritePreSuperInputContract     inputContractPre = ETGOTMSalesLineWritePreSuperInputContract::construct();
+        ETGOTMSalesLineWritePreSuperOutputContract    outputContractPre;
+        ETGOTMSalesLineWritePostSuperInputContract    inputContractPost = ETGOTMSalesLineWritePostSuperInputContract::construct();
+        ETGOTMSalesLineWritePostSuperOutputContract   outputContractPost;
+    
+        //BP Deviation Documented
+        tmp.setTmp();
+        tmp.setTmpData(salesLine);
+        select maxOf(LineNum) from tmp;
+        if (salesLine.LineNum < tmp.LineNum)
+        {
+            salesLine.LineNum = -salesLine.LineNum;
+        }
+        else
+        {
+            salesLine.LineNum = 0;
+        }
+    
+        salesTableForm_DeliverySchedule.salesLine_InitValue(salesLine);
+    
+        SalesLine salesLineMax;
+
+        newLineNumber = newLineNumber + 1;
+
+        salesLine.LineNum = newLineNumber;
+        salesLine.SalesQty = splitQty;
+        salesLine.QtyOrdered = salesLine.calcQtyOrdered();
+        salesLine.RemainSalesPhysical = splitQty;
+        salesLine.RemainInventPhysical = salesLine.calcQtyOrdered(salesLine.RemainSalesPhysical);
+        salesLine.RemainSalesFinancial = 0;
+        salesLine.LineAmount = salesLine.calcLineAmount();
+        salesLine.ETGITMId = shipId;
+        
+        if (ETGOTMITMPurchLineSplitCleanAutoDimFlight::instance().isEnabled())
+        {
+            salesLine.InventDimId = this.cleanUpAutoInventoryDimension(salesLine.inventTable(), salesLine.inventDim()).inventDimId;
+        }
+    
+        if (salesLine.validateWrite() && salesTableForm_DeliverySchedule.salesLine_ValidateWrite(salesLine, salesLine.inventDim()))
+        {
+            inputContractPre.parmSalesLine(salesLine);
+            inputContractPre.parmSalesTable(salesLine.salesTable());
+    
+            numberSeq = NumberSeq::newGetNum(InventParameters::numRefInventTransId());
+            salesLine.InventTransId = numberSeq.num();
+
+            salesLine.InterCompanyInventTransId = '';
+    
+            salesLine.SourceDocumentLine = (select maxof(RecId) from sourceDocumentLine).RecId + 1;
+
+            SalesLine salesLineLineNum;
+
+            select maxof(LINECREATIONSEQUENCENUMBER) from salesLineLineNum
+            where salesLineLineNum.SalesId == callerSalesLine.SalesId
+                && salesLineLineNum.DataAreaId == callerSalesLine.DataAreaId;
+
+            salesLine.LINECREATIONSEQUENCENUMBER = salesLineLineNum.LINECREATIONSEQUENCENUMBER + 1;
+            salesLine.doInsert();
+    
+            newLineNumber = salesLine.LineNum;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initSalesTableForm</Name>
+				<Source><![CDATA[
+    private void initSalesTableForm()
+    {
+        salesTableForm_DeliverySchedule = new ETGOTMSalesTableFormDeliverySchedule(callerSalesLine);
+        salesTableForm_DeliverySchedule.salesLine_Init(salesLine);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>new</Name>
+				<Source><![CDATA[
+    protected void new()
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmNewLineNumber</Name>
+				<Source><![CDATA[
+    internal TradeLineNumber parmNewLineNumber(TradeLineNumber _newLineNumber = newLineNumber)
+    {
+        newLineNumber = _newLineNumber;
+        return newLineNumber;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmInventTransId</Name>
+				<Source><![CDATA[
+    internal InventTransId parmInventTransId(InventTransId _inventTransId = inventTransId)
+    {
+        inventTransId = _inventTransId;
+        return inventTransId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmSalesLine</Name>
+				<Source><![CDATA[
+    private SalesLine parmSalesLine(SalesLine _salesLine = callerSalesLine)
+    {
+        callerSalesLine = _salesLine;
+        return callerSalesLine;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmShipId</Name>
+				<Source><![CDATA[
+    private ITMId parmShipId(ITMId _shipId = shipId)
+    {
+        shipId = _shipId;
+        return shipId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmSplitQty</Name>
+				<Source><![CDATA[
+    private SalesQty parmSplitQty(SalesQty _splitQty = splitQty)
+    {
+        splitQty = _splitQty;
+        return splitQty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    internal void run()
+    {
+        if (callerSalesLine.isInterCompanyOrder() && ETGOTMStopSplitIntercompanyLineFlight::instance().isEnabled())
+        {
+            throw error(strFmt("@InboundTransportationManagement:ITMStopSplitIntercompanySalesLine", callerSalesLine.LineNum, callerSalesLine.SalesId));
+        }
+
+        ttsBegin;
+    
+        ITMTTSTable::createTTSOutETG();
+
+        this.moveCallerToLast();
+        this.initSalesTableForm();
+        this.updateCallerSalesLine();
+        this.createNewSalesLine();
+        this.updateDeliverySchedule();
+    
+        ITMTTSTable::deleteTTSOutETG();
+    
+        ttsCommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>cleanUpAutoInventoryDimension</Name>
+				<Source><![CDATA[
+    private InventDim cleanUpAutoInventoryDimension(InventTable _inventTable, InventDim _inventDim)
+    {
+        boolean findOrCreateInventDim = false;
+        InventDim ret = _inventDim;
+
+        if (_inventDim.inventBatchId && _inventTable.BatchNumGroupId)
+        {
+            InventNumGroup batchNumGroup = InventNumGroup::find(_inventTable.BatchNumGroupId);
+            if (!batchNumGroup.PhysicalUpdate && !batchNumGroup.ManualAllocation && !batchNumGroup.OnlyInventTransaction)
+            {
+                _inventDim.inventBatchId = '';
+                findOrCreateInventDim = true;
+            }
+        }
+
+        if (_inventDim.inventSerialId && _inventTable.SerialNumGroupId)
+        {
+            InventNumGroup serialNumGroup = InventNumGroup::find(_inventTable.SerialNumGroupId);
+            if (!serialNumGroup.PhysicalUpdate && !serialNumGroup.ManualAllocation && !serialNumGroup.OnlyInventTransaction)
+            {
+                _inventDim.inventSerialId = '';
+                findOrCreateInventDim = true;
+            }
+        }
+
+        if (findOrCreateInventDim)
+        {
+            ret = InventDim::findOrCreate(_inventDim);
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>moveCallerToLast</Name>
+				<Source><![CDATA[
+    private void moveCallerToLast()
+    {
+        SalesLine salesLineLineNum;
+
+        select maxof(LineNum) from salesLineLineNum 
+            where salesLineLineNum.SalesId == callerSalesLine.SalesId
+                && salesLineLineNum.DataAreaId == callerSalesLine.DataAreaId;
+
+        newLineNumber = salesLineLineNum.LineNum;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateCallerSalesLine</Name>
+				<Source><![CDATA[
+    private void updateCallerSalesLine()
+    {
+        ETGOTMSalesLineWritePreSuperInputContract     inputContractPre = ETGOTMSalesLineWritePreSuperInputContract::construct();
+        ETGOTMSalesLineWritePreSuperInputContract    outputContractPre;
+        ETGOTMSalesLineWritePreSuperInputContract    inputContractPost = ETGOTMSalesLineWritePreSuperInputContract::construct();
+        ETGOTMSalesLineWritePreSuperInputContract   outputContractPost;
+    
+        if (callerSalesLine.LineDeliveryType == LineDeliveryType::OrderLine)
+        {
+            select forUpdate salesLine;
+        }
+        else
+        {
+            select forUpdate salesLine
+                where salesLine.InventTransId == callerSalesLine.InventTransId;
+        }
+    
+        salesLine.SalesQty -= splitQty;
+        salesLine.QtyOrdered = salesLine.calcQtyOrdered();
+        salesLine.RemainSalesPhysical -= splitQty;
+        salesLine.RemainInventPhysical = salesLine.calcQtyOrdered(salesLine. RemainSalesPhysical);
+        salesLine.LineAmount = salesLine.calcLineAmount();
+        if (salesLine.validateWrite() && salesTableForm_DeliverySchedule.salesLine_ValidateWrite(salesLine, salesLine.inventDim()))
+        {
+            inputContractPre.parmSalesLine(salesLine);
+            inputContractPre.parmSalesTable(salesLine.salesTable());
+            salesLine.doUpdate();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateDeliverySchedule</Name>
+				<Source><![CDATA[
+    private void updateDeliverySchedule()
+    {
+        List newScheduleLines = new List(Types::Container);
+    
+        while select salesLine
+        {
+            newScheduleLines.addEnd([salesLine]);
+        }
+    
+        SalesTableForm_DeliverySchedule::closeOkServer(callerSalesLine,
+            newScheduleLines.pack(),
+            DlvScheduleMarkupConversionMode::Split);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    private server static ETGITMSalesLineSplitOut construct()
+    {
+        return new ETGITMSalesLineSplitOut();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>newSalesLineSplit</Name>
+				<Source><![CDATA[
+    internal server static ETGITMSalesLineSplitOut newSalesLineSplit(
+        SalesLine _salesLine,
+        SalesQty _splitQty,
+        ITMId _shipId)
+    {
+        ETGITMSalesLineSplitOut salesLineSplitHelper = ETGITMSalesLineSplitOut::construct();
+    
+        salesLineSplitHelper.parmSalesLine(_salesLine);
+        salesLineSplitHelper.parmSplitQty(_splitQty);
+        salesLineSplitHelper.parmShipId(_shipId);
+    
+        return salesLineSplitHelper;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

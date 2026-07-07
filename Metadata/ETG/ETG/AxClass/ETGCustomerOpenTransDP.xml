@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCustomerOpenTransDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[
+SRSReportQueryAttribute(''),
+    SRSReportParameterAttribute(classStr(ETGCustomerOpenTransContract))
+]
+class ETGCustomerOpenTransDP extends SRSReportDataProviderBase
+{
+    ETGCustomerOpenTransactions   tmpCustOpenTrans;
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGCustomerOpenTransactions</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the processed data for the report
+    /// </summary>
+    [SRSReportDataSetAttribute(tableStr(ETGCustomerOpenTransactions))]
+    public ETGCustomerOpenTransactions getETGCustomerOpenTransactions()
+    {
+        select tmpCustOpenTrans;
+        return tmpCustOpenTrans;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Main process method called by the reporting framework
+    /// </summary>
+    public void processReport()
+    {
+        ETGCustomerOpenTransContract contract;
+        TransDate                   asOfDate;
+        NoYes                       excludeFutureSettlements;
+
+        
+        contract = this.parmDataContract() as ETGCustomerOpenTransContract;
+        asOfDate = contract.parmAsOfDate();
+        excludeFutureSettlements = contract.parmExcludeFutureSettlements();
+
+        
+        if (asOfDate >= today())
+        {
+            throw error("As of date should not be greater than Today's date");
+        }
+
+        this.insertCustOpenTransData(asOfDate, excludeFutureSettlements);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertCustOpenTransData</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Business logic to populate the temp table
+    /// </summary>
+    /// <param name = "_fromDate">The cut-off date from the contract</param>
+    /// <param name = "_excludeFutureSettlements">Exclude future settlements flag</param>
+    private void insertCustOpenTransData(date _fromDate, NoYes _excludeFutureSettlements = NoYes::No)
+    {
+        CustTrans           custTrans;
+        CustTable           custTable;
+        CustSettlement      custSettlement;
+        
+        AmountCur           amountCurSettled;
+        AmountMST           amountMSTSettled;
+        AmountCur           amountCurOpen;
+        AmountMST           amountMSTOpen;
+
+        date                maximumDate = _fromDate;
+        
+        // Helper strings for dimensions
+        str businessUnitStr         = "BusinessUnit";
+        str verticalStr             = "Vertical";
+        str MAIN_COMMODITYStr       = "MainCommodity";
+        str SUB_COMMODITYStr        = "SubCommodity";
+        str lineOfBusinessStr       = "Line_of_Business";
+        str plantWarehouseOfficeStr = "Plant_Warehouse_Office";
+        str departmentStr           = "Department";
+        str interCompanyStr         = "InterCompany";
+        str trader_EmployeeStr      = "Trader_Employee";
+        str itemStr                 = "Item";
+
+        tmpCustOpenTrans.clear();
+        delete_from tmpCustOpenTrans;
+
+        while select custTrans
+            where custTrans.TransDate <= _fromDate
+               && (custTrans.Closed == dateNull() || custTrans.Closed > _fromDate)
+        {
+            
+            if (!_excludeFutureSettlements)
+            {
+                
+                amountCurSettled = custTrans.SettleAmountCur;
+                amountMSTSettled = custTrans.SettleAmountMST;
+            }
+            else
+            {
+                
+                select sum(SettleAmountCur), sum(SettleAmountMST)
+                    from custSettlement
+                    where custSettlement.TransRecId == custTrans.RecId
+                       && custSettlement.TransDate <= maximumDate;
+
+                amountCurSettled = custSettlement.SettleAmountCur;
+                amountMSTSettled = custSettlement.SettleAmountMST;
+            }
+            
+            // Calculate true open amounts
+            amountCurOpen = custTrans.AmountCur - amountCurSettled;
+            amountMSTOpen = custTrans.AmountMST - amountMSTSettled;
+            // -----------------------------------------------
+
+            // If the transaction has a zero balance as of our date, skip it.
+            if ((custTrans.AmountCur && amountCurOpen == 0.00) ||
+                (custTrans.AmountMST && amountMSTOpen == 0.00))
+            {
+                continue;
+            }
+
+           
+            ExchRate newExchRate, newExchRateOrg;
+
+            if (custTrans.LastExchAdjRate)
+            {
+                newExchRate = custTrans.LastExchAdjRate;
+            }
+            else
+            {
+                newExchRate = custTrans.ExchRate;
+            }
+
+            if (newExchRate)
+            {
+                newExchRateOrg = newExchRate / 100;
+            }
+
+            // Using historical open TC for accurate balance reflection
+            AmountMST calculatedBalanceUSD = amountCurOpen * newExchRateOrg;
+            // ---------------------------------------------------------
+
+            tmpCustOpenTrans.clear();
+            tmpCustOpenTrans.AccountNum                = custTrans.AccountNum;
+            
+            // Use the dynamically calculated open and settled amounts!
+            tmpCustOpenTrans.AmountMST                 = amountMSTOpen;
+            tmpCustOpenTrans.AmountCur                 = amountCurOpen;
+            tmpCustOpenTrans.SettleAmountMST           = amountMSTSettled;
+            tmpCustOpenTrans.SettleAmountCur           = amountCurSettled;
+            
+            tmpCustOpenTrans.CurrencyCode              = custTrans.CurrencyCode;
+            tmpCustOpenTrans.ExchAdjustment            = custTrans.ExchAdjustment;
+            tmpCustOpenTrans.ExchRate                  = custTrans.ExchRate;
+            tmpCustOpenTrans.DocumentNum               = custTrans.DocumentNum;
+            tmpCustOpenTrans.DocumentDate              = custTrans.DocumentDate;
+            tmpCustOpenTrans.DueDate                   = custTrans.DueDate;
+            tmpCustOpenTrans.Invoice                   = custTrans.Invoice;
+            tmpCustOpenTrans.LastExchAdj               = custTrans.LastExchAdj;
+            tmpCustOpenTrans.LastExchAdjRate           = custTrans.LastExchAdjRate;
+            tmpCustOpenTrans.LastExchAdjVoucher        = custTrans.LastExchAdjVoucher;
+            tmpCustOpenTrans.ReportingCurrencyAmount   = custTrans.ReportingCurrencyAmount;
+            tmpCustOpenTrans.ReportingCurrencyExchRate = custTrans.ReportingCurrencyExchRate;
+            tmpCustOpenTrans.Voucher                   = custTrans.Voucher;
+            tmpCustOpenTrans.TransDate                 = custTrans.TransDate;
+            tmpCustOpenTrans.Settlement                = custTrans.Settlement;
+            tmpCustOpenTrans.RecId                     = custTrans.RecId;
+            tmpCustOpenTrans.CounterPartyName          = custTrans.custTableName();
+            tmpCustOpenTrans.LedgerOffsetCode          = CustTrans::ledgerOffsetCode(custTrans);
+            tmpCustOpenTrans.LedgerOffsetName          = CustTrans::ledgerOffsetName(custTrans);
+            
+            // Replaced the standard methods with the dynamically calculated values
+            tmpCustOpenTrans.BalanceTC                 = amountCurOpen;        // Historical TC
+            tmpCustOpenTrans.BalanceUSD                = calculatedBalanceUSD; // Custom Exch Rate * Historical TC
+            tmpCustOpenTrans.NewExchangeRate           = CustTrans::newExchangeRate(custTrans);
+            
+            tmpCustOpenTrans.LedgerCode                = CustTrans::displayMainAccountId(custTrans);
+            
+            // Get Customer Group
+            select firstonly CustGroup from custTable where custTable.AccountNum == custTrans.AccountNum;
+            tmpCustOpenTrans.CustGroup                      = custTable.CustGroup;
+            tmpCustOpenTrans.CustName                       = custTable.name();
+
+            //Financial Dimension
+            tmpCustOpenTrans.BusinessUnit          = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, businessUnitStr);
+            tmpCustOpenTrans.Vertical              = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, verticalStr);
+            tmpCustOpenTrans.MainCommodity         = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, MAIN_COMMODITYStr);
+            tmpCustOpenTrans.SubCommodity          = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(custTrans.DefaultDimension, SUB_COMMODITYStr);
+            tmpCustOpenTrans.LineOfBusiness        = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, lineOfBusinessStr);
+            tmpCustOpenTrans.PlantWarehouseOffice  = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, plantWarehouseOfficeStr);
+            tmpCustOpenTrans.Department            = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, departmentStr);
+            tmpCustOpenTrans.InterCompany          = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, interCompanyStr);
+            tmpCustOpenTrans.TraderEmployee        = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, trader_EmployeeStr);
+            tmpCustOpenTrans.Item                  = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, itemStr);
+            tmpCustOpenTrans.Product_Service       = CustTrans::product_Service(CustTrans);
+
+            tmpCustOpenTrans.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGProdMultiStatusDecrease_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(ProdMultiStatusDecrease))]
+final class ETGProdMultiStatusDecrease_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>decreaseStatus</Name>
+				<Source><![CDATA[
+    protected void decreaseStatus(ProdParmStatusDecrease _prodParmStatusDecrease)
+    {
+        try
+        {
+            ttsbegin;
+            next decreaseStatus(_prodParmStatusDecrease);
+
+            if(ETGCanadaParameters::find().EnableSubContractingPO)
+            {
+                ProdTable prodTable = this.initProdTable(_prodParmStatusDecrease.ProdId);
+
+                if(prodTable && prodTable.ETGIsSubContractingOrder && prodTable.ETGParentProdId)
+                {
+                    changecompany(prodTable.ETGParentEntity)
+                    {
+                        ProdParmStatusDecrease prodParmStatusDecrease;
+                        ProdTable prodTableParent = ProdTable::find(prodTable.ETGParentProdId);
+
+                        prodParmStatusDecrease.clear();
+                        //buf2Buf(_prodParmStatusDecrease,prodParmStatusDecrease);
+                        prodParmStatusDecrease.initFromProdTable(prodTableParent);
+                        prodParmStatusDecrease.wantedstatus = _prodParmStatusDecrease.WantedStatus;
+                        prodParmStatusDecrease.ParmId = NumberSeq::newGetNum(CompanyInfo::numRefParmId()).num();
+                        prodParmStatusDecrease.insert();
+
+                        prodMultiStatusDecrease prodMultiStatusDecrease = prodMultiStatusDecrease::construct();
+                        prodMultiStatusDecrease.initParmBuffer(prodParmStatusDecrease);
+                        prodMultiStatusDecrease.parmId(prodParmStatusDecrease.ParmId);
+
+                        prodMultiStatusDecrease.run();
+                    }
+                }
+            }
+            ttscommit;
+        }
+        catch
+        {
+            ttsabort;
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

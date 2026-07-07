@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGOTMInventTransferMultiShip</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+internal final class ETGOTMInventTransferMultiShip extends InventTransferMultiShip
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initParmBuffer</Name>
+				<Source><![CDATA[
+    public void initParmBuffer(
+        ParmBuffer _inventTransferParmTable
+        )
+    {
+        InventTransferParmTable inventTransferParmTable = _inventTransferParmTable;
+        InventTransferParmTable saveInventTransferParmTable;
+    
+        saveInventTransferParmTable.data(_inventTransferParmTable);
+    
+        super(_inventTransferParmTable);
+    
+        inventTransferParmTable.ITMFilters = saveInventTransferParmTable.ITMFilters;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insert</Name>
+				<Source><![CDATA[
+    public void insert(
+        Common _common,
+        ParmBuffer _inventTransferParmTable
+        )
+    {
+        switch (_common.TableId)
+        {
+            case tableNum(ITMTable):
+            case tableNum(ITMContainers):
+            case tableNum(ITMFolioTable):
+                this.ITMInsert(_common, _inventTransferParmTable);
+                break;
+    
+            default:
+                super(_common, _inventTransferParmTable);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ITMFilters</Name>
+				<Source><![CDATA[
+    internal container ITMFilters(
+        Common _common
+        )
+    {
+        ITMTable shipTable;
+        ITMContainers shipContainers;
+        ITMFolioTable shipFolioTable;
+    
+        ITMId shipId;
+        ITMContainerId shipContainerId;
+        ITMFolioId shipFolioId;
+    
+        switch (_common.TableId)
+        {
+            case tableNum(ITMTable):
+                shipTable = _common;
+                shipId = shipTable.ShipId;
+                break;
+    
+            case tableNum(ITMContainers):
+                shipContainers = _common;
+                shipId = shipContainers.ShipId;
+                shipContainerId = shipContainers.ShipContainerId;
+                break;
+    
+            case tableNum(ITMFolioTable):
+                shipFolioTable = _common;
+                shipId = shipFolioTable.ShipId;
+                shipFolioId = shipFolioTable.ShipFolioId;
+                break;
+        }
+    
+        return [shipId, shipContainerId, shipFolioId];
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ITMFilterSet</Name>
+				<Source><![CDATA[
+    private container ITMFilterSet(
+        container _filterSet,
+        ITMId _shipId,
+        ITMContainerId _shipContainerId,
+        ITMFolioId _shipFolioId
+        )
+    {
+        Set filterSet;
+    
+        if (_filterSet != conNull())
+        {
+            filterSet = Set::create(_filterSet);
+        }
+        else
+        {
+            filterSet = new Set(Types::Container);
+        }
+    
+        filterSet.add([_shipId, _shipContainerId, _shipFolioId]);
+    
+        return filterSet.pack();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ITMInsert</Name>
+				<Source><![CDATA[
+    private void ITMInsert(
+        Common _common,
+        InventTransferParmTable _inventTransferParmTable
+        )
+    {
+        ITMId shipId;
+        ITMContainerId shipContainerId;
+        ITMFolioId shipFolioId;
+    
+        InventTransferTable inventTransferTable;
+        ITMLine shipLine;
+        InventTransferParmTable inventTransferParmTable;
+        int lines;
+    
+        [shipId, shipContainerId, shipFolioId] = this.ITMFilters(_common);
+    
+        while select inventTransferTable
+            exists join shipLine
+            where shipLine.TransRefId == inventTransferTable.TransferId 
+            && shipLine.TransType == InventTransType::TransferOrderShip
+                && inventTransferTable.TransferStatus != InventTransferStatus::Received
+                && (!shipId || shipLine.ShipId == shipId) 
+                && (!shipContainerId || shipLine.ShipContainerId == shipContainerId) 
+                && (!shipFolioId || shipLine.ShipFolioId == shipFolioId)
+        {
+            if (!InventTransferParmTable::exist(parmId, inventTransferTable.TransferId))
+            {
+                _inventTransferParmTable.ITMFilters = this.ITMFilterSet(conNull(), shipId, shipContainerId, shipFolioId);
+                _inventTransferParmTable.LineNum += lines;
+                this.insert(inventTransferTable, _inventTransferParmTable);
+    
+                lines++;
+            }
+            else
+            {
+                inventTransferParmTable = InventTransferParmTable::find(parmId, inventTransferTable.TransferId, true);
+                inventTransferParmTable.ITMFilters = this.ITMFilterSet(inventTransferParmTable.ITMFilters, shipId, shipContainerId, shipFolioId);
+                inventTransferParmTable.doUpdate();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    internal static server ETGOTMInventTransferMultiShip construct()
+    {
+        return new ETGOTMInventTransferMultiShip();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    internal static void main(
+        Args _args
+        )
+    {
+        ETGOTMInventTransferMultiShip  inventTransferMultiShip;
+    
+        if (_args.parmEnum() == RunChoose::Run)
+        {
+            inventTransferMultiShip = ETGOTMInventTransferMultiShip::construct();
+    
+            switch (_args.dataset())
+            {
+                case tableNum(ITMTable):
+                case tableNum(ITMContainers):
+                case tableNum(ITMFolioTable):
+                    inventTransferMultiShip.parmCalledFromWMS(false);
+                    RunBaseMultiParm::initFromForm(inventTransferMultiShip, _args);
+                    break;
+    
+                default:
+                    RunBaseMultiParm::initParm(inventTransferMultiShip);
+                    inventTransferMultiShip.parmCalledFromWMS(false);
+                    break;
+            }
+    
+            if (!inventTransferMultiShip.prompt())
+            {
+                return;
+            }
+    
+            inventTransferMultiShip.runOperation();
+        }
+        else
+        {
+            RunBaseMultiParm::runSpecial(_args);
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

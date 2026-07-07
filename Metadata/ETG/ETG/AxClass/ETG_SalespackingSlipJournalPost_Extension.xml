@@ -1,0 +1,338 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalespackingSlipJournalPost_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The class <c>ETG_SalespackingSlipJournalPost_Extension</c> is used to handle the COC methods related to <c>SalespackingSlipJournalPost</c> form.
+/// </summary>
+[ExtensionOf(classstr(SalespackingSlipJournalPost))]
+final class ETG_SalespackingSlipJournalPost_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>endPost</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Ends the posting.
+    /// </summary>
+    protected void endPost()
+    {
+        #OCCRetryCount
+        ETG_BillOfLading  billOfLading;
+        SalesParmLine     parmLine;        
+        SalesParmTable    salesParm = this.salesParmTable;
+        //CS DLT, 26012025
+        ETGACFParameters acfParameters = ETGACFParameters::find();
+        //if(acfParameters.EnableManageMultiCurrencyFeature == NoYes::Yes)
+        //{
+        //    parmLine = this.salesParmLine;
+        //}
+        //CE DLT, 26012025
+        next endPost();
+        CustPackingSlipJour     custPackingSlipJour = this.custPackingSlipJour;
+        //CS DLT, 26012025
+        //if(acfParameters.EnableManageMultiCurrencyFeature == NoYes::Yes)
+        //{
+        //    custPackingSlipJour.ETGRefSalesId = parmLine.ETGRefSalesId;
+        //}
+        //CE DLT, 26012025
+
+       // this.updateBillOfLading();
+        try
+        {      
+            select firstonly forupdate PackingSlipId,DeliveryDate,SalesId,BOLNo,BOLDate from billOfLading
+                where billOfLading.ParmId == salesParm.ParmId;           
+            
+            if(billOfLading)
+            {
+                ttsbegin;
+                billOfLading.PackingSlipId = custPackingSlipJour.PackingSlipId;
+                billOfLading.DeliveryDate  = custPackingSlipJour.DeliveryDate;
+                billOfLading.SalesId       = custPackingSlipJour.SalesId;
+                billOfLading.update();
+                ttscommit;
+            }
+
+            ttsbegin;
+            custPackingSlipJour.selectForUpdate(true);
+            custPackingSlipJour.BOLNo       = billOfLading.BOLNo;
+            custPackingSlipJour.BOLDate     = billOfLading.BOLDate;
+            custPackingSlipJour.ETGRemark   = salesParm.ETGRemark;
+            custPackingSlipJour.doUpdate();
+            ttscommit;
+
+            this.updateBOLCarrierTable(custPackingSlipJour);
+            this.updateBOLContainerTable(custPackingSlipJour);
+
+           
+
+            //CS - Abhinav
+            if(ETGACFParameters::find().EnableSOInvoiceDifferentQty == NoYes::Yes)
+            {
+                CustPackingSlipTrans CustPackingSlipTransLocal;
+                SalesParmLine SalesParmLineLocal;
+                while select CustPackingSlipTransLocal
+                    where CustPackingSlipTransLocal.packingslipid == custPackingSlipJour.PackingSlipId
+                {
+                    SalesParmLineLocal = SalesParmLine::findInventTransId(custPackingSlipJour.ParmId,CustPackingSlipTransLocal.InventTransId);
+
+                    ttsbegin;
+                    CustPackingSlipTransLocal.selectForUpdate(true);
+                    CustPackingSlipTransLocal.ETGGrossQty = SalesParmLineLocal.ETGGrossWeight;
+                    CustPackingSlipTransLocal.ETGNetQty = SalesParmLineLocal.DeliverNow;
+                    CustPackingSlipTransLocal.doUpdate();
+                    ttscommit;
+                }
+            }
+            if(ETGACFParameters::find().EnableSalesInvoiceWorkflow == NoYes::Yes)
+            {
+                CustPackingSlipTrans CustPackingSlipTransLoc,CustPackingSlipTransLoc1,CustPackingSlipTransLocSum,CustPackingSlipTransLocal1;
+                ETGSaleseditLinesOverview saleseditlinesoverview,saleseditlinesoverviewSum;
+
+                //CS, DLT. Abhinav - 18-02-2025
+                select firstonly CustPackingSlipTransLocal1
+                    where CustPackingSlipTransLocal1.PackingSlipId == custPackingSlipJour.PackingSlipId;
+
+                saleseditlinesoverview.PackingSlipId = CustPackingSlipTransLocal1.PackingSlipid;
+                saleseditlinesoverview.SalesId = CustPackingSlipTransLocal1.SalesId;
+
+                SalesTable salestableloc = salesTable::find(CustPackingSlipTransLocal1.SalesId);
+                SalesTotals salesTotalsloc;
+      
+                salesTotalsloc =  SalesTotals::construct(salestableloc,SalesUpdate::PackingSlip);
+                salesTotalsloc.calc();
+                        
+                select sum(InvoiceAmount) from saleseditlinesoverviewSum
+                            where saleseditlinesoverviewSum.SalesId == CustPackingSlipTransLocal1.SalesId;
+
+                AmountCur InvoiceAmountLoc;
+                InvoiceAmountLoc = salesTotalsloc.totalAmount() + salesTotalsloc.totalMarkup() + salesTotalsloc.totalTaxAmount();
+
+                saleseditlinesoverview.InvoiceAmount = InvoiceAmountLoc - saleseditlinesoverviewSum.InvoiceAmount;
+                saleseditlinesoverview.insert();
+                //CE
+
+                while select CustPackingSlipTransLoc
+                    where CustPackingSlipTransLoc.packingslipid == custPackingSlipJour.PackingSlipId
+               //     && CustPackingSlipTransLoc.Qty > 0
+                {
+                    ETGSalesEditLines ETGsaleseditlines,ETGsaleseditlinesCheck,ETGsaleseditlinesSum;
+
+                    select firstonly ETGsaleseditlinesCheck
+                        where ETGsaleseditlinesCheck.PackingSlipId == CustPackingSlipTransLoc.PackingSlipId
+                        && ETGsaleseditlinesCheck.ETGRefDefaultDimension == CustPackingSlipTransLoc.DefaultDimension
+                        && ETGsaleseditlinesCheck.ItemId == CustPackingSlipTransLoc.ItemId;
+
+                    if(ETGsaleseditlinesCheck)
+                    {
+                        ttsbegin;
+                        ETGsaleseditlinesCheck.selectForUpdate(true);
+                        ETGsaleseditlinesCheck.Quantity = CustPackingSlipTransLoc.Qty;
+                        ETGsaleseditlinesCheck.Remain = CustPackingSlipTransLoc.Remain;
+                        ETGsaleseditlinesCheck.WorkflowStatus = ETGSalesEditLinesWorkflow::Draft;
+                        ETGsaleseditlinesCheck.update();
+                        ttscommit;
+                    }
+                    else 
+                    {
+                        InventDim inventdim = InventDim::find(CustPackingSlipTransLoc.InventDimId);
+
+                        ETGsaleseditlines.packingSlipId = CustPackingSlipTransLoc.PackingSlipId;
+                        ETGsaleseditlines.SalesId = CustPackingSlipTransLoc.SalesId;
+                        ETGsaleseditlines.Quantity = CustPackingSlipTransLoc.Qty;
+                        ETGsaleseditlines.ItemId = CustPackingSlipTransLoc.ItemId;
+                        ETGsaleseditlines.Name = CustPackingSlipTransLoc.Name;
+                        ETGsaleseditlines.Ordered = CustPackingSlipTransLoc.Ordered;
+                        
+                        ETGsaleseditlines.GrossQty = CustPackingSlipTransLoc.ETGGrossQty;
+                        ETGsaleseditlines.Remain = CustPackingSlipTransLoc.Remain;
+                        ETGsaleseditlines.LineNum = CustPackingSlipTransLoc.LineNum;
+                    
+                        SalesLine SalesLineLoc;
+                        select SalesLineLoc where SalesLineLoc.SalesId ==  CustPackingSlipTransLoc.SalesId
+                             && SalesLineLoc.DefaultDimension == CustPackingSlipTransLoc.DefaultDimension;
+
+                        ETGsaleseditlines.SalesPrice = SalesLineLoc.SalesPrice;
+
+                        ETGsaleseditlines.configId = inventdim.configId;
+                        ETGsaleseditlines.InventSizeId = inventdim.InventSizeId;
+                        ETGsaleseditlines.InventStyleId = inventdim.InventStyleId;
+                        ETGsaleseditlines.InventSiteId = inventdim.InventSiteId;
+                        ETGsaleseditlines.InventColorId = inventdim.InventColorId;
+                        ETGsaleseditlines.InventLocationId = inventdim.InventLocationId;
+                        ETGsaleseditlines.ETGRefDefaultDimension = CustPackingSlipTransLoc.DefaultDimension;
+                        ETGsaleseditlines.insert();
+                    }
+                }
+
+                ETGSaleseditlines ETGSaleseditlinesLoc1;
+
+                while select CustPackingSlipTransLoc1
+                    where CustPackingSlipTransLoc1.packingslipid == custPackingSlipJour.PackingSlipId
+                    && CustPackingSlipTransLoc1.Qty == 0
+                    join ETGSaleseditlinesLoc1
+                    where ETGSaleseditlinesLoc1.PackingSlipId == CustPackingSlipTransLoc1.PackingSlipId
+                    && ETGSaleseditlinesLoc1.ETGRefDefaultDimension == CustPackingSlipTransLoc1.DefaultDimension
+                {
+                    ttsbegin;
+                    ETGSaleseditlinesLoc1.selectForUpdate(true);
+                    ETGSaleseditlinesLoc1.Quantity = CustPackingSlipTransLoc1.Qty;
+                    ETGSaleseditlinesLoc1.Remain = CustPackingSlipTransLoc1.Remain;
+                    ETGSaleseditlinesLoc1.WorkflowStatus = ETGSalesEditLinesWorkflow::Draft;
+                    ETGSaleseditlinesLoc1.update();
+                    ttscommit;
+                }
+
+            }
+            //CE, DLT, Abhinav
+
+
+            delete_from billOfLading
+                where billOfLading.PackingSlipId  == '';          
+        }
+        catch (Exception::Deadlock)
+        {
+            if (xSession::currentRetryCount() >= #RetryNum)
+            {
+                throw Exception::Deadlock;
+            }
+            else
+            {
+                retry;
+            }
+        }
+
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateBillOfLading</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Update the BOL details when posting the packing slip which to be shown against the Packing slip journal.
+    /// </summary>
+    protected void  updateBillOfLading()
+    {
+        #OCCRetryCount
+        ETG_BillOfLading  billOfLading;
+        CustPackingSlipJour     custPackingSlipJourloc;
+        SalesParmTable  salesParm = this.salesParmTable;
+       
+        try
+        {
+            ttsbegin;
+
+            update_recordset billOfLading
+                setting PackingSlipId = custPackingSlipJour.PackingSlipId,
+                        DeliveryDate  = custPackingSlipJour.DeliveryDate,
+                        SalesId       = custPackingSlipJour.SalesId
+                where billOfLading.TableRefId  == salesParm.TableRefId
+                    && billOfLading.ParmId == salesParm.ParmId;
+
+            delete_from billOfLading
+                where billOfLading.PackingSlipId  == '';
+
+            select * from billOfLading 
+                where  billOfLading.PackingSlipId     == custPackingSlipJour.PackingSlipId
+                        && billOfLading.DeliveryDate  == custPackingSlipJour.DeliveryDate
+                        && billOfLading.SalesId       == custPackingSlipJour.SalesId
+                        && billOfLading.TableRefId    == salesParm.TableRefId
+                        && billOfLading.ParmId        == salesParm.ParmId;
+
+            update_recordset custPackingSlipJourloc
+                setting BOLNo = billOfLading.BOLNo ,
+                BOLDate = billOfLading.BOLDate
+                where custPackingSlipJourloc.recid == custPackingSlipJour.recid;
+            
+            ttscommit;
+        }
+        catch (Exception::Deadlock)
+        {
+            if (xSession::currentRetryCount() >= #RetryNum)
+            {
+                throw Exception::Deadlock;
+            }
+            else
+            {
+                retry;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>endLedgerVoucher</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// QualitySpecificationGroup,25 Jan 2021 , Binay
+    /// </summary>
+    protected void endLedgerVoucher()
+    {
+
+        SalesParmTable          salesParmTableloc = salesParmTable;
+        SalesParmLine           salesParmLineloc = salesParmLine;
+
+        CustPackingSlipJour     custPackingSlipJour;
+        CustPackingSlipTrans    custPackingSlipTrans;
+        SalesLine               saleslineloc = salesLine;
+        SalesTable              salestableloc = salesTable;
+        SalesFormLetter_Confirm              salesFormLetter;
+
+        next endLedgerVoucher();
+
+        VendPackingSlipJour::inserSalesMarkupTrans(salesParmLineloc);
+        salesFormLetter = SalesFormLetter::construct(DocumentStatus::Confirmation, '');
+        salesFormLetter.printFormLetter(false);
+        salesFormLetter.proforma(false);
+        salesFormLetter.createFromLines(false);
+        salesformLetter.usePrintManagement(true);
+        salesFormLetter.update(salestableloc, DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()), SalesUpdate::All, AccountOrder::None, false, false, true, false);
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateBOLCarrierTable</Name>
+				<Source><![CDATA[
+    private void updateBOLCarrierTable(CustPackingSlipJour _custPackingSlipJour)
+    {
+        SalesParmTable          salesParmTable;
+        ETG_BOLCarrierTable     carrierTable;
+        ETG_BillOfLading        billLading;
+
+        update_recordset carrierTable
+            setting PackingSlipId = _custPackingSlipJour.PackingSlipId, ParmId = _custPackingSlipJour.ParmId, BOLId = _custPackingSlipJour.BOLNo
+            where carrierTable.SalesId == _custPackingSlipJour.SalesId;
+                
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateBOLContainerTable</Name>
+				<Source><![CDATA[
+    private void updateBOLContainerTable(CustPackingSlipJour _custPackingSlipJour)
+    {
+        SalesParmTable            salesParmTable;
+        ETG_BOLContainerTable     containerTable;
+
+        update_recordset containerTable
+            setting PackingSlipId = _custPackingSlipJour.PackingSlipId,
+                    ParmId        = _custPackingSlipJour.ParmId,
+                    BOLId         = _custPackingSlipJour.BOLNo
+                 where containerTable.SalesId          == _custPackingSlipJour.SalesId
+                       && containerTable.PackingSlipId == '';
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,372 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGJournalCreateService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGJournalCreateService
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>Main</Name>
+				<Source><![CDATA[
+    public static void Main(Args _args)
+    {
+        VendInvoiceInfoTable    VendInvoiceInfoTable;
+        FormRun                 formRun  = _args.caller();
+        FormDataSource          VendInvoiceInfoTable_ds;
+
+        VendInvoiceInfoTable_ds = formRun.dataSource(tableStr(VendInvoiceInfoTable));
+        VendInvoiceInfoTable    =  VendInvoiceInfoTable_ds.cursor();
+
+        ETGJournalCreateService::createJournal(VendInvoiceInfoTable);
+        VendInvoiceInfoTable_ds.research(true);
+
+        //VendInvoiceInfoTable           VendInvoiceInfoTable;
+        //FormRun                        formrun = sender.formRun() as formrun;
+        //FormDataSource                 VendInvoiceInfoTable_ds;
+
+        //VendInvoiceInfoTable_ds = sender.formRun().dataSource(1);
+        //VendInvoiceInfoTable =  VendInvoiceInfoTable_ds.cursor();
+
+        //ETGJournalCreateService::createJournal(VendInvoiceInfoTable);
+
+        //VendInvoiceInfoTable_ds.research(true);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createJournal</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    //[FormControlEventHandler(formControlStr(VendEditInvoice, ETGCreateJournal), FormControlEventType::Clicked)]
+    //public static void ETGCreateJournal_OnClicked(FormControl sender, FormControlEventArgs e)
+    //{
+    //    VendInvoiceInfoTable           VendInvoiceInfoTable;
+    //    FormRun                        formrun = sender.formRun() as formrun;
+    //    FormDataSource                 VendInvoiceInfoTable_ds;
+
+    //    VendInvoiceInfoTable_ds = sender.formRun().dataSource(1);
+    //    VendInvoiceInfoTable =  VendInvoiceInfoTable_ds.cursor();
+
+    //    ETGJournalCreateService::createJournal(VendInvoiceInfoTable);
+
+    //    VendInvoiceInfoTable_ds.research(true);
+    //}
+
+    public static Void createJournal(VendInvoiceInfoTable _VendInvoiceInfoTable)
+    {
+        #OCCRetryCount
+        Ledgerjournalname                          ledgerjournalname;
+        LedgerjournalTable                         LedgerjournalTable;
+        LedgerjournalTrans                         LedgerjournalTrans;
+        NumberSeq                                  numberSeq;
+        DimensionAttribute                         dimBusinessUnitAttribute , dimProfitCenterAttribute ;
+        DimensionAttributeValue                    dimAttributeBusinessUnitValue;
+        DimensionDefault                           defaultDimension;
+        DimensionAttributeValueSetItem             dimensionAttributeValueSetItem;
+        DimensionDynamicAccount                    ledgerDim;
+        Currency                                   currencydet;
+        DimensionAttributeValueSetStorage          dimStorage = new DimensionAttributeValueSetStorage();   
+        VendParameters                             VendParameters = VendParameters::find();
+        PurchTable                                 PurchTable;
+        VendInvoiceInfoLine     VendInvoiceInfoLineloop;
+        ETGACFParameters                           ETGACFParameters = ETGACFParameters::find();
+
+
+        //if(VendParameters.ETGJournalNameCreditDebitNote == '')
+        //{
+        //    throw error(strFmt('Define the Dr/Cr Note Journal Name in AP Parameter.'));
+        //}
+
+        ///CS, DLT, Abhinav - 03022025
+        if(ETGACFParameters.CreditJournalNamePurchase == '' || ETGACFParameters.DebitJournalNamePurchase == '')
+        {
+            throw error(strFmt('Define the Dr/Cr Note Journal Name in AP Parameter.'));
+        }
+        //CE
+
+        VendInvoiceInfoLine  VendInvoiceInfoLine;
+              
+        select sum(ETGActualLineAmt),sum(LineAmount) from  VendInvoiceInfoLine
+                    where   VendInvoiceInfoLine.ParmId == _VendInvoiceInfoTable.ParmId
+                    &&      VendInvoiceInfoLine.TableRefId == _VendInvoiceInfoTable.TableRefId;
+
+        if(abs(VendInvoiceInfoLine.ETGActualLineAmt)  == 0)
+        {
+           // throw error(strFmt('Dr/Cr Note Journal not created due to Total Actual Net Amount is zero'));
+        }
+
+        if( _VendInvoiceInfoTable.ETGCrDrNoteCreated == NoYes::Yes)
+        {
+            throw error(strFmt('Dr/Cr Note Journal No %1 is already created.',_VendInvoiceInfoTable.ETGJournalNum));
+        }
+
+        PurchTable = PurchTable::find(_VendInvoiceInfoTable.PurchId);
+              
+        try
+        {
+          
+            if(_VendInvoiceInfoTable.RecId)
+            {
+                if(VendInvoiceInfoLine.ETGActualLineAmt > 0)
+                {
+                    select ledgerjournalname where ledgerjournalname.JournalName ==  ETGACFParameters.CreditJournalNamePurchase;
+                }
+                else if(VendInvoiceInfoLine.ETGActualLineAmt < 0)
+                {
+                    select ledgerjournalname where ledgerjournalname.JournalName ==  ETGACFParameters.DebitJournalNamePurchase;
+                }
+                else
+                {
+                    select ledgerjournalname where ledgerjournalname.JournalName ==  VendParameters.ETGJournalNameCreditDebitNote;
+                }
+              
+                
+
+                    ttsBegin;
+                    LedgerjournalTable.clear();
+                    LedgerjournalTable.initValue();
+                    LedgerjournalTable.JournalName =  ledgerjournalname.JournalName;
+                    LedgerjournalTable.initFromLedgerJournalName();
+                    LedgerjournalTable.JournalNum  =  JournalTableData::newTable(LedgerjournalTable).nextJournalId();
+                    LedgerjournalTable.Name = 'Journal for '+_VendInvoiceInfoTable.PurchId;  
+                    LedgerjournalTable.ETGIsCrDeJournal = NoYes::Yes;
+                    LedgerjournalTable.insert();
+         
+                    if(ledgerjournalname)
+                    {                       
+
+                        numberSeq =  NumberSeq::newGetVoucherFromId((ledgerjournalname.NumberSequenceTable));
+                        LedgerjournalTrans.clear();
+                        LedgerjournalTrans.initValue();
+                        LedgerjournalTrans.Voucher      =   numberSeq.voucher();
+                        LedgerjournalTrans.JournalNum   =   LedgerjournalTable.JournalNum;
+                        LedgerjournalTrans.AccountType  =   LedgerJournalACType::Vend;
+                        LedgerjournalTrans.Company      =   curext();
+                        LedgerjournalTrans.parmAccount(_VendInvoiceInfoTable.InvoiceAccount,LedgerjournalTrans.AccountType);
+                        LedgerjournalTrans.CurrencyCode =  VendTable::find(_VendInvoiceInfoTable.InvoiceAccount).Currency;
+                        LedgerjournalTrans.TransDate    =  systemDateGet();
+                        LedgerjournalTrans.initForCurrency(LedgerjournalTable);
+                        LedgerjournalTrans.Txt          =   LedgerjournalTable.Name;
+                        LedgerjournalTrans.DefaultDimension  = PurchTable.DefaultDimension;
+                        LedgerjournalTrans.TransactionType         =   LedgerTransType::GeneralJournal;
+                        Amount CrDrNoteDiffAmtPartailGRN = VendInvoiceInfoLine.getCrDrNoteDiffAmtPartailGRN();
+                        
+                        if(VendInvoiceInfoLine.ETGActualLineAmt == 0 && CrDrNoteDiffAmtPartailGRN == 0)
+                        {
+                            throw error(strFmt('Dr/Cr Note Journal not created due to Total Actual Net Amount is zero'));
+                        }
+
+                        if(VendInvoiceInfoLine.ETGActualLineAmt > 0 )
+                        {
+                            LedgerjournalTrans.AmountCurCredit = abs(VendInvoiceInfoLine.ETGActualLineAmt);
+                        }
+                        else  if(VendInvoiceInfoLine.ETGActualLineAmt < 0 )
+                        {
+                            LedgerjournalTrans.AmountCurDebit           =  abs(VendInvoiceInfoLine.ETGActualLineAmt);
+                        }
+
+                        if(VendInvoiceInfoLine.ETGActualLineAmt == 0)
+                        {
+                            if(CrDrNoteDiffAmtPartailGRN > 0)
+                            {
+                                LedgerjournalTrans.AmountCurCredit          =  CrDrNoteDiffAmtPartailGRN;
+                            }
+                            else if(CrDrNoteDiffAmtPartailGRN < 0)
+                            {
+                                LedgerjournalTrans.AmountCurDebit           =  abs(CrDrNoteDiffAmtPartailGRN);
+                            }
+                        }
+                        
+                        LedgerjournalTrans.LedgerDimension          = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber
+                        (_VendInvoiceInfoTable.InvoiceAccount,LedgerJournalACType::Vend);
+                      
+                        LedgerjournalTrans.OffsetAccountType  =  ledgerjournalname.OffsetAccountType;// LedgerJournalACType::Ledger;
+                        //container con= conNull();
+                        //con = [''];
+                        LedgerjournalTrans.OffsetLedgerDimension = ledgerjournalname.OffsetLedgerDimension; //ETGJournalCreateService::getLedgerDimension(con, '');
+
+
+                        //CS, DLT, Abhinav 03022025
+                        //    LedgerjournalTrans.OffsetLedgerDimension = LedgerDimensionFacade::ServiceCreateLedgerDimension(LedgerjournalTrans.OffsetLedgerDimension,
+                        //                                                                                                                PurchTable.DefaultDimension);
+                    
+                        RecId ledgerDimension = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber
+                                    (ETGACFParameters.MainAccountForCrDeJournalCreationPurchase,LedgerJournalACType::Ledger);
+
+                        LedgerjournalTrans.OffsetLedgerDimension = LedgerDimensionFacade::ServiceCreateLedgerDimension(ledgerDimension, PurchTable.DefaultDimension);
+                        //CE Abhinav
+
+                        LedgerjournalTrans.OffsetDefaultDimension = PurchTable.DefaultDimension;
+                                                                                                                 
+                        LedgerjournalTrans.Approved                 = NoYes::Yes;
+                        LedgerjournalTrans.Approver                 = HcmWorker::userId2Worker(curuserid());
+                        LedgerjournalTrans.DocumentNum              = _VendInvoiceInfoTable.PurchId;
+                        LedgerjournalTrans.Invoice                  = 'I-'+_VendInvoiceInfoTable.PurchId+'-'+_VendInvoiceInfoTable.ParmId;
+                        LedgerjournalTrans.DocumentDate             = LedgerjournalTrans.Transdate;
+   
+                        LedgerjournalTrans.insert();
+
+                        if(PurchTable)
+                        {
+                            PurchTable.selectForUpdate(true);
+                            PurchTable.ETGCrDrNoteCreated = NoYes::Yes;
+                            PurchTable.ETGJournalNum = LedgerjournalTable.JournalNum;
+                            PurchTable.ETGCrDrJrnAmt =  VendInvoiceInfoLine.ETGActualLineAmt;
+                            PurchTable.doUpdate();
+                        }
+
+                    PurchLine       PurchLineupd;
+                        while select   VendInvoiceInfoLineloop
+                            where   VendInvoiceInfoLineloop.ParmId == _VendInvoiceInfoTable.ParmId
+                                &&      VendInvoiceInfoLineloop.TableRefId == _VendInvoiceInfoTable.TableRefId
+                                &&      VendInvoiceInfoLineloop.ETGActualLineAmt !=0
+                        {
+                            PurchLineupd = PurchLine::findInventTransId(VendInvoiceInfoLineloop.InventTransId);
+
+                            if(PurchLineupd.RecId)
+                            {
+                                PurchLineupd.selectForUpdate(true);
+                                PurchLineupd.ETGCrDrNoteCreated = NoYes::Yes;
+                                PurchLineupd.ETGJournalNum = LedgerjournalTable.JournalNum;
+                                PurchLineupd.ETGCrDrJrnAmt =  VendInvoiceInfoLineloop.ETGActualLineAmt;
+                                PurchLineupd.ETGActualPurchPrice = VendInvoiceInfoLineloop.ETGActualPurchPrice;
+                                PurchLineupd.doUpdate();
+                            }
+                            ///CS , DLT, Abhinav 03022025
+                            ttsbegin;
+
+                            VendInvoiceInfoLineloop.selectForUpdate(true);
+                            VendInvoiceInfoLineloop.ETGCrDrJrnAmt = abs(VendInvoiceInfoLineloop.ETGActualLineAmt);
+                            VendInvoiceInfoLineloop.ETGCrDrNoteCreated = NoYes::Yes;
+                            VendInvoiceInfoLineloop.ETGJournalNum = LedgerjournalTable.JournalNum;
+                            VendInvoiceInfoLineloop.doUpdate();
+
+                            ttscommit;
+                            //CE, DLT , Abhinav 
+
+
+                        }
+
+                        _VendInvoiceInfoTable.selectForUpdate(true);
+                        _VendInvoiceInfoTable.ETGCrDrNoteCreated = NoYes::Yes;
+                        _VendInvoiceInfoTable.ETGJournalNum = LedgerjournalTable.JournalNum;
+                        _VendInvoiceInfoTable.ETGCrDrJrnAmt =  VendInvoiceInfoLine.ETGActualLineAmt;
+                        _VendInvoiceInfoTable.doUpdate();
+
+                    }
+
+                    ttscommit;
+
+                    info(strFmt('Journal %1 Id is created.',LedgerjournalTable.JournalNum));   
+                                           
+                    //Post
+                    if(ETGACFParameters::find().EnableRateCardCrDrNoteAutoPostPurch == NoYes::Yes)
+                    {
+                        ttsbegin;
+                        LedgerJournalCheckPost jourPost;
+                        jourPost = LedgerJournalCheckPost::newLedgerJournalTable(LedgerjournalTable, NoYes::Yes);
+                        jourPost.runOperation();
+                        ttscommit;
+                    }
+                    //Post end
+
+            }
+         
+        }
+        catch(Exception::Error)
+        {
+            throw error('Payment Journal Creation Failed');
+        }
+        catch(Exception::Deadlock)
+        {
+            retry;
+        }
+        catch(Exception::UpdateConflict)
+        {
+            if(appl.ttsLevel()==0)
+            {
+                if(xSession::currentRetryCount()>=#RetryNum)
+                {
+                    throw exception::UpdateConflictNotRecovered;
+                }
+                else
+                {
+                    retry;
+                }
+            }
+            else
+            {
+                throw exception::UpdateConflict;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getLedgerDimension</Name>
+				<Source><![CDATA[
+    public static DimensionDynamicAccount getLedgerDimension(container _conData, AccountNum _accountNum)
+    {
+        int hierarchyCount;
+        int hierarchyIdx;
+        DimensionDynamicAccount ledgerRecId;
+        mainAccountNum mainAccountId = conPeek(_conData, 1);
+        MainAccount mainAccount;
+        RefRecId recordvalue;
+        DimensionAttribute dimensionAttribute;
+        DimensionAttributeValue dimensionAttributeValue;
+        DimensionSetSegmentName DimensionSet;
+        DimensionStorage dimStorage;
+        LedgerAccountContract LedgerAccountContract = new LedgerAccountContract();
+        DimensionAttributeValueContract ValueContract;
+        List valueContracts = new List(Types::Class);
+        dimensionAttributeValueCombination dimensionAttributeValueCombination;
+
+        mainAccount = MainAccount::findByMainAccountId(mainAccountId);
+        recordvalue = DimensionHierarchy::getAccountStructure(mainAccount.RecId,Ledger::current());
+        hierarchyCount = DimensionHierarchy::getLevelCount(recordvalue);
+        DimensionSet = DimensionHierarchyLevel::getDimensionHierarchyLevelNames(recordvalue);
+        for(hierarchyIdx = 1;hierarchyIdx<=hierarchyCount;hierarchyIdx++)
+        {
+            if(hierarchyIdx == 1)
+            {
+                continue;
+            }
+            dimensionAttribute = DimensionAttribute::findByLocalizedName(DimensionSet[hierarchyIdx],false, CompanyInfo::find().LanguageId);
+          
+
+            if(dimensionAttribute)
+            {
+                dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute,conPeek(_conData,hierarchyIdx));
+                if(dimensionAttributeValue)
+                {
+                    ValueContract = new DimensionAttributeValueContract();
+                    ValueContract.parmName(dimensionAttribute.Name) ;
+                    ValueContract.parmValue(dimensionAttributeValue.CachedDisplayValue);
+                    valueContracts.addEnd(ValueContract);
+                }
+            }
+        }
+        LedgerAccountContract.parmMainAccount(mainAccountId);
+        LedgerAccountContract.parmValues(valueContracts);
+        dimStorage = DimensionServiceProvider::buildDimensionStorageForLedgerAccount(LedgerAccountContract);
+        dimensionAttributeValueCombination = DimensionAttributeValueCombination::find(dimStorage.save());
+        ledgerRecId = dimensionAttributeValueCombination.RecId;
+        return ledgerRecId;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

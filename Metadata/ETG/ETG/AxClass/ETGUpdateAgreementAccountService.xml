@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGUpdateAgreementAccountService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+using System.IO;
+using OfficeOpenXml;
+using OfficeOpenXml.ExcelPackage;
+
+class ETGUpdateAgreementAccountService
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>processExcel</Name>
+				<Source><![CDATA[
+    public static void processExcel(System.IO.Stream _fileStream, ETGAgreementUpdateModule _module)
+    {
+        ExcelPackage                package;
+        ExcelWorksheet              worksheet;
+        int                         rowCount, i;
+        str                         agreementId, accountNum, thirdColAccountNum;
+
+        try
+        {
+            package = new ExcelPackage(_fileStream);
+            worksheet = package.get_Workbook().get_Worksheets().get_Item(1); // Read the first sheet
+            rowCount = worksheet.get_Dimension().get_End().get_Row();
+
+            // Row 1 is header.
+            // Purchase uses: Contract(1), Account(2), SellerAccountNum(3).
+            // Sales uses: Contract(1), Account(2), BuyerAccountNum(3).
+            for (i = 2; i <= rowCount; i++)
+            {
+                agreementId        = any2Str(worksheet.get_Cells().get_Item(i, 1).get_Value());
+                accountNum         = any2Str(worksheet.get_Cells().get_Item(i, 2).get_Value());
+                thirdColAccountNum = any2Str(worksheet.get_Cells().get_Item(i, 3).get_Value());
+
+                if (agreementId && accountNum)
+                {
+                    if (_module == ETGAgreementUpdateModule::Purchase)
+                    {
+                        ETGUpdateAgreementAccountService::updatePurchAgreement(agreementId, accountNum, thirdColAccountNum);
+                    }
+                    else
+                    {
+                        ETGUpdateAgreementAccountService::updateSalesAgreement(agreementId, accountNum, thirdColAccountNum);
+                    }
+                }
+            }
+            
+            info("Excel processing completed.");
+        }
+        catch (Exception::Error)
+        {
+            error("An error occurred while reading the Excel file. Please ensure it has 3 columns (Contract, Account, and Seller/Buyer AccountNum).");
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updatePurchAgreement</Name>
+				<Source><![CDATA[
+    private static void updatePurchAgreement(PurchAgreementId _agreementId, VendAccount _newVendorAccount, str _sellerAccountNum)
+    {
+        PurchAgreementHeader        purchAgreementHeader;
+        PurchAgreementHeaderDefault purchAgreementHeaderDefault;
+        VendTable                   vendTable;
+        ETG_PurchaseAgreementHeader etgPurchaseAgreementHeader;
+
+        ttsbegin;
+        select forupdate purchAgreementHeader where purchAgreementHeader.PurchNumberSequence == _agreementId;
+
+        if (purchAgreementHeader &&
+           (purchAgreementHeader.AgreementState == AgreementState::OnHold ||
+            purchAgreementHeader.AgreementState == AgreementState::Effective))
+        {
+            vendTable = VendTable::find(_newVendorAccount);
+            
+            purchAgreementHeader.VendAccount = _newVendorAccount;
+            purchAgreementHeader.doUpdate();
+            
+            // Update the custom ETG table ONLY if the record already exists
+            if (_sellerAccountNum)
+            {
+                select forupdate etgPurchaseAgreementHeader
+                    where etgPurchaseAgreementHeader.PurchAgreementId == purchAgreementHeader.PurchNumberSequence;
+
+                if (etgPurchaseAgreementHeader.RecId)
+                {
+                    etgPurchaseAgreementHeader.SellerAccountNum = _sellerAccountNum;
+                    
+                    // Purchase - Auto fetch address
+                    etgPurchaseAgreementHeader.SellerDeliveryAddress = VendTable::find(_sellerAccountNum).postalAddress().RecId;
+                    
+                    etgPurchaseAgreementHeader.doUpdate();
+                }
+            }
+
+            select forupdate purchAgreementHeaderDefault where purchAgreementHeaderDefault.PurchaseAgreementHeader == purchAgreementHeader.RecId;
+            if (purchAgreementHeaderDefault)
+            {
+                purchAgreementHeaderDefault.VendorInvoiceAccount = vendTable.InvoiceAccount ? vendTable.InvoiceAccount : vendTable.AccountNum;
+                purchAgreementHeaderDefault.doUpdate();
+            }
+            
+            info(strFmt("Updated Purch Agreement %1 with Vendor %2", _agreementId, _newVendorAccount));
+        }
+        else
+        {
+            warning(strFmt("Purch Agreement %1 not found or not in OnHold/Effective status.", _agreementId));
+        }
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateSalesAgreement</Name>
+				<Source><![CDATA[
+    private static void updateSalesAgreement(SalesAgreementId _agreementId, CustAccount _newCustAccount, str _buyerAccountNum)
+    {
+        SalesAgreementHeader        salesAgreementHeader;
+        SalesAgreementHeaderDefault salesAgreementHeaderDefault;
+        CustTable                   custTable;
+        ETG_SalesAgreementHeader    etgSalesAgreementHeader;
+
+        ttsbegin;
+        select forupdate salesAgreementHeader where salesAgreementHeader.SalesNumberSequence == _agreementId;
+
+        if (salesAgreementHeader &&
+           (salesAgreementHeader.AgreementState == AgreementState::OnHold ||
+            salesAgreementHeader.AgreementState == AgreementState::Effective))
+        {
+            custTable = CustTable::find(_newCustAccount);
+        
+            // 1. Update main Customer Account
+            salesAgreementHeader.CustAccount = _newCustAccount;
+            salesAgreementHeader.doUpdate();
+            
+            // Update the custom ETG table ONLY if the record already exists
+            if (_buyerAccountNum)
+            {
+                select forupdate etgSalesAgreementHeader
+                    where etgSalesAgreementHeader.SalesAgreementId == salesAgreementHeader.SalesNumberSequence;
+
+                if (etgSalesAgreementHeader.RecId)
+                {
+                    etgSalesAgreementHeader.BuyerAccountNum = _buyerAccountNum;
+
+                    // Sales - Auto fetch address mapping the same way Purchase does, but using CustTable since it's a Buyer
+                    etgSalesAgreementHeader.BuyerDeliveryAddress = CustTable::find(_buyerAccountNum).postalAddress().RecId;
+                    
+                    etgSalesAgreementHeader.doUpdate();
+                }
+            }
+
+            // 2. Update Invoice Account on the Default table
+            select forupdate salesAgreementHeaderDefault
+            where salesAgreementHeaderDefault.SalesAgreementHeader == salesAgreementHeader.RecId;
+            
+            if (salesAgreementHeaderDefault)
+            {
+                salesAgreementHeaderDefault.CustomerInvoiceAccount = custTable.InvoiceAccount ? custTable.InvoiceAccount : custTable.AccountNum;
+                salesAgreementHeaderDefault.doUpdate();
+            }
+        
+            info(strFmt("Updated Sales Agreement %1 with Customer %2", _agreementId, _newCustAccount));
+        }
+        else
+        {
+            warning(strFmt("Sales Agreement %1 not found or not in OnHold/Effective status.", _agreementId));
+        }
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

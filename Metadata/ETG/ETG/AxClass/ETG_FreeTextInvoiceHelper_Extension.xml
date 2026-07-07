@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_FreeTextInvoiceHelper_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classstr(CustPostInvoiceJob))]
+final class ETG_FreeTextInvoiceHelper_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args args)
+    {
+        if(ETG_Parameters::find().ETGIsDimensionValidationRequired == NoYes::Yes)
+        {
+            DefaultDimensionView            defaultDimView;
+            DimensionAttributeSetItem       dimAttrSetItem;
+            DimensionAttribute              dimAttribute;
+            CustInvoiceTable                custInvoiceTable;
+            DimensionEnumeration            dimensionSetId = DimensionCache::getDimensionAttributeSetForLedger();
+
+            select firstonly DefaultDimension from custInvoiceTable
+            where custInvoiceTable.RecId == args.record().RecId;
+
+            select firstonly RecId from dimAttrSetItem
+                where  dimAttrSetItem.DimensionAttributeSet == dimensionSetId
+            join Name from dimAttribute
+                where dimAttribute.RecId == dimAttrSetItem.DimensionAttribute
+                    && dimAttribute.Type != DimensionAttributeType::MainAccount
+            notexists join defaultDimView
+                where defaultDimView.Name ==  dimAttribute.Name
+                    && defaultDimView.DefaultDimension == custInvoiceTable.DefaultDimension;
+        
+            if(dimAttrSetItem)
+            {
+                if(Box::yesNoAxaptaForm(strFmt('Few financial dimensions are not filled in. Do you want to update? '), DialogButton::Yes) == DialogButton::Yes)
+                {
+                    throw warning('Update has been canceled');
+                }
+            }
+        }
+
+        next main(args);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

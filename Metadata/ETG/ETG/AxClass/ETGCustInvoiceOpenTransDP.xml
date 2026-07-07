@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCustInvoiceOpenTransDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// <c>ETGCustInvoiceOpenTransDP</c>is a Data provider class to fetch Customer Open Invioces of project ETGInvoiceDueNotification
+/// Created by Asif on 11/02/2026
+/// Project: ETGInvoiceDueNotification
+/// </summary>
+[SRSReportQueryAttribute(QueryStr(ETGCustOpenInvoices))]
+internal final class ETGCustInvoiceOpenTransDP extends SrsReportDataProviderPreProcessTempDB
+{
+    ETGCustInvoiceOpenTransTemp custInvOpenTransTmp;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGCustInvoiceOpenTransTemp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETGCustInvoiceOpenTransTemp))]
+    public ETGCustInvoiceOpenTransTemp getETGCustInvoiceOpenTransTemp()
+    {
+        select custInvOpenTransTmp;
+        return custInvOpenTransTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        Query                   query = this.parmQuery();
+        QueryRun                queryRun;
+        QueryBuildDataSource    qbdsCustTrans;
+        QueryBuildRange         qbrDueDate;
+        CustTrans               custTrans;
+        CustTransOpen           custTransOpen;
+        CustTable               custTable;
+
+        ETGCanadaParameters canadaParameters = ETGCanadaParameters::find();
+
+        int  lookAheadDays  = canadaParameters.ETGLookAheadDays;
+        date today          = systemDateGet();
+        date fromDate;
+        date toDate;
+
+        if (lookAheadDays > 0)
+        {
+            fromDate = today;
+            toDate   = today + lookAheadDays;
+        }
+        else if (lookAheadDays < 0)
+        {
+            fromDate = today + lookAheadDays;
+            toDate   = today;
+        }
+        else
+        {
+            fromDate = today;
+            toDate   = today;
+        }
+
+        qbdsCustTrans = query.dataSourceTable(tableNum(CustTrans));
+
+        qbrDueDate = qbdsCustTrans.addRange(fieldNum(CustTrans, DueDate));
+        qbrDueDate.value(SysQuery::range(fromDate, toDate));
+
+        queryRun = new QueryRun(query);
+
+        while (queryRun.next())
+        {
+            custTrans       = queryRun.get(tableNum(CustTrans));
+            custTable       = queryRun.get(tableNum(CustTable));
+
+            CustTrans   locCustTrans;
+
+            select locCustTrans
+                where locCustTrans.Voucher == custTrans.Voucher;
+
+            real invoiceAmount  = custTrans.AmountCur;
+            real amountDue      = locCustTrans.remainAmountCur();
+
+            custInvOpenTransTmp.clear();
+            custInvOpenTransTmp.InvoiceId      = custTrans.Invoice;
+            custInvOpenTransTmp.InvoiceAccount = custTrans.AccountNum;
+            custInvOpenTransTmp.InvoiceDate    = custTrans.TransDate;
+            custInvOpenTransTmp.DueDate        = custTrans.DueDate;
+            custInvOpenTransTmp.InvoiceAmount  = invoiceAmount * -1;
+            custInvOpenTransTmp.ETGAmountDue   = amountDue * -1;
+            custInvOpenTransTmp.ETGDaysToDue   = custTrans.DueDate - today;
+            custInvOpenTransTmp.CurrencyCode   = custTrans.CurrencyCode;
+            custInvOpenTransTmp.Party          = custTable.name();
+            custInvOpenTransTmp.insert();
+
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

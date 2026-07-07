@@ -1,0 +1,470 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_ReleaseOrder</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_ReleaseOrder
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>createSalesTable</Name>
+				<Source><![CDATA[
+    public static SalesTable createSalesTable(SalesAgreementHeader _salesAgreementHeader,PurchId _purchId)
+    {        
+        ETG_SalesAgreementHeader    salesAgreementHeaderTrade;
+        SalesAgreementHeaderHistory agreementHeaderHistory;
+        SalesTable                  salesTable;
+        NumberSeq                   numberSeq;
+      
+        try
+        {
+            select firstonly ConfirmationNumber,SalesNumberSequence from agreementHeaderHistory
+                order by agreementHeaderHistory.ConfirmationNumber desc
+                    where agreementHeaderHistory.SalesNumberSequence == _salesAgreementHeader.SalesNumberSequence
+            join salesAgreementHeaderTrade
+                where salesAgreementHeaderTrade.SalesAgreementId == agreementHeaderHistory.SalesNumberSequence;
+           
+            salesTable.clear();
+            numberSeq = NumberSeq::newGetNum(SalesParameters::numRefSalesId());
+            numberSeq.used();
+            salesTable.SalesId = numberSeq.num();          
+            salesTable.initValue();
+          
+            salesTable.CustAccount = _salesAgreementHeader.CustAccount;
+            salesTable.initFromCustTable();
+            salesTable.initFromSalesAgreementHeader(_salesAgreementHeader,true);
+            salesTable.ETG_TPPurchId                  = _purchId;
+            salesTable.ETG_IsThirdParty               = NoYes::Yes;
+            salesTable.ETG_SalesAgreementIdComfirmVer = _salesAgreementHeader.SalesNumberSequence + "-" + agreementHeaderHistory.ConfirmationNumber;
+            salesTable.DefaultDimension = _salesAgreementHeader.DefaultDimension;
+
+            salesTable.insert();
+
+            if (salesTable.DefaultDimension != _salesAgreementHeader.DefaultDimension)
+            {
+                ttsbegin;
+                salesTable.selectForUpdate(true);
+                salesTable.DefaultDimension = _salesAgreementHeader.DefaultDimension;
+                salesTable.doUpdate();
+                ttscommit;
+            }
+
+            info(strFmt('TP sales order %1 has been created successfully',salesTable.SalesId));
+            ETG_ReleaseOrder::createSalesTrade(salesTable.SalesId,salesAgreementHeaderTrade);
+            if(salesTable.InterCompanyPurchId)
+            {
+                ETG_ReleaseOrder::intercompanyPurchTrade(salesTable);
+            }
+                      
+        }
+        catch(Exception::Error)
+        {
+            ttsabort;
+        }
+
+        return salesTable;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createSalesTrade</Name>
+				<Source><![CDATA[
+    public static void createSalesTrade(SalesId _salesId,ETG_SalesAgreementHeader _salesAgreementHeaderTrade)
+    {
+        ETG_SalesTableTrade            salesTableTrade;
+
+        salesTableTrade.SalesId                           = _salesId;
+        salesTableTrade.AdvanceDue                        = _salesAgreementHeaderTrade.AdvanceDue;
+        salesTableTrade.BuyerAccountNum                   = _salesAgreementHeaderTrade.BuyerAccountNum;
+        salesTableTrade.BuyerDeliveryAddress              = _salesAgreementHeaderTrade.BuyerDeliveryAddress;
+        salesTableTrade.BuyerBank                         = _salesAgreementHeaderTrade.BuyerBank;
+        salesTableTrade.SellerAccountNum                  = _salesAgreementHeaderTrade.SellerAccountNum;
+        salesTableTrade.SellerBank                        = _salesAgreementHeaderTrade.SellerBank;
+        salesTableTrade.SellerDeliveryAddress             = _salesAgreementHeaderTrade.SellerDeliveryAddress;
+        salesTableTrade.Consignee                         = _salesAgreementHeaderTrade.Consignee;
+        salesTableTrade.CustomImport                      = _salesAgreementHeaderTrade.CustomImport;
+        salesTableTrade.DeliveryDescription               = _salesAgreementHeaderTrade.DeliveryDescription;
+        salesTableTrade.FromDatePort                      = _salesAgreementHeaderTrade.FromDatePort;
+        salesTableTrade.Future                            = _salesAgreementHeaderTrade.Future;
+        salesTableTrade.ImportDate                        = _salesAgreementHeaderTrade.ImportDate;
+        salesTableTrade.Notes                             = _salesAgreementHeaderTrade.Notes;
+        salesTableTrade.Notifytodifferentparty            = _salesAgreementHeaderTrade.Notifytodifferentparty;
+        salesTableTrade.Number                            = _salesAgreementHeaderTrade.Number;
+        salesTableTrade.OnAccountOf                       = _salesAgreementHeaderTrade.OnAccountOf;
+        salesTableTrade.PortOfDischarge                   = _salesAgreementHeaderTrade.PortOfDischarge;
+        salesTableTrade.PortOfLoading                     = _salesAgreementHeaderTrade.PortOfLoading;
+        salesTableTrade.PricingFromDate                   = _salesAgreementHeaderTrade.PricingFromDate;
+        salesTableTrade.PricingMonth                      = _salesAgreementHeaderTrade.PricingMonth;
+        salesTableTrade.PricingTodate                     = _salesAgreementHeaderTrade.PricingTodate;
+        salesTableTrade.TermPaymDescription               = _salesAgreementHeaderTrade.TermPaymDescription;
+        salesTableTrade.TermsOfDelDescription             = _salesAgreementHeaderTrade.TermsOfDelDescription;
+        salesTableTrade.Through                           = _salesAgreementHeaderTrade.Through;
+        salesTableTrade.ToDatePort                        = _salesAgreementHeaderTrade.ToDatePort;
+        salesTableTrade.Buyersecondarybank                = _salesAgreementHeaderTrade.Buyersecondarybank;
+        salesTableTrade.Sellersecondarybank               = _salesAgreementHeaderTrade.Sellersecondarybank;
+        salesTableTrade.PortOfDischargeDesc               = _salesAgreementHeaderTrade.PortOfDischargeDesc;
+        salesTableTrade.PortOfLoadingDesc                 = _salesAgreementHeaderTrade.PortOfLoadingDesc;
+        salesTableTrade.Name                              = _salesAgreementHeaderTrade.Name;
+        salesTableTrade.Address                           = _salesAgreementHeaderTrade.Address;
+        salesTableTrade.PackingGroup                      = _salesAgreementHeaderTrade.PackingGroup;
+        salesTableTrade.QuantityConditions                = _salesAgreementHeaderTrade.QuantityConditions;
+        salesTableTrade.ShipperBuyer                      = _salesAgreementHeaderTrade.ShipperBuyer;
+        salesTableTrade.PermitNumber                      = _salesAgreementHeaderTrade.PermitNumber;
+        salesTableTrade.insert();       
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createPurchTrade</Name>
+				<Source><![CDATA[
+    public static void createPurchTrade(PurchId _purchId,ETG_PurchaseAgreementHeader  _purchAgreementTrade)
+    {
+        ETG_PurchTableTrade              purchTrade;
+       
+        if(_purchAgreementTrade)
+        {
+            purchTrade.PurchId                           = _purchId;
+            purchTrade.AdvanceDue                        = _purchAgreementTrade.AdvanceDue;
+            purchTrade.BuyerAccountNum                   = _purchAgreementTrade.BuyerAccountNum;
+            purchTrade.BuyerDeliveryAddress              = _purchAgreementTrade.BuyerDeliveryAddress;
+            purchTrade.BuyerBank                         = _purchAgreementTrade.BuyerBank;
+            purchTrade.SellerAccountNum                  = _purchAgreementTrade.SellerAccountNum;
+            purchTrade.SellerBank                        = _purchAgreementTrade.SellerBank;
+            purchTrade.SellerDeliveryAddress             = _purchAgreementTrade.SellerDeliveryAddress;
+            purchTrade.Consignee                         = _purchAgreementTrade.Consignee;
+            purchTrade.CustomImport                      = _purchAgreementTrade.CustomImport;
+            purchTrade.DeliveryDescription               = _purchAgreementTrade.DeliveryDescription;
+            purchTrade.FromDatePort                      = _purchAgreementTrade.FromDatePort;
+            purchTrade.Future                            = _purchAgreementTrade.Future;
+            purchTrade.ImportDate                        = _purchAgreementTrade.ImportDate;
+            purchTrade.Notes                             = _purchAgreementTrade.Notes;
+            purchTrade.Notifytodifferentparty            = _purchAgreementTrade.Notifytodifferentparty;
+            purchTrade.Number                            = _purchAgreementTrade.Number;
+            purchTrade.OnAccountOf                       = _purchAgreementTrade.OnAccountOf;
+            purchTrade.PortOfDischarge                   = _purchAgreementTrade.PortOfDischarge;
+            purchTrade.PortOfLoading                     = _purchAgreementTrade.PortOfLoading;
+            purchTrade.PricingFromDate                   = _purchAgreementTrade.PricingFromDate;
+            purchTrade.PricingMonth                      = _purchAgreementTrade.PricingMonth;
+            purchTrade.PricingTodate                     = _purchAgreementTrade.PricingTodate;
+            purchTrade.TermPaymDescription               = _purchAgreementTrade.TermPaymDescription;
+            purchTrade.TermsOfDelDescription             = _purchAgreementTrade.TermsOfDelDescription;
+            purchTrade.Through                           = _purchAgreementTrade.Through;
+            purchTrade.ToDatePort                        = _purchAgreementTrade.ToDatePort;
+            purchTrade.BuyerSecondaryBank                = _purchAgreementTrade.BuyerSecondaryBank;
+            purchTrade.SellerSecondaryBank               = _purchAgreementTrade.SellerSecondaryBank;
+            purchTrade.PortOfDischargeDesc               = _purchAgreementTrade.PortOfDischargeDesc;
+            purchTrade.PortOfLoadingDesc                 = _purchAgreementTrade.PortOfLoadingDesc;
+            purchTrade.Name                              = _purchAgreementTrade.Name;
+            purchTrade.Address                           = _purchAgreementTrade.Address;
+            purchTrade.PackingGroup                      = _purchAgreementTrade.PackingGroup;
+            purchTrade.QuantityConditions                = _purchAgreementTrade.QuantityConditions;
+            purchTrade.ShipperBuyer                      = _purchAgreementTrade.ShipperBuyer;
+            purchTrade.PermitNumber                      = _purchAgreementTrade.PermitNumber;
+            purchTrade.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createSalesLine</Name>
+				<Source><![CDATA[
+    public static SalesLine createSalesLine(AgreementLineQuantityCommitment _agreementLine,PurchLine _purchLine)
+    {
+        SalesLine               salesLine;
+        SalesTable              salesTable = SalesTable::find(_purchLine.purchTable().ETG_TPSalesId);
+
+        salesLine.SalesId       = salesTable.SalesId;
+        salesLine.initFromSalesTable(salesTable);
+        salesLine.ItemId            = _agreementLine.ItemId;
+        salesLine.initFromItemOrCategory(salesLine.ItemId,0,'',false);       
+        salesLine.initFromAgreementLine(_agreementLine);
+        salesLine.SalesQty              = _purchLine.PurchQty;
+        salesLine.QtyOrdered            = salesLine.calcQtyOrdered(salesLine.SalesQty);
+        salesLine.ETG_TPInventTransId   = _purchLine.InventTransId;
+        salesLine.MatchingAgreementLine = _agreementLine.RecId;
+
+        if(ETG_Parameters::find().ETGIsAutoMarking)
+
+        {
+            salesLine.InventRefTransId        = _purchLine.InventTransId;
+            salesLine.InventRefId             = _purchLine.PurchId;
+        }
+        salesLine.DefaultDimension = _agreementLine.DefaultDimension;
+      
+        salesLine.createLine(NoYes::No,
+                             NoYes::No,
+                             NoYes::No,
+                             NoYes::Yes,
+                             NoYes::No,
+                             NoYes::No
+                            );
+        if(salesLine.InterCompanyInventTransId && salesLine.InventRefTransId)
+        {
+            salesLine.InventRefTransId        = '';
+            salesLine.InventRefId             = '';
+            salesLine.doUpdate();
+        }
+        if (salesLine.DefaultDimension != _agreementLine.DefaultDimension)
+        {
+            ttsbegin;
+            salesLine.selectForUpdate(true);
+            salesLine.DefaultDimension = _agreementLine.DefaultDimension;
+            salesLine.doUpdate();
+            ttscommit;
+        }
+
+        return salesLine;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createPurchTable</Name>
+				<Source><![CDATA[
+    public static PurchTable createPurchTable(PurchAgreementHeader  _purchAgreementHeader,SalesId _salesId)
+    {
+        ETG_PurchaseAgreementHeader     purchAgreementHeaderTrade;
+        PurchAgreementHeaderHistory     agreementHeaderHistory;
+        PurchTable                      purchTable;
+        VendTable                       vendTable;
+        NumberSeq                       numberSeq;
+       
+        try
+        {
+            select firstonly ConfirmationNumber,PurchNumberSequence from agreementHeaderHistory
+                order by agreementHeaderHistory.ConfirmationNumber desc
+                    where agreementHeaderHistory.PurchNumberSequence == _purchAgreementHeader.PurchNumberSequence
+            join purchAgreementHeaderTrade
+                where purchAgreementHeaderTrade.PurchAgreementId == agreementHeaderHistory.PurchNumberSequence;
+           
+            purchTable.clear();
+            numberSeq = NumberSeq::newGetNum(PurchParameters::numRefPurchId());
+            numberSeq.used();
+            purchTable.PurchId = numberSeq.num();
+           
+            purchTable.initValue();
+            vendTable               = VendTable::find(_purchAgreementHeader.VendAccount);
+            purchTable.OrderAccount = _purchAgreementHeader.VendAccount;
+            purchTable.initFromVendTable(vendTable);
+            purchTable.initFromPurchAgreementHeader(_purchAgreementHeader,true,true);
+            purchTable.ETG_TPSalesId                    = _salesId;
+            purchTable.ETG_IsThirdParty                 = NoYes::Yes;
+            purchTable.ETG_AgreementConfirmationVersion = _purchAgreementHeader.PurchNumberSequence + "-" + agreementHeaderHistory.ConfirmationNumber;
+            purchTable.DefaultDimension = _purchAgreementHeader.DefaultDimension;
+
+            purchTable.insert();
+            info(strFmt('TP purchase order %1 has been created successfully',purchTable.PurchId));
+            ETG_ReleaseOrder::createPurchTrade(purchTable.PurchId,purchAgreementHeaderTrade);
+
+            if(purchTable.InterCompanySalesId)
+            {
+                ETG_ReleaseOrder::intercompanySalesTrade(purchTable);
+            }
+                      
+        }
+        catch(Exception::Error)
+        {
+            ttsabort;
+        }
+
+        return purchTable;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createPurchLine</Name>
+				<Source><![CDATA[
+    public static PurchLine createPurchLine(AgreementLineQuantityCommitment _agreementLine,SalesLine _salesLine)
+    {
+        PurchLine               purchLine;    
+        PurchTable              purchTable = PurchTable::find(_salesLine.salesTable().ETG_TPPurchId);
+
+        purchLine.PurchId       = purchTable.PurchId;
+        purchLine.initFromPurchTable(purchTable);
+
+        purchLine.ItemId            = _agreementLine.ItemId; 
+       // purchLine.initFromItemOrCategory( purchLine.ItemId,0,'',false,false);
+        purchLine.itemIdChanged();
+        purchLine.initFromAgreementLine(_agreementLine);
+        purchLine.PurchQty          = _salesLine.SalesQty;       
+        purchLine.QtyOrdered        = purchLine.calcQtyOrdered(purchLine.PurchQty);
+        purchLine.VariantId         = InventDimCombination::findByInventDim(purchLine.ItemId, purchLine.inventDim()).RetailVariantId;
+       
+        purchLine.ETG_TPInventTransId     = _salesLine.InventTransId;      
+        if(ETG_Parameters::find().ETGIsAutoMarking)
+        {
+            purchLine.InventRefTransId        = _salesLine.InventTransId;
+            purchLine.InventRefId             = _salesLine.SalesId;
+        }
+       
+        purchLine.MatchingAgreementLine   = _agreementLine.RecId;
+        purchLine.DefaultDimension = _agreementLine.DefaultDimension;
+        purchLine.createLine(NoYes::Yes,
+                             NoYes::No,
+                             NoYes::No,
+                             NoYes::Yes,
+                             NoYes::No,
+                             NoYes::No);
+
+        if(purchLine.InterCompanyInventTransId &&  purchLine.InventRefTransId)
+        {
+            purchLine.InventRefTransId        = '';
+            purchLine.InventRefId             = '';
+            purchLine.doUpdate();
+        }
+
+        if (purchLine.DefaultDimension != _agreementLine.DefaultDimension)
+        {
+            ttsbegin;
+            purchLine.selectForUpdate(true);
+            purchLine.DefaultDimension = _agreementLine.DefaultDimension;
+            purchLine.doUpdate();
+            ttscommit;
+        }
+
+        return purchLine;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>intercompanySalesTrade</Name>
+				<Source><![CDATA[
+    public static void intercompanySalesTrade(PurchTable _purchTable)
+    {
+        ETG_SalesTableTrade             salesTableTrade;
+        ETG_SalesAgreementHeader        salesTradeAgreementHeader;
+        AgreementReference              agreementRef;
+        SalesAgreementHeader            salesAgreementHeader;
+        
+        select firstonly DerivedAgreement from agreementRef
+            where agreementRef.SourceAgreement == _purchTable.MatchingAgreement;
+
+        changecompany(_purchTable.InterCompanyCompanyId)
+        {
+            select firstonly SalesNumberSequence from salesAgreementHeader
+                where salesAgreementHeader.RecId == agreementRef.DerivedAgreement
+            join salesTradeAgreementHeader
+                where salesTradeAgreementHeader.SalesAgreementId == salesAgreementHeader.SalesNumberSequence;
+
+            if(salesTradeAgreementHeader)
+            {
+                salesTableTrade.SalesId                           = _purchTable.InterCompanySalesId;
+                salesTableTrade.AdvanceDue                        = salesTradeAgreementHeader.AdvanceDue;
+                salesTableTrade.BuyerAccountNum                   = salesTradeAgreementHeader.BuyerAccountNum;
+                salesTableTrade.BuyerDeliveryAddress              = salesTradeAgreementHeader.BuyerDeliveryAddress;
+                salesTableTrade.BuyerBank                         = salesTradeAgreementHeader.BuyerBank;
+                salesTableTrade.SellerAccountNum                  = salesTradeAgreementHeader.SellerAccountNum;
+                salesTableTrade.SellerBank                        = salesTradeAgreementHeader.SellerBank;
+                salesTableTrade.SellerDeliveryAddress             = salesTradeAgreementHeader.SellerDeliveryAddress;
+                salesTableTrade.Consignee                         = salesTradeAgreementHeader.Consignee;
+                salesTableTrade.CustomImport                      = salesTradeAgreementHeader.CustomImport;
+                salesTableTrade.DeliveryDescription               = salesTradeAgreementHeader.DeliveryDescription;
+                salesTableTrade.FromDatePort                      = salesTradeAgreementHeader.FromDatePort;
+                salesTableTrade.Future                            = salesTradeAgreementHeader.Future;
+                salesTableTrade.ImportDate                        = salesTradeAgreementHeader.ImportDate;
+                salesTableTrade.Notes                             = salesTradeAgreementHeader.Notes;
+                salesTableTrade.Notifytodifferentparty            = salesTradeAgreementHeader.Notifytodifferentparty;
+                salesTableTrade.Number                            = salesTradeAgreementHeader.Number;
+                salesTableTrade.OnAccountOf                       = salesTradeAgreementHeader.OnAccountOf;
+                salesTableTrade.PortOfDischarge                   = salesTradeAgreementHeader.PortOfDischarge;
+                salesTableTrade.PortOfLoading                     = salesTradeAgreementHeader.PortOfLoading;
+                salesTableTrade.PricingFromDate                   = salesTradeAgreementHeader.PricingFromDate;
+                salesTableTrade.PricingMonth                      = salesTradeAgreementHeader.PricingMonth;
+                salesTableTrade.PricingTodate                     = salesTradeAgreementHeader.PricingTodate;
+                salesTableTrade.TermPaymDescription               = salesTradeAgreementHeader.TermPaymDescription;
+                salesTableTrade.TermsOfDelDescription             = salesTradeAgreementHeader.TermsOfDelDescription;
+                salesTableTrade.Through                           = salesTradeAgreementHeader.Through;
+                salesTableTrade.ToDatePort                        = salesTradeAgreementHeader.ToDatePort;
+                salesTableTrade.Buyersecondarybank                = salesTradeAgreementHeader.Buyersecondarybank;
+                salesTableTrade.Sellersecondarybank               = salesTradeAgreementHeader.Sellersecondarybank;
+                salesTableTrade.PortOfDischargeDesc               = salesTradeAgreementHeader.PortOfDischargeDesc;
+                salesTableTrade.PortOfLoadingDesc                 = salesTradeAgreementHeader.PortOfLoadingDesc;
+                salesTableTrade.Name                              = salesTradeAgreementHeader.Name;
+                salesTableTrade.Address                           = salesTradeAgreementHeader.Address;
+                salesTableTrade.PackingGroup                      = salesTradeAgreementHeader.PackingGroup;
+                salesTableTrade.QuantityConditions                = salesTradeAgreementHeader.QuantityConditions;
+                salesTableTrade.ShipperBuyer                      = salesTradeAgreementHeader.ShipperBuyer;
+                salesTableTrade.PermitNumber                      = salesTradeAgreementHeader.PermitNumber;
+                salesTableTrade.insert();
+            }          
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>intercompanyPurchTrade</Name>
+				<Source><![CDATA[
+    public static void intercompanyPurchTrade(SalesTable _salesTable)
+    {
+        ETG_PurchTableTrade             purchTrade;
+        ETG_PurchaseAgreementHeader     purchAgreementTrade;
+        AgreementReference              agreementRef;
+        PurchAgreementHeader            purchAgreementHeader;
+        
+        select firstonly DerivedAgreement from agreementRef
+            where agreementRef.SourceAgreement == _salesTable.MatchingAgreement;
+
+        changecompany(_salesTable.InterCompanyCompanyId)
+        {
+            select firstonly PurchNumberSequence from purchAgreementHeader
+                where purchAgreementHeader.RecId == agreementRef.DerivedAgreement
+            join purchAgreementTrade
+                where purchAgreementTrade.PurchAgreementId == purchAgreementHeader.PurchNumberSequence;
+
+            if(purchAgreementTrade)
+            {
+                purchTrade.PurchId                           = _salesTable.InterCompanyPurchId;
+                purchTrade.AdvanceDue                        = purchAgreementTrade.AdvanceDue;
+                purchTrade.BuyerAccountNum                   = purchAgreementTrade.BuyerAccountNum;
+                purchTrade.BuyerDeliveryAddress              = purchAgreementTrade.BuyerDeliveryAddress;
+                purchTrade.BuyerBank                         = purchAgreementTrade.BuyerBank;
+                purchTrade.SellerAccountNum                  = purchAgreementTrade.SellerAccountNum;
+                purchTrade.SellerBank                        = purchAgreementTrade.SellerBank;
+                purchTrade.SellerDeliveryAddress             = purchAgreementTrade.SellerDeliveryAddress;
+                purchTrade.Consignee                         = purchAgreementTrade.Consignee;
+                purchTrade.CustomImport                      = purchAgreementTrade.CustomImport;
+                purchTrade.DeliveryDescription               = purchAgreementTrade.DeliveryDescription;
+                purchTrade.FromDatePort                      = purchAgreementTrade.FromDatePort;
+                purchTrade.Future                            = purchAgreementTrade.Future;
+                purchTrade.ImportDate                        = purchAgreementTrade.ImportDate;
+                purchTrade.Notes                             = purchAgreementTrade.Notes;
+                purchTrade.Notifytodifferentparty            = purchAgreementTrade.Notifytodifferentparty;
+                purchTrade.Number                            = purchAgreementTrade.Number;
+                purchTrade.OnAccountOf                       = purchAgreementTrade.OnAccountOf;
+                purchTrade.PortOfDischarge                   = purchAgreementTrade.PortOfDischarge;
+                purchTrade.PortOfLoading                     = purchAgreementTrade.PortOfLoading;
+                purchTrade.PricingFromDate                   = purchAgreementTrade.PricingFromDate;
+                purchTrade.PricingMonth                      = purchAgreementTrade.PricingMonth;
+                purchTrade.PricingTodate                     = purchAgreementTrade.PricingTodate;
+                purchTrade.TermPaymDescription               = purchAgreementTrade.TermPaymDescription;
+                purchTrade.TermsOfDelDescription             = purchAgreementTrade.TermsOfDelDescription;
+                purchTrade.Through                           = purchAgreementTrade.Through;
+                purchTrade.ToDatePort                        = purchAgreementTrade.ToDatePort;
+                purchTrade.BuyerSecondaryBank                = purchAgreementTrade.BuyerSecondaryBank;
+                purchTrade.SellerSecondaryBank               = purchAgreementTrade.SellerSecondaryBank;
+                purchTrade.PortOfDischargeDesc               = purchAgreementTrade.PortOfDischargeDesc;
+                purchTrade.PortOfLoadingDesc                 = purchAgreementTrade.PortOfLoadingDesc;
+                purchTrade.Name                              = purchAgreementTrade.Name;
+                purchTrade.Address                           = purchAgreementTrade.Address;
+                purchTrade.PackingGroup                      = purchAgreementTrade.PackingGroup;
+                purchTrade.QuantityConditions                = purchAgreementTrade.QuantityConditions;
+                purchTrade.ShipperBuyer                      = purchAgreementTrade.ShipperBuyer;
+                purchTrade.PermitNumber                      = purchAgreementTrade.PermitNumber;
+                purchTrade.insert();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesAgreementHeader_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tableStr(SalesAgreementHeader))]
+final class ETG_SalesAgreementHeader_Extension
+
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>intercompanySync</Name>
+				<Source><![CDATA[
+    public void intercompanySync(boolean _forceIntercompanySync)
+    {
+        
+        ETG_PurchaseAgreementHeader         tradeDetailsHeaderDes;
+        ETG_SalesAgreementHeader            tradeDetailsHeaderSource;
+        CustTable                           custTable;
+        InterCompanyCompanyId               custTableInterCompanyTradingPartnerCompanyId;
+        AgreementHeaderDefault              agreementHeaderDefault;
+        ETG_PurchAgreementNotes             purchAgreementNotes;
+        ETG_SalesAgreementNotes             salesAgreementNotes;
+        ETG_PurchaseAgreementQualityGrp     PurchaseAgreementQualityGrp;
+        ETG_SalesAgreementQualityGrp        SalesAgreementQualityGrp;
+        DataAreaId                          srcLE;
+        CustBankAccount                     buyerBank;
+        
+        next intercompanySync(_forceIntercompanySync);
+        PurchAgreementHeader        purchAgreementHeaderInter = this.purchAgreementHeader(true);       
+
+        if(!this.ETG_PurchAgreementIdIC)
+        {
+            srcLE       = curext();
+            this.ETG_PurchAgreementIdIC     = purchAgreementHeaderInter.PurchNumberSequence;
+            this.doUpdate();
+
+            select firstonly * from tradeDetailsHeaderSource
+                where tradeDetailsHeaderSource.SalesAgreementId == this.SalesNumberSequence;
+
+            custTable                                    = this.custTable();
+            custTableInterCompanyTradingPartnerCompanyId = custTable.interCompanyTradingPartnerCompanyID();
+
+            changecompany(custTableInterCompanyTradingPartnerCompanyId)
+            {
+                tradeDetailsHeaderDes.PurchAgreementId                  = purchAgreementHeaderInter.PurchNumberSequence;
+                tradeDetailsHeaderDes.AdvanceDue                        = tradeDetailsHeaderSource.AdvanceDue;
+                tradeDetailsHeaderDes.BuyerAccountNum                   = purchAgreementHeaderInter.VendAccount;
+                tradeDetailsHeaderDes.BuyerDeliveryAddress              = CustTable::find(purchAgreementHeaderInter.VendAccount).postalAddress().RecId;
+                tradeDetailsHeaderDes.BuyerBank                         = CustTable::find(purchAgreementHeaderInter.VendAccount).BankAccount;
+                tradeDetailsHeaderDes.SellerAccountNum                  = curExt();
+                tradeDetailsHeaderDes.SellerDeliveryAddress             = CompanyInfo::findDataArea(curExt()).postalAddress().RecId;
+                tradeDetailsHeaderDes.CommissionType                    = tradeDetailsHeaderSource.CommissionType;
+                tradeDetailsHeaderDes.Consignee                         = tradeDetailsHeaderSource.Consignee;
+                tradeDetailsHeaderDes.CustomImport                      = tradeDetailsHeaderSource.CustomImport;
+                tradeDetailsHeaderDes.DeliveryDescription               = tradeDetailsHeaderSource.DeliveryDescription;
+                tradeDetailsHeaderDes.DisplayTotalCalculatedCommission  = tradeDetailsHeaderSource.DisplayTotalCalculatedCommission;
+                tradeDetailsHeaderDes.FromDatePort                      = tradeDetailsHeaderSource.FromDatePort;
+                tradeDetailsHeaderDes.Future                            = tradeDetailsHeaderSource.Future;
+                tradeDetailsHeaderDes.ImportDate                        = tradeDetailsHeaderSource.ImportDate;
+                tradeDetailsHeaderDes.Notes                             = tradeDetailsHeaderSource.Notes;
+                tradeDetailsHeaderDes.Notifytodifferentparty            = tradeDetailsHeaderSource.Notifytodifferentparty;
+                tradeDetailsHeaderDes.Number                            = tradeDetailsHeaderSource.Number;
+                tradeDetailsHeaderDes.OnAccountOf                       = tradeDetailsHeaderSource.OnAccountOf;
+                tradeDetailsHeaderDes.PortOfDischarge                   = tradeDetailsHeaderSource.PortOfDischarge;
+                tradeDetailsHeaderDes.PortOfLoading                     = tradeDetailsHeaderSource.PortOfLoading;
+                tradeDetailsHeaderDes.PricingFromDate                   = tradeDetailsHeaderSource.PricingFromDate;
+                tradeDetailsHeaderDes.PricingMonth                      = tradeDetailsHeaderSource.PricingMonth;
+                tradeDetailsHeaderDes.PricingTodate                     = tradeDetailsHeaderSource.PricingTodate;
+                tradeDetailsHeaderDes.TermPaymDescription               = tradeDetailsHeaderSource.TermPaymDescription;
+                tradeDetailsHeaderDes.TermsOfDelDescription             = tradeDetailsHeaderSource.TermsOfDelDescription;
+                tradeDetailsHeaderDes.Through                           = tradeDetailsHeaderSource.Through;
+                tradeDetailsHeaderDes.ToDatePort                        = tradeDetailsHeaderSource.ToDatePort;
+                tradeDetailsHeaderDes.TypeValue                         = tradeDetailsHeaderSource.TypeValue;
+                tradeDetailsHeaderDes.Name                              = tradeDetailsHeaderSource.Name;
+                tradeDetailsHeaderDes.Address                           = tradeDetailsHeaderSource.Address;
+                tradeDetailsHeaderDes.AgreementType                     = tradeDetailsHeaderSource.AgreementType;
+                tradeDetailsHeaderDes.PackingGroup                      = tradeDetailsHeaderSource.PackingGroup;
+                tradeDetailsHeaderDes.QuantityConditions                = tradeDetailsHeaderSource.QuantityConditions;
+                tradeDetailsHeaderDes.PortOfDischargeDesc               = tradeDetailsHeaderSource.PortOfDischargeDesc;
+                tradeDetailsHeaderDes.PortOfLoadingDesc                 = tradeDetailsHeaderSource.PortOfLoadingDesc;
+                tradeDetailsHeaderDes.ShipperBuyer                      = tradeDetailsHeaderSource.ShipperBuyer;
+                tradeDetailsHeaderDes.PermitNumber                      = tradeDetailsHeaderSource.PermitNumber;
+       
+                buyerBank     = CustBankAccount::find(tradeDetailsHeaderDes.BuyerAccountNum,tradeDetailsHeaderDes.BuyerBank);
+                if(buyerBank)
+                    tradeDetailsHeaderDes.BuyerSecondaryBank = buyerBank.AccountNum + '\n'+buyerBank.SWIFTNo+'\n'+LogisticsPostalAddress::findByLocation(buyerBank.location).Address;
+
+                tradeDetailsHeaderDes.insert();
+
+                while select crosscompany EnumNotes,Description from purchAgreementNotes
+                    where salesAgreementNotes.SalesAgreementId == this.SalesNumberSequence
+                        && salesAgreementNotes.DataAreaId      == srcLE
+                {
+                    purchAgreementNotes.PurchAgreementId     = purchAgreementHeaderInter.PurchNumberSequence;
+                    purchAgreementNotes.EnumNotes            = salesAgreementNotes.EnumNotes;
+                    purchAgreementNotes.Description          = salesAgreementNotes.Description;
+                    purchAgreementNotes.PrintNotesInContract = salesAgreementNotes.PrintNotesInContract;
+                    purchAgreementNotes.insert();
+                }
+
+                purchAgreementHeaderInter.ETG_SalesAgreementIdIC     = this.SalesNumberSequence;
+                purchAgreementHeaderInter.DefaultDimension           = VendTable::find(purchAgreementHeaderInter.VendAccount).DefaultDimension;
+
+                purchAgreementHeaderInter.doUpdate();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>canSubmitToWorkflow</Name>
+				<Source><![CDATA[
+    public boolean  canSubmitToWorkflow(str workflowType)
+    {
+        boolean     canSubmit = next canSubmitToWorkflow(workflowType);
+
+        if(ETGACFParameters::find().EnableSalesAgreementWorkflow == NoYes::Yes)
+        {
+            if (this.RecId && this.ETGWorkflowStatus  == VersioningDocumentState::Draft)
+            {
+                canSubmit = true;
+            }
+            else
+            {
+                canSubmit = false;
+            }
+        }
+
+        return canSubmit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateWorkflowStatus</Name>
+				<Source><![CDATA[
+    public static void  updateWorkflowStatus(RefRecId recId , VersioningDocumentState status)
+    {
+        SalesAgreementHeader salesAgreementHeader;
+
+        ttsbegin;
+
+        select forupdate salesAgreementHeader where salesAgreementHeader.RecId == recId;
+
+        if(salesAgreementHeader)
+        {
+            salesAgreementHeader.ETGWorkflowStatus = status;
+            salesAgreementHeader.doUpdate();
+        }
+
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETG_findByParentDealNumber</Name>
+				<Source><![CDATA[
+    ///SB, DLT, 10/04/2026
+    /// <summary>
+    /// Method to find sales agreement based on parent deal number.
+    /// </summary>
+    /// <returns>
+    /// sales agreement based on parent deal number.
+    /// </returns>
+    public static SalesAgreementHeader ETG_findByParentDealNumber(str _parentDealNumber,
+                                            boolean              _forUpdate = false)
+    {
+        SalesAgreementHeader salesAgreementHeader;
+
+        if (_parentDealNumber)
+        {
+            if (_forUpdate)
+            {
+                salesAgreementHeader.selectForUpdate(_forUpdate);
+            }
+
+            select salesAgreementHeader
+                where salesAgreementHeader.ETGDMSDealNumber == _parentDealNumber;
+        }
+
+        return salesAgreementHeader;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

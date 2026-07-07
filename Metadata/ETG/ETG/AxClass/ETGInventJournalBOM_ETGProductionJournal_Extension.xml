@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGInventJournalBOM_ETGProductionJournal_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formStr(InventJournalBOM))]
+final class ETGInventJournalBOM_ETGProductionJournal_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>ETGProductionJournal_jumpref</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// jumref for journal number reference - Abhinav
+    /// </summary>
+    /// <param name = "_control"></param>
+    public void ETGProductionJournal_jumpref(FormStringControl _control)
+    {
+        InventJournalTable inventJournalTable;
+        InventJournalTable inventJournalTableCurr = this.dataSource(1).cursor();
+        DataAreaId targetCompany;
+
+        select firstOnly crossCompany inventJournalTable
+                where inventJournalTable.JournalId == inventJournalTableCurr.ETGProductionEntityBOMJournal;
+
+        if (inventJournalTable)
+        {
+            targetCompany = inventJournalTable.DataAreaId;
+
+            changeCompany(targetCompany)
+            {
+                Args args = new Args();
+                args.record(inventJournalTable);
+                new MenuFunction(menuItemDisplayStr(InventJournalTableBOM), MenuItemType::Display).run(args);
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSubcontractingJournal_jumpref</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// jumref for journal number reference - Abhinav
+    /// </summary>
+    /// <param name = "_control"></param>
+    public void ETGSubcontractingJournal_jumpref(FormStringControl _control)
+    {
+        InventJournalTable inventJournalTable;
+        InventJournalTable inventJournalTableCurr = this.dataSource(1).cursor();
+        DataAreaId targetCompany;
+
+        select firstOnly crossCompany inventJournalTable
+                where inventJournalTable.JournalId == inventJournalTableCurr.ETGSubcontractingBOMJournal;
+
+        if (inventJournalTable)
+        {
+            targetCompany = inventJournalTable.DataAreaId;
+
+            changeCompany(targetCompany)
+            {
+                Args args = new Args();
+                args.record(inventJournalTable);
+                new MenuFunction(menuItemDisplayStr(InventJournalTableBOM), MenuItemType::Display).run(args);
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>init</Name>
+				<Source><![CDATA[
+    public void init()
+    {
+        FormStringControl formStringControl;
+        FormStringControl formStringControlsub;
+        next init();
+
+        formStringControl = this.design().controlName(formControlStr(InventJournalBOM, ETGProdEntityJournal));
+        formStringControl.registerOverrideMethod(methodStr(FormStringControl, jumpRef),methodStr(ETGInventJournalBOM_ETGProductionJournal_Extension,ETGProductionJournal_jumpref));
+
+        formStringControlsub = this.design().controlName(formControlStr(InventJournalBOM, ETGSubcontractingBOMJournal));
+        formStringControlsub.registerOverrideMethod(methodStr(FormStringControl, jumpRef),methodStr(ETGInventJournalBOM_ETGProductionJournal_Extension,ETGSubcontractingJournal_jumpref));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initDatasourceAllow</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// CS,DLT,SB, Allow edit after posting for two custom controls
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    public void initDatasourceAllow()
+    {
+        next initDatasourceAllow();
+
+        if(InventJournalTable.ETGParentEntity && InventJournalTable.posted == NoYes::Yes && ETGCanadaParameters::find().EnableBOMJournalMarking == NoYes::Yes)
+        {
+            InventJournalTable_ds.allowEdit(true);
+            allowEditFieldsOnFormDS_W(InventJournalTable_ds, !InventJournalTable.Posted);
+
+            InventJournalTable   InventJournalTableNew;
+            changecompany(InventJournalTable.ETGParentEntity)
+            {
+                InventJournalTableNew = InventJournalTable::find(InventJournalTable.ETGSubcontractingBOMJournal);
+            }
+            boolean     enableBOMMarkingAfterPosting = InventJournalTableNew && InventJournalTableNew.ETGItemId == '';
+
+            InventJournalTable_ds.object(fieldNum(InventJournalTable, ETGSalesId)).allowEdit(enableBOMMarkingAfterPosting);
+            InventJournalTable_ds.object(fieldNum(InventJournalTable, ETGItemId)).allowEdit(enableBOMMarkingAfterPosting);
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

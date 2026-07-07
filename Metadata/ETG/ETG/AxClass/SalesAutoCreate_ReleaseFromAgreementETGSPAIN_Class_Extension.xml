@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>SalesAutoCreate_ReleaseFromAgreementETGSPAIN_Class_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the <c>SalesAutoCreate_ReleaseFromAgreement</c> class for the ETGSPAIN model.
+/// </summary>
+[ExtensionOf(classStr(SalesAutoCreate_ReleaseFromAgreement))]
+final class SalesAutoCreate_ReleaseFromAgreementETGSPAIN_Class_Extension
+{    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>createSalesLine</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>createSalesLine</c> method.
+    /// </summary>
+    public void createSalesLine()
+    {
+        
+            InventDim                   inventDim;
+            ETGSPAINInventApplicationTable   ETGSPAINInventApplicationTable   = ETGSPAINInventApplicationTable::findOrCreate(salesLine.SalesId);
+            LedgerParameters            ledgerParameters            = LedgerParameters::find();
+            DimensionValue              ETGSPAINOperationId              = salesLine.inventDim().inventBatchId;
+            Description                 ETGSPAINOperationDescription     = ETGSPAINPurchOperationTable::find(ETGSPAINOperationId).Name;
+
+            // Añadimos el valor a la dimensión Aplicación, que corresponde con el número del Pedido de Venta.
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            inventDim                  = salesLine.inventDim();
+            inventDim.InventDimension1 = ETGSPAINInventApplicationTable.ApplicationId;
+            inventDim                  = InventDim::findOrCreate(inventDim);
+            salesLine.InventDimId      = inventDim.inventDimId;
+      
+            // Insertamos la dimensión financiera Operación
+            salesLine.ETGSPAINsetDimensionValue(ledgerParameters.ETGSPAINFinDimOperation,   ETGSPAINOperationId,   ETGSPAINOperationDescription);
+
+            DimensionValue          ETGSPAINContractId               = createFromSalesAgreement.SalesNumberSequence;
+            DimensionValue          ETGSPAINApplicationId            = salesTable.SalesId;
+        
+            salesLine.ETGSPAINsetDimensionValue(ledgerParameters.ETGSPAINFinDimContract,    ETGSPAINContractId,    ETGSPAINContractId);
+            salesLine.ETGSPAINsetDimensionValue(ledgerParameters.ETGSPAINFinDimApplication, ETGSPAINApplicationId, ETGSPAINApplicationId);
+        }
+        
+        next createSalesLine();
+
+        ETGSPAINInventTransApplication   ETGSPAINInventTransApplication;
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            // Almacenamos el registro de cantidad Aplicada.
+            ttsbegin;
+            ETGSPAINInventTransApplication.clear();
+            ETGSPAINInventTransApplication.initValue();
+            ETGSPAINInventTransApplication.InventTransId       = salesLine.InventTransId;
+            ETGSPAINInventTransApplication.ItemId              = salesLine.ItemId;
+            ETGSPAINInventTransApplication.InventDimId         = salesLine.inventDimId;
+            ETGSPAINInventTransApplication.SalesId             = salesLine.SalesId;
+            ETGSPAINInventTransApplication.SalesApplicationQty = salesLine.SalesQty * -1; // Lo ponemos en negativo.
+            ETGSPAINInventTransApplication.DateApplicationQty  = salesTable.ShippingDateRequested;
+            ETGSPAINInventTransApplication.insert();
+ 
+            InventTrans         inventTrans         = InventTrans::findTransId(salesLine.InventTransId);
+            InventTransOrigin   inventTransOrigin   = InventTransOrigin::find(inventTrans.InventTransOrigin);
+
+            if (inventTrans && inventTransOrigin)
+            {
+                InventTrans         inventTransCreated;
+        
+                inventTransCreated.clear();
+                buf2Buf(inventTrans, inventTransCreated);
+
+                inventTransCreated.StatusIssue                  = StatusIssue::None;
+                inventTransCreated.StatusReceipt                = StatusReceipt::None;
+                inventTransCreated.ETGSPAINInventTransIsUnsold  = NoYes::Yes;
+            
+                inventTransCreated.Qty                          = 0;
+
+                inventTransCreated.insert();
+
+                if (inventTransCreated)
+                {
+                    ETGSPAINUnsoldInventTrans::findOrCreateByRefRecIdandQty(inventTransCreated.RecId, -abs(salesLine.SalesQty), salesLine.SalesUnit, salesLine, true, true);
+                }
+            }
+
+            // Actualizamos la cabecera con las fechas de ejecución de la línea y añadimos dimensión Operación.
+            salesTable.selectForUpdate(true);
+            salesTable.ETGSPAINPurchExecutionFromDate = createFromAgreementLine.ETGSPAINPurchExecutionFromDate;
+            salesTable.ETGSPAINPurchExecutionDueDate  = createFromAgreementLine.ETGSPAINPurchExecutionDueDate;
+            salesTable.ETGSPAINsetDimensionValue(ledgerParameters.ETGSPAINFinDimOperation,   ETGSPAINOperationId,   ETGSPAINOperationDescription);
+            salesTable.doUpdate();
+
+            //Actualizamos las dimensiones de la línea de acuerdo
+            if (salesLine.inventDim().InventBatchId && !createFromAgreementLine.inventDim().InventBatchId)
+            {
+                InventBatchId   inventBatchId           = salesLine.inventDim().InventBatchId;
+                AgreementLine   agreementLine           = AgreementLine::find(createFromAgreementLine.RecId);
+                InventDim       inventDimAgreementLine  = agreementLine.inventDim();
+
+                inventDimAgreementLine.inventBatchId = inventBatchId;
+
+                inventDimAgreementLine = InventDim::findOrCreate(inventDimAgreementLine);
+
+                agreementLine.selectForUpdate(true);
+                agreementLine.inventDimId = inventDimAgreementLine.inventDimId;
+
+                agreementLine.update();
+            }
+            ttscommit;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initSalesTable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>initSalesTable</c> method.
+    /// </summary>
+    /// <param name="_agreementHeaderDefault">AgreementHeaderDefault.</param>
+    /// <param name="_salesAgreementHeaderDefault">SalesAgreementHeaderDefault.</param>
+    protected void initSalesTable(
+        AgreementHeaderDefault      _agreementHeaderDefault,
+        SalesAgreementHeaderDefault _salesAgreementHeaderDefault)
+    {
+        next initSalesTable(_agreementHeaderDefault, _salesAgreementHeaderDefault);
+
+        // Insertamos el periodo de Plancha
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            salesTable.ETGSPAINPlateFromDate = salesTable.ShippingDateRequested;
+            salesTable.ETGSPAINPlateDueDate  = salesTable.ETGSPAINPlateFromDate + createFromSalesAgreement.ETGSPAINPurchPlateDaysNumber;
+
+            /*
+        // En el caso de que la hora sea anterior a la configurada, la fecha de expiración es un día antes.
+        if (DateTimeUtil::getTimeNow(DateTimeUtil::getUserPreferredTimeZone()) < purchParameters.ETGSPAINPurchPlateHourUpdate)
+        {
+        */
+            salesTable.ETGSPAINPlateDueDate = salesTable.ETGSPAINPlateDueDate - 1;
+            //}
+
+            // Insertamos las Dimensiones Financieras
+            this.ETGSPAINsetDimensionValues();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSPAINsetDimensionValues</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method to insert the Financial Dimensions for ETGSPAIN.
+    /// </summary>
+    private void ETGSPAINsetDimensionValues()
+    {        
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            LedgerParameters        ledgerParameters            = LedgerParameters::find();
+            DimensionValue          ETGSPAINContractId               = createFromSalesAgreement.SalesNumberSequence;
+            DimensionValue          ETGSPAINApplicationId            = salesTable.SalesId;
+        
+            salesTable.ETGSPAINsetDimensionValue(ledgerParameters.ETGSPAINFinDimContract,    ETGSPAINContractId,    ETGSPAINContractId);
+            salesTable.ETGSPAINsetDimensionValue(ledgerParameters.ETGSPAINFinDimApplication, ETGSPAINApplicationId, ETGSPAINApplicationId);
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

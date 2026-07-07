@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCustExchRateAdjSimulationDP_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(CustExchRateAdjSimulationDP))]
+final class ETGCustExchRateAdjSimulationDP_Extension 
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>insertRecord</Name>
+				<Source><![CDATA[
+    protected void insertRecord(CustVendTrans _custVendTrans, AmountCur _transactionCurrencyAmount, 
+                                AmountMST _currentBalance, AmountMST _newBalance, CurrencyExchangeRate _accountingCurrencyExchangeRateUsed, 
+                                AmountMSTSecondary _currentBalanceReporting, AmountMSTSecondary _newBalanceReporting, 
+                                CurrencyExchangeRate _reportingCurrencyExchangeRateUsed)
+    {
+        CustTrans                           custTrans;
+        CustSettlement                      custSettlement;
+        ETG_CustExchRateAdjSimulation       eTG_CustExchRateAdjSimulation;
+        GeneralJournalEntry                 generalJournalEntry;
+        GeneralJournalAccountEntry          generalJournalAccountEntry,gjAccEntry;
+        DimensionAttributeValueCombination  dimAttrValueComb;
+        DimensionStorage                    dimensionStorage;
+        DimensionStorageSegment             segment;
+        int                                 segmentCount, segmentIndex;
+        int                                 hierarchyCount, hierarchyIndex;
+        str                                 segmentName, segmentDescription;
+        SysDim                              segmentValue;
+
+        TransDate considerddate = this.getConsideredDate();
+        TransDate exchRate      = this.getExchangeRateDate();
+
+        next insertRecord( _custVendTrans,  _transactionCurrencyAmount,
+                           _currentBalance,  _newBalance,  _accountingCurrencyExchangeRateUsed,
+                          _currentBalanceReporting,  _newBalanceReporting,
+                         _reportingCurrencyExchangeRateUsed);
+        //next createSettledTransQuery(Query _baseQuery);
+        eTG_CustExchRateAdjSimulation.ETG_ConsiderDate = considerddate;
+        eTG_CustExchRateAdjSimulation.ETG_DateOfRate = exchRate;
+        eTG_CustExchRateAdjSimulation.ETG_CustVendExchPrinciples = this.getRevaluationMethod();
+        eTG_CustExchRateAdjSimulation.AccountNum              = custExchRateAdjSimulationTmp.AccountNum ;
+        eTG_CustExchRateAdjSimulation.AccountName             = custExchRateAdjSimulationTmp.AccountName;
+        eTG_CustExchRateAdjSimulation.CurrencyCode            = custExchRateAdjSimulationTmp.CurrencyCode;
+        eTG_CustExchRateAdjSimulation.TransDate               = custExchRateAdjSimulationTmp.TransDate;
+        eTG_CustExchRateAdjSimulation.AmountCur               = custExchRateAdjSimulationTmp.AmountCur;
+        eTG_CustExchRateAdjSimulation.CurBalance              = custExchRateAdjSimulationTmp.CurBalance;
+        eTG_CustExchRateAdjSimulation.NewBalance              = custExchRateAdjSimulationTmp.NewBalance;
+        eTG_CustExchRateAdjSimulation.ExchangeAdj             = custExchRateAdjSimulationTmp.ExchangeAdj;
+        eTG_CustExchRateAdjSimulation.ExchangeRate            = custExchRateAdjSimulationTmp.ExchangeRate;
+        eTG_CustExchRateAdjSimulation.CurrentBalanceReporting = custExchRateAdjSimulationTmp.CurrentBalanceReporting;
+        eTG_CustExchRateAdjSimulation.NewBalanceReporting     = custExchRateAdjSimulationTmp.NewBalanceReporting;
+        eTG_CustExchRateAdjSimulation.ExchangeAdjReporting    = custExchRateAdjSimulationTmp.ExchangeAdjReporting;
+        eTG_CustExchRateAdjSimulation.ExchangeRateReporting   = custExchRateAdjSimulationTmp.ExchangeRateReporting;
+        eTG_CustExchRateAdjSimulation.ETGFinalSimulation      = NoYes::Yes;
+
+        
+        eTG_CustExchRateAdjSimulation.Voucher = _custVendTrans.Voucher;
+        select custSettlement where custSettlement.OffsetTransVoucher == _custVendTrans.Voucher;
+        if(custSettlement)
+        {
+            eTG_CustExchRateAdjSimulation.ETG_Settiledvoucher = custSettlement.OffsetTransVoucher;
+            eTG_CustExchRateAdjSimulation.Settileddate = custSettlement.TransDate;
+        }
+        select custTrans where custTrans.Voucher == _custVendTrans.Voucher;
+        eTG_CustExchRateAdjSimulation.InvoiceNumber = custTrans.Invoice;
+
+        select  generalJournalEntry
+          where generalJournalEntry.SubledgerVoucher == eTG_CustExchRateAdjSimulation.ETG_Settiledvoucher ;
+        if(!generalJournalEntry)
+        {
+            select  generalJournalEntry
+          where generalJournalEntry.SubledgerVoucher == eTG_CustExchRateAdjSimulation.Voucher ;
+        }
+        select generalJournalAccountEntry order by RecId desc  where 
+                  generalJournalAccountEntry.GeneralJournalEntry == generalJournalEntry.RecId ;
+        eTG_CustExchRateAdjSimulation.PostingType = generalJournalAccountEntry.PostingType;
+        eTG_CustExchRateAdjSimulation.Text = generalJournalAccountEntry.Text;
+        eTG_CustExchRateAdjSimulation.DocumentNumber = generalJournalEntry.DocumentNumber;
+        eTG_CustExchRateAdjSimulation.DocumentDate = generalJournalEntry.DocumentDate;
+        eTG_CustExchRateAdjSimulation.LedgerAccount = generalJournalAccountEntry.LedgerAccount;
+
+
+        setPrefix("@ETG_New:Dimensionvaluesfetching");
+        dimAttrValueComb = DimensionAttributeValueCombination::find(generalJournalAccountEntry.LedgerDimension);
+        setPrefix("@ETG_New:Breakupfor" + dimAttrValueComb.DisplayValue);
+        dimensionStorage = DimensionStorage::findById(generalJournalAccountEntry.LedgerDimension);
+
+        if (dimensionStorage == null)
+        {
+            throw error("@SYS83964");
+
+        }
+
+        // Get hierarchy count
+        hierarchyCount = dimensionStorage.hierarchyCount();
+
+        //Loop through hierarchies to get individual segments
+        for(hierarchyIndex = 1; hierarchyIndex <= hierarchyCount; hierarchyIndex++)
+        {
+            setPrefix(strFmt("@ETG_New:Hierarchy", DimensionHierarchy::find(dimensionStorage.getHierarchyId(hierarchyIndex)).Name));
+            //Get segment count for hierarchy
+            segmentCount = dimensionStorage.segmentCountForHierarchy(hierarchyIndex);
+            //Loop through segments and display required values
+            for (segmentIndex = 1; segmentIndex <= segmentCount; segmentIndex++)
+            {
+                //Get segment
+                segment = dimensionStorage.getSegmentForHierarchy(hierarchyIndex, segmentIndex);
+                // Get the segment information
+                if (segment.parmDimensionAttributeValueId() != 0)
+                {
+                    // Get segment name
+                    segmentName = DimensionAttribute::find(DimensionAttributeValue::find(segment.parmDimensionAttributeValueId()).DimensionAttribute).Name;
+                    //Get segment value (id of the dimension)
+                    segmentValue        = segment.parmDisplayValue();
+                    //Get segment value name (Description for dimension)
+                    segmentDescription  = segment.getName();
+                    if(segmentName == "@ETG_New:Item")
+                    {
+                        eTG_CustExchRateAdjSimulation.ETGItemFinancialdimension = segmentValue;
+                    }
+
+                }
+
+            }
+
+        }
+        eTG_CustExchRateAdjSimulation.PostingProfile = _custVendTrans.PostingProfile;
+
+        if(!(eTG_CustExchRateAdjSimulation::find(eTG_CustExchRateAdjSimulation.ETG_ConsiderDate,eTG_CustExchRateAdjSimulation.ETG_DateOfRate,eTG_CustExchRateAdjSimulation.ETG_CustVendExchPrinciples,
+             eTG_CustExchRateAdjSimulation.AccountNum,eTG_CustExchRateAdjSimulation.AccountName,eTG_CustExchRateAdjSimulation.CurrencyCode,
+             eTG_CustExchRateAdjSimulation.TransDate,eTG_CustExchRateAdjSimulation.AmountCur,eTG_CustExchRateAdjSimulation.CurBalance,
+             eTG_CustExchRateAdjSimulation.NewBalance,eTG_CustExchRateAdjSimulation.ExchangeAdj,eTG_CustExchRateAdjSimulation.ExchangeRate,
+             eTG_CustExchRateAdjSimulation.CurrentBalanceReporting,eTG_CustExchRateAdjSimulation.NewBalanceReporting,eTG_CustExchRateAdjSimulation.ExchangeAdjReporting,
+             eTG_CustExchRateAdjSimulation.ExchangeRateReporting, eTG_CustExchRateAdjSimulation.ETGFinalSimulation,eTG_CustExchRateAdjSimulation.Voucher)))
+        {
+            eTG_CustExchRateAdjSimulation.insert();
+        }
+       
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

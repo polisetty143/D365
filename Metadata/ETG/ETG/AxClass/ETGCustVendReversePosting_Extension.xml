@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCustVendReversePosting_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Updates the remaining trade limit fields when a customer or vendor settlement is reversed.
+/// </summary>
+[ExtensionOf(Classstr(CustVendReversePosting))]
+internal final class ETGCustVendReversePosting_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>reverseSettlement</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Updates the remaining trade limit fields when a customer or vendor settlement is reversed.
+    /// </summary>
+    public void reverseSettlement(CustVendSettlement _custVendSettlement)
+    {
+        next reverseSettlement(_custVendSettlement);
+
+        if(ETGACFParameters::find().EnableTradeLimit == NoYes::Yes)
+        {
+            SalesTable                      salesTable;
+            CustInvoiceJour                 custInvoiceJour;
+            CustTrans                       custtrans;
+            VendTrans                       vendtrans;
+            VendInvoiceJour                 vendInvoiceJour;
+            PurchTable                      purchTable;
+
+            select * from custtrans where custtrans.RecId == _custVendSettlement.TransRecId;
+    
+            if(custtrans)
+            {
+                select firstOnly custInvoiceJour
+                                where custInvoiceJour.InvoiceId == custtrans.Invoice
+                                   && custInvoiceJour.InvoiceAccount == custtrans.AccountNum
+                                   && custInvoiceJour.InvoiceDate ==custtrans.TransDate
+                                   && custInvoiceJour.LedgerVoucher == custtrans.Voucher;
+
+                select firstonly salesTable where salesTable.SalesId == custInvoiceJour.salesid;
+
+                if(salesTable.MatchingAgreement)
+                {
+                    CustTable custTable;
+                    select forUpdate custTable where custTable.AccountNum == custtrans.AccountNum;
+                    if (custTable)
+                    {
+                        ttsBegin;
+                        custTable.ETGRemainingTradeLimitSalesReal -= abs(_custVendSettlement.SettleAmountMST);
+                        custTable.doUpdate();
+                        ttsCommit;
+                    }
+                }
+            }
+            select * from vendtrans where vendtrans.RecId == _custVendSettlement.TransRecId;
+
+            if(vendtrans)
+            {
+                select firstOnly vendInvoiceJour
+                                where vendInvoiceJour.InvoiceId == vendtrans.Invoice
+                                   && vendInvoiceJour.InvoiceAccount == vendtrans.AccountNum
+                                   && vendInvoiceJour.InvoiceDate ==vendtrans.TransDate
+                                   && vendInvoiceJour.LedgerVoucher == vendtrans.Voucher;
+
+                select firstonly purchTable where purchTable.PurchId == vendInvoiceJour.PurchId;
+
+                if(purchTable.MatchingAgreement)
+                {
+
+                    VendTable vendTable;
+                    select forUpdate vendTable where vendTable.AccountNum == vendTrans.AccountNum;
+                    if (vendTable)
+                    {
+                        ttsBegin;
+                        vendTable.ETGRemainingTradeLimitPurchReal -= abs(_custVendSettlement.SettleAmountMST);
+                        vendTable.doUpdate();
+                        ttsCommit;
+                    }
+                }
+                         
+            }
+        }
+
+       
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

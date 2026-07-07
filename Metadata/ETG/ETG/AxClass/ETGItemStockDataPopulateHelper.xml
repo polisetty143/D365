@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGItemStockDataPopulateHelper</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+internal final class ETGItemStockDataPopulateHelper
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>generateStockData</Name>
+				<Source><![CDATA[
+    public static void generateStockData()
+    {
+        //SalesLine salesLine;
+        PurchLine purchLine;
+        InventTable inventTable;
+        UnitOfMeasureConversion unitOfMeasureConversion;
+        UnitOfMeasure fromUnitOfMeasure, toUnitOfMeasure;
+        LogisticsAddressCountryRegion countryRegion;
+        CustTable custTableloc;
+        DirPartyPostalAddressView postalAddressView;
+
+        str fromUnit, toUnit;
+
+        ETGItemStockPDTable inventStockPD;
+        ETGItemStockPDTable existingRecord;
+
+        delete_from inventStockPD;
+
+        ttsBegin;
+        while select PurchId, ItemId, PurchQty, PurchUnit, TaxItemGroup, PurchPrice, VendAccount from purchLine
+        //while select SalesId, ItemId, SalesQty, SalesUnit, TaxItemGroup, SalesPrice, CustAccount from salesLine
+        {
+            inventTable = InventTable::find(purchLine.ItemId);
+            if (!inventTable.RecId)
+                continue; 
+
+            existingRecord = ETGItemStockPDTable::find(purchLine.ItemId);
+            if (existingRecord)
+                continue;
+
+            inventStockPD.clear();
+            inventStockPD.itemCode = purchLine.ItemId;
+
+            inventStockPD.sdcId = "SDC0060000006";
+            inventStockPD.itemCode = purchLine.ItemId;
+            inventStockPD.itemClassificationCode = inventTable.ETGHSCode;
+            inventStockPD.quantityUnitCode = purchLine.PurchUnit;
+
+            fromUnit = purchLine.PurchUnit;
+            fromUnitOfMeasure = UnitOfMeasure::findBySymbol(fromUnit);
+
+            select firstonly unitOfMeasureConversion
+                where unitOfMeasureConversion.FromUnitOfMeasure == fromUnitOfMeasure.RecId;
+
+            if (unitOfMeasureConversion.RecId)
+            {
+                toUnitOfMeasure = UnitOfMeasure::find(unitOfMeasureConversion.ToUnitOfMeasure);
+                toUnit = toUnitOfMeasure.Symbol;
+                inventStockPD.PackagingUnitCode = toUnit;
+            }
+
+            select firstonly custTableloc where custTableloc.AccountNum == purchLine.VendAccount;
+
+            if (custTableloc.RecId)
+            {
+                select firstOnly postalAddressView
+                    where postalAddressView.Party == custTableloc.Party
+                      && postalAddressView.IsPrimary == NoYes::Yes;
+
+                if (postalAddressView.RecId)
+                {
+                    countryRegion = LogisticsAddressCountryRegion::find(postalAddressView.CountryRegionId);
+                    inventStockPD.originNationCode = countryRegion.ISOCode;
+                }
+            }
+
+            inventStockPD.description = inventTable.itemName();
+            inventStockPD.quantity = purchLine.PurchQty;
+            inventStockPD.taxLabel = purchLine.TaxItemGroup;
+            inventStockPD.DefaultPrice = purchLine.PurchPrice;
+
+            try
+            {
+                inventStockPD.insert();
+            }
+            catch (Exception::DuplicateKeyException)
+            {
+                continue;
+            }
+        }
+        ttsCommit;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

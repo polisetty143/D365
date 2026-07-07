@@ -1,0 +1,225 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_PurchAgreementHeader_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(PurchAgreementForm))]
+final class ETG_PurchAgreementHeader_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>enableHeaderButtons</Name>
+				<Source><![CDATA[
+    public void enableHeaderButtons(AgreementHeader _agreementHeader)
+    {
+        next enableHeaderButtons(_agreementHeader);
+
+        PurchAgreementHeader purchAgreementHeader = _agreementHeader as PurchAgreementHeader;
+        if(ETGACFParameters::find().EnableAbruptTerminationAgreement == NoYes::Yes)
+        {
+            FormControl                 buttoncontrol             = formRun.design().controlName(formControlStr(PurchAgreement, ButtonReleaseOrderCreate));
+            FormControl                 buttoncontrolconfirmation = formRun.design().controlName(formControlStr(PurchAgreement, ButtonConfirmation));
+
+            //NS, DLT, actiavte WF control, 09-july-25
+            boolean isWorkflowActive;
+            if(ETGACFParameters::find().EnablePurchaseAgreementWF)
+            {
+                isWorkflowActive = WorkflowTable::findActiveTemplate(workflowTypeStr(ETGPurchAgreementType)).RecId != 0;
+            }
+            if(!isWorkflowActive)
+            {
+                isWorkflowActive = WorkflowTable::findActiveTemplate(workflowTypeStr(PurchAgreementType)).RecId != 0;
+            }
+            if (!isWorkflowActive)
+            {
+                purchAgreementHeader.WorkflowStatus_PSN = PurchAgreementWorkflowStatus::Approved;
+                buttoncontrolconfirmation.enabled(true);
+            }
+            //NE, DLT, actiavte WF control, 09-july-25
+
+            // NE DLT 27/05/2023 Check if workflow for this document is not active
+            if(purchAgreementHeader.AgreementState == AgreementState::ETGTerminated || purchAgreementHeader.AgreementState == AgreementState::ETGForceClosed)
+            {
+                buttoncontrol.enabled(false);
+                buttoncontrolconfirmation.enabled(false);
+            }
+            //NS, DLT  5/15/2025 Conformation button and release order button enable and disable conditions
+            if (purchAgreementHeader.AgreementState == AgreementState::ETGTerminated || purchAgreementHeader.AgreementState == AgreementState::ETGForceClosed)
+            {
+                buttoncontrol.enabled(false);
+                buttoncontrolconfirmation.enabled(false);
+            }
+            else if (purchAgreementHeader.WorkflowStatus_PSN == PurchAgreementWorkflowStatus::Approved && purchAgreementHeader.AgreementState == AgreementState::OnHold)
+            {
+                buttoncontrolconfirmation.enabled(true);
+                buttoncontrol.enabled(false);
+            }
+            else if (purchAgreementHeader.WorkflowStatus_PSN == PurchAgreementWorkflowStatus::Approved && purchAgreementHeader.AgreementState == AgreementState::Effective)
+            {
+                buttoncontrolconfirmation.enabled(false);
+                buttoncontrol.enabled(true);
+            }
+            else if (purchAgreementHeader.WorkflowStatus_PSN == PurchAgreementWorkflowStatus::NotSubmitted && purchAgreementHeader.AgreementState == AgreementState::OnHold)
+            {
+                buttoncontrolconfirmation.enabled(false);
+                buttoncontrol.enabled(false);
+            }
+            else if (purchAgreementHeader.WorkflowStatus_PSN == PurchAgreementWorkflowStatus::Submitted && purchAgreementHeader.AgreementState == AgreementState::OnHold)
+            {
+                buttoncontrolconfirmation.enabled(false);
+                buttoncontrol.enabled(false);
+            }
+            else if (purchAgreementHeader.WorkflowStatus_PSN == PurchAgreementWorkflowStatus::Rejected && purchAgreementHeader.AgreementState == AgreementState::OnHold)
+            {
+                buttoncontrolconfirmation.enabled(false);
+                buttoncontrol.enabled(false);
+            }
+            else if (purchAgreementHeader.WorkflowStatus_PSN == PurchAgreementWorkflowStatus::PendingApproval && purchAgreementHeader.AgreementState == AgreementState::OnHold)
+            {
+                buttoncontrolconfirmation.enabled(false);
+                buttoncontrol.enabled(false);
+            }
+            //NS, DLT 5/15/2025 Conformation button and release order button enable and disable conditions
+
+
+
+        }
+       
+        FormDesign design = formRun.design();
+
+        container relatedObjectsExistanceFlags         = _agreementHeader.relatedObjectExistanceFlags();       
+        boolean   canViewRelatedAgreement              = conPeek(relatedObjectsExistanceFlags, AgreementHeader::posCanViewRelatedAgreement());
+        boolean   canConfirmAgreement;
+           
+        if (purchAgreementHeader.hasActiveWorkFlow())
+        {
+            canConfirmAgreement = purchAgreementHeader.canConfirmAgreement_PSN();
+            
+            if (!CurrentCompanyIsSpanishCompany())
+            {
+                design.controlName(formControlStr(PurchAgreement, ButtonConfirmationETG)).enabled(canConfirmAgreement);
+            }
+        }
+           
+        else if (PurchAgreementHeader::activeWorkflowTemplateExists())
+        {
+            if (!CurrentCompanyIsSpanishCompany())
+            {
+                design.controlName(formControlStr(PurchAgreement, ButtonConfirmationETG)).enabled(false);
+            }
+        }
+       
+        design.controlName(formControlStr(PurchAgreement, ButtonSalesAgreementTP)).enabled(false);
+        design.controlName(formControlStr(PurchAgreement, Generatesalesagreement)).enabled(false);
+
+        //SB, DLT, 10/04/2026, Visibility control if Intercompany/Third agreement exists for S/P agreement.
+        if(!purchAgreementHeader.ETG_SalesAgreementIdIC)
+        {
+            if(purchAgreementHeader.ETG_SalesAgreementIdTP)
+            {
+                design.controlName(formControlStr(PurchAgreement, ButtonSalesAgreementTP)).enabled(true);
+                design.controlName(formControlStr(PurchAgreement, SalesAgreementGenerationTask)).enabled(false);
+                design.controlName(formControlStr(PurchAgreement, ViewIntercompanyAgreement)).enabled(false);
+            }
+            else
+            {
+                design.controlName(formControlStr(PurchAgreement, Generatesalesagreement)).enabled(true);
+                design.controlName(formControlStr(PurchAgreement, SalesAgreementGenerationTask)).enabled(true);
+            }
+        }
+        //end, SB, DLT, 10/04/2026
+
+        //if(purchAgreementHeader.ETG_TradingStatusPurch == ETG_TradingStatus::Released)
+        //{
+        //    design.controlName(formControlStr(PurchAgreement, buttonReleaseOrderCreate)).enabled(false);
+        //}
+       
+        if(purchAgreementHeader.ETG_TradingStatusPurch != ETG_TradingStatus::None)
+        {
+            if (!CurrentCompanyIsSpanishCompany())
+            {
+                design.controlName(formControlStr(PurchAgreement, ButtonConfirmationETG)).enabled(false);
+            }
+        }    
+
+        //NS, DLT , 17/03/2025 Header/Line items should be frozen once P/S agreement/order is confirmed by user. It cannot be edited.
+        if(ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+        {
+            if(purchAgreementHeader.AgreementState == AgreementState::Effective)
+            {
+               formRun.design().viewEditMode(ViewEditMode::View);
+            }
+            else
+            {
+               formRun.design().viewEditMode(ViewEditMode::Edit);
+            }
+        }
+        //NS, DLT , 17/03/2025 Header/Line items should be frozen once P/S agreement/order is confirmed by user. It cannot be edited.
+        
+
+        //NS DLT 26/5/2025 Header/Line items should be frozen once P/S agreement/order is confirmed by user. It cannot be edited.
+        if(ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+        {
+           // FormRun formRun = _agreementHeader.formRun() as FormRun;
+
+            //if (formRun)
+            //{
+            //    //header ds
+            //    FormDataSource purchAgreementHeaderDS        = formRun.dataSource(formDataSourceStr(PurchAgreement, PurchAgreementHeader));
+            //    FormDataSource purchAgreementCertificationDS = formRun.dataSource(formDataSourceStr(PurchAgreement, PurchAgreementCertification));
+            //    FormDataSource agreementHeaderDefaultDS      = formRun.dataSource(formDataSourceStr(PurchAgreement, AgreementHeaderDefault));
+            //    FormDataSource purchAgreementHeaderDefaultDS = formRun.dataSource(formDataSourceStr(PurchAgreement, PurchAgreementHeaderDefault));
+            //    FormDataSource InventDimDS                   = formRun.dataSource(formDataSourceStr(PurchAgreement, InventDim));
+            //    FormDataSource agreementLineDefaultDS        = formRun.dataSource(formDataSourceStr(PurchAgreement, AgreementLineDefault));
+            //    FormDataSource purchAgreementSubcontractorDS = formRun.dataSource(formDataSourceStr(PurchAgreement, PurchAgreementSubcontractor));
+            //    FormDataSource etg_PurchaseAgreementHeaderDS = formRun.dataSource(formDataSourceStr(PurchAgreement, ETG_PurchaseAgreementHeader));
+
+            //    //line DS
+            //    FormDataSource ALineDS                                   = formRun.dataSource(formDataSourceStr(PurchAgreement, ALine));
+            //    FormDataSource ALine_AgreementLineQuantityCommitmentDS   = formRun.dataSource(formDataSourceStr(PurchAgreement, ALine_AgreementLineQuantityCommitment));
+            //    FormDataSource ALine_AgreementLineVolumeCommitmentDS     = formRun.dataSource(formDataSourceStr(PurchAgreement, ALine_AgreementLineVolumeCommitment));
+            //    FormDataSource LogisticsPostalAddressDS                  = formRun.dataSource(formDataSourceStr(PurchAgreement, LogisticsPostalAddress));
+            //    FormDataSource TMSPurchAgreementHeaderDS                 = formRun.dataSource(formDataSourceStr(PurchAgreement,TMSPurchAgreementHeader));
+            //    FormDataSource VendCertificationDS                       = formRun.dataSource(formDataSourceStr(PurchAgreement,VendCertification));
+
+            //    boolean isEditable;
+
+            //    if(purchAgreementHeader.AgreementState == AgreementState::Effective)
+            //    {
+            //        isEditable = false;
+            //    }
+            //    else if(purchAgreementHeader.AgreementState == AgreementState::OnHold)
+            //    {
+            //        isEditable = true;
+            //    }
+
+            //    formRun.design().viewEditMode(isEditable ? ViewEditMode::Edit);
+            //    lineDS.allowEdit(true);
+            //    lineDS.allowCreate(true);
+            //    lineDS.allowDelete(true);
+            //    headerDS.allowEdit(true);
+            //    lineDS.allowEdit(true);
+            //    lineDS.allowCreate(true);
+            //    lineDS.allowDelete(true);
+            //    headerDS.allowEdit(true);
+            //    lineDS.allowEdit(true);
+            //    lineDS.allowCreate(true);
+            //    lineDS.allowDelete(true);
+            //    headerDS.allowEdit(true);
+            //    lineDS.allowEdit(true);
+            //    lineDS.allowCreate(true);
+            //    lineDS.allowDelete(true);
+            //    headerDS.allowEdit(true);
+            //}
+        }
+        //NE DLT 26/5/2025 Header/Line items should be frozen once P/S agreement/order is confirmed by user. It cannot be edited.
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

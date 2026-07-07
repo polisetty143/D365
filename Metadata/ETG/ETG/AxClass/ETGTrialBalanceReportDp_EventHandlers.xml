@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGTrialBalanceReportDp_EventHandlers</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public final class ETGTrialBalanceReportDp_EventHandlers
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>LedgerTrialBalanceDP_Post_processReport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="args"></param>
+    [PostHandlerFor(classStr(LedgerTrialBalanceDP), methodStr(LedgerTrialBalanceDP, processReport))]
+    public static void LedgerTrialBalanceDP_Post_processReport(XppPrePostArgs args)
+    {
+        if(ETGACFParameters::find().EnableUATSmallPoints)
+        {
+            ETGTrailbalanceReport     eTGTrailbalanceReport;
+            LedgerTrialBalanceDP      dpinstance            = args.getThis() as LedgerTrialBalanceDP;
+            ETGACFParameters          acfParameters         = ETGACFParameters::find();
+            LedgerTrialBalanceTmp     ledgerTrialBalanceTmp = dpinstance.getLedgerTrialBalanceTmp();
+
+            ttsbegin;
+            while select forupdate ledgerTrialBalanceTmp
+            {
+                select * from eTGTrailbalanceReport;
+
+                if(eTGTrailbalanceReport.DimensionSetName == acfParameters.TrailBalanceFinDImSet && eTGTrailbalanceReport.ETGVertical && eTGTrailbalanceReport.ETGSubVerticalDim)
+                {
+                    if(ledgerTrialBalanceTmp.DimensionValues[2] != eTGTrailbalanceReport.ETGVertical || ledgerTrialBalanceTmp.DimensionValues[3] != eTGTrailbalanceReport.ETGSubVerticalDim)
+                    {
+                        ledgerTrialBalanceTmp.delete();
+                    }                   
+                }
+                else if(eTGTrailbalanceReport.DimensionSetName == acfParameters.TrailBalanceFinDImSet && (eTGTrailbalanceReport.ETGVertical || eTGTrailbalanceReport.ETGSubVerticalDim))
+                {
+                    if(eTGTrailbalanceReport.ETGVertical && ledgerTrialBalanceTmp.DimensionValues[2] != eTGTrailbalanceReport.ETGVertical)
+                    {
+                        ledgerTrialBalanceTmp.delete();
+                    }
+                    else if(eTGTrailbalanceReport.ETGSubVerticalDim && ledgerTrialBalanceTmp.DimensionValues[3] != eTGTrailbalanceReport.ETGSubVerticalDim)
+                    {
+                        ledgerTrialBalanceTmp.delete();
+                    }
+
+                }
+            }
+            ttscommit;
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

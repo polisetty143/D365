@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>PurchPackingSlipJournalPost_ETGSPAIN_Class_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the <c>PurchPackingSlipJournalPost</c> class for the ETGSPAIN model.
+/// </summary>
+[ExtensionOf(classStr(PurchPackingSlipJournalPost))]
+final class PurchPackingSlipJournalPost_ETGSPAIN_Class_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>updateSourceLine</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>updateSourceLine</c> method.
+    /// </summary>
+    /// <remarks>
+    /// Modifies the status of the operation to "In Execution" based on the InventBatchId.
+    /// </remarks>
+    protected void updateSourceLine()
+    {
+        next updateSourceLine();
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            InventDim inventDim = vendPackingSlipTrans.inventDim();
+
+            // Dimensión Operación (Número de lote)
+            if (inventDim.inventBatchId)
+            {
+                // Modificamos el estado de la operación a "En ejecución".
+                ETGSPAINPurchOperationTable etgspainPurchOperationTable = ETGSPAINPurchOperationTable::find(inventDim.inventBatchId, true);
+
+                if (etgspainPurchOperationTable)
+                {
+                    ttsbegin;
+                    etgspainPurchOperationTable.OperationStatus = ETGSPAINOperationStatus::Execution;
+                    etgspainPurchOperationTable.update();
+                    ttscommit;
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postInventory</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>postInventory</c> method.
+    /// </summary>
+    /// <remarks>
+    /// Updates the unsold quantity if the quantity is greater than ordered.
+    /// </remarks>
+    protected void postInventory()
+    {      
+        next postInventory();
+        
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            VendPackingSlipTrans    vendPackingSlipTransUnsold  = vendPackingSlipTrans;
+                
+            if (vendPackingSlipTransUnsold.ETGSPAINUnsoldQtyModify == NoYes::Yes
+            && vendPackingSlipTransUnsold.Qty > vendPackingSlipTransUnsold.Ordered)
+            {
+                InventTrans         inventTrans         = InventTrans::findTransId(vendPackingSlipTransUnsold.InventTransId);
+                InventTransOrigin   inventTransOrigin   = InventTransOrigin::find(inventTrans.InventTransOrigin);
+
+                if (inventTrans && inventTransOrigin)
+                {
+                    InventTrans         inventTransCreated;
+        
+                    inventTransCreated.clear();
+                    buf2Buf(inventTrans, inventTransCreated);
+
+                    inventTransCreated.StatusIssue                  = StatusIssue::None;
+                    inventTransCreated.StatusReceipt                = StatusReceipt::None;
+                    inventTransCreated.ETGSPAINInventTransIsUnsold  = NoYes::Yes;
+                    inventTransCreated.Qty                          = 0;
+
+                    inventTransCreated.insert();
+
+                    if (inventTransCreated)
+                    {
+                        ETGSPAINUnsoldInventTrans::findOrCreateByRefRecIdandQty(inventTransCreated.RecId,
+                                                                            (abs(vendPackingSlipTransUnsold.Qty) - abs(vendPackingSlipTransUnsold.Ordered) ),
+                                                                            vendPackingSlipTransUnsold.PurchUnit,
+                                                                            vendPackingSlipTransUnsold.purchLine(),
+                                                                            true);
+                    }
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

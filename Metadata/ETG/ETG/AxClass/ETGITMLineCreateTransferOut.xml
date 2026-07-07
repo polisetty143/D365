@@ -1,0 +1,309 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGITMLineCreateTransferOut</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// this class will generate voyage lines for transaction type transfer order
+/// </summary>
+using System.ComponentModel.Composition;
+[
+    ExportMetadataAttribute(enumStr(InventTransType), enumLiteralStr(InventTransType, TransferOrderShip)),
+    ExportAttribute(identifierStr(Dynamics.AX.Application.ITMLineCreate))
+]
+internal class ETGITMLineCreateTransferOut extends ITMLineCreate
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>splitSourceLine</Name>
+				<Source><![CDATA[
+    protected Common splitSourceLine(
+        Common _sourceLine,
+        ITMTransferQuantity _qty)
+    {
+        InventTransferLine existingInventTransferLine = _sourceLine as InventTransferLine;
+        InventTransferLine newInventTransferLine;
+        LineNum nextLineNum;
+    
+        if (existingInventTransferLine.QtyRemainShip >= _qty)
+        {
+            existingInventTransferLine.QtyTransfer -= _qty;
+        }
+        else
+        {
+            existingInventTransferLine.QtyTransfer -= existingInventTransferLine.QtyRemainShip;
+        }
+
+        existingInventTransferLine.modifiedField(fieldNum(InventTransferLine, QtyTransfer));
+        InventMovement::bufferSetRemainQty(existingInventTransferLine, InventMovSubType::None);
+        InventMovement::bufferSetRemainQty(existingInventTransferLine, InventMovSubType::TransferOrderTransitFrom);
+    
+        if (existingInventTransferLine.validateWrite())
+        {
+            existingInventTransferLine.update();
+        }
+    
+        newInventTransferLine.data(existingInventTransferLine);
+        newInventTransferLine.QtyTransfer = _qty;
+        newInventTransferLine.QtyRemainReceive = _qty;
+        newInventTransferLine.QtyRemainShip = _qty;
+    
+        newInventTransferLine.QtyReceived = 0;
+        newInventTransferLine.QtyScrapped = 0;
+        newInventTransferLine.QtyShipped = 0;
+    
+        newInventTransferLine.InventTransId = '';
+        newInventTransferLine.InventTransIdReceive = '';
+        newInventTransferLine.InventTransIdScrap = '';
+        newInventTransferLine.InventTransIdTransitFrom = '';
+        newInventTransferLine.InventTransIdTransitTo = '';
+        newInventTransferLine.RecId = 0;
+    
+        InventTransferLine inventTransferLineByLineNum;
+
+        select firstOnly LineNum from inventTransferLineByLineNum
+            order by LineNum asc
+            where inventTransferLineByLineNum.TransferId == existingInventTransferLine.TransferId
+                && inventTransferLineByLineNum.LineNum > existingInventTransferLine.LineNum;
+
+        nextLineNum = inventTransferLineByLineNum.LineNum;
+    
+        if (nextLineNum)
+        {
+            nextLineNum = (nextLineNum + existingInventTransferLine.LineNum) / 2;
+        }
+        else
+        {
+            nextLineNum = existingInventTransferLine.LineNum + 1;
+        }
+        
+        newInventTransferLine.LineNum = nextLineNum;
+    
+        if (newInventTransferLine.validateWrite())
+        {
+            newInventTransferLine.insert();
+        }
+        else
+        {
+            throw error("@SYS18447");
+        }
+    
+        return newInventTransferLine;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateSourceLine</Name>
+				<Source><![CDATA[
+    protected Common updateSourceLine()
+    {
+        InventTransferLine inventTransferLine;
+        InventTransferQty pickedQty;
+        boolean isSourceLineUpdated = false;
+    
+        inventTransferLine = InventTransferLine::findTransIdShip(inventTransId, true);
+    
+        if (inventTransferLine.QtyShipped)
+        {
+            if (inventTransferLine.QtyRemainReceive >= transferQty)
+            {
+                inventTransferLine = this.splitSourceLine(inventTransferLine, transferQty);
+            }
+            else
+            {
+                warning("@InboundTransportationManagement:TransferQuantityIsGreaterThanTheShipRemainQuantityDot");
+                throw error("@SYS18447");
+            }
+            isSourceLineUpdated = true;
+        }
+        else
+        {
+            pickedQty = inventTransferLine.qtyShipPickedAll();
+    
+            if (pickedQty)
+            {
+                if (pickedQty >= inventTransferLine.QtyReceived)
+                {
+                    if (pickedQty <= transferQty)
+                    {
+                        this.splitSourceLine(inventTransferLine, inventTransferLine.QtyRemainShip - transferQty);
+                    }
+                    else if (((inventTransferLine.QtyShipped + inventTransferLine.QtyRemainShip) - pickedQty) >= transferQty)
+                    {
+                        inventTransferLine = this.splitSourceLine(inventTransferLine, transferQty);
+                    }
+                    else
+                    {
+                        warning("@InboundTransportationManagement:CannotSplitTheTransferQuantityIsGreaterThanThePick");
+                        throw error("@SYS18447");
+                    }
+
+                    isSourceLineUpdated = true;
+                }
+                else
+                {
+                    if (inventTransferLine.QtyRemainReceive != 0 || inventTransferLine.QtyReceived != transferQty)
+                    {
+                        if (inventTransferLine.QtyReceived <= transferQty)
+                        {
+                            this.splitSourceLine(inventTransferLine, inventTransferLine.QtyRemainShip - transferQty);
+                        }
+                        else if (inventTransferLine.QtyRemainReceive >= transferQty)
+                        {
+                            inventTransferLine = this.splitSourceLine(inventTransferLine, transferQty);
+                        }
+                        else
+                        {
+                            warning("@InboundTransportationManagement:CannotSplitTheTransferQuantityIsGreaterThanTheShip");
+                            throw error("@SYS18447");
+                        }
+
+                        isSourceLineUpdated = true;
+                    }
+                }
+            }
+            else if (inventTransferLine.QtyReceived)
+            {
+                if (inventTransferLine.QtyRemainReceive != 0 || inventTransferLine.QtyReceived != transferQty)
+                {
+                    if (inventTransferLine.QtyReceived <= transferQty)
+                    {
+                        this.splitSourceLine(inventTransferLine, inventTransferLine.QtyRemainReceive - transferQty);
+                    }
+                    else if (inventTransferLine.QtyRemainReceive >= transferQty)
+                    {
+                        inventTransferLine = this.splitSourceLine(inventTransferLine, transferQty);
+                    }
+                    else
+                    {
+                        warning("@InboundTransportationManagement:CannotSplitTheTransferQuantityIsGreaterThanTheShip");
+                        throw error("@SYS18447");
+                    }
+                    isSourceLineUpdated = true;
+                }
+            }
+            else if (inventTransferLine.QtyRemainShip > transferQty)
+            {
+                if (close)
+                {
+                    inventTransferLine.QtyRemainReceive = transferQty;
+                    inventTransferLine.updateDeliverRemainder();
+                }
+                else
+                {
+                    inventTransferLine = this.splitSourceLine(inventTransferLine, transferQty);
+                }
+
+                isSourceLineUpdated = true;
+            }
+            else if (inventTransferLine.QtyRemainShip < transferQty)
+            {
+                inventTransferLine.QtyRemainReceive = transferQty;
+                inventTransferLine.updateDeliverRemainder();
+                isSourceLineUpdated = true;
+            }
+        }
+    
+        if (!isSourceLineUpdated)
+        {
+            canSourceLineUpdateBeDelayed = true;
+        }
+
+        this.writeSourceLine(inventTransferLine);
+    
+        return inventTransferLine;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateSourceLinesWithShipIdAndStatus</Name>
+				<Source><![CDATA[
+    public void updateSourceLinesWithShipIdAndStatus()
+    {
+        super();
+
+        if (shipId != '')
+        {
+            InventTransferLine inventTransferLine;
+            ITMLine            shipLineLocal;
+
+            update_recordset inventTransferLine
+                setting ITMId = shipId, ITMStatusId = statusId
+                exists join shipLineLocal
+                where inventTransferLine.ITMId == ''
+                   && shipLineLocal.ShipId == shipId
+                   && shipLineLocal.RefRecId == inventTransferLine.RecId
+                   && shipLineLocal.RefTableId == inventTransferLine.TableId;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>checkDlvMode</Name>
+				<Source><![CDATA[
+    public boolean checkDlvMode()
+    {
+        boolean isValid = super();
+
+        if (shipId != '' && shipTable.RecId != 0 && ITMParameters::find().MultipleDlvModeTolerance != ErrorTolerance::Accept)
+        {
+            ITMLine                 shipLinelocal;
+            inventTransferTable     inventTransferTable;
+
+            select firstonly shipLinelocal
+                where shipLinelocal.ShipId == shipId
+                exists join inventTransferTable
+                where inventTransferTable.TransferId == shipLinelocal.TransRefId
+                   && inventTransferTable.DlvModeId != shipTable.DlvModeId;
+
+            if (shipLinelocal.RecId)
+            {
+                isValid = shipLinelocal.throwErrorToleranceForMultiDlvMode();
+            }
+        }
+
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>writeShipLine</Name>
+				<Source><![CDATA[
+    protected void writeShipLine(Common _sourceLine)
+    {
+        InventTransferLine inventTransferLine = _sourceLine as InventTransferLine;
+    
+        shipLine.initFromInventTransferLineShipmentETG(inventTransferLine);
+        shipLine.ShipQty = abs(shipLine.inventTransQty());
+        shipLine.Volume  = abs(shipLine.Volume);
+        shipLine.Weight  = abs(shipLine.Weight);
+
+        super(_sourceLine);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>writeSourceLine</Name>
+				<Source><![CDATA[
+    protected void writeSourceLine(Common _sourceLine)
+    {
+        InventTransferLine inventTransferLine = _sourceLine as InventTransferLine;
+    
+        inventTransferLine.ITMId = shipId;
+    
+        super(inventTransferLine);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

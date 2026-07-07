@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGMarkupTransTable_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tableStr(MarkupTrans))]
+internal final class ETGMarkupTransTable_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>insert</Name>
+				<Source><![CDATA[
+    public void insert(SourceDocumentLineAccountingStatus _targetAccountingStatus)
+    {
+        
+        if(ETGCanadaParameters::find().EnableGrainReceiptNote == NoYes::Yes)
+        {
+            this.applyLevyIfApplicable();
+        }
+        next insert(_targetAccountingStatus);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>update</Name>
+				<Source><![CDATA[
+    public void update(boolean _updateMiscMatching, boolean _isEditingBlockedByVendorInvoice)
+    {
+        if(ETGCanadaParameters::find().EnableGrainReceiptNote == NoYes::Yes)
+        {
+            this.applyLevyIfApplicable();
+        }
+            next update(_updateMiscMatching, _isEditingBlockedByVendorInvoice);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>modifiedField</Name>
+				<Source><![CDATA[
+    public void modifiedField(FieldId _fieldId)
+    {
+        next modifiedField(_fieldId);
+
+        switch (_fieldId)
+        {
+            case fieldNum(MarkupTrans, MarkupCode):
+                if(ETGCanadaParameters::find().EnableGrainReceiptNote == NoYes::Yes)
+                {
+                    this.applyLevyIfApplicable();
+                }
+                break;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>applyLevyIfApplicable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method to applying levy charges
+    /// </summary>
+    private void applyLevyIfApplicable()
+    {
+        MarkupTable markupTable;
+        PurchTable purchTable;
+        PurchLine purchLine;
+        ETGElevatorReceiptTable elevatorReceipt;
+        ETGLevyChargeSetup setup;
+
+        if (this.TransTableId != tableNum(PurchTable))
+        return;
+
+        markupTable = MarkupTable::find(this.ModuleType, this.MarkupCode);
+
+        if (!markupTable)
+        return;
+
+        if (markupTable.ETGLevyChargesApplicable != NoYes::Yes)
+        return;
+
+        purchTable = PurchTable::findRecId(this.TransRecId);
+        if (!purchTable)
+        return;
+
+        select purchLine where 
+            purchTable.PurchId == purchLine.PurchId;
+
+        select firstOnly crossCompany elevatorReceipt
+        where elevatorReceipt.PONumberInDefaultEntity == purchTable.PurchId;
+
+        if (!elevatorReceipt)
+        return;
+
+        setup = ETGLevyChargeSetup::findForPO(purchTable);
+        if (!setup)
+        return;
+
+        this.Value = setup.calcLevyFromElevatorReceipt(elevatorReceipt, purchLine);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

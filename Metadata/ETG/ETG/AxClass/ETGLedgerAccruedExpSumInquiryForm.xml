@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerAccruedExpSumInquiryForm</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGLedgerAccruedExpSumInquiryForm
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>populateVendPrepaymentDetailsTmp</Name>
+				<Source><![CDATA[
+    public ETGLedgerAccruedExpSumDetailsTmp populateVendPrepaymentDetailsTmp(
+        FiscalCalendar  _fiscalCalendar,
+        FiscalYearName  _fiscalYear,
+        boolean         _pendingAccruedTransactionsFilter)
+    {
+        ETGLedgerAccruedExpSumDetailsTmp   tmp;
+
+        ETGLedgerJournalTransAccrualTrans   ledgerJournalTransAccrualTrans,
+                                            ledgerJournalTransAccrualTrans_Debit, ledgerJournalTransAccrualTrans_Credit,
+                                            ledgerJournalTransAccrualTrans_RefRecId,
+                                            ledgerJournalTransAccrualTrans_Pending,
+                                            ledgerJournalTransAccrualTrans_Posted;
+
+        LedgerJournalTrans                  ledgerJournalTrans;
+
+        FiscalCalendarYear                  fiscalCalendarYear;
+
+        FiscalYearStart     startDate;
+        FiscalYearEnd       endDate;
+
+        int     noOfAccruedTxns, noOfAccruedTxns_NotPosted;
+        boolean validRefRecId;
+
+        fiscalCalendarYear  = FiscalCalendarYear::findByCalendarYearName(_fiscalCalendar.RecId, _fiscalYear);
+                
+        startDate   = fiscalCalendarYear.StartDate;
+        endDate     = fiscalCalendarYear.EndDate;
+
+        while select ledgerJournalTransAccrualTrans_RefRecId
+            group by RefRecid
+
+            where  ledgerJournalTransAccrualTrans_RefRecId.TransDate >=  startDate
+                &&  ledgerJournalTransAccrualTrans_RefRecId.TransDate <=  endDate
+        {  
+            validRefRecId = false;
+                        
+            select firstonly RecId, Posted from ledgerJournalTransAccrualTrans_Pending
+                order by Posted
+
+                where   ledgerJournalTransAccrualTrans_Pending.RefRecid ==  ledgerJournalTransAccrualTrans_RefRecId.RefRecid;
+           
+            if (ledgerJournalTransAccrualTrans_Pending.RecId != 0)
+            {
+                if (_pendingAccruedTransactionsFilter == false)
+                {
+                    if (ledgerJournalTransAccrualTrans_Pending.Posted == true)
+                    {
+                        validRefRecId = true;
+                    }
+                }   
+                else
+                {
+                    if (ledgerJournalTransAccrualTrans_Pending.Posted == false)
+                    {
+                        validRefRecId = true;
+                    }
+                }   
+            }
+
+            if (validRefRecId == true)
+            {
+                while select maxof(TransDate) from ledgerJournalTransAccrualTrans
+                    group by JournalNumSource, TransTxt, RefRecid, CurrencyCode
+
+                    where   ledgerJournalTransAccrualTrans.RefRecid ==  ledgerJournalTransAccrualTrans_RefRecId.RefRecid
+                {
+                    tmp.clear();
+
+                    tmp.RefRecid            =   ledgerJournalTransAccrualTrans_RefRecId.RefRecid;
+                    tmp.OriginalTxnJournal  =   ledgerJournalTransAccrualTrans.JournalNumSource;
+                    tmp.FiscalYear          =   _fiscalYear;
+         
+                    select firstonly Voucher, TransDate, AmountCurCredit, AmountCurDebit from ledgerJournalTrans 
+                        where   ledgerJournalTrans.RecId   ==  ledgerJournalTransAccrualTrans.RefRecid;
+
+                    tmp.OriginalTxnVoucher  =   ledgerJournalTrans.Voucher;
+                    tmp.OriginalTxnDate     =   ledgerJournalTrans.TransDate;
+
+                    tmp.CurrencyCode        =   ledgerJournalTransAccrualTrans.CurrencyCode;
+                    tmp.TransTxt            =   ledgerJournalTransAccrualTrans.TransTxt;
+
+                    if (ledgerJournalTrans.AmountCurCredit == 0)
+                    {
+                        tmp.OriginalTransactionAmount = ledgerJournalTrans.AmountCurDebit;
+                    }
+                    else if(ledgerJournalTrans.AmountCurDebit == 0)
+                    {
+                        tmp.OriginalTransactionAmount = (-1) * (ledgerJournalTrans.AmountCurCredit);                    
+                    }
+
+                    while select sum(AmountCur), count(RefRecid) from ledgerJournalTransAccrualTrans_Debit
+                        group by LedgerDimension, Posted
+                        where   ledgerJournalTransAccrualTrans_Debit.RefRecid   == ledgerJournalTransAccrualTrans.RefRecid
+                            &&  ledgerJournalTransAccrualTrans_Debit.AmountCur  > 0
+                    {
+                        noOfAccruedTxns += any2int(ledgerJournalTransAccrualTrans_Debit.RefRecid);
+                        if  (ledgerJournalTransAccrualTrans_Debit.Posted    == true)
+                        {
+                            tmp.DebitAmountPosted   =  ledgerJournalTransAccrualTrans_Debit.AmountCur;
+                        }
+                        else
+                        {
+                            tmp.DebitAmountNotPosted    =   ledgerJournalTransAccrualTrans_Debit.AmountCur;
+                            noOfAccruedTxns_NotPosted   +=  any2int(ledgerJournalTransAccrualTrans_Debit.RefRecid);
+                        }     
+                        tmp.DebitLedgerAccount  =   ledgerJournalTransAccrualTrans_Debit.LedgerDimension;
+                    }
+                    tmp.NoOfAccruedTransactions     =   noOfAccruedTxns;
+                    tmp.NoOfNotPostedTransactions   =   noOfAccruedTxns_NotPosted;
+
+                    noOfAccruedTxns             =   0;
+                    noOfAccruedTxns_NotPosted   =   0;
+
+                    while select sum(AmountCur), count(RefRecid) from ledgerJournalTransAccrualTrans_Credit
+                        group by LedgerDimension, Posted
+                        where   ledgerJournalTransAccrualTrans_Credit.RefRecid   == ledgerJournalTransAccrualTrans.RefRecid
+                            &&  ledgerJournalTransAccrualTrans_Credit.AmountCur  < 0
+                    {
+                        noOfAccruedTxns += any2int(ledgerJournalTransAccrualTrans_Credit.RefRecid);
+                        if  (ledgerJournalTransAccrualTrans_Credit.Posted    == true)
+                        {
+                            tmp.CreditAmountPosted   =  ledgerJournalTransAccrualTrans_Credit.AmountCur;
+                        }
+                        else
+                        {
+                            tmp.CreditAmountNotPosted    =   ledgerJournalTransAccrualTrans_Credit.AmountCur;
+                            noOfAccruedTxns_NotPosted   +=  any2int(ledgerJournalTransAccrualTrans_Credit.RefRecid);
+                        }
+                        tmp.CreditLedgerAccount  =   ledgerJournalTransAccrualTrans_Credit.LedgerDimension;
+                    }
+                    tmp.NoOfAccruedTransactions     =   noOfAccruedTxns;
+                    tmp.NoOfNotPostedTransactions   =   noOfAccruedTxns_NotPosted;
+
+                    noOfAccruedTxns             =   0;
+                    noOfAccruedTxns_NotPosted   =   0;
+
+                    select firstonly TransDate from ledgerJournalTransAccrualTrans_Posted
+                        order by TransDate desc
+                        where   ledgerJournalTransAccrualTrans_Posted.RefRecid  == ledgerJournalTransAccrualTrans_RefRecId.RefRecid
+                            &&  ledgerJournalTransAccrualTrans_Posted.Posted    == true;
+
+                    tmp.LastPostedTxnDate   =   ledgerJournalTransAccrualTrans_Posted.TransDate;
+                    tmp.insert();            
+                }
+            }
+        }
+        return tmp;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

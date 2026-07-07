@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SAALine_DS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formdatasourcestr(SalesAgreement, ALine))]
+final class ETG_SAALine_DS_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {
+        int                     ret;
+        AgreementReference      agreementReference;
+        boolean                 isTPAgreement = false;
+        boolean                 isReleased    = true;
+        FormDataSource          ALine_DS                = any2Object(this) as FormDataSource;
+        formRun                 formRun                 = ALine_DS.formRun();
+        FormDataSource          SalesAgreementHeader_DS = formRun.dataSource(formDataSourceStr(SalesAgreement, SalesAgreementHeader)) as FormDataSource;
+        SalesAgreementHeader    salesAgreementHeader    = SalesAgreementHeader_ds.cursor();       
+        FormDataSource          aLineQtyCommitment_ds   = formRun.dataSource(formDataSourceStr(PurchAgreement, ALine_AgreementLineQuantityCommitment)) as FormDataSource;
+        FormDataSource          agreementLineDefault_ds = formRun.dataSource(formDataSourceStr(PurchAgreement, AgreementLineDefault)) as FormDataSource;
+        FormDataSource          inventDim_ds            = formRun.dataSource(formDataSourceStr(PurchAgreement, InventDim)) as FormDataSource;
+        ETG_Parameters          parameter               = ETG_Parameters::find();
+
+        FormDataSource          aLineQtyCommitmentSales_ds   = formRun.dataSource(formDataSourceStr(SalesAgreement,ALine_AgreementLineQuantityCommitment )) as FormDataSource;
+        FormDataSource          aLineVolCommitmentSales_ds   = formRun.dataSource(formDataSourceStr(SalesAgreement,ALine_AgreementLineVolumeCommitment  )) as FormDataSource;
+        FormDataSource          agreementLineDefaultSales_ds = formRun.dataSource(formDataSourceStr(SalesAgreement, AgreementLineDefault)) as FormDataSource;
+        FormDataSource          inventDimSales_ds            = formRun.dataSource(formDataSourceStr(SalesAgreement, InventDim)) as FormDataSource;
+
+       
+        ret = next active();
+
+        select firstonly agreementReference
+            where agreementReference.DerivedAgreement == salesAgreementHeader.RecId;
+       
+        if(salesAgreementHeader.ETG_TradingStatusSales != ETG_TradingStatus::None)
+        {
+            isReleased = false;
+        }
+
+        if(parameter.ETG_FrozenValidations
+            && parameter.ETG_FrozenValidationPurchaseAgreement
+            && (salesAgreementHeader.ETG_IsThirdParty || agreementReference))
+        {
+            isTPAgreement = true;
+        }
+
+        if(!isReleased)
+        {
+            aline_ds.allowEdit(false);
+            aline_ds.allowCreate(false);
+            aline_ds.allowDelete(false);
+            inventDim_ds.allowEdit(false);
+            aLineQtyCommitment_ds.allowEdit(false);
+        }
+        else if(isTPAgreement)
+        {
+            //aline_ds.allowCreate(false);
+            //aline_ds.allowDelete(false);
+            //agreementLineDefault_ds.allowEdit(false);
+            //allowEditFieldGroup(InventDim_DS, tableFieldGroupStr(InventDim_DS, StorageDimensions));
+            //allowEditFieldGroup(aLineQtyCommitment_ds, tableFieldGroupStr(aLineQtyCommitment_ds, AgreementFieldsEditable));
+
+            agreementLineDefault_ds.allowEdit(true);
+            aLineQtyCommitment_ds.allowEdit(true);
+            aline_ds.allowCreate(true);
+            aline_ds.allowDelete(true);
+            aline_ds.allowEdit(true);
+            inventDim_ds.allowEdit(true);
+        }
+        else
+        {
+            agreementLineDefault_ds.allowEdit(true);
+            aLineQtyCommitment_ds.allowEdit(true);
+            aline_ds.allowCreate(true);
+            aline_ds.allowDelete(true);
+            aline_ds.allowEdit(true);
+            inventDim_ds.allowEdit(true);
+        }
+
+        if(ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+        {
+            if (salesAgreementHeader.AgreementState == AgreementState::OnHold)
+            {
+                SalesAgreementHeader_DS.allowEdit(true);
+                agreementLineDefault_ds.allowEdit(true);
+                aline_ds.allowCreate(true);
+                aline_ds.allowDelete(true);
+                aline_ds.allowEdit(true);
+                inventDimSales_ds.allowEdit(true);
+                aLineQtyCommitmentSales_ds.allowEdit(true);
+                aLineQtyCommitmentSales_ds.allowCreate(true);
+                aLineQtyCommitmentSales_ds.allowDelete(true);
+                agreementLineDefaultSales_ds.allowCreate(true);
+                agreementLineDefaultSales_ds.allowEdit(true);
+                agreementLineDefaultSales_ds.allowDelete(true);
+
+                // --- ADD THESE LINES TO UNLOCK UNIT PRICE ---
+                FormDataObject priceField = aLineQtyCommitmentSales_ds.object(fieldNum(AgreementLineQuantityCommitment, PricePerUnit));
+                if (priceField)
+                {
+                    priceField.allowEdit(true);
+                }
+                //
+
+                element.design(ViewEditMode::Edit);
+            }
+            else
+            {
+                SalesAgreementHeader_DS.allowEdit(false);
+                agreementLineDefault_ds.allowEdit(false);
+                aline_ds.allowCreate(false);
+                aline_ds.allowDelete(false);
+                aline_ds.allowEdit(false);
+                inventDimSales_ds.allowEdit(false);
+                aLineQtyCommitmentSales_ds.allowEdit(false);
+                aLineQtyCommitmentSales_ds.allowCreate(false);
+                aLineQtyCommitmentSales_ds.allowDelete(false);
+                agreementLineDefaultSales_ds.allowCreate(false);
+                agreementLineDefaultSales_ds.allowEdit(false);
+                agreementLineDefaultSales_ds.allowDelete(false);
+                element.design(ViewEditMode::View);
+            }
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

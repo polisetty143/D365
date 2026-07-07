@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGAgreementTradeLimitHelper</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGAgreementTradeLimitHelper
+{
+    PurchAgreementHeader purchAgreementHeader;
+
+    //SalesAgreementHeader salesAgreementHeader;
+    //public static ETGAgreementTradeLimitHelper construct()
+    //{
+    //    return new ETGAgreementTradeLimitHelper();
+    //}
+
+    //public PurchAgreementHeader parmPurchAgreementHeader(PurchAgreementHeader _purchAgreementHeader = purchAgreementHeader)
+    //{
+    //    purchAgreementHeader = _purchAgreementHeader;
+    //    return purchAgreementHeader;
+    //}
+
+    //public SalesAgreementHeader parmSalesAgreementHeader(SalesAgreementHeader _salesAgreementHeader = salesAgreementHeader)
+    //{
+    //    salesAgreementHeader = _salesAgreementHeader;
+    //    return salesAgreementHeader;
+    //}
+
+    //public static void reduceTradeLimitAmt(AgreementHeader agreementHeader)
+    //{
+    //    ETGAgreementTradeLimitHelper agreementTradeLimitHelper = ETGAgreementTradeLimitHelper::construct();
+
+    //    PurchAgreementHeader purchAgreementHeaderLoc = PurchAgreementHeader::find(agreementHeader.RecId);
+
+    //    if(purchAgreementHeaderLoc)
+    //    {
+    //        agreementTradeLimitHelper.parmPurchAgreementHeader(purchAgreementHeaderLoc);
+    //        agreementTradeLimitHelper.processPurchTradeLimit();
+    //    }
+    //    else
+    //    {
+    //        SalesAgreementHeader salesAgreementHeaderLoc = SalesAgreementHeader::find(agreementHeader.RecId);
+    //        agreementTradeLimitHelper.parmSalesAgreementHeader(salesAgreementHeaderLoc);
+    //        agreementTradeLimitHelper.processSalesTradeLimit();
+    //    }
+    //}
+
+    //public static void addTradeLimitAmtAll(AgreementHeader agreementHeader)
+    //{
+    //    ETGAgreementTradeLimitHelper agreementTradeLimitHelper = ETGAgreementTradeLimitHelper::construct();
+
+    //    if(agreementHeader.moduleType() == ModuleSalesPurch::Purch)
+    //    {
+    //        PurchAgreementHeader purchAgreementHeaderLoc = PurchAgreementHeader::find(agreementHeader.RecId);
+
+    //        if(purchAgreementHeaderLoc)
+    //        {
+    //            agreementTradeLimitHelper.parmPurchAgreementHeader(purchAgreementHeaderLoc);
+    //            agreementTradeLimitHelper.processPurchTradeLimit();
+    //        }
+    //    }
+    //    else if(agreementHeader.moduleType() == ModuleSalesPurch::Sales)
+    //    {
+    //        SalesAgreementHeader salesAgreementHeaderLoc = SalesAgreementHeader::find(agreementHeader.RecId);
+    //        agreementTradeLimitHelper.parmSalesAgreementHeader(salesAgreementHeaderLoc);
+    //        agreementTradeLimitHelper.processSalesTradeLimit();
+    //    }
+    //}
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>processPurchTradeLimit</Name>
+				<Source><![CDATA[
+    public void processPurchTradeLimit()
+    {
+        AgreementLineQuantityCommitment aLine;
+        LineAmount totalAgreementAmt;
+        VendTable vendTable;
+        ETGACFParameters    _eTGACFParameters = ETGACFParameters::find();
+
+        if(_eTGACFParameters.EnableTradeLimit == NoYes::Yes && purchAgreementHeader.vendTable().ETGApplicableTradeLimit == NoYes::Yes)
+        {
+            while select aLine where aLine.Agreement == purchAgreementHeader.RecId
+            {
+                totalAgreementAmt += aLine.lineAmount();
+            }
+
+            if(totalAgreementAmt != 0)
+            {
+                vendTable = VendTable::find(purchAgreementHeader.VendAccount, true);
+                if(totalAgreementAmt > vendTable.ETGRemainingTradeLimitPurchReal)
+                {
+                    throw Error(strFmt("@ETG:ErrorTradeLimit1", totalAgreementAmt, vendTable.ETGRemainingTradeLimitPurchReal));
+                }
+
+                ttsbegin;
+                vendTable.ETGRemainingTradeLimitPurchReal = vendTable.ETGRemainingTradeLimitPurchReal - totalAgreementAmt;
+                vendTable.doUpdate();
+                ttscommit;
+            }
+        }
+    }
+
+    //public void addTradeLimitAmtPurch(VendAccount vendAccount, Amount amount)
+    //{
+    //    if(amount != 0)
+    //    {
+    //        VendTable vendTable = VendTable::find(vendAccount, true);
+    //        if(amount && amount < vendTable.ETGTradeLimitPurch)
+    //        {
+    //            ttsbegin;
+    //            vendTable.ETGRemainingTradeLimitPurch = vendTable.ETGRemainingTradeLimitPurch + amount;
+    //            if(vendTable.ETGRemainingTradeLimitPurch > vendTable.ETGTradeLimitPurch)
+    //            {
+    //                vendTable.ETGRemainingTradeLimitPurch = vendTable.ETGTradeLimitPurch;
+    //            }
+    //            vendTable.doUpdate();
+    //            ttscommit;
+    //        }
+    //    }
+    //}
+
+    //public void addTradeLimitAmtSales(CustAccount custAccount, Amount amount)
+    //{
+    //    if(amount != 0)
+    //    {
+    //        CustTable custTable = CustTable::find(custAccount, true);
+    //        if(amount && amount < custTable.ETGTradeLimitSales)
+    //        {
+    //            ttsbegin;
+    //            custTable.ETGRemainingTradeLimitSales = custTable.ETGRemainingTradeLimitSales + amount;
+    //            if(custTable.ETGRemainingTradeLimitSales > custTable.ETGTradeLimitSales)
+    //            {
+    //                custTable.ETGRemainingTradeLimitSales = custTable.ETGTradeLimitSales;
+    //            }
+    //            custTable.doUpdate();
+    //            ttscommit;
+    //        }
+    //    }
+    //}
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

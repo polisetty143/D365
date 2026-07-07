@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_VendAccountStatementDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[
+SRSReportParameterAttribute(classStr(ETG_VendAccountStatementContract))
+]
+    public class ETG_VendAccountStatementDP extends SRSReportDataProviderBase
+{
+    
+    ETG_VendAccountStatementTmp     eTG_VendAccountStatementTmp;
+   
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETG_VendAccountStatementTmp</Name>
+				<Source><![CDATA[
+    [
+        SRSReportDataSetAttribute(tableStr(ETG_VendAccountStatementTmp))
+    ]
+    public ETG_VendAccountStatementTmp getETG_VendAccountStatementTmp()
+    {
+        select * from eTG_VendAccountStatementTmp;
+        return eTG_VendAccountStatementTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+   {
+       ETG_VendAccountStatementContract            contract = this.parmDataContract() as ETG_VendAccountStatementContract;
+        
+        TransDate       fromDate = contract.parmFromDate();
+        TransDate       toDate   = contract.parmToDate();
+        VendAccount     vendorAccount = contract.parmVendorAccount();
+        VendTable       vendtable;
+        VendTrans        vendTrans;
+        AmountCur     debit,credit,debitlocal,creditlocal;
+        VendInvoiceJour     vendInvoiceJour;
+       
+
+        str SubCommodity = "SubCommodity";
+        
+       
+        
+                                  
+
+      while select  vendtrans           
+         where vendTrans.AccountNum == vendorAccount
+          && (vendTrans.TransDate >= fromDate   &&   vendTrans.TransDate <= toDate)
+        {
+            debit = 0.00;
+            credit = 0.00;
+            debitlocal = 0.00;
+            creditlocal =0.00;
+        
+            if(vendTrans.AmountCur > 0 )
+            {
+               
+
+                debit  = vendtrans.AmountCur;
+                debitlocal  = vendtrans.AmountMST;
+
+                eTG_VendAccountStatementTmp.AmountDebit =  abs(debit);
+                eTG_VendAccountStatementTmp.Amount      =   abs(debitlocal);
+                eTG_VendAccountStatementTmp.AmountCredit =  0.00;
+                eTG_VendAccountStatementTmp.AccumulatedBalance      = 0.00;
+            }
+            
+            if(vendTrans.AmountCur < 0 )
+            {
+               
+
+                credit  = vendtrans.AmountCur;
+                creditlocal  = vendtrans.AmountMST;
+
+                eTG_VendAccountStatementTmp.AmountCredit =  abs(credit);
+                eTG_VendAccountStatementTmp.AccumulatedBalance      = abs(creditlocal);
+                eTG_VendAccountStatementTmp.AmountDebit =  0.00;
+                eTG_VendAccountStatementTmp.Amount      =   0.00;
+            }
+            eTG_VendAccountStatementTmp.VendCode  =  vendtrans.AccountNum;
+            eTG_VendAccountStatementTmp.VendName  =  vendtrans.vendTableName();
+            eTG_VendAccountStatementTmp.Currency  = vendTrans.CurrencyCode;
+            eTG_VendAccountStatementTmp.TransactionDate =vendTrans.TransDate;
+            eTG_VendAccountStatementTmp.Vocher  = vendTrans.Voucher;
+            eTG_VendAccountStatementTmp.InvoiceNumber = vendTrans.Invoice;
+            eTG_VendAccountStatementTmp.TransactionText =vendTrans.Txt;
+
+            select * from  vendInvoiceJour where vendInvoiceJour.LEDGERVOUCHER == vendTrans.Voucher;
+            eTG_VendAccountStatementTmp.Quantity = vendInvoiceJour.Qty;
+            eTG_VendAccountStatementTmp.BOLNumber = vendInvoiceJour.ETG_BLnumber;
+
+            
+           
+            
+            eTG_VendAccountStatementTmp.Commodity   = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension,SubCommodity);
+
+
+
+            eTG_VendAccountStatementTmp.insert();
+        }
+       
+
+        
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

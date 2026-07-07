@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ProdMultiStartUpETG_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(ProdMultiStartUp))]
+Final class ProdMultiStartUpETG_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>canGoBatch</Name>
+				<Source><![CDATA[
+    public boolean canGoBatch()
+    {
+        boolean  batch;
+        batch =  next  canGoBatch();
+        batch = false;
+        return batch;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Abhinav - Start Production order in parent entity
+    /// </summary>
+    public void run()
+    {
+        try
+        {
+            ttsbegin;
+            next run();
+
+            if(ETGCanadaParameters::find().EnableSubContractingPO)
+            {
+                ProdParmStartUp prodParmStartUp = this.setProduction();
+                ProdJournaltable prodJournaltableParent;
+
+                ProdTable prodTable = this.initProdTable(prodParmStartUp.ProdId);
+
+                if(prodTable && prodTable.ETGIsSubContractingOrder && prodTable.ETGParentProdId)
+                {
+                    changecompany(prodTable.ETGParentEntity)
+                    {
+                        ProdParmStartUp prodParmStartUpLoc;
+                        ProdTable prodTableParent = ProdTable::find(prodTable.ETGParentProdId);
+
+                        if(ETGCanadaParameters::find().EnableICPoSoValidation)
+                        {
+                            PurchLine purchline;
+                            select firstonly purchline
+                            where purchline.InventRefId == prodTableParent.ProdId;
+
+                            if(purchline)
+                            {
+                                PurchTable purchtable = purchtable::find(purchline.PurchId);
+
+                                if(purchtable.PurchStatus != PurchStatus::Invoiced)
+                                {
+                                    throw Error("@ETG_New:IntercompanyPONotInvoiced");
+                                }
+
+                                SalesTable salesTable = SalesTable::find(purchtable.InterCompanySalesId);
+
+                                if(salesTable && salesTable.SalesStatus != SalesStatus::Invoiced)
+                                {
+                                    throw Error("@ETG_New:IntercompanySONotInvoiced");
+                                }
+                            }
+                        }
+
+                        //ProdMultiStartUp prodMultiStartUp = ProdMultiStartUp::construct(null);
+                        //prodMultiStartUp.getLast();
+                        //prodMultiStartUp.parmId(RunBaseMultiParm::getSysParmId());
+                    
+                        
+
+                        prodParmStartUpLoc.initValue();
+                        //prodParmStartUpLoc.initParmDefault();
+                        prodParmStartUpLoc.ProdId = prodTableParent.ProdId;
+                        prodParmStartUpLoc.StartUpQty = prodParmStartUp.StartUpQty;
+
+                        JmgProdParametersDim    jmgProdParametersDim = JmgProdParametersDim::find(prodTableParent.InventDimId);
+
+                        if (jmgProdParametersDim.StartUpUseSFCParameters == NoYes::Yes)
+                        {
+                            prodParmStartUpLoc.StartUpProduction       = jmgProdParametersDim.StartUpProduction;
+                            prodParmStartUpLoc.References              = jmgProdParametersDim.StartUpReferences;
+                            prodParmStartUpLoc.RouteJournalNameId      = jmgProdParametersDim.StartUpRouteJournalNameId;
+                            prodParmStartUpLoc.RouteAutoConsump        = jmgProdParametersDim.StartUpRouteAutoConsump;
+                            prodParmStartUpLoc.PostNowRoute            = jmgProdParametersDim.StartUpPostNowRoute;
+                            prodParmStartUpLoc.EndRouteCard            = jmgProdParametersDim.StartUpEndRouteCard;
+                            prodParmStartUpLoc.bomJournalNameId        = jmgProdParametersDim.StartUpBomJournalNameId;
+                            prodParmStartUpLoc.bomAutoConsump          = jmgProdParametersDim.StartUpBOMAutoConsump;
+                            prodParmStartUpLoc.bomJournalSplit         = jmgProdParametersDim.StartUpBOMJournalSplit;
+                            prodParmStartUpLoc.PostNowBOM              = jmgProdParametersDim.StartUpPostNowBOM;
+                            prodParmStartUpLoc.EndPicklist             = jmgProdParametersDim.StartUpEndPicklist;
+                            prodParmStartUpLoc.ReducePhysical          = jmgProdParametersDim.StartUpReducePhysical;
+                            prodParmStartUpLoc.DrawNegative            = jmgProdParametersDim.StartUpDrawNegative;
+                            prodParmStartUpLoc.CompletePickListJournal = jmgProdParametersDim.StartUpCompletePickListJournal;
+                        }
+                        else
+                        {
+                            //prodParmStartUpLoc.BOMJournalNameId = prodParametersDim.BOMJournalNameId;
+                            //prodParmStartUpLoc.RouteJournalNameId = prodParametersDim.RouteJournalNameId;
+                            ProdParametersDim prodParametersDim = ProdParametersDim::findDefault();
+                            prodParmStartUpLoc.initFromProdParametersDim(prodParametersDim);
+                        }
+                        
+                        prodParmStartUpLoc.linenum = ProdParmStartUp::lastLineNum(prodParmStartUpLoc.parmid)+1;
+                        prodParmStartUpLoc.insert();
+
+                        prodTableParent.status().runStartUp(prodParmStartUpLoc,false,null,null,false);
+                        //prodParmStartUpLoc.BOMJournalNameId = prodParametersDim.BOMJournalNameId;
+                        //prodParmStartUpLoc.RouteJournalNameId = prodParametersDim.RouteJournalNameId;
+                        //prodParmStartUpLoc.ReducePhysical = NoYes::Yes;
+                        //prodParmStartUpLoc.BOMAutoConsump = BOMAutoConsump::Always;
+                        //prodParmStartUpLoc.StartUpProduction = NoYes::Yes;
+                        //prodParmStartUpLoc.RouteAutoConsump = RouteAutoConsump::Always;
+                        //prodParmStartUpLoc.update();
+                        //prodMultiStartUp.initParmBuffer(prodParmStartUpLoc);
+
+                        //prodMultiStartUp.insert(prodTableParent, prodParmStartUpLoc);
+                        //prodMultiStartUp.runOnServer();
+                        
+                        select firstonly prodJournaltableParent
+                            order by CreatedDateTime desc
+                            where prodJournaltableParent.ProdId == prodTableParent.ProdId
+                            && prodJournaltableParent.JournalType == ProdJournalType::Picklist;
+                    }
+                    ProdJournaltable prodJournaltable;
+                    ttsbegin;
+                    select forupdate prodJournaltable
+                            order by CreatedDateTime desc
+                            where prodJournaltable.ProdId == prodTable.ProdId
+                            && prodJournaltable.JournalType == ProdJournalType::Picklist;
+
+                    if(prodJournaltable)
+                    {
+                        prodJournaltable.ETGParentEntityJournalNumber = prodJournaltableParent.JournalId;
+                        prodJournaltable.update();
+                    }
+                    ttscommit;
+
+                    changecompany(prodTable.ETGParentEntity)
+                    {
+                        ttsbegin;
+                        if(prodJournaltableParent)
+                        {
+                            prodJournaltableParent.selectForUpdate(true);
+                            prodJournaltableParent.ETGSubcontractingJournalNumber = prodJournaltable.JournalId;
+                            prodJournaltableParent.update();
+                        }
+                        ttscommit;
+                    }
+
+                    if(!prodJournaltableParent || !prodJournaltable)
+                    {
+                        throw error("Process cancelled picking list journal creation mismatched.");
+                    }
+                }
+            }
+            ttscommit;
+        }
+        catch
+        {
+            ttsabort;
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

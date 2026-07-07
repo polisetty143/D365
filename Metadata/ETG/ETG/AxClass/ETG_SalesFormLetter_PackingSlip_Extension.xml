@@ -1,0 +1,220 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesFormLetter_PackingSlip_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(SalesFormLetter_PackingSlip))]
+final class ETG_SalesFormLetter_PackingSlip_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>validate</Name>
+				<Source><![CDATA[
+    public boolean validate(Object _calledFrom)
+    {
+       
+        InventTrans                         inventTrans;
+        InventDim                           inventDimSales, inventDimTrans;
+        InventTransPosting                  inventTransPosting;
+        SalesLine                           salesLine;
+        Qty                                 totalQty, totalPurchased,totalamount,totalunaitconverstion;
+        InventTransOrigin                   inventTransOrigin;
+        SalesParmLine                       salesParmLineloc,salesParmLineloc1;
+        InventTable                         inventTable;
+        SalesParmTable                      salesParmTable;
+        DimensionDefault                    defaultDimension;
+        DimensionAttribute                  dimAttribute;
+        DimensionValue                      displayValue = "";
+        DefaultDimensionView                dimensionView;
+        DimensionAttributeValueSetStorage   dimStorage;
+
+        int i;
+        DimensionAttributeValueSet  set;
+        ETGACFParameters acfParameters = ETGACFParameters::find();
+        str dimValueVertical,dimValueSubVertical,dimValueMainCommodity,dimValueSubCommodity;
+
+        boolean isValid =  next validate(_calledFrom);
+
+        if(!isValid)
+            return  false;
+        if (ETGACFParameters::find().EnableUATSmallPoints)
+        {
+
+            while   select  salesParmLineloc1
+            where salesParmLineloc1.ParmId == this.parmId()
+            {
+                salesParmTable = salesParmLineloc1.salesParmTable();
+
+                while select salesParmLineloc
+                 where salesParmLineloc.ParmId      == salesParmTable.ParmId
+                    && salesParmLineloc.TableRefId == salesParmTable.TableRefId
+                    && salesParmLineloc.ItemId     == salesParmLineloc1.ItemId
+                {
+                    
+                    EcoResProduct     ecoResProduct = EcoResProduct::find(InventTable::find(salesParmLineloc.ItemId).Product);
+                    if(ecoResProduct.ProductType != EcoResProductType::Item)
+                    {
+                        continue;
+                    }
+
+                    salesLine        = salesParmLineloc.salesLine();
+                    defaultDimension = salesLine.DefaultDimension;
+           
+                    dimStorage = DimensionAttributeValueSetStorage::find(defaultDimension);
+                    for (i= 1 ; i<= dimStorage.elements() ; i++)
+                    {
+                        if(DimensionAttribute::find(dimStorage.getAttributeByIndex(i)).Name == acfParameters.Vertical)
+                        {
+                            dimValueVertical = dimStorage.getDisplayValueByIndex(i);
+                        }
+                        if(DimensionAttribute::find(dimStorage.getAttributeByIndex(i)).Name == acfParameters.SubVertical)
+                        {
+                            dimValueSubVertical = dimStorage.getDisplayValueByIndex(i);
+                        }
+                        if(DimensionAttribute::find(dimStorage.getAttributeByIndex(i)).Name == acfParameters.MainCommodity)
+                        {
+                            dimValueMainCommodity = dimStorage.getDisplayValueByIndex(i);
+                        }
+                        if(DimensionAttribute::find(dimStorage.getAttributeByIndex(i)).Name == acfParameters.SubCommodity)
+                        {
+                            dimValueSubCommodity = dimStorage.getDisplayValueByIndex(i);
+                        }
+                    }
+
+                    totalPurchased = abs(this.TotalPurchased(salesParmLineloc,dimValueVertical,dimValueSubVertical,dimValueMainCommodity,dimValueSubCommodity));
+                    
+                    inventTable = (InventTable::find(salesParmLineloc.ItemId));
+
+                    totalunaitconverstion = UnitOfMeasureConverter::convert(salesParmLineloc.DeliverNow,
+                                                                UnitOfMeasure::unitOfMeasureIdBySymbol(salesParmLineloc.salesUnit()),
+                                                                UnitOfMeasure::unitOfMeasureIdBySymbol(inventTable.BOMUnitId),
+                                                                NoYes::Yes,
+                                                                InventTable::itemProduct(inventTable.ItemId),
+                                                                NoYes::Yes);
+
+                    if(totalunaitconverstion > totalPurchased)
+                    {
+                        throw error(strFmt("@ETG_New:PackingSlipCancelInsufficientQuantity", salesParmLineLoc.ItemId));
+                    }
+
+                   // totalamount = totalPurchased-salesParmLineloc.DeliverNow;
+
+                }
+            }
+        }
+
+        //CS - Abhinav - bin qty validation
+        if(ETGCanadaParameters::find().EnableBINValidation == NoYes::Yes)
+        {
+            InventDim               inventdim,dimInner;
+            SalesParmTable          salesParmTableLoc;
+            SalesParmLine           salesParmLine,saLineInner;
+            SalesParmUpdate         SalesParmUpdate     = this.SalesParmUpdate();
+            InventTable             inventtableLoc;
+
+            select  salesParmTableLoc where salesParmTableLoc.ParmId == SalesParmUpdate.ParmId;
+
+            while select sum(DeliverNow) from salesParmLine
+                group by inventdim.InventLocationId,inventdim.wMSLocationId
+                where salesParmLine.ParmId  == salesParmTableLoc.ParmId
+                && salesParmLine.DeliverNow < 0
+            join inventdim
+                where inventdim.inventDimId == salesParmLine.InventDimId
+            join inventtableLoc
+                    where inventtableLoc.ItemId == salesParmLine.ItemId
+                       && inventtableLoc.GrossDepth > 0
+                       && inventtableLoc.grossHeight > 0
+                       && inventtableLoc.grossWidth > 0
+            {
+                WMSLocation wmsLocation = WMSLocation::find(inventdim.WmsLocationid ,inventdim.inventLocationId);
+                
+                if(( abs(salesParmLine.DeliverNow) * inventtableLoc.UnitVolume) > wmsLocation.freeVolume())
+                {
+                    throw Error(strFmt("@ETG_New:BInQtyValidationMovement",inventdim.wMSLocationId));
+                }
+            }
+        }
+        //CE
+        return true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>TotalPurchased</Name>
+				<Source><![CDATA[
+    protected Qty TotalPurchased(SalesParmLine _salesParmLine,str dimValueVertical,str dimValueSubVertical,str dimValueMainCommodity,str dimValueSubCommodity)
+    {
+        SalesParmLine           salesParmLineloc = _salesParmLine;
+        InventTrans             inventTrans,inventTransloc;
+        boolean                  qtyvalue = false;
+        Qty                      totalQty;
+
+        str dimValueVerticalloc,dimValueSubVerticalloc,dimValueMainCommodityloc,dimValueSubCommodityloc;
+
+        select firstonly inventTrans
+            where inventTrans.ItemId        == salesParmLineloc.ItemId
+              &&  inventTrans.StatusReceipt == StatusReceipt::Received
+              &&  inventTrans.inventDimId   == salesParmLineloc.InventDimId;
+
+        if(inventTrans.StatusReceipt  == StatusReceipt::Received)
+        {
+            if(inventTrans.ItemId         == salesParmLineloc.ItemId
+            && inventTrans.inventDimId    == salesParmLineloc.InventDimId
+            && inventTrans.StatusReceipt  == StatusReceipt::Received)
+            {
+                select sum(Qty) from inventTrans
+               where inventTrans.ItemId         == salesParmLineloc.ItemId
+                  && inventTrans.inventDimId    == salesParmLineloc.InventDimId
+                  && inventTrans.StatusReceipt  == StatusReceipt::Purchased;
+                totalQty = inventTrans.Qty;
+            }
+        }
+        else
+        {
+            select firstonly inventTransloc
+            where inventTransloc.ItemId        == salesParmLineloc.ItemId
+               && inventTransloc.inventDimId   == salesParmLineloc.InventDimId
+               && inventTransloc.StatusReceipt == StatusReceipt::Purchased;
+
+
+            dimValueVerticalloc      = inventTrans::getVerticalETG(inventTransloc);
+            dimValueSubVerticalloc   = inventTrans::getSubVerticalETG(inventTransloc);
+            dimValueMainCommodityloc = inventTrans::getMainCommodityETG(inventTransloc);
+            dimValueSubCommodityloc  = inventTrans::getSubCommodityETG(inventTransloc);
+
+            if(inventTransloc.ItemId        == salesParmLineloc.ItemId
+            && inventTransloc.inventDimId   == salesParmLineloc.InventDimId
+            && inventTransloc.StatusReceipt == StatusReceipt::Purchased
+            && dimValueVerticalloc          == dimValueVertical
+            && dimValueSubVerticalloc       == dimValueSubVertical
+            && dimValueMainCommodityloc     == dimValueMainCommodity
+            && dimValueSubCommodityloc      == dimValueSubCommodity)
+            {
+                select sum(Qty) from inventTransloc
+                    where inventTransloc.ItemId         == salesParmLineloc.ItemId
+                       && inventTransloc.inventDimId    == salesParmLineloc.InventDimId
+                       && inventTransloc.StatusReceipt  == StatusReceipt::Purchased
+                       && dimValueVerticalloc           == dimValueVertical
+                       && dimValueSubVerticalloc        == dimValueSubVertical
+                       && dimValueMainCommodityloc      == dimValueMainCommodity
+                       && dimValueSubCommodityloc       == dimValueSubCommodity;
+
+                totalQty = inventTransloc.Qty;
+            }
+            else
+            {
+                throw error(strFmt("@ETG_New:PackingSlipCancelled", salesParmLineLoc.ItemId));
+
+            }
+        }
+        return totalQty;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGRateCardMasterHelper</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGRateCardMasterHelper
+{
+    AgreementLine        agreementLine;
+    PurchAgreementHeader agreementHeader;
+    FormDataSource       formDS;
+    InventDim            inventDim;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static ETGRateCardMasterHelper construct()
+    {
+        return new ETGRateCardMasterHelper();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmAgreementLine</Name>
+				<Source><![CDATA[
+    public AgreementLine parmAgreementLine(AgreementLine _agreementLine = agreementLine)
+    {
+        agreementLine = _agreementLine;
+
+        return agreementLine;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmInventDim</Name>
+				<Source><![CDATA[
+    public InventDim parmInventDim(InventDim _inventDim = inventDim)
+    {
+        inventDim = _inventDim;
+
+        return inventDim;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmFormDataSource</Name>
+				<Source><![CDATA[
+    public FormDataSource parmFormDataSource(FormDataSource _formDS = formDS)
+    {
+        formDS = _formDS;
+
+        return formDS;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processPurchaseAgrrement</Name>
+				<Source><![CDATA[
+    public void processPurchaseAgrrement()
+    {
+        ETGRateCardMaster rateCardMaster;
+        boolean recordsExists;
+
+        if(!agreementLine)
+        {
+            throw Error("Error. Agreement details does not exists");
+        }
+
+        select firstonly RecId from rateCardMaster 
+            where rateCardMaster.RefRecId == agreementLine.RecId
+            && rateCardMaster.LineNumber == agreementLine.LineNumber;
+
+        if(!rateCardMaster.RecId)
+        {
+            this.createLinesFromAgreement();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createLinesFromAgreement</Name>
+				<Source><![CDATA[
+    public void createLinesFromAgreement()
+    {
+        ETGRateCardMaster rateCardMaster;
+        PurchAgreementHeader header;
+        InventTable inventTable, inventTableAgreementLine;
+        AgreementLineQuantityCommitment lineQtyCommittment;
+        EcoResReleasedProductsWithVariants ecoResProductVariantPerCompanyView;
+        InventDim InventDimLoc, InventDimLocOrig;
+
+        inventTableAgreementLine = InventTable::find(agreementLine.ItemId);
+
+        header = PurchAgreementHeader::find(agreementLine.Agreement);
+
+        InventDimLocOrig = agreementLine.inventDim();
+
+        lineQtyCommittment = AgreementLineQuantityCommitment::find(agreementLine.RecId);
+
+        while select inventTable
+            where 
+                 inventTable.DataAreaId == agreementLine.ItemDataAreaId
+                && inventTable.ETGSubCommodity == inventTableAgreementLine.ETGSubCommodity
+                && inventTable.ETGSubCommodity != ""
+        {
+            while select ecoResProductVariantPerCompanyView
+                where ecoResProductVariantPerCompanyView.ItemId == inventTable.ItemId
+                    && ecoResProductVariantPerCompanyView.DataAreaId == curExt()
+                join InventDimLoc
+                where InventDimLoc.inventDimId == ecoResProductVariantPerCompanyView.InventDimId
+            {
+                if(InventDimLoc.configId == InventDimLocOrig.configId
+                    && InventDimLoc.InventColorId == InventDimLocOrig.InventColorId
+                    && InventDimLoc.InventSizeId == InventDimLocOrig.InventSizeId
+                    && InventDimLoc.InventStyleId == InventDimLocOrig.InventStyleId)
+                {
+                    continue;
+                }
+                rateCardMaster.clear();
+                rateCardMaster.RateCardId = NumberSeq::newGetNum(PurchParameters::numRefRateCardId()).num();
+                rateCardMaster.ItemId = inventTable.ItemId;
+                rateCardMaster.SubCommodity = inventTable.ETGSubCommodity;
+                rateCardMaster.RefRecId = agreementLine.RecId;
+                rateCardMaster.LineNumber = agreementLine.LineNumber;
+                rateCardMaster.ProductName = inventTable.itemName();
+                rateCardMaster.ModuleSalesPurch = ModuleSalesPurch::Purch;
+                rateCardMaster.VendAccount = header.VendAccount;
+                rateCardMaster.VendName = header.vendName();
+                rateCardMaster.RetailVariantId = ecoResProductVariantPerCompanyView.ETGRetailVariantId;
+                rateCardMaster.Price = lineQtyCommittment.PricePerUnit;
+                rateCardMaster.Qty = lineQtyCommittment.CommitedQuantity;
+                //grade
+                rateCardMaster.configId = InventDimLoc.configId;
+                //size
+                rateCardMaster.InventSizeId = InventDimLoc.InventSizeId;
+                //origin
+                rateCardMaster.InventColorId = InventDimLoc.InventColorId;
+                //brand
+                rateCardMaster.InventStyleId = InventDimLoc.InventStyleId;
+                rateCardMaster.insert();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    public void run()
+    {
+        this.processPurchaseAgrrement();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

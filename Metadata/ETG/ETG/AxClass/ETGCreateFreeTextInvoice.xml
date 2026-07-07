@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCreateFreeTextInvoice</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// create free text invoice 
+/// </summary>
+public class ETGCreateFreeTextInvoice
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>createFreeTxtInv</Name>
+				<Source><![CDATA[
+    public static void createFreeTxtInv(CustInvoiceJour _custInvoiceJour)
+    {
+        CustInvoiceTrans    custInvoiceTrans;
+        CustInvoiceTable    custInvoiceTable;
+        CustInvoiceLine     custInvoiceLine;
+
+        if(SalesParameters::find().ETGMainAccountRecId == 0)
+        {
+            throw error("@ETG_New:FreeTextInvMainAccountMissing");
+        }
+
+        select firstonly RecId from custInvoiceTrans
+            where custInvoiceTrans.salesid == _custInvoiceJour.SalesId
+                && custInvoiceTrans.InvoiceId == _custInvoiceJour.InvoiceId
+                && (custInvoiceTrans.ETGConnectionType == ETGConnectionType::NewConnectionorCylinder
+                || custInvoiceTrans.ETGConnectionType == ETGConnectionType::Surrenderofcylinders)
+                && custInvoiceTrans.ETGDepositAmount != 0
+                && custInvoiceTrans.ETGDepositRate   != 0;
+
+        if (custInvoiceTrans.RecId == 0)
+        {
+            return;
+        }
+
+        ttsbegin;
+
+        custInvoiceTable.clear();
+        custInvoiceTable.initValue();
+        custInvoiceTable.OrderAccount   = _custInvoiceJour.InvoiceAccount;
+        custInvoiceTable.InvoiceDate    = _custInvoiceJour.InvoiceDate;
+        custInvoiceTable.InvoiceAccount = _custInvoiceJour.InvoiceAccount;
+        custInvoiceTable.CurrencyCode   = _custInvoiceJour.CurrencyCode;
+        custInvoiceTable.Payment        = _custInvoiceJour.Payment;
+        custInvoiceTable.PaymMode       = _custInvoiceJour.paymMode();
+        custInvoiceTable.CustGroup      = _custInvoiceJour.CustGroup;
+        custInvoiceTable.LanguageId     = _custInvoiceJour.LanguageId;
+        custInvoiceTable.ETGSalesRef    = _custInvoiceJour.SalesId;
+        custInvoiceTable.insert();  
+                
+        while select TaxGroup, TaxItemGroup, Qty, ETGDepositRate, ETGDepositAmount, DefaultDimension from custInvoiceTrans
+            where custInvoiceTrans.ParentRecId == _custInvoiceJour.RecId
+                && custInvoiceTrans.ETGDepositRate != 0
+                && custInvoiceTrans.ETGDepositAmount != 0
+        {
+            custInvoiceLine.clear();
+            custInvoiceLine.initValue();
+            custInvoiceLine.ParentRecId         = custInvoiceTable.RecId;
+            custInvoiceLine.initFromCustInvoiceTable(custInvoiceTable);
+            custInvoiceLine.TaxGroup            = custInvoiceTrans.TaxGroup;
+            custInvoiceLine.TaxItemGroup        = custInvoiceTrans.TaxItemGroup;
+            custInvoiceLine.Quantity            = custInvoiceTrans.Qty;
+            custInvoiceLine.UnitPrice           = custInvoiceTrans.ETGDepositRate;
+            custInvoiceLine.AmountCur           = custInvoiceTrans.ETGDepositAmount;
+            custInvoiceLine.DefaultDimension    = custInvoiceTrans.DefaultDimension;
+            custInvoiceLine.Description         = strFmt("@ETG_New:DepositEntryForSalesOrderAndInvNumber", _custInvoiceJour.SalesId, _custInvoiceJour.InvoiceId);
+            custInvoiceLine.LedgerDimension     = LedgerDefaultAccountHelper::getDefaultAccountFromMainAccountRecId(SalesParameters::find().ETGMainAccountRecId);
+            custInvoiceLine.insert();
+        }
+        ttscommit;
+
+        Info(strFmt("@ETG_New:FreeTextInvoiceCreateMsg", custInvoiceTable.InvoiceId));
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

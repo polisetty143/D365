@@ -1,0 +1,796 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGGlobal</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGGlobal
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>checkdimactive</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Check observedDimension
+    /// </summary>
+    /// <param name = "_itemid">ItemId</param>
+    /// <param name = "dimval">DimValue</param>
+    /// <param name = "Dimgrp">DimGroup</param>
+    /// <returns></returns>
+    static boolean checkdimactive(itemid  _itemid,str dimval,Name Dimgrp)
+    {
+        ItemId        varItemId = _itemid;
+        FieldId       observedDimension;
+        NoYes         isActive;
+        EcoResProductDimensionGroup  EcoResProductDimensionGroup= EcoResProductDimensionGroup::findByDimensionGroupName(Dimgrp);
+
+        ;
+
+        if(dimval == 'Configid')
+        {
+            observedDimension = fieldNum(InventDim, Configid);
+        }
+        else if(dimval == 'InventColorId')
+        {
+            observedDimension = fieldNum(InventDim, InventColorId);
+        }
+        else  if(dimval == 'InventStyleId')
+        {
+            observedDimension = fieldNum(InventDim, InventStyleId);
+        }
+        else  if(dimval == 'InventSizeId')
+        {
+            observedDimension = fieldNum(InventDim, InventSizeId);
+        }
+
+        isActive = EcoResProductDimensionGroupFldSetup::findByDimensionGroupFieldId(EcoResProductDimensionGroup.RecId, observedDimension).IsActive;
+
+        return isactive;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>CreateTransferJournal</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates Transfer journal
+    /// </summary>
+    /// <param name = "Recid">Rec Id</param>
+    public static void CreateTransferJournal(RecId  Recid)
+    {
+        InventJournalTable inventJournalTable;
+        InventJournalTrans inventJournalTrans;
+        //InventJournalName  inventJournalName = InventJournalName::find(InventParameters::find().ETGBinTransferJournalName;
+        JournalCheckPost inventJournalCheckPost;
+        NumberSeq num;
+        boolean _throwserror=true;
+        boolean _showinforesult=false;
+        InventDim frominventDim,ToinventDim;
+        ETGBinJournalLine         ETGBinJournalLine;
+        ETGBinJournalBatchDetails  ETGBinJournalBatchDetails;
+        InventDim                   inventDim;
+        ;
+
+        ttsbegin;
+
+        select ETGBinJournalLine
+            where ETGBinJournalLine.RecId == Recid;
+
+        inventJournalTable.clear();
+
+        num = new NumberSeq();
+
+        num = NumberSeq::newGetNum(InventParameters::numRefTransferId());
+
+        inventJournalTable.initFromInventJournalName(InventJournalName::find(InventParameters::find().ETGBinTransferJournalName));
+
+        inventJournalTable.Description = 'Bin Journal  No. for '+ETGBinJournalLine.JournalId;
+
+        inventJournalTable.SystemBlocked = true;
+
+        inventJournalTable.insert();
+
+        int linecount=0;
+
+        while select ETGBinJournalBatchDetails
+              where ETGBinJournalBatchDetails.BinJournalLine == ETGBinJournalLine.RecId
+        {
+
+            inventJournalTrans.clear();
+
+            inventJournalTrans.initFromInventJournalTable(inventJournalTable);
+
+            inventJournalTrans.ItemId = ETGBinJournalLine.ItemId;
+
+            inventDim = inventDim::find(ETGBinJournalBatchDetails.GRNInvenDim);
+
+            frominventDim.InventLocationId= inventDim.InventLocationId;
+            frominventDim.inventSiteId =inventDim.InventSiteId;
+            frominventDim.wMSLocationId = inventDim.wMSLocationId;
+            frominventDim.configId =  inventDim.configId;
+            frominventDim.InventSizeId =inventDim.InventSizeId;
+            frominventDim.InventColorId = inventDim.InventColorId;
+            frominventDim.InventStyleId = inventDim.InventStyleId;
+            frominventDim.inventBatchId = ETGBinJournalBatchDetails.InventBatch;
+            frominventDim.inventSerialId = inventDim.inventSerialId;
+            
+            ToinventDim.InventLocationId = ETGBinJournalLine.Warehouse;
+            ToinventDim.inventSiteId = ETGBinJournalLine.SiteId; 
+            ToinventDim.wMSLocationId = ETGBinJournalLine.Location;
+            ToinventDim.configId =   ETGBinJournalLine.Configuration;
+            ToinventDim.InventSizeId = ETGBinJournalLine.Size;
+            ToinventDim.InventColorId = ETGBinJournalLine.Colour;
+            ToinventDim.InventStyleId = ETGBinJournalLine.Style;
+            ToinventDim.inventBatchId = ETGBinJournalLine.ToBatch;
+            ToinventDim.inventSerialId = inventDim.inventSerialId;
+
+
+            ToinventDim = InventDim::findOrCreate(ToinventDim);
+            
+            frominventDim = InventDim::findOrCreate(frominventDim);
+            
+            inventJournalTrans.InventDimId = frominventDim.inventDimId;
+            
+            inventJournalTrans.initFromInventTable(InventTable::find(ETGBinJournalLine.ItemId));
+
+            inventJournalTrans.Qty = -ETGBinJournalBatchDetails.GRNQuantity;
+            inventJournalTrans.modifiedField(fieldNum(inventJournalTrans,Qty));
+
+            inventJournalTrans.ToInventDimId = ToinventDim.inventDimId;
+
+            inventJournalTrans.TransDate = SystemDateget();
+
+            inventJournalTrans.ETGReasonId = InventJournalName::find(inventJournalTable.JournalNameId).ETGReasonCode;
+
+            inventJournalTrans.insert();
+            linecount++;
+        }
+
+        InventJournalTable  updateInventJournalTable;
+
+        select firstOnly forUpdate updateInventJournalTable
+            where updateInventJournalTable.RecId == inventJournalTable.RecId;
+
+        updateInventJournalTable.SystemBlocked = false;
+        updateInventJournalTable.NumOfLines = linecount;
+        updateInventJournalTable.update();
+        
+        ETGBinJournalLine.selectForUpdate(true);
+        ETGBinJournalLine.TransferJRNId = inventJournalTable.JournalId;
+        ETGBinJournalLine.doUpdate();
+
+        ttscommit;
+
+        if(inventJournalTable.JournalId)
+        {
+            Info(strFmt('@ETGReport:ETG101',inventJournalTable.JournalId));
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>TransferToBin</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// creates bin transfer journal lines
+    /// </summary>
+    /// <param name = "recid">RecId</param>
+    /// <param name = "BinJournalLine">BinJournalLine</param>
+    public static void TransferToBin(RecId recid,RecId BinJournalLine)
+    {
+        VendPackingSlipTrans        VendPackingSlipTrans;
+        InventDim                   InventDim;
+        ETGBinJournalBatchDetails   ETGBinJournalBatchDetails;
+        ETGBinJournalLine           ETGBinJournalLine;
+        ETGQtyRequired              _ReqQty;
+        LineAmount                  BinValue;
+
+
+        select * from VendPackingSlipTrans
+                where VendPackingSlipTrans.RecId == recid;
+       
+        select  InventDim
+                where InventDim.inventDimId     == VendPackingSlipTrans.InventDimId;
+
+        select  ETGBinJournalLine
+            where ETGBinJournalLine.RecId == BinJournalLine;
+
+        ttsbegin;
+
+        select  ETGBinJournalBatchDetails order by LineNum desc
+            where ETGBinJournalBatchDetails.JournalId == ETGBinJournalLine.JournalId
+                    && ETGBinJournalBatchDetails.BinJournalLine ==  BinJournalLine;
+
+        ETGBinJournalBatchDetails.initValue();
+
+        if(ETGBinJournalBatchDetails.RecId) 
+        {
+            ETGBinJournalBatchDetails.LineNum = ETGBinJournalBatchDetails.LineNum+1;
+        }
+        ETGBinJournalBatchDetails.JournalId         = ETGBinJournalLine.JournalId;
+        ETGBinJournalBatchDetails.BinJournalLine    = BinJournalLine;
+        ETGBinJournalBatchDetails.GRNDate           = VendPackingSlipTrans.DeliveryDate;
+        ETGBinJournalBatchDetails.GRNNo             = VendPackingSlipTrans.PackingSlipId;
+        ETGBinJournalBatchDetails.GRNInvenDim       = VendPackingSlipTrans.InventDimId;
+        ETGBinJournalBatchDetails.ItemId            = VendPackingSlipTrans.ItemId;
+        ETGBinJournalBatchDetails.GRNQuantity       = VendPackingSlipTrans.ETGQtyRequired;
+        ETGBinJournalBatchDetails.InventBatch       = InventDim.inventBatchId;
+        ETGBinJournalBatchDetails.GRNRate           = VendPackingSlipTrans.ETGGRNRate();
+        ETGBinJournalBatchDetails.GRNAmount         = ETGBinJournalBatchDetails.GRNQuantity * ETGBinJournalBatchDetails.GRNRate;
+        ETGBinJournalBatchDetails.insert();
+
+        _ReqQty = _ReqQty+VendPackingSlipTrans.ETGQtyRequired;
+        BinValue = BinValue + ETGBinJournalBatchDetails.GRNAmount;
+
+        VendPackingSlipTrans.selectForUpdate(true);
+        VendPackingSlipTrans.ETGQtyBalance = VendPackingSlipTrans.ETGQtyBalance - VendPackingSlipTrans.ETGQtyRequired;
+        VendPackingSlipTrans.ETGQtyRequired= VendPackingSlipTrans.ETGQtyBalance;
+        VendPackingSlipTrans.doUpdate();
+
+        ETGBinJournalLine.selectForUpdate(true);
+        ETGBinJournalLine.BinQty    = ETGBinJournalLine.BinQty+_ReqQty;       
+        ETGBinJournalLine.BinRate   = ETGBinJournalLine.BinRate + BinValue;        
+        ETGBinJournalLine.modifiedField(fieldNum(ETGBinJournalLine,BinQty));
+        ETGBinJournalLine.BinQtyOriginal =  ETGBinJournalLine.BinQty;
+        ETGBinJournalLine.BinRateFinal = ETGBinJournalLine.BinQtyOriginal!=0 ? round(ETGBinJournalLine.BinRate /ETGBinJournalLine.BinQtyOriginal,0.01) : 0;
+        ETGBinJournalLine.doUpdate();
+
+        
+        ttscommit;
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>CreateTransferJournalHeaderB2B</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// creates transfer journal header
+    /// </summary>
+    public static InventJournalId CreateTransferJournalHeaderB2B(RecId  Recid)
+    {
+        InventJournalTable inventJournalTable;
+        NumberSeq num;
+        ETGBinJournalLine         ETGBinJournalLine;
+        ETGBin2BinTransferHistory  ETGBin2BinTransferHistory;
+        ;
+
+        ttsbegin;
+
+        select ETGBin2BinTransferHistory
+            where ETGBin2BinTransferHistory.RecId == Recid;
+
+        select ETGBinJournalLine
+            where ETGBinJournalLine.RecId == ETGBin2BinTransferHistory.BinJournalLine;
+
+        inventJournalTable.clear();
+
+        num = new NumberSeq();
+
+        num = NumberSeq::newGetNum(InventParameters::numRefTransferId());
+
+        inventJournalTable.initFromInventJournalName(InventJournalName::find(InventParameters::find().ETGBin2BinTransferJrnName));
+
+        inventJournalTable.Description = 'B2B Journal  No. for '+ETGBinJournalLine.JournalId;
+
+        inventJournalTable.SystemBlocked = true;
+        inventJournalTable.ETGBinProcessType = ETGBinProcessType::B2BTransfer;
+
+        inventJournalTable.insert();
+
+        ttscommit;
+
+        return inventJournalTable.JournalId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>CreateTransferJournalB2B</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// creates B2B transfer journal
+    /// </summary>
+    public static void CreateTransferJournalB2B(RecId  Recid,int loopcount,InventJournalId  JournalId)
+    {
+        InventJournalTable inventJournalTable = inventJournalTable::find(JournalId);
+        InventJournalTrans inventJournalTrans;
+        JournalCheckPost inventJournalCheckPost;
+        NumberSeq num;
+        boolean _throwserror=true;
+        boolean _showinforesult=false;
+        InventDim frominventDim,ToinventDim;
+        ETGBinJournalLine         ETGBinJournalLine;
+        ETGBin2BinTransferHistory  ETGBin2BinTransferHistory;
+        ;
+
+        ttsbegin;
+
+        select ETGBin2BinTransferHistory
+            where ETGBin2BinTransferHistory.RecId == Recid;
+
+        select ETGBinJournalLine
+            where ETGBinJournalLine.RecId == ETGBin2BinTransferHistory.BinJournalLine;
+
+       
+        int linecount=0;
+        
+        {
+
+            inventJournalTrans.clear();
+
+            inventJournalTrans.initFromInventJournalTable(inventJournalTable);
+
+            inventJournalTrans.ItemId = ETGBinJournalLine.ItemId;
+            inventJournalTrans.LineNum = loopcount;
+
+            frominventDim.InventLocationId= ETGBinJournalLine.Warehouse;
+            frominventDim.inventSiteId = ETGBinJournalLine.SiteId;
+            frominventDim.wMSLocationId = ETGBinJournalLine.Location;
+            frominventDim.configId =   ETGBinJournalLine.Configuration;
+            frominventDim.InventSizeId = ETGBinJournalLine.Size;
+            frominventDim.InventColorId = ETGBinJournalLine.Colour;
+            frominventDim.InventStyleId = ETGBinJournalLine.Style;
+            frominventDim.inventBatchId = ETGBin2BinTransferHistory.FromBatch;
+            frominventDim.inventSerialId =ETGBinJournalLine.inventSerialId;
+            
+            ToinventDim.InventLocationId = ETGBinJournalLine.Warehouse;
+            ToinventDim.inventSiteId = ETGBinJournalLine.SiteId;
+            ToinventDim.wMSLocationId = ETGBinJournalLine.Location;
+            ToinventDim.configId =   ETGBinJournalLine.Configuration;
+            ToinventDim.InventSizeId = ETGBinJournalLine.Size;
+            ToinventDim.InventColorId = ETGBinJournalLine.Colour;
+            ToinventDim.InventStyleId = ETGBinJournalLine.Style;
+            ToinventDim.inventBatchId = ETGBin2BinTransferHistory.ToBatch;
+            ToinventDim.inventSerialId = ETGBinJournalLine.inventSerialId;
+
+
+            ToinventDim = InventDim::findOrCreate(ToinventDim);
+            
+            frominventDim = InventDim::findOrCreate(frominventDim);
+            
+            inventJournalTrans.InventDimId = frominventDim.inventDimId;
+            
+            inventJournalTrans.initFromInventTable(InventTable::find(ETGBinJournalLine.ItemId));
+
+            inventJournalTrans.Qty = -ETGBin2BinTransferHistory.TransferQty;
+            inventJournalTrans.modifiedField(fieldNum(InventJournalTrans,Qty));
+
+            inventJournalTrans.ToInventDimId = ToinventDim.inventDimId;
+
+            inventJournalTrans.TransDate = SystemDateget();
+
+            inventJournalTrans.ETGBinProcessType = ETGBinProcessType::B2BTransfer;
+            inventJournalTrans.ETGRefBinRecid = ETGBin2BinTransferHistory.RecId;
+
+            inventJournalTrans.insert();
+            linecount++;
+        }
+
+        InventJournalTable  updateInventJournalTable;
+
+        select firstOnly forUpdate updateInventJournalTable
+            where updateInventJournalTable.RecId == inventJournalTable.RecId;
+
+        updateInventJournalTable.SystemBlocked = false;
+        updateInventJournalTable.NumOfLines = loopcount;
+        updateInventJournalTable.update();
+        
+        ETGBin2BinTransferHistory.selectForUpdate(true);
+        ETGBin2BinTransferHistory.TransferJRNId = inventJournalTable.JournalId;
+        ETGBin2BinTransferHistory.doUpdate();
+
+        ttscommit;      
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>CreateBinAdjustment</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates bin adjustment journal
+    /// </summary>
+    /// <param name = "Recid">RecId</param>
+    public static void CreateBinAdjustment(RecId  Recid)
+    {
+        InventJournalTable inventJournalTable;
+        InventJournalTrans inventJournalTrans;
+        JournalCheckPost inventJournalCheckPost;
+        NumberSeq num;
+        boolean _throwserror=true;
+        boolean _showinforesult=false;
+        InventDim frominventDim,ToinventDim;
+        ETGBinJournalLine         ETGBinJournalLine;
+        ETGBinAdjustmentDetails  ETGBinAdjustmentDetails;
+        ;
+
+        ttsbegin;
+
+        select ETGBinAdjustmentDetails
+            where ETGBinAdjustmentDetails.RecId == Recid;
+
+        select ETGBinJournalLine
+            where ETGBinJournalLine.RecId == ETGBinAdjustmentDetails.BinJournalLine;
+
+        inventJournalTable.clear();
+
+        num = new NumberSeq();
+
+        num = NumberSeq::newGetNum(InventParameters::numRefTransferId());
+
+        inventJournalTable.initFromInventJournalName(InventJournalName::find(InventParameters::find().ETGBinAdjustmentJrnName));
+
+        inventJournalTable.Description = 'Bin Adjustment  No. for '+ETGBinJournalLine.JournalId;
+
+        inventJournalTable.SystemBlocked = true;
+        inventJournalTable.ETGBinProcessType = ETGBinProcessType::BinAdjustment;
+
+        inventJournalTable.insert();
+
+        int linecount=0;
+
+        
+        {
+
+            inventJournalTrans.clear();
+
+            inventJournalTrans.initFromInventJournalTable(inventJournalTable);
+
+            inventJournalTrans.ItemId = ETGBinJournalLine.ItemId;
+
+            frominventDim.InventLocationId= ETGBinJournalLine.Warehouse;
+            frominventDim.inventSiteId = ETGBinJournalLine.SiteId;
+            frominventDim.wMSLocationId = ETGBinJournalLine.Location;
+            frominventDim.configId =   ETGBinJournalLine.Configuration;
+            frominventDim.InventSizeId = ETGBinJournalLine.Size;
+            frominventDim.InventColorId = ETGBinJournalLine.Colour;
+            frominventDim.InventStyleId = ETGBinJournalLine.Style;
+            frominventDim.inventBatchId = ETGBinAdjustmentDetails.ToBatch;
+            frominventDim.inventSerialId = ETGBinJournalLine.InventSerialId;
+            
+            frominventDim = InventDim::findOrCreate(frominventDim);
+            
+            inventJournalTrans.InventDimId = frominventDim.inventDimId;
+            
+            inventJournalTrans.initFromInventTable(InventTable::find(ETGBinJournalLine.ItemId));
+
+            inventJournalTrans.Qty = ETGBinAdjustmentDetails.TransferQty;       
+            inventJournalTrans.modifiedField(fieldNum(InventJournalTrans,Qty));
+
+            inventJournalTrans.TransDate = SystemDateget();
+
+
+            inventJournalTrans.ETGBinProcessType = ETGBinProcessType::BinAdjustment;
+            inventJournalTrans.ETGRefBinRecid = ETGBinAdjustmentDetails.RecId;
+
+            inventJournalTrans.insert();
+            linecount++;
+        }
+
+        InventJournalTable  updateInventJournalTable;
+
+        select firstOnly forUpdate updateInventJournalTable
+            where updateInventJournalTable.RecId == inventJournalTable.RecId;
+
+        updateInventJournalTable.SystemBlocked = false;
+        updateInventJournalTable.NumOfLines = linecount;
+        updateInventJournalTable.update();
+        
+        ETGBinAdjustmentDetails.selectForUpdate(true);
+        ETGBinAdjustmentDetails.TransferJRNId = inventJournalTable.JournalId;
+        ETGBinAdjustmentDetails.doUpdate();
+
+        ttscommit;
+
+        if(inventJournalTable.JournalId)
+        {
+            Info(strFmt('Bin Adjustment Journal %1 has been created.',inventJournalTable.JournalId));
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>CreateTransferJournalHeaderLot</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates lot transfer journal header
+    /// </summary>
+    /// <param name = "Recid">RecId</param>
+    /// <returns>JournalId</returns>
+    public static InventJournalId CreateTransferJournalHeaderLot(RecId  Recid)
+    {
+        InventJournalTable inventJournalTable;
+        NumberSeq num;
+        ETGBinJournalLine         ETGBinJournalLine;
+        ETGBinLotLine  ETGBinLotLine;
+        ;
+
+        ttsbegin;
+
+        select ETGBinLotLine
+            where ETGBinLotLine.RecId == Recid;
+
+        select ETGBinJournalLine
+            where ETGBinJournalLine.RecId == ETGBinLotLine.BinJournalLine;
+
+        inventJournalTable.clear();
+
+        num = new NumberSeq();
+
+        num = NumberSeq::newGetNum(InventParameters::numRefTransferId());
+
+        inventJournalTable.initFromInventJournalName(InventJournalName::find(InventParameters::find().ETGLotTransferJrnName));
+
+        inventJournalTable.Description = 'Lot Journal  No. for '+ETGBinJournalLine.JournalId;
+
+        inventJournalTable.SystemBlocked = true;
+
+        inventJournalTable.insert();
+
+        ttscommit;
+
+        return inventJournalTable.JournalId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>CreateTransferJournalLineLot</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// creates line for lot transfer journal
+    /// </summary>
+    public static void CreateTransferJournalLineLot(RecId  Recid,int loopcount,InventJournalId  JournalId)
+    {
+        InventJournalTable inventJournalTable = inventJournalTable::find(JournalId);
+        InventJournalTrans inventJournalTrans;
+        JournalCheckPost inventJournalCheckPost;
+        NumberSeq num;
+        boolean _throwserror=true;
+        boolean _showinforesult=false;
+        InventDim frominventDim,ToinventDim;
+        ETGBinJournalLine         ETGBinJournalLine;
+        ETGBinLotLine  ETGBinLotLine;
+        ;
+
+        ttsbegin;
+
+        select ETGBinLotLine
+            where ETGBinLotLine.RecId == Recid;
+
+        select ETGBinJournalLine
+            where ETGBinJournalLine.RecId == ETGBinLotLine.BinJournalLine;
+
+       
+        int linecount=0;
+        
+        {
+
+            inventJournalTrans.clear();
+
+            inventJournalTrans.initFromInventJournalTable(inventJournalTable);
+
+            inventJournalTrans.ItemId = ETGBinJournalLine.ItemId;
+            inventJournalTrans.LineNum = loopcount;
+
+            frominventDim.InventLocationId= ETGBinJournalLine.Warehouse;
+            frominventDim.inventSiteId = ETGBinJournalLine.SiteId;
+            frominventDim.wMSLocationId = ETGBinJournalLine.Location;
+            frominventDim.configId =   ETGBinJournalLine.Configuration;
+            frominventDim.InventSizeId = ETGBinJournalLine.Size;
+            frominventDim.InventColorId = ETGBinJournalLine.Colour;
+            frominventDim.InventStyleId = ETGBinJournalLine.Style;
+            frominventDim.inventBatchId = ETGBinLotLine.ToBatch;
+            frominventDim.inventSerialId = ETGBinLotLine.FromInventSerialId;
+            
+            ToinventDim.InventLocationId = ETGBinJournalLine.Warehouse;
+            ToinventDim.inventSiteId = ETGBinJournalLine.SiteId;
+            ToinventDim.wMSLocationId = ETGBinJournalLine.Location;
+            ToinventDim.configId =   ETGBinJournalLine.Configuration;
+            ToinventDim.InventSizeId = ETGBinJournalLine.Size;
+            ToinventDim.InventColorId = ETGBinJournalLine.Colour;
+            ToinventDim.InventStyleId = ETGBinJournalLine.Style;
+            ToinventDim.inventBatchId = ETGBinLotLine.ToBatch;
+            ToinventDim.inventSerialId = ETGBinLotLine.InventSerialId;
+
+
+            ToinventDim = InventDim::findOrCreate(ToinventDim);
+            
+            frominventDim = InventDim::findOrCreate(frominventDim);
+            
+            inventJournalTrans.InventDimId = frominventDim.inventDimId;
+            
+            inventJournalTrans.initFromInventTable(InventTable::find(ETGBinJournalLine.ItemId));
+
+            inventJournalTrans.Qty = -ETGBinLotLine.LotQty;
+            inventJournalTrans.modifiedField(fieldNum(inventJournalTrans,Qty));
+
+            inventJournalTrans.ToInventDimId = ToinventDim.inventDimId;
+
+            inventJournalTrans.TransDate = SystemDateget();
+
+            inventJournalTrans.insert();
+            linecount++;
+        }
+
+        InventJournalTable  updateInventJournalTable;
+
+        select firstOnly forUpdate updateInventJournalTable
+            where updateInventJournalTable.RecId == inventJournalTable.RecId;
+
+        updateInventJournalTable.SystemBlocked = false;
+        updateInventJournalTable.NumOfLines = loopcount;
+        updateInventJournalTable.update();
+        
+        ETGBinLotLine.selectForUpdate(true);
+        ETGBinLotLine.TransferJRNId = inventJournalTable.JournalId;
+        ETGBinLotLine.doUpdate();
+
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getItemCostPrice</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method contains the logic for calculating costprice
+    /// </summary>
+    /// <param name = "_itemId">ItemId</param>
+    /// <param name = "_inventDim">InventDim</param>
+    /// <returns>CostPrice</returns>
+    public static CostPrice getItemCostPrice(ItemId _itemId, InventDim _inventDim)
+    {
+        InventSum                   inventSum;
+        CostPrice                   priceLoc;
+        CostPrice                   costPrice;
+        InventOnhand                inventOnHand;
+        InventDimParm               inventDimParm;
+        InventTransferLine_IN       inventTransferLineIN;
+
+        InventDimGroupSetup::newItemId(_itemId).inventDimParmActivefinancialInventory(inventDimParm);
+        inventOnHand = InventOnhand::newParameters(_itemId, _inventDim, inventDimParm);
+        inventSum    = inventOnhand.inventSum();
+
+        if (inventSum)
+        {
+            priceLoc = inventSum.costPricePcs();
+
+            if (!priceLoc)
+            {
+                priceLoc = InventTable::findCostPcsPrice(_itemId, _inventDim.inventDimId);
+            }
+        }
+        else
+        {
+            priceLoc = InventTable::findCostPcsPrice(_itemId, _inventDim.inventDimId);
+        }
+        costPrice = CurrencyExchangeHelper::price(priceLoc, CompanyInfoHelper::standardCurrency());
+
+        return costPrice;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>lookupSubVertical</Name>
+				<Source><![CDATA[
+    public static void lookupSubVertical(FormControl _formControl, str _filterStr)
+    {
+        
+        SysTableLookup          sysTableLookup = SysTableLookup::newParameters(tableNum(DimensionAttributeValue),_formControl);
+            
+        Query                   query = new Query();
+        QueryBuildDataSource    queryBuildDataSource;
+        QueryBuildRange         queryBuildRange;
+ 
+            
+        queryBuildDataSource = query.addDataSource(tableNum(DimensionAttributeValue));
+            
+        queryBuildRange = queryBuildDataSource.addRange(fieldNum(DimensionAttributeValue,DimensionAttribute));
+            
+        LedgerParameters LedgerParameters;
+                
+        select firstonly LedgerParameters
+                       where LedgerParameters.DataAreaId == curExt();
+
+        DimensionAttribute dimensionAttribute      = DimensionAttribute::findByName(LedgerParameters.ETGCostDistributionSubVerticalDimension);
+
+        queryBuildRange.value(queryValue(dimensionAttribute.RecId));
+
+            
+        sysTableLookup.addLookupfield(fieldNum(DimensionAttributeValue,DisplayValue));
+        //sysTableLookup.addLookupfield(fieldNum(DimensionAttributeValue,name));
+            
+ 
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.performFormLookup();
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>lookupSubVerticalCharges</Name>
+				<Source><![CDATA[
+    public static void lookupSubVerticalCharges(FormControl _formControl, str _filterStr)
+    {
+        
+        SysTableLookup          sysTableLookup = SysTableLookup::newParameters(tableNum(DimensionAttributeValue),_formControl);
+            
+        Query                   query = new Query();
+        QueryBuildDataSource    queryBuildDataSource;
+        QueryBuildRange         queryBuildRange;
+ 
+            
+        queryBuildDataSource = query.addDataSource(tableNum(DimensionAttributeValue));
+            
+        queryBuildRange = queryBuildDataSource.addRange(fieldNum(DimensionAttributeValue,DimensionAttribute));
+            
+        ETGACFParameters acfParameters;
+                
+        select firstonly acfParameters
+                       where acfParameters.DataAreaId == curExt();
+
+        DimensionAttribute dimensionAttribute      = DimensionAttribute::findByName(acfParameters.SubVertical);
+
+        queryBuildRange.value(queryValue(dimensionAttribute.RecId));
+
+        sysTableLookup.addLookupfield(fieldNum(DimensionAttributeValue,DisplayValue));
+ 
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.performFormLookup();
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>lookupVertical</Name>
+				<Source><![CDATA[
+    public static void lookupVertical(FormControl _formControl, str _filterStr)
+    {
+        
+        SysTableLookup          sysTableLookup = SysTableLookup::newParameters(tableNum(DimensionAttributeValue),_formControl);
+            
+        Query                   query = new Query();
+        QueryBuildDataSource    queryBuildDataSource;
+        QueryBuildRange         queryBuildRange;
+ 
+            
+        queryBuildDataSource = query.addDataSource(tableNum(DimensionAttributeValue));
+            
+        queryBuildRange = queryBuildDataSource.addRange(fieldNum(DimensionAttributeValue,DimensionAttribute));
+            
+        LedgerParameters LedgerParameters;
+                
+        select firstonly LedgerParameters
+                       where LedgerParameters.DataAreaId == curExt();
+
+        DimensionAttribute dimensionAttribute      = DimensionAttribute::findByName(LedgerParameters.ETGCostDistributionVerticalDimension);
+
+        queryBuildRange.value(queryValue(dimensionAttribute.RecId));
+
+            
+        sysTableLookup.addLookupfield(fieldNum(DimensionAttributeValue,DisplayValue));
+        //sysTableLookup.addLookupfield(fieldNum(DimensionAttributeValue, Description));
+            
+ 
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.performFormLookup();
+
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

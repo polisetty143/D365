@@ -1,0 +1,756 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_VendAccountStatementIntDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The <c>VendAccountStatementIntDP</c> class supports the <c>VendAccountStatementInt</c>Microsoft SQL
+/// Server Reporting Services report.
+/// </summary>
+/// <remarks>
+/// This class declares the variables, tables, enumerations, and so on that can be used for the
+/// <c>VendAccountStatementInt</c>Microsoft SQL Server Reporting Services report.
+/// </remarks>
+[SRSReportQueryAttribute(querystr(ETG_VendAccountStatementInt)), SRSReportParameterAttribute(classstr(ETG_VendAccountStatementIntContract))]
+public class ETG_VendAccountStatementIntDP extends SRSReportDataProviderPreProcessTempDB
+{
+    VendTrans vendTrans;
+    VendTable vendTable;
+    TransactionReversalTrans transactionReversalTrans;
+    LedgerEntry ledgerEntry;
+
+    DimensionAttributeValueCombination dimensionAttributeValueCombination;
+    TmpCustVendTransOpen tmpCustVendTransOpen;
+    FormLetterRemarks formLetterRemarks;
+
+    AmountMST balance;
+    Int headingPrinted;
+    boolean firstAccountPrinted;
+    CustVendTransDetails custVendTransDetails;
+    Int numberOfTransOpen;
+    boolean markForPaymentSchedulePrinted;
+    CurrencyCode companyCurrencyCode;
+    LanguageId languageId;
+
+    TransDate fromDate;
+    TransDate toDate;
+    TransDate assessmentDate;
+
+    DiscCurrency details;
+
+    NoYes onlyOpen;
+    NoYes includeReversed;
+    NoYes printPaymentSchedule;
+    NoYes withoutTransact;
+    NoYes newPage;
+    NoYes offsetAccount;
+
+    ETG_CustVendAccountStatementIntTmp vendAccountStatementIntTmp;
+    CustVendAccountStatementIntTmpProcessing vendAccountStatementIntTmpProcessing;
+
+    boolean recordAdded;
+    CustVendTrans custVendTrans;
+    TransDate transDate;
+
+    BankLCBankDocumentType bankLCBankDocumentType;
+    boolean              financialDimensions;
+    DimensionSetName     financialDimSet;
+    RecordInsertList procRil;
+    RecordInsertList tmpRil;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>amountMST</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculates the <c>AmountMST</c> value.
+    /// </summary>
+    /// <returns>
+    /// The <c>AmountMST</c> value.
+    /// </returns>
+    public AmountMST amountMST()
+    {
+        AmountMST amountMST = this.printingAmountMST();
+
+        balance += amountMST;
+        return amountMST;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>assessmentDate</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Assigns the user entered values for the dates used in this report.
+    /// </summary>
+    /// <returns>
+    /// An assessment date to use for this report.
+    /// </returns>
+    public TransDate assessmentDate()
+    {
+        transDate = assessmentDate;
+
+        if (!transDate)
+        {
+            transDate = toDate;
+        }
+
+        if (!transDate)
+        {
+            transDate = dateMax();
+        }
+
+        return transDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getCustVendAccountStatementIntTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the <c>CustVendAccountStatementIntTmp</c> table.
+    /// </summary>
+    /// <returns>
+    /// The <c>CustVendAccountStatementIntTmp</c> table.
+    /// </returns>
+    [SRSReportDataSetAttribute(tableStr(ETG_CustVendAccountStatementIntTmp))]
+    public ETG_CustVendAccountStatementIntTmp getCustVendAccountStatementIntTmp()
+    {
+        select vendAccountStatementIntTmp;
+        return vendAccountStatementIntTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>init</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Initializes company Info,company currency code and languageId.
+    /// </summary>
+    public void init()
+    {
+        CompanyInfo companyInfo = CompanyInfo::find();
+
+        companyCurrencyCode = Ledger::accountingCurrency(companyInfo.RecId);
+        languageId = companyInfo.LanguageId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initVendTransQuery</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates and executes the query.
+    /// </summary>
+    /// <returns>
+    /// A <c>Query</c> object.
+    /// </returns>
+    /// <remarks>
+    /// Adds data source, ranges, and sorting based on the selected parameters.
+    /// </remarks>
+    public Query initVendTransQuery()
+    {
+        Query query = this.parmQuery();
+
+        QueryBuildDataSource vendTransDataSource = SysQuery::findOrCreateDataSource(query, tableNum(VendTrans), tableNum(VendTable));
+        QueryBuildDataSource transactionReversalTransDataSource = vendTransDataSource.addDataSource(tableNum(TransactionReversalTrans));
+        QueryBuildDataSource bankLCVendTransDataSource;
+        QueryBuildDataSource ds;
+
+        vendTransDataSource.relations(true);
+        vendTransDataSource.joinMode(JoinMode::OuterJoin);
+
+        transactionReversalTransDataSource.addLink(fieldNum(VendTrans, RecId), fieldNum(TransactionReversalTrans, RefRecId));
+        transactionReversalTransDataSource.addLink(fieldNum(VendTrans, TableId), fieldNum(TransactionReversalTrans, RefTableId));
+        transactionReversalTransDataSource.fetchMode(QueryFetchMode::One2One);
+        transactionReversalTransDataSource.joinMode(JoinMode::OuterJoin);
+
+        vendTransDataSource.addRange(fieldNum(VendTrans,AccountNum));
+
+        if (fromDate || toDate)
+        {
+            vendTransDataSource.addRange(fieldNum(VendTrans,TransDate)).value(queryRange(fromDate, toDate));
+        }
+
+        vendTransDataSource.addSortField(fieldNum(VendTrans,TransDate));
+        vendTransDataSource.addSortField(fieldNum(VendTrans,Voucher));
+
+        if (!includeReversed)
+        {
+            ds = vendTransDataSource.addDataSource(tableNum(TransactionReversalTrans));
+            ds.joinMode(JoinMode::NoExistsJoin);
+            ds.addLink(fieldNum(VendTrans,TableId), fieldNum(TransactionReversalTrans,RefTableId));
+            ds.addLink(fieldNum(VendTrans,RecId), fieldNum(TransactionReversalTrans,RefRecId));
+            ds.addRange(fieldNum(TransactionReversalTrans,Reversed)).value(enum2str(NoYes::Yes));
+        }
+
+        if (BankLCImportFeatureChecker::checkBankLCImportEnabled())
+        {
+            if (bankLCBankDocumentType != BankLCBankDocumentType::All)
+            {
+                bankLCVendTransDataSource = vendTransDataSource.addDataSource(tableNum(BankLCVendTrans));
+                bankLCVendTransDataSource.joinMode(JoinMode::ExistsJoin);
+                bankLCVendTransDataSource.addLink(fieldNum(VendTrans, BankLCImportLine), fieldNum(BankLCVendTrans, BankLCImportLine));
+                bankLCVendTransDataSource.addRange(fieldNum(BankLCVendTrans, BankDocumentType)).value(
+                SysQuery::value(BankLCCustVendTransHelper::convertDocumentType(bankLCBankDocumentType)));
+            }
+        }
+
+        return query;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertVendAccountStatementIntTmpRil</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Inserts records into the <c>CustVendAccountStatementIntTmp</c> table.
+    /// </summary>
+    /// <param name="_blSchedule">
+    /// The boolean value that indicates whether the <paramref name="_blSchedule" /> parameter is retrieved
+    /// and set.
+    /// </param>
+    /// <param name="_ril">
+    ///    A <c>RecordInsertList</c> object to which the <c>CustVendAccountStatementIntTmp</c> record
+    ///    will be added.
+    /// </param>
+    public void insertVendAccountStatementIntTmpRil(boolean _blSchedule, RecordInsertList _ril)
+    {
+        this.populateVendAccountStatementIntTmpRil(_blSchedule);
+        _ril.add(vendAccountStatementIntTmp);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>populateVendAccountStatementIntTmpRil</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///     Populates records into the <c>CustVendAccountStatementIntTmp</c> table.
+    /// </summary>
+    /// <param name = "_isSchedule">
+    ///     The boolean value that indicates whether the <paramref name="_isSchedule" /> parameter is retrieved and set.
+    /// </param>
+    protected void populateVendAccountStatementIntTmpRil(boolean _isSchedule)
+    {
+        #define.Detail("Detail")
+        FinancialDimensionSetEntity     financialDimensionSetEntity;
+
+        // <GBR>
+        if (BrazilParameters::isEnabled())
+        {
+            // Get TmpTaxWithhold
+            TmpTaxWithhold tmpTaxWithhold = TaxWithhold::calculateTmpTaxWithhold(vendTrans, vendTrans.TransDate);
+
+            vendAccountStatementIntTmp.FiscalEstablishmentId = vendTrans.fiscalEstablishmentId_BR();
+            vendAccountStatementIntTmp.TaxWithHoldAmount_BR = tmpTaxWithhold.TaxWithholdAmount;
+        }
+        // </GBR>
+
+        if (tmpCustVendTransOpen.RecId !=0)
+        {
+            vendAccountStatementIntTmp.SumAmountMST = this.amountMST();
+        }
+        else
+        {
+            vendAccountStatementIntTmp.SumAmountMST = tmpCustVendTransOpen.AmountMST;
+        }
+        if ((numberOfTransOpen > 1) && (!printPaymentSchedule))
+        {
+            vendAccountStatementIntTmp.MarkForPaymentSchedule = '*';
+            vendAccountStatementIntTmp.PaymentScheduleMark = SysLabel::labelId2String2("@SYS67766");
+        }
+        else
+        {
+            vendAccountStatementIntTmp.MarkForPaymentSchedule = '';
+            vendAccountStatementIntTmp.PaymentScheduleMark = '';
+        }
+
+        if (_isSchedule)
+        {
+            if (isConfigurationkeyEnabled(configurationKeyNum(PublicSector)))
+            {
+                VendTransOpen vendTransOpen = VendTransOpen::find(tmpCustVendTransOpen.TmpRecId);
+
+                if (vendTransOpen && vendTransOpen.ThirdPartyBankAccountId)
+                {
+                    vendAccountStatementIntTmp.Txt = VendBankAccount::find(vendTransOpen.AccountNum,vendTransOpen.ThirdPartyBankAccountId).Name;
+                }
+                else
+                {
+                    vendAccountStatementIntTmp.Txt = #Detail;
+                }
+            }
+            else
+            {
+                vendAccountStatementIntTmp.Txt = #Detail;
+            }
+
+            vendAccountStatementIntTmp.IsDetail = enum2str(NoYes::Yes);
+            vendAccountStatementIntTmp.SumAmountMST = 0.0;
+
+            if (details == DiscCurrency::Currency)
+            {
+                vendAccountStatementIntTmp.AmountMST = tmpCustVendTransOpen.AmountMST;
+            }
+            else if (details == DiscCurrency::Disc)
+            {
+                vendAccountStatementIntTmp.AmountMST = 0.0;
+            }
+            vendAccountStatementIntTmp.TransDate = dateNull();
+            vendAccountStatementIntTmp.Voucher = '';
+            vendAccountStatementIntTmp.Invoice = '';
+            vendAccountStatementIntTmp.AmountCur = tmpCustVendTransOpen.AmountMST;
+            vendAccountStatementIntTmp.DueDate = tmpCustVendTransOpen.DueDate;
+            vendAccountStatementIntTmp.PossibleCashDisc = 0.0;
+            vendAccountStatementIntTmp.UtilizedCashDisc = 0.0;
+            vendAccountStatementIntTmp.RemainAmountCur = 0.0;
+            vendAccountStatementIntTmp.TmpDueDate = tmpCustVendTransOpen.DueDate;
+            vendAccountStatementIntTmp.RemainAmountMST = tmpCustVendTransOpen.AmountMST;
+            vendAccountStatementIntTmp.CurrencyCode = '';
+        }
+        else
+        {
+            vendAccountStatementIntTmp.CurrencyCode = vendTrans.CurrencyCode;
+            vendAccountStatementIntTmp.Txt = vendTrans.Txt;
+            vendAccountStatementIntTmp.TransDate = vendTrans.TransDate;
+            vendAccountStatementIntTmp.Voucher = vendTrans.Voucher;
+            if (offsetAccount)
+            {
+                vendAccountStatementIntTmp.OffsetAccount = custVendTransDetails.offsetAccount(vendTrans.Voucher, vendTrans.TransDate);
+            }
+            vendAccountStatementIntTmp.Invoice = vendTrans.Invoice;
+            vendAccountStatementIntTmp.AmountMST = this.amountMST();
+            vendAccountStatementIntTmp.RemainAmountMST = vendTrans.remainAmountMST();
+            vendAccountStatementIntTmp.AmountCur = vendTrans.AmountCur;
+            vendAccountStatementIntTmp.RemainAmountCur = vendTrans.remainAmountCur();
+
+            if (numberOfTransOpen > 1 || numberOfTransOpen == 0)
+            {
+                vendAccountStatementIntTmp.DueDate = dateNull();
+                vendAccountStatementIntTmp.TmpDueDate = dateNull();
+                vendAccountStatementIntTmp.TransOpen = 1;
+            }
+            else
+            {
+                vendAccountStatementIntTmp.DueDate = vendTrans.DueDate;
+
+                if (vendAccountStatementIntTmp.RecId != 0)
+                {
+                    vendAccountStatementIntTmp.TmpDueDate = tmpCustVendTransOpen.DueDate;
+                }
+                else
+                {
+                    vendAccountStatementIntTmp.TmpDueDate = vendTrans.DueDate;
+                }
+                vendAccountStatementIntTmp.TransOpen = 2;
+            }
+            vendAccountStatementIntTmp.PossibleCashDisc = CurrencyExchangeHelper::curAmount2CurAmount(vendAccountStatementIntTmpProcessing.PossibleCashDisc, vendTrans.CurrencyCode, companyCurrencyCode);
+        }
+
+        vendAccountStatementIntTmp.UtilizedCashDisc = CurrencyExchangeHelper::curAmount2CurAmount(vendAccountStatementIntTmpProcessing.utilizedCashDisc, vendTrans.CurrencyCode, companyCurrencyCode);
+
+        vendAccountStatementIntTmp.TraceNum = transactionReversalTrans.TraceNum;
+        vendAccountStatementIntTmp.Reversed = transactionReversalTrans.Reversed ? 'R' : '';
+        vendAccountStatementIntTmp.LetterRemarks = FormLetterRemarks::find(CompanyInfo::languageId(), FormTextType::CustACStatement).Txt;
+
+        GeneralJournalEntry generalJournalEntry;
+        SubledgerVoucherGeneralJournalEntry subledgerVoucherGeneralJournalEntry;
+
+        select firstonly RecId from generalJournalEntry
+            exists join subledgerVoucherGeneralJournalEntry
+                where subledgerVoucherGeneralJournalEntry.Voucher == vendTrans.Voucher
+                && subledgerVoucherGeneralJournalEntry.AccountingDate == vendTrans.TransDate
+                && subledgerVoucherGeneralJournalEntry.VoucherDataAreaId == vendTrans.DataAreaId
+                && generalJournalEntry.RecId == subledgerVoucherGeneralJournalEntry.GeneralJournalEntry;
+
+        if (generalJournalEntry)
+        {
+            vendAccountStatementIntTmp.GeneralJournalEntry = generalJournalEntry.RecId;
+        }
+
+        if (BankLCImportFeatureChecker::checkBankLCImportEnabled())
+        {
+            BankLCVendTrans bankLCVendTrans;
+
+            select firstonly BankDocumentType, BankLCNumber
+                from bankLCVendTrans
+                where bankLCVendTrans.BankLCImportLine == vendTrans.BankLCImportLine;
+            if (bankLCVendTrans && bankLCVendTrans.RecId != 0)
+            {
+                vendAccountStatementIntTmp.BankDocumentType = bankLCVendTrans.BankDocumentType;
+                vendAccountStatementIntTmp.BankLCNumber = bankLCVendTrans.BankLCNumber;
+            }
+        }
+
+        vendAccountStatementIntTmp.DefaultDimension = vendTrans.DefaultDimension;
+        if (financialDimSet)
+        {
+            select firstonly financialDimensionSetEntity
+                where financialDimensionSetEntity.Name == financialDimSet;
+
+            if (financialDimensionSetEntity.SegmentName01)
+            {
+                vendAccountStatementIntTmp.SegmentValue01   = this.getFinDimValue(vendTrans.DefaultDimension, financialDimensionSetEntity.SegmentName01);
+                vendAccountStatementIntTmp.SegmentName01    = financialDimensionSetEntity.SegmentName01;
+            }
+            if (financialDimensionSetEntity.SegmentName02)
+            {
+                vendAccountStatementIntTmp.SegmentValue02   = this.getFinDimValue(vendTrans.DefaultDimension, financialDimensionSetEntity.SegmentName02);
+                vendAccountStatementIntTmp.SegmentName02    = financialDimensionSetEntity.SegmentName02;
+            }
+            if (financialDimensionSetEntity.SegmentName03)
+            {
+                vendAccountStatementIntTmp.SegmentValue03   = this.getFinDimValue(vendTrans.DefaultDimension, financialDimensionSetEntity.SegmentName03);
+                vendAccountStatementIntTmp.SegmentName03    = financialDimensionSetEntity.SegmentName03;
+            }
+            if (financialDimensionSetEntity.SegmentName04)
+            {
+                vendAccountStatementIntTmp.SegmentValue04   = this.getFinDimValue(vendTrans.DefaultDimension, financialDimensionSetEntity.SegmentName04);
+                vendAccountStatementIntTmp.SegmentName04    = financialDimensionSetEntity.SegmentName04;
+            }
+            if (financialDimensionSetEntity.SegmentName05)
+            {
+                vendAccountStatementIntTmp.SegmentValue05   = this.getFinDimValue(vendTrans.DefaultDimension, financialDimensionSetEntity.SegmentName05);
+                vendAccountStatementIntTmp.SegmentName05    = financialDimensionSetEntity.SegmentName05;
+            }
+            if (financialDimensionSetEntity.SegmentName06)
+            {
+                vendAccountStatementIntTmp.SegmentValue06   = this.getFinDimValue(vendTrans.DefaultDimension, financialDimensionSetEntity.SegmentName06);
+                vendAccountStatementIntTmp.SegmentName06    = financialDimensionSetEntity.SegmentName06;
+            }
+            if (financialDimensionSetEntity.SegmentName07)
+            {
+                vendAccountStatementIntTmp.SegmentValue07   = this.getFinDimValue(vendTrans.DefaultDimension, financialDimensionSetEntity.SegmentName07);
+                vendAccountStatementIntTmp.SegmentName07    = financialDimensionSetEntity.SegmentName07;
+            }
+            if (financialDimensionSetEntity.SegmentName08)
+            {
+                vendAccountStatementIntTmp.SegmentValue08   = this.getFinDimValue(vendTrans.DefaultDimension, financialDimensionSetEntity.SegmentName08);
+                vendAccountStatementIntTmp.SegmentName08    = financialDimensionSetEntity.SegmentName08;
+            }
+            if (financialDimensionSetEntity.SegmentName09)
+            {
+                vendAccountStatementIntTmp.SegmentValue09   = this.getFinDimValue(vendTrans.DefaultDimension, financialDimensionSetEntity.SegmentName09);
+                vendAccountStatementIntTmp.SegmentName09    = financialDimensionSetEntity.SegmentName09;
+            }
+            if (financialDimensionSetEntity.SegmentName10)
+            {
+                vendAccountStatementIntTmp.SegmentValue10   = this.getFinDimValue(vendTrans.DefaultDimension, financialDimensionSetEntity.SegmentName10);
+                vendAccountStatementIntTmp.SegmentName10    = financialDimensionSetEntity.SegmentName10;
+            }
+            if (financialDimensionSetEntity.SegmentName11)
+            {
+                vendAccountStatementIntTmp.SegmentValue11   = this.getFinDimValue(vendTrans.DefaultDimension, financialDimensionSetEntity.SegmentName11);
+                vendAccountStatementIntTmp.SegmentName11    = financialDimensionSetEntity.SegmentName11;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>openingBalance</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculates the opening balance amount.
+    /// </summary>
+    /// <returns>
+    /// The opening balance amount.
+    /// </returns>
+    public AmountMST openingBalance()
+    {
+        return fromDate ? (onlyOpen ? vendTable.openBalanceMST(dateNull(), fromDate -1, this.assessmentDate()) : vendTable.balanceMST(dateNull(), fromDate -1)) : 0.00;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>printingAmountMST</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculates the <c>printingAmountMST</c> value.
+    /// </summary>
+    /// <returns>
+    /// Returns the <c>printingAmountMST</c> value to the <c>processReport</c> method.
+    /// </returns>
+    /// <remarks>
+    /// The <c>printingAmountMST</c> value will be passed to the <c>processReport</c> method.
+    /// </remarks>
+    public AmountMST printingAmountMST()
+    {
+        return onlyOpen ? vendTrans.remainAmountMST() : vendTrans.AmountMST;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Processes the report business logic.
+    /// </summary>
+    /// <remarks>
+    /// This method is used to process the report business logic which is used by
+    /// <c>VendAccountStatementInt</c> SSRS report.
+    /// </remarks>
+    public void processReport()
+    {
+        ETG_VendAccountStatementIntContract vendAccountStatementIntContract = this.parmDataContract();
+        QueryRun queryRun;
+        QueryBuildDataSource vendAccountStatementIntTmpProcDS;
+
+        procRil = new RecordInsertList(tableNum(CustVendAccountStatementIntTmpProcessing), true, true, true, false, true, vendAccountStatementIntTmpProcessing);
+        tmpRil = new RecordInsertList(tableNum(ETG_CustVendAccountStatementIntTmp), true, true, true, false, true, vendAccountStatementIntTmp);
+
+        fromDate = vendAccountStatementIntContract.parmFromDate();
+        toDate = vendAccountStatementIntContract.parmToDate();
+        assessmentDate = vendAccountStatementIntContract.parmAssessmentDate();
+        onlyOpen = vendAccountStatementIntContract.parmOnlyOpen();
+        offsetAccount = vendAccountStatementIntContract.parmOffsetAccount();
+        includeReversed = vendAccountStatementIntContract.parmIncReversed();
+        printPaymentSchedule = vendAccountStatementIntContract.parmSPaySchedule();
+        withoutTransact = vendAccountStatementIntContract.parmWithoutTrans();
+        details = vendAccountStatementIntContract.parmDetails();
+        financialDimensions     = vendAccountStatementIntContract.parmFinancialDimensions();
+        financialDimSet         = vendAccountStatementIntContract.parmFinancialDimSet();
+
+        if (BankLCImportFeatureChecker::checkBankLCImportEnabled())
+        {
+            bankLCBankDocumentType = vendAccountStatementIntContract.parmBankLCBankDocumentType();
+        }
+
+        this.init();
+        custVendTransDetails = new CustVendTransDetails(vendTrans, this.assessmentDate());
+
+        queryRun = new QueryRun(this.initVendTransQuery());
+
+        // pre-run through the query only to grab the trans recs we will be using. this allows us to calculate
+        // several thing later using set-based operations instead of nested queries.
+        while (queryRun.next())
+        {
+            if (queryRun.changed(tableNum(VendTrans)))
+            {
+                vendTrans = queryRun.get(tableNum(VendTrans));
+
+                if (vendTrans)
+                {
+                    vendAccountStatementIntTmpProcessing.CustVendTransRefRecId = vendTrans.RecId;
+                    procRil.add(vendAccountStatementIntTmpProcessing);
+                }
+            }
+        }
+        procRil.insertDatabase();
+
+        custVendTransDetails.calcCashDiscounts(vendAccountStatementIntTmpProcessing);
+
+        // join our processing table against our global query for insertion into the report backing table
+        vendAccountStatementIntTmpProcDS = SysQuery::findOrCreateDataSource(queryRun.query(), tableNum(VendTrans)).addDataSource(tableNum(CustVendAccountStatementIntTmpProcessing));
+        vendAccountStatementIntTmpProcDS.addLink(fieldNum(VendTrans, RecId), fieldNum(CustVendAccountStatementIntTmpProcessing, CustVendTransRefRecId));
+        vendAccountStatementIntTmpProcDS.fetchMode(QueryFetchMode::One2One);
+        vendAccountStatementIntTmpProcDS.joinMode(JoinMode::OuterJoin);
+        queryRun.setCursor(vendAccountStatementIntTmpProcessing);
+
+        // reset and perform our core query loop
+        queryRun.reset();
+
+        while (queryRun.next())
+        {
+            if (queryRun.changed(tableNum(VendTable)))
+            {
+                vendTable = queryRun.get(tableNum(VendTable));
+                recordAdded = false;
+                numberOfTransOpen = 0;
+                this.initAccountStatementTmpFromVendTable(vendTable);
+                markForPaymentSchedulePrinted = false;
+            }
+
+            if (queryRun.changed(tableNum(VendTrans)))
+            {
+                vendTrans = queryRun.get(tableNum(VendTrans));
+                vendAccountStatementIntTmpProcessing = queryRun.get(tableNum(CustVendAccountStatementIntTmpProcessing));
+                transactionReversalTrans = queryRun.get(tableNum(TransactionReversalTrans));
+
+                if (vendTrans)
+                {
+                    vendTrans.transactionPerDate(this.assessmentDate());
+
+                    if (onlyOpen && !this.printingAmountMST())
+                    {
+                        continue;
+                    }
+
+                    tmpCustVendTransOpen = custVendTransDetails.calcTmpCustVendTransOpen(vendTrans, onlyOpen);
+                    numberOfTransOpen = custVendTransDetails.numberOfTransOpen();
+
+                    if ((numberOfTransOpen == 1) || (numberOfTransOpen > 1 && !printPaymentSchedule))
+                    {
+                        if (printPaymentSchedule)
+                        {
+                            select firstonly tmpCustVendTransOpen;
+                        }
+                        else
+                        {
+                            select maxof(DueDate) from tmpCustVendTransOpen;
+                        }
+                    }
+
+                    this.insertVendAccountStatementIntTmpRil(false, tmpRil);
+                    recordAdded = true;
+
+                    if (numberOfTransOpen > 1 && printPaymentSchedule)
+                    {
+                        while select tmpCustVendTransOpen
+                        order by DueDate
+                        {
+                            if (tmpCustVendTransOpen)
+                            {
+                                this.insertVendAccountStatementIntTmpRil(true, tmpRil);
+                                recordAdded = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!recordAdded && withoutTransact)
+            {
+                this.insertVendAccountStatementIntTmpRil(false, tmpRil);
+            }
+        }
+
+        // flush remaining records to the database
+        tmpRil.insertDatabase();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initAccountStatementTmpFromVendTable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///     Initializes the data for the <c>CustVendAccountStatementIntTmp</c> table.
+    /// </summary>
+    /// <param name = "_vendTable">
+    ///     The <c>VendTable</c> buffer used to initialize.
+    /// </param>
+    protected void initAccountStatementTmpFromVendTable(VendTable _vendTable)
+    {
+        vendAccountStatementIntTmp.Name = _vendTable.name();
+        vendAccountStatementIntTmp.Address = _vendTable.invoiceAddress().Address;
+        vendAccountStatementIntTmp.AccountNum = _vendTable.AccountNum;
+        vendAccountStatementIntTmp.OrganizationNumber = DirOrganization::find(_vendTable.Party).OrgNumber;
+        vendAccountStatementIntTmp.InvoiceAccount = _vendTable.InvoiceAccount;
+        vendAccountStatementIntTmp.VendGroup = _vendTable.VendGroup;
+        vendAccountStatementIntTmp.PaymentTxt = PaymTerm::find(_vendTable.PaymTermId).Description;
+        vendAccountStatementIntTmp.CashDiscName = CashDisc::find(_vendTable.CashDisc).Description;
+        vendAccountStatementIntTmp.OpeningBalance = this.openingBalance();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getFinDimValue</Name>
+				<Source><![CDATA[
+    public Description getFinDimValue(DimensionDefault _defaultDimension, Name     _dimensionName)
+    {
+        DimensionAttributeValueSetStorage   dimStorage;
+        DimensionAttribute                  dimAttribute;
+        DimensionValue                      displayValue = "";
+        Description                         dimDescription = "";
+        int                                 i;
+        
+        dimStorage = DimensionAttributeValueSetStorage::find(_defaultDimension);
+        for (i= 1 ; i<= dimStorage.elements() ; i++)
+        {
+            dimAttribute    = DimensionAttribute::find(dimStorage.getAttributeByIndex(i));
+            
+            if(dimAttribute.Name == _dimensionName)
+            {
+                displayValue    = dimStorage.getDisplayValueByIndex(i);
+                dimDescription  = DimensionFinancialTag::findByFinancialTagCategoryAndValue(dimAttribute.financialTagCategory(), displayValue).Description;
+                if (dimDescription == "")
+                {
+                    dimDescription  = this.getFinDimValueDescription(dimAttribute.ViewName, displayValue);
+                }
+            }
+        }
+
+        return  dimDescription;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getFinDimValueDescription</Name>
+				<Source><![CDATA[
+    public Description getFinDimValueDescription(TableNameShort     _ViewName, DimensionValue   _displayValue)
+    {
+        DimAttributeInventTable         inventTable;
+        DimAttributeHcmWorker           worker;
+        DimAttributeCustTable           custTable;
+        DimAttributeVendTable           dimVendTable;
+        DimAttributeAssetTable          assetTable;
+        DimAttributeOMBusinessUnit      businessUnit;
+        DimAttributeOMCostCenter        costCenter;
+        DimAttributeOMDepartment        department;
+        Description                     dimDescription = "";
+
+        switch (_ViewName)
+        {
+            case  "DimAttributeInventTable":
+                select Name from inventTable
+                    where inventTable.value == _displayValue;
+                dimDescription = inventTable.Name;
+                break;
+            case  "DimAttributeHcmWorker":
+                select Name from worker
+                    where worker.value == _displayValue;
+                dimDescription = worker.Name;
+                break;
+            case  "DimAttributeCustTable":
+                select Name from custTable
+                    where custTable.value == _displayValue;
+                dimDescription = custTable.Name;
+                break;
+            case  "DimAttributeVendTable":
+                select Name from dimVendTable
+                    where dimVendTable.value == _displayValue;
+                dimDescription = dimVendTable.Name;
+                break;
+            case  "DimAttributeAssetTable":
+                select Name from assetTable
+                    where assetTable.value == _displayValue;
+                dimDescription = assetTable.Name;
+                break;
+            case  "DimAttributeOMBusinessUnit":
+                select Name from businessUnit
+                    where businessUnit.value == _displayValue;
+                dimDescription = businessUnit.Name;
+                break;
+            case  "DimAttributeOMCostCenter":
+                select Name from costCenter
+                    where costCenter.value == _displayValue;
+                dimDescription = costCenter.Name;
+                break;
+            case  "DimAttributeOMDepartment":
+                select Name from department
+                    where department.value == _displayValue;
+                dimDescription = department.Name;
+                break;
+        }
+          
+        return      dimDescription;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

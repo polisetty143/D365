@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCustVendPaymSettlement</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// customer and vendor payment settlement integration helper class
+/// </summary>
+public class ETGCustVendPaymSettlement
+{
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>sendPaymentCust</Name>
+				<Source><![CDATA[
+    //CS, DLT, 31012025, customer payment journal integration with fusion
+    /// <summary>
+    /// customer payment journal integration with fusion
+    /// </summary>
+    /// <param name = "cont">container cont</param>
+    public static void sendPaymentCust(container cont)
+    {
+        custSettlement                  custSettlement;
+        ETGSettleTranscations           SettleTranscations;
+        CustTrans                       custtrans;
+        LedgerJournalTrans              ledgerJournalTrans;
+        LedgerJournalTable              ledgerJournalTable;
+        ETGCustPaymIntegrationHistory   custPaymIntegrationHistory;
+        String30                        offsetTransVoucherId;
+
+        if (BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGCustPaymPostedBusinessEvent)))
+        {
+            if(cont)
+            {
+                for(int i = 1; i <= conLen(cont); i++)
+                {
+                    offsetTransVoucherId = conPeek(cont, i);
+
+                    if(offsetTransVoucherId)
+                    {
+                        while select custSettlement
+                        where custSettlement.OffsetTransVoucher == offsetTransVoucherId
+                            && custSettlement.SettleAmountCur != 0
+                        {
+                            if(custSettlement)
+                            {
+                                select * from custtrans where custtrans.RecId == custSettlement.TransRecId;
+                            }
+                    
+                            String10 filterInv = subStr(custtrans.Invoice, 1, 3);
+
+                            if(custtrans.Invoice != "" &&
+                                (filterInv == "RPP" || 
+                                 filterInv == "RPI" || 
+                                 filterInv == "RFI" || 
+                                 filterInv == "RSC" ||
+                                 filterInv == "RCN" || 
+                                 filterInv == "RDN"))
+                            {
+                                if(custtrans)
+                                {
+                                    select ledgerJournalTrans
+                                    join ledgerJournalTable
+                                    where ledgerJournalTrans.JournalNum == ledgerJournalTable.JournalNum
+                                        && ledgerJournalTrans.Voucher == offsetTransVoucherId
+                                        && ledgerJournalTrans.DataAreaId == ledgerJournalTable.DataAreaId
+                                        && (ledgerJournalTable.JournalType == LedgerJournalType::CustPayment
+                                        || ledgerJournalTable.JournalType == LedgerJournalType::Payment);
+
+                                    if(ledgerJournalTrans && custtrans.Invoice != "" && !ETGCustPaymIntegrationHistory::exist(ledgerJournalTrans.JournalNum, ledgerJournalTrans.Voucher, custtrans.Invoice))
+                                    {
+                                        custPaymIntegrationHistory = ETGCustPaymIntegrationHistory::createFromLedgerJournalTrans(ledgerJournalTrans, custtrans.CurrencyCode, custtrans.Invoice, ledgerJournalTable.JournalType, custSettlement.SettleAmountMST, custtrans.remainAmountCur());
+                                        ETGCustPaymPostedBusinessEvent::newFromCustPaymIntegrationHistory(custPaymIntegrationHistory).send();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                   
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>sendPaymentVend</Name>
+				<Source><![CDATA[
+     //CE, DLT, 31012025, customer payment journal integration with fusion
+
+
+   
+    //CS, DLT, 31012025, vendor payment journal integration with fusion
+    /// <summary>
+    /// vendor payment journal integration with fusion
+    /// </summary>
+    /// <param name = "cont">container cont</param>
+    public static void sendPaymentVend(container cont)
+    {
+        VendSettlement                              vendSettlement;
+        ETGSettleTranscations                       SettleTranscations;
+        VendTrans                                   vendTrans;
+        LedgerJournalTrans                          ledgerJournalTrans;
+        LedgerJournalTable                          ledgerJournalTable;
+        String30                                    offsetTransVoucherId;
+        ETGCustPaymIntegrationHistory               custPaymIntegrationHistory;
+
+        if (BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGVendPaymPostedBusinessEvent)))
+        {
+            if(cont)
+            {
+                for(int i = 1; i <= conLen(cont); i++)
+                {
+                    offsetTransVoucherId = conPeek(cont, i);
+
+                    if(offsetTransVoucherId)
+                    {
+                        while select vendSettlement
+                        where vendSettlement.OffsetTransVoucher == offsetTransVoucherId
+                            && vendSettlement.SettleAmountCur != 0
+                        {
+                            if(vendSettlement)
+                            {
+                                select * from vendTrans where vendTrans.RecId == vendSettlement.TransRecId;
+                            }
+
+                            String10 filterInv = subStr(vendTrans.Invoice, 1, 3);
+
+                            if(vendTrans.Invoice != "" &&
+                                (filterInv == "PPP" || 
+                                filterInv == "PPI"  || 
+                                filterInv == "PFI"  || 
+                                filterInv == "PSC"  || 
+                                filterInv == "PCN"  ||
+                                filterInv == "PDN"))
+                            {
+                                if(vendTrans)
+                                {
+                                    select ledgerJournalTrans
+                                    join ledgerJournalTable
+                                    where ledgerJournalTrans.JournalNum == ledgerJournalTable.JournalNum
+                                        && ledgerJournalTrans.Voucher == offsetTransVoucherId
+                                        && ledgerJournalTrans.DataAreaId == ledgerJournalTable.DataAreaId
+                                        && (ledgerJournalTable.JournalType == LedgerJournalType::Payment);
+
+                                    if(ledgerJournalTrans && vendTrans.Invoice != "" && !ETGCustPaymIntegrationHistory::exist(ledgerJournalTrans.JournalNum, ledgerJournalTrans.Voucher, vendTrans.Invoice))
+                                    {
+                                        custPaymIntegrationHistory = ETGCustPaymIntegrationHistory::createFromLedgerJournalTrans(ledgerJournalTrans, vendTrans.CurrencyCode, vendTrans.Invoice, ledgerJournalTable.JournalType, vendSettlement.SettleAmountMST, vendTrans.remainAmountCur());
+                                        ETGVendPaymPostedBusinessEvent::newFromCustPaymIntegrationHistory(custPaymIntegrationHistory).send();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

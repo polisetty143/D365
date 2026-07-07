@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGNewInjectionofCylindersDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This is the DP class for NewInjectionofCylinders report
+/// </summary>
+[SRSReportParameterAttribute(classStr(ETGNewInjectionofCylindersContract))]
+internal final class ETGNewInjectionofCylindersDP extends SRSReportDataProviderBase
+{
+    FromDate                                fromDate;
+    ToDate                                  toDate;
+    List                                    custAccount = new List(Types::String);
+    ETGNewInjectionofCylindersContract      etgNewInjectionofCylindersContract;
+    ETGNewInjectionofCylindersTmp           etgNewInjectionofCylindersTmp;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getTmpTable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the temporary table
+    /// </summary>
+    /// <returns>ETGNewInjectionofCylindersTmp temporary table</returns>
+    [SrsReportDataSetAttribute(tableStr(ETGNewInjectionofCylindersTmp))]
+    public ETGNewInjectionofCylindersTmp getTmpTable()
+    {
+        select * from etgNewInjectionofCylindersTmp;
+        return etgNewInjectionofCylindersTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Processes the business logic of the report
+    /// </summary>
+    public void processReport()
+    {
+        Query                               query;
+        QueryRun                            queryRun;
+        QueryBuildDataSource                queryBuildDataSourceCustInvoiceJour, queryBuildDataSourceCustInvoiceTrans, qbds;
+        QueryBuildRange                     queryBuildRange, qbr;
+        CustInvoiceJour                     custInvoiceJour;
+        CustInvoiceTrans                    custInvoiceTrans;
+        CustTable                           custTable;
+        ListEnumerator                      listEnumerator;
+
+
+        etgNewInjectionofCylindersContract = new ETGNewInjectionofCylindersContract();
+        etgNewInjectionofCylindersContract = this.parmDataContract() as ETGNewInjectionofCylindersContract;
+
+        fromDate            = etgNewInjectionofCylindersContract.parmFromDate();
+        toDate              = etgNewInjectionofCylindersContract.parmToDate();
+        custAccount         = etgNewInjectionofCylindersContract.parmCustAccount();
+
+        query = new Query();
+        queryBuildDataSourceCustInvoiceJour           = query.addDataSource(tableNum(CustInvoiceJour));
+        queryBuildDataSourceCustInvoiceTrans          = queryBuildDataSourceCustInvoiceJour.addDataSource(tableNum(CustInvoiceTrans));
+        queryBuildDataSourceCustInvoiceTrans.joinMode(JoinMode::InnerJoin);
+        queryBuildDataSourceCustInvoiceTrans.relations(true);
+        queryBuildDataSourceCustInvoiceTrans.addLink(fieldNum(CustInvoiceJour, SalesId), fieldNum(CustInvoiceTrans, SalesId));
+        queryBuildDataSourceCustInvoiceTrans.addLink(fieldNum(CustInvoiceJour, InvoiceId), fieldNum(CustInvoiceTrans, InvoiceId));
+        queryBuildDataSourceCustInvoiceTrans.addLink(fieldNum(CustInvoiceJour, InvoiceDate), fieldNum(CustInvoiceTrans, InvoiceDate));
+
+        query.dataSourceTable(tableNum(CustInvoiceJour)).addRange(fieldNum(CustInvoiceJour, InvoiceDate)).value(queryRange(fromDate, toDate));
+
+        queryBuildRange = queryBuildDataSourceCustInvoiceTrans.addRange(fieldNum(CustInvoiceTrans, ETGConnectionType));
+        queryBuildRange.value(queryValue(ETGConnectionType::NewConnectionorCylinder));
+
+
+        if(custAccount != null)
+        {
+            listEnumerator = custAccount.getEnumerator();
+            while(listEnumerator.moveNext())
+            {
+                queryBuildDataSourceCustInvoiceJour.addRange(fieldNum(CustInvoiceJour, InvoiceAccount)).value(listEnumerator.current());
+            }
+        }
+
+  
+        queryRun = new QueryRun(query);
+
+        while(queryRun.next())
+        {
+            etgNewInjectionofCylindersTmp.clear();
+
+            custInvoiceJour         = queryRun.get(tableNum(CustInvoiceJour));
+            custInvoiceTrans        = queryRun.get(tableNum(CustInvoiceTrans));
+            custTable               = CustTable::find(custInvoiceJour.InvoiceAccount);
+
+            etgNewInjectionofCylindersTmp.CustName              = custTable.name();
+            etgNewInjectionofCylindersTmp.CustAccount           = custTable.AccountNum;
+            etgNewInjectionofCylindersTmp.SalesId               = custInvoiceJour.SalesId;
+            etgNewInjectionofCylindersTmp.ETGBusinessSegment    = custInvoiceJour.ETGBusinessSegment;
+            etgNewInjectionofCylindersTmp.ETGConnectionType     = custInvoiceTrans.ETGConnectionType;
+            etgNewInjectionofCylindersTmp.ETGNoofCylinders      = custInvoiceTrans.Qty;
+            etgNewInjectionofCylindersTmp.ItemId                = custInvoiceTrans.ItemId;
+            etgNewInjectionofCylindersTmp.ItemName              = custInvoiceTrans.itemName();
+            etgNewInjectionofCylindersTmp.InvoiceDate           = custInvoiceTrans.InvoiceDate;
+
+            InventTableModule inventTableModule = InventTableModule::find(custInvoiceTrans.ItemId,ModuleInventPurchSales::Sales);
+
+            etgNewInjectionofCylindersTmp.ETGPackSize           = inventTableModule.ETGPackSize;
+
+            etgNewInjectionofCylindersTmp.insert();
+
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

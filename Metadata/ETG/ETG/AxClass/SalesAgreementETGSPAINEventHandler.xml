@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>SalesAgreementETGSPAINEventHandler</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Event handler class for the <c>SalesAgreement</c> form for the ETGSPAIN model.
+/// </summary>
+class SalesAgreementETGSPAINEventHandler
+{    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>SalesAgreementHeader_ETGSPAINPurchHasAgreementQuotas_OnClicked</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Clicked method for the "Contract by Quotas" checkbox.
+    /// </summary>
+    /// <param name="sender">"Contract by Quotas" checkbox.</param>
+    /// <param name="e">Event arguments.</param>
+    [FormControlEventHandler(formControlStr(SalesAgreement, SalesAgreementHeader_ETGSPAINPurchHasAgreementQuotas), FormControlEventType::Clicked)]
+    public static void SalesAgreementHeader_ETGSPAINPurchHasAgreementQuotas_OnClicked(FormControl sender, FormControlEventArgs e)
+    {
+        Args                    args                    = new Args();
+        FormRun                 formRun                 = sender.formRun();
+        FormDataSource          salesAgreementHeader_DS = formRun.dataSource(formDataSourceStr(SalesAgreement, SalesAgreementHeader));
+        FormDataSource          salesAgreementLine_DS   = formRun.dataSource(formDataSourceStr(SalesAgreement, ALine));
+        SalesAgreementHeader    salesAgreementHeader;
+        AgreementHeader         agreementHeader;
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            // Para evitar errores de actualizaciones cruzadas, guardamos los datos actuales del formulario antes de realizar el proceso.
+            salesAgreementHeader_DS.write();
+            salesAgreementLine_DS.write();
+
+            salesAgreementHeader = salesAgreementHeader_DS.cursor();
+            agreementHeader      = AgreementHeader::find(salesAgreementHeader.RecId);
+
+            if (salesAgreementHeader.ETGSPAINPurchHasAgreementQuotas)
+            {
+                // Lanzamos proceso de Contrato por Cupos
+                args.record(agreementHeader);
+                args.caller(formRun);
+
+                new MenuFunction(menuItemActionStr(ETGSPAINPurchSalesAgreementQuotaDialog), MenuItemType::Action).run(args);
+            }
+            else
+            {
+                // Reseteamos los valores de Cupos
+                ttsbegin;
+                agreementHeader.selectForUpdate(true);
+                agreementHeader.ETGSPAINresetAgreementQuota();
+                agreementHeader.update();
+                ttscommit;
+            }
+
+            // Refresco la cabecera del formulario
+            salesAgreementHeader_DS.refresh();
+
+            // Refrescamos los datos de las líneas
+            salesAgreementLine_DS.refresh();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

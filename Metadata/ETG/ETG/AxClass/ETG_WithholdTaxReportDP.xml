@@ -1,0 +1,276 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_WithholdTaxReportDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The <c>ETGSalesRegisterReportDP</c> class is the report data provider class for Sales register report
+/// </summary>
+[
+    SRSReportQueryAttribute(queryStr(ETG_WithholdTaxReportQuery)),
+    SRSReportParameterAttribute(classStr(ETG_WithholdTaxReportContract))
+]
+class ETG_WithholdTaxReportDP extends SrsReportDataProviderPreProcessTempDB
+{
+    ETG_WithholdTaxReportTmp        withholdTaxReportTmp;
+    TaxWithholdTrans                taxWithholdTrans;
+    ETG_WithholdTaxReportContract   contract;
+    FromDate                        fromDate;
+    ToDate                          toDate;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getWithholdTaxReportTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tablestr(ETG_WithholdTaxReportTmp))]
+    public ETG_WithholdTaxReportTmp getWithholdTaxReportTmp()
+    {
+        select withholdTaxReportTmp;
+        return withholdTaxReportTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        this.initContract();
+        this.insertData();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initContract</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    To fetch parameter values
+    /// </summary>
+    public void initContract()
+    {
+        contract                = this.parmDataContract() as ETG_WithholdTaxReportContract;
+        fromDate                = contract.parmFromDate();
+        toDate                  = contract.parmToDate();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertData</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    inserting data useing parm query
+    /// </summary>
+    public void insertData()
+    {
+        VendTable                           vendTable;
+        VendTrans                           vendTrans;
+        VendInvoiceJour                     vendInvoiceJour,vendInvoiceJour1;
+        PurchTotalsSummary                  purchTotalsSummary;
+        PurchTotals                         purchTotals;
+        Query                               query = this.parmQuery();
+        QueryRun                            queryRun;
+        DirPartyLocation                    dirPartyLocation;
+        TaxRegistration                     taxRegistration;
+        CompanyInfo                         companyInfo = CompanyInfo::find();
+        TaxWithholdTable                    taxWithHoldTable;
+        DimensionAttributeValueCombination  dimensionAttributeValueCombination;
+        LedgerJournalTrans                  ledgerJournalTrans;
+        
+        query.dataSourceTable(tablenum(TaxWithholdTrans)).addRange(fieldnum(TaxWithholdTrans, TransDate)).value(queryRange(fromDate, toDate));
+
+        queryRun = new QueryRun(query);
+        while (queryRun.next())
+        {
+            taxWithholdTrans  = queryRun.get(tableNum(TaxWithholdTrans));
+
+            select firstonly vendTable
+                where vendTable.AccountNum == taxWithholdTrans.VendAccount;
+            select firstonly dirPartyLocation
+                where dirPartyLocation.Party == vendTable.Party;
+            select firstonly taxRegistration
+                where taxRegistration.DirPartyLocation == dirPartyLocation.RecId;
+
+            select firstonly taxWithHoldTable
+                where taxWithHoldTable.TaxWithholdCode == taxWithholdTrans.TaxWithholdCode;
+            select firstonly dimensionAttributeValueCombination
+                where dimensionAttributeValueCombination.RecId == taxWithHoldTable.LedgerDimension;
+
+
+            withholdTaxReportTmp.clear();
+            withholdTaxReportTmp.TransDate              = taxWithholdTrans.TransDate;
+            withholdTaxReportTmp.Voucher                = taxWithholdTrans.Voucher;
+            withholdTaxReportTmp.TaxWithholdTrans       = taxWithholdTrans.RecId;
+            withholdTaxReportTmp.PaymCompany            = taxWithholdTrans.PaymCompany;
+            withholdTaxReportTmp.PaymCompanyName        = CompanyInfo::findDataArea(taxWithholdTrans.PaymCompany).Name;
+            withholdTaxReportTmp.VendTrans              = taxWithholdTrans.VendTransInvoiceId;
+            withholdTaxReportTmp.VendAccount            = taxWithholdTrans.VendAccount;
+
+            withholdTaxReportTmp.VendName               = vendTable.name();
+            withholdTaxReportTmp.TaxWithholdCode        = taxWithholdTrans.TaxWithholdCode;
+            withholdTaxReportTmp.VoucherInvoice         = taxWithholdTrans.VoucherInvoice;
+            withholdTaxReportTmp.InvoiceAmount          = taxWithholdTrans.InvoiceAmount;
+            withholdTaxReportTmp.PaymWithholdBaseAmount = taxWithholdTrans.PaymWithholdBaseAmount;
+            withholdTaxReportTmp.PaymTaxWithholdAmount  = taxWithholdTrans.PaymTaxWithholdAmount;
+            withholdTaxReportTmp.CompanyLogo            = FormLetter::companyLogo();
+            withholdTaxReportTmp.VendorRegNum           = taxRegistration.RegistrationNumber;
+            withholdTaxReportTmp.CompanyCoRegNum        = companyInfo.CoRegNum;
+            withholdTaxReportTmp.DisplayValue           = dimensionAttributeValueCombination.DisplayValue; 
+            select firstonly ledgerJournalTrans
+                    where ledgerJournalTrans.Voucher == withholdTaxReportTmp.Voucher;
+
+            withholdTaxReportTmp.WHTCertificateNumber   = ledgerJournalTrans.WHTCertificateNumber;
+            withholdTaxReportTmp.InvoiceDate            = ledgerJournalTrans.DocumentDate;
+
+
+            select firstonly vendTrans
+                where vendTrans.RecId == withholdTaxReportTmp.VendTrans;
+            
+
+           // withholdTaxReportTmp.VendName           = vendTrans.vendTableName();
+            withholdTaxReportTmp.LocationFinDim     = this.getFinDimValue(vendTrans.DefaultDimension, "Locations");
+            if(withholdTaxReportTmp.PaymTaxWithholdAmount)
+            {
+                withholdTaxReportTmp.WHTPercent         = (withholdTaxReportTmp.PaymTaxWithholdAmount / withholdTaxReportTmp.PaymWithholdBaseAmount) * 100;
+            }
+            withholdTaxReportTmp.VoucherTransDate   = vendTrans.TransDate;
+            
+            
+
+            if (vendTrans.TransType == LedgerTransType::Purch)
+            {
+                select firstonly vendInvoiceJour
+                    where vendInvoiceJour.InvoiceDate == vendTrans.TransDate
+                    && vendInvoiceJour.LedgerVoucher == vendTrans.Voucher
+                    && vendInvoiceJour.InvoiceAccount == vendTrans.AccountNum
+                    && vendInvoiceJour.InvoiceId      == vendTrans.Invoice;
+
+                withholdTaxReportTmp.Voucher                = vendInvoiceJour.PurchId;
+               // withholdTaxReportTmp.ETGInvocieId           = vendInvoiceJour.InvoiceId;
+
+                
+                //select firstonly TotalAmount from purchTotalsSummary
+                //    where purchTotalsSummary.PurchId == vendInvoiceJour.PurchId;
+
+                purchTotals =  PurchTotals::newPurchTable(PurchTable::find(vendInvoiceJour.PurchId));
+                purchTotals.calc();
+                withholdTaxReportTmp.POTotalAmount      = purchTotals.purchTotalAmount();
+
+            }
+                  withholdTaxReportTmp.ETGInvocieId           = vendInvoiceJour.InvoiceId;
+            if(!withholdTaxReportTmp.ETGInvocieId)
+            {
+               
+                    withholdTaxReportTmp.ETGInvocieId = ledgerJournalTrans.Invoice;
+                
+            }
+
+            withholdTaxReportTmp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getFinDimValue</Name>
+				<Source><![CDATA[
+    public Description getFinDimValue(DimensionDefault _defaultDimension, Name     _dimensionName)
+    {
+        DimensionAttributeValueSetStorage   dimStorage;
+        DimensionAttribute                  dimAttribute;
+        DimensionValue                      displayValue = "";
+        Description                         dimDescription = "";
+        int                                 i;
+        
+        dimStorage = DimensionAttributeValueSetStorage::find(_defaultDimension);
+        for (i= 1 ; i<= dimStorage.elements() ; i++)
+        {
+            dimAttribute    = DimensionAttribute::find(dimStorage.getAttributeByIndex(i));
+            
+            if(dimAttribute.Name == _dimensionName)
+            {
+                displayValue    = dimStorage.getDisplayValueByIndex(i);
+                dimDescription  = DimensionFinancialTag::findByFinancialTagCategoryAndValue(dimAttribute.financialTagCategory(), displayValue).Description;
+                if (dimDescription == "")
+                {
+                    dimDescription  = this.getFinDimValueDescription(dimAttribute.ViewName, displayValue);
+                }
+            }
+        }
+
+        return  dimDescription;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getFinDimValueDescription</Name>
+				<Source><![CDATA[
+    public Description getFinDimValueDescription(TableNameShort     _ViewName, DimensionValue   _displayValue)
+    {
+        DimAttributeInventTable         inventTable;
+        DimAttributeHcmWorker           worker;
+        DimAttributeCustTable           custTable;
+        DimAttributeVendTable           dimVendTable;
+        DimAttributeAssetTable          assetTable;
+        DimAttributeOMBusinessUnit      businessUnit;
+        DimAttributeOMCostCenter        costCenter;
+        DimAttributeOMDepartment        department;
+        Description                     dimDescription = "";
+
+        switch (_ViewName)
+        {
+            case  "DimAttributeInventTable":
+                select Name from inventTable
+                    where inventTable.value == _displayValue;
+                dimDescription = inventTable.Name;
+                break;
+            case  "DimAttributeHcmWorker":
+                select Name from worker
+                    where worker.value == _displayValue;
+                dimDescription = worker.Name;
+                break;
+            case  "DimAttributeCustTable":
+                select Name from custTable
+                    where custTable.value == _displayValue;
+                dimDescription = custTable.Name;
+                break;
+            case  "DimAttributeVendTable":
+                select Name from dimVendTable
+                    where dimVendTable.value == _displayValue;
+                dimDescription = dimVendTable.Name;
+                break;
+            case  "DimAttributeAssetTable":
+                select Name from assetTable
+                    where assetTable.value == _displayValue;
+                dimDescription = assetTable.Name;
+                break;
+            case  "DimAttributeOMBusinessUnit":
+                select Name from businessUnit
+                    where businessUnit.value == _displayValue;
+                dimDescription = businessUnit.Name;
+                break;
+            case  "DimAttributeOMCostCenter":
+                select Name from costCenter
+                    where costCenter.value == _displayValue;
+                dimDescription = costCenter.Name;
+                break;
+            case  "DimAttributeOMDepartment":
+                select Name from department
+                    where department.value == _displayValue;
+                dimDescription = department.Name;
+                break;
+        }
+          
+        return      dimDescription;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,308 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesAgreementGenerateReleaseOrder_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classstr(SalesAgreementGenerateReleaseOrder))]
+final class ETG_SalesAgreementGenerateReleaseOrder_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>check</Name>
+				<Source><![CDATA[
+    public boolean check()
+    {
+        AgreementReference      agreementReference;
+        PurchAgreementHeader    purchAgreementHeader;
+        ETG_Parameters          etgParameters;
+       
+        SalesCreateReleaseOrderLineTmp  releaseOrderLineLocal;
+        boolean                 ok = true;
+
+        if(salesAgreementHeader.ETG_IsThirdParty)
+        {
+            select firstonly PurchNumberSequence from purchAgreementHeader
+                where purchAgreementHeader.PurchNumberSequence == salesAgreementHeader.ETG_PurchAgreementIdTP
+                    && purchAgreementHeader.AgreementState == AgreementState::Effective;
+
+            if(!purchAgreementHeader.PurchNumberSequence)
+            {
+                ok = checkFailed(strFmt('Third party purch agreement %1 must be confirmed',purchAgreementHeader.PurchNumberSequence));
+            }
+            
+        }
+
+        next check();
+
+        etgParameters = ETG_Parameters::find();
+
+        releaseOrderLineLocal.setTmpData(releaseOrderLine);
+
+        if (etgParameters && etgParameters.ETG_SalesOneItemMultipleVariant == NoYes::Yes && this.validationOneItemwithMultipleVariant(releaseOrderLineLocal) > 0 )
+        {
+            ok = checkFailed(strFmt('Sales agreement line is having multiple item when parameter is enabled'));
+
+        }
+
+        //CS, DLT, 04022025, sales agreement workflow changes
+        //check if sales agrement is enabled and workflow is approved then allow release order else throw error
+        if(ok && ETGACFParameters::find().EnableSalesAgreementWorkflow == NoYes::Yes)
+        {
+            if(salesAgreementHeader.ETGWorkflowStatus != VersioningDocumentState::Approved)
+            {
+                ok = checkFailed('@ETG_New:SalesAgreementNotApprovedError');
+            }
+        }
+        //CE, DLT, 04022025, sales agreement workflow changes
+
+       
+
+        return ok;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validationOneItemwithMultipleVariant</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Validating the lines for one item
+    /// </summary>
+    /// <param name = "_tmpPurchLine"></param>
+    /// <returns> integer value for count of record</returns>
+    public int  validationOneItemwithMultipleVariant(SalesCreateReleaseOrderLineTmp  _releaseOrderLineLocal)
+    {
+        int             recCount    =   0;
+        int             loopcount   =   0;
+        ItemIdSmall     itemId;
+
+        while select _releaseOrderLineLocal
+             group by ItemId
+                where _releaseOrderLineLocal.SalesQty != 0
+        {
+            if (loopcount == 0)
+            {
+                itemId      =   _releaseOrderLineLocal.ItemId;
+            }
+
+            if (loopcount > 0)
+            {
+                if (itemId != _releaseOrderLineLocal.ItemId)
+                {
+                    recCount ++;
+                }
+            }
+
+            loopcount ++;
+        }
+
+        return recCount;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createOrderAndLines</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Populating maintain charges from sales agreement to sales order header.
+    /// </summary>
+    /// <param name = "_releaseOrderLine"></param>
+    /// <param name = "_releaseOrderTable"></param>
+    /// <returns></returns>
+    protected SalesAutoCreate createOrderAndLines(SalesCreateReleaseOrderLineTmp  _releaseOrderLine,
+                               SalesCreateReleaseOrderTableTmp _releaseOrderTable)
+    {
+        SalesAutoCreate                     salesAutoCreate;
+        SalesTable                          salesTableloc;
+        MarkupTrans                         markUpTrans;
+        ETG_ChargeCodes                     ChargeCodes,ChargeCodesloc;
+        SalesLine                           salesLine,salesLineloc;
+        SalesAgreementHeader                salesAgreementHeader,salesAgreementHeaderint;
+        AgreementLineQuantityCommitment     agreementLineQuantityCommitment,agreementLineQuantityCommitmentloc;
+
+        salesAutoCreate = next createOrderAndLines(_releaseOrderLine,_releaseOrderTable);
+
+        try
+        {
+            if(ETGACFParameters::find().EnableProvisionalCharges == NoYes::Yes)
+            {
+
+                salesAgreementHeader = SalesAgreementHeader::find(_releaseOrderTable.AgreementHeader);
+
+                select salesTableloc
+                where salesTableloc.SalesId == salesAutoCreate.salesId();
+
+                select sum(ETGRemainingQuantity) from agreementLineQuantityCommitment
+                    where agreementLineQuantityCommitment.Agreement == salesAgreementHeader.RecId;
+
+                while  select ChargeCodes
+                where ChargeCodes.PurchNumberSequence == salesAgreementHeader.SalesNumberSequence
+                {
+                    LineAmount              lineAmount;
+                    markupTrans.initFromMarkupTable(MarkupTable::find(MarkupModuleType::Cust,  ChargeCodes.MarkupCode));
+                    markupTrans.initFromSalesTable(salesTableloc);
+                    markupTrans.LineNum = MarkupTrans::lastLineNum(markupTrans.TransTableId, markupTrans.TransRecId)+1;
+                    markupTrans.modifiedField(fieldNum(markupTrans ,Value ));
+                    markupTrans.MarkupCode = ChargeCodes.MarkupCode;
+                    markupTrans.Txt = ChargeCodes.TransTxt;
+                    if(ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Pcs)
+                    {
+                        markupTrans.MarkupCategory = MarkupCategory::Pcs;
+                    }
+                    else if(ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Fixed)
+                    {
+                        markupTrans.MarkupCategory = MarkupCategory::Fixed;
+                        while select  salesLine
+                            where salesLine.SalesId == salesTableloc.SalesId
+                        {
+                            lineAmount += (ChargeCodes.RemainingValue/agreementLineQuantityCommitment.ETGRemainingQuantity) * salesLine.SalesQty;
+
+                            select forupdate agreementLineQuantityCommitmentloc
+                                where agreementLineQuantityCommitmentloc.RecId == salesLine.MatchingAgreementLine;
+                            if(agreementLineQuantityCommitmentloc)
+                            {
+                                ttsbegin;
+                                agreementLineQuantityCommitmentloc.ETGRemainingQuantity = agreementLineQuantityCommitmentloc.CommitedQuantity - salesLine.SalesQty;
+                                agreementLineQuantityCommitmentloc.update();
+                                ttscommit;
+                            }
+                        }
+                    }
+                    else if(ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Percentage)
+                    {
+                        markupTrans.MarkupCategory = MarkupCategory::Percent;
+                        lineAmount                 = ChargeCodes.Value;
+                    }
+
+                    
+                    markupTrans.Value                       = lineAmount;
+                    markupTrans.CurrencyCode                = ChargeCodes.CurrencyCode;
+                    markupTrans.ModuleType                  = MarkupModuleType::Cust;
+                    markupTrans.PreviousValue               = lineAmount;
+                    markupTrans.mcrMarkupTransCreatedBy     = MCRMarkupTransCreatedBy::User;
+                    markupTrans.MCROriginalMiscChargeValue  = lineAmount;
+                    markupTrans.ModuleCategory              = HeadingLine::Heading;
+                    markupTrans.ETGProvisionalCharges = NoYes::Yes;
+                    markupTrans.insert();
+
+                    select forupdate ChargeCodesloc
+                    where ChargeCodesloc.RecId == ChargeCodes.RecId;
+                    if(ChargeCodesloc)
+                    {
+                        ttsbegin;
+                        if(ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Fixed)
+                        {
+                            ChargeCodesloc.RemainingValue = ChargeCodes.Value - lineAmount;
+                        }
+                        ChargeCodesloc.update();
+                        ttscommit;
+                    }
+
+
+                }
+            }
+        }
+        catch(Exception::Error)
+        {
+            //return;
+        }
+
+        //NS, DLT ,11032025, Provisional charges IncoTerms
+        if(ETGACFParameters::find().EnableProvisionalCharges)
+        {
+            salesAgreementHeader = SalesAgreementHeader::find(_releaseOrderTable.AgreementHeader);
+            if(salesAgreementHeader.ETG_PurchAgreementIdTP)
+            {
+                PurchAgreementHeader purchAgreementHeader = PurchAgreementHeader::findAgreementId(salesAgreementHeader.ETG_PurchAgreementIdTP);
+                PurchTable purchTable;
+                select firstonly purchTable order by RecId desc
+                    where purchTable.MatchingAgreement == purchAgreementHeader.RecId;
+                ETGProvisionalChargesBackToBackOrder::createChargesPurch(purchTable, purchAgreementHeader);
+            }
+        }
+        //NE, DLT ,11032025, Provisional charges IncoTerms
+
+        if(salesAutoCreate && ETGACFParameters::find().EnablePTBFContractsSales == NoYes::Yes)
+        {
+            ttsbegin;
+            
+            AgreementHeader aHeader;
+            AgreementLine aLine;
+
+            aHeader = AgreementHeader::find(_releaseOrderTable.AgreementHeader);
+
+            while select aLine 
+                where aLine.Agreement == aHeader.RecId
+            {
+                SalesLine saleslinePriceUpd;
+                select firstonly saleslinePriceUpd where saleslinePriceUpd.MatchingAgreementLine == aline.RecId 
+                    && saleslinePriceUpd.SalesId == salesAutoCreate.salesId();
+               
+                saleslinePriceUpd.selectForUpdate(true);
+                saleslinePriceUpd.ETGPriceTolerance = aline.ETGPriceTolerance;
+                saleslinePriceUpd.doUpdate();
+            }
+            ttscommit;
+        }
+
+        // DMS Reverse intergreation
+
+        if (ETGACFParameters::find().EnableDMSIntegration
+            && BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGDMSRevereSalesAgreementIntegrationEventClass)))
+        {
+             salesAgreementHeaderint = SalesAgreementHeader::find(_releaseOrderTable.AgreementHeader);
+             boolean              isPartial = false;
+
+            select salesTableloc
+                where salesTableloc.SalesId == salesAutoCreate.salesId();
+            
+            select firstOnly salesLine
+                where salesLine.SalesId == salesTableLoc.SalesId;
+
+            str formattedDateTime = DateTimeUtil::toStr(salesTableloc.CreatedDateTime);
+
+            ETGDMSRevereSalesAgreementIntegrationContract contract = new ETGDMSRevereSalesAgreementIntegrationContract();
+
+            contract.parmDealNumber(salesAgreementHeaderint.ETGDMSDealNumber);
+            contract.parmDataAreaId(curExt());
+           
+            contract.parmDocumentNumber(salesTableloc.SalesId);
+            contract.parmDocumentDate(formattedDateTime);
+            contract.parmActivityOwner(salesTableloc.CreatedBy);
+            
+            contract.parmOperationType("Order Release - Releasing");
+            contract.parmActivityName("Sales Agreement Order Release");
+            contract.parmActivityRemarks(strFmt("The  Sales agreement %1 is released with sales order %2", salesAgreementHeaderint.SalesNumberSequence, salesTableloc.SalesId));
+
+            //if (salesLine.RemainSalesPhysical == 0)
+            //{
+            //    contract.parmOperationType("Order Release - Released");
+            //    contract.parmActivityName("Sales Agreement Full Order Release");
+            //    contract.parmActivityRemarks(strFmt("The  Sales agreement %1 is fully released with sales order %2", salesAgreementHeaderint.SalesNumberSequence, salesTableloc.SalesId));
+            //}
+            //else
+            //{
+
+            //    contract.parmOperationType("Order Release - Partial Released");
+            //    contract.parmActivityName("Sales Agreement Partial Order Release");
+            //    contract.parmActivityRemarks(strFmt("The  Sales agreement %1 is partially released with sales order %2", salesAgreementHeaderint.SalesNumberSequence, salesTableloc.SalesId));
+            //}
+
+            ETGDMSRevereSalesAgreementIntegrationEventClass eventClass = ETGDMSRevereSalesAgreementIntegrationEventClass::newFromContract(contract);
+            eventClass.send();
+        }
+        //DMS Reverse intergreation
+
+        
+
+        return salesAutoCreate;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

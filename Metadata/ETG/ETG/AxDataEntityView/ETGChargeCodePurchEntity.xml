@@ -1,0 +1,346 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxDataEntityView xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGChargeCodePurchEntity</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGChargeCodePurchEntity extends common
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>calculateValues</Name>
+				<Source><![CDATA[
+    private void calculateValues(ETG_ChargeCodes _chargeCodes)
+    {
+        AgreementLineQuantityCommitment  commitment;
+        PurchAgreementHeader             purchHeader;
+        SalesAgreementHeader             salesHeader;
+        AgreementLine                    agreementLine;
+        AgreementHeader                  agreementHeader;
+        MarkupTable                      markupTable;
+
+        CurrencyExchangeHelper exchangeHelper;
+        CurrencyCode fromCurrency = Ledger::accountingCurrency();
+        CurrencyCode reportingCurrency = Ledger::reportingCurrency();
+
+        select firstOnly markupTable
+        where markupTable.MarkupCode == _chargeCodes.MarkupCode;
+
+        if (markupTable)
+        _chargeCodes.TransTxt = markupTable.Txt;
+
+        select firstOnly purchHeader
+        where purchHeader.PurchNumberSequence == _chargeCodes.PurchNumberSequence;
+
+        if (purchHeader)
+        {
+            select firstOnly agreementLine
+            where agreementLine.Agreement == purchHeader.RecId;
+
+            select firstOnly agreementHeader
+            where agreementHeader.RecId == purchHeader.RecId;
+        }
+
+        select firstOnly salesHeader
+        where salesHeader.SalesNumberSequence == _chargeCodes.PurchNumberSequence;
+
+        if (salesHeader)
+        {
+            select firstOnly agreementLine
+            where agreementLine.Agreement == salesHeader.RecId;
+
+            select firstOnly agreementHeader
+            where agreementHeader.RecId == salesHeader.RecId;
+        }
+
+        select firstOnly commitment
+        where commitment.RecId == agreementLine.RecId;
+
+        if (commitment)
+        _chargeCodes.Qty = commitment.CommitedQuantity;
+
+        if (!_chargeCodes.CurrencyCode && commitment)
+        _chargeCodes.CurrencyCode = commitment.Currency;
+
+        if (!_chargeCodes.CurrencyCode && agreementHeader)
+        _chargeCodes.CurrencyCode = agreementHeader.Currency;
+
+        exchangeHelper = CurrencyExchangeHelper::newExchangeDate(Ledger::current(), systemDateGet());
+
+        if (_chargeCodes.CurrencyCode)
+        {
+            _chargeCodes.ExchangeRate =
+            exchangeHelper.calculateCurrencyToCurrency(_chargeCodes.CurrencyCode,
+                                                        fromCurrency,
+                                                        1,
+                                                        true);
+
+            _chargeCodes.ReportingExchangeRate =
+            exchangeHelper.calculateCurrencyToCurrency(_chargeCodes.CurrencyCode,
+                                                        reportingCurrency,
+                                                        1,
+                                                        true);
+        }
+
+        if (_chargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Pcs)
+        {
+            _chargeCodes.AmountMST = _chargeCodes.Value * _chargeCodes.Qty;
+        }
+        else if (_chargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Fixed)
+        {
+            _chargeCodes.AmountMST = _chargeCodes.Value;
+        }
+        else if (_chargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Percentage && commitment)
+        {
+            _chargeCodes.AmountMST =
+        ((commitment.CommitedQuantity * commitment.PricePerUnit) -
+        ((commitment.LineDiscountPercent *
+         (commitment.CommitedQuantity * commitment.PricePerUnit)) / 100)) *
+         (_chargeCodes.Value / 100);
+        }
+
+        _chargeCodes.Amountinaccountingcurrency = _chargeCodes.ExchangeRate * _chargeCodes.AmountMST;
+        _chargeCodes.Amountinreportingcurrency  = _chargeCodes.ReportingExchangeRate * _chargeCodes.AmountMST;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>mapEntityToDataSource</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method sets fields like exchange rate, amount when Charge code is inserted
+    /// </summary>
+    /// <param name = "_entityCtx"></param>
+    /// <param name = "_dataSourceCtx"></param>
+    public void mapEntityToDataSource(DataEntityRuntimeContext _entityCtx, DataEntityDataSourceRuntimeContext _dataSourceCtx)
+    {
+        super(_entityCtx, _dataSourceCtx);
+        ETG_ChargeCodes chargeCodes = _dataSourceCtx.getBuffer();
+        this.calculateValues(chargeCodes);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+	<ConfigurationKey>LedgerBasic</ConfigurationKey>
+	<Label>ETG Charge code purch entity</Label>
+	<SubscriberAccessLevel>
+		<Read>Allow</Read>
+	</SubscriberAccessLevel>
+	<DataManagementEnabled>Yes</DataManagementEnabled>
+	<DataManagementStagingTable>ETGChargeCodePurchStaging</DataManagementStagingTable>
+	<IsPublic>Yes</IsPublic>
+	<PrimaryCompanyContext>DataAreaId</PrimaryCompanyContext>
+	<PrimaryKey>EntityKey</PrimaryKey>
+	<PublicCollectionName>ETGPurchChargeCodes</PublicCollectionName>
+	<PublicEntityName>ChargeCodePurch</PublicEntityName>
+	<SupportsSetBasedSqlOperations>Yes</SupportsSetBasedSqlOperations>
+	<DeleteActions />
+	<FieldGroups>
+		<AxTableFieldGroup>
+			<Name>AutoReport</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoLookup</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoIdentification</Name>
+			<AutoPopulate>Yes</AutoPopulate>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoSummary</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoBrowse</Name>
+			<Fields />
+		</AxTableFieldGroup>
+	</FieldGroups>
+	<Fields>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Actual</Name>
+			<DataField>Actual</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>AgreementNumber</Name>
+			<DataField>AgreementNumber</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Amountinaccountingcurrency</Name>
+			<DataField>Amountinaccountingcurrency</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Amountinreportingcurrency</Name>
+			<DataField>Amountinreportingcurrency</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>AmountMST</Name>
+			<DataField>AmountMST</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>CurrencyCode</Name>
+			<DataField>CurrencyCode</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Estimation</Name>
+			<DataField>Estimation</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ETG_Estimation</Name>
+			<DataField>ETG_Estimation</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ETG_MarkupCategory</Name>
+			<DataField>ETG_MarkupCategory</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ExchangeRate</Name>
+			<DataField>ExchangeRate</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>IncoTerms</Name>
+			<DataField>IncoTerms</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>IsProvisionalChargesCreated</Name>
+			<DataField>IsProvisionalChargesCreated</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>JournalNum</Name>
+			<DataField>JournalNum</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>MarkupCode</Name>
+			<DataField>MarkupCode</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Posted</Name>
+			<DataField>Posted</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PurchNumberSequence</Name>
+			<DataField>PurchNumberSequence</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Qty</Name>
+			<DataField>Qty</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>RemainingValue</Name>
+			<DataField>RemainingValue</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ReportingExchangeRate</Name>
+			<DataField>ReportingExchangeRate</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>TransTxt</Name>
+			<DataField>TransTxt</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Value</Name>
+			<DataField>Value</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ValuePerPiece</Name>
+			<DataField>ValuePerPiece</DataField>
+			<DataSource>ETG_ChargeCodes</DataSource>
+		</AxDataEntityViewField>
+	</Fields>
+	<Keys>
+		<AxDataEntityViewKey>
+			<Name>EntityKey</Name>
+			<Fields>
+				<AxDataEntityViewKeyField>
+					<DataField>PurchNumberSequence</DataField>
+				</AxDataEntityViewKeyField>
+				<AxDataEntityViewKeyField>
+					<DataField>MarkupCode</DataField>
+				</AxDataEntityViewKeyField>
+			</Fields>
+		</AxDataEntityViewKey>
+	</Keys>
+	<Mappings />
+	<Ranges />
+	<Relations />
+	<StateMachines />
+	<ViewMetadata>
+		<Name>Metadata</Name>
+		<SourceCode>
+			<Methods>
+				<Method>
+					<Name>classDeclaration</Name>
+					<Source><![CDATA[
+[Query]
+public class Metadata extends QueryRun
+{
+}
+]]></Source>
+				</Method>
+			</Methods>
+		</SourceCode>
+		<DataSources>
+			<AxQuerySimpleRootDataSource>
+				<Name>ETG_ChargeCodes</Name>
+				<DynamicFields>Yes</DynamicFields>
+				<Table>ETG_ChargeCodes</Table>
+				<DataSources />
+				<DerivedDataSources />
+				<Fields />
+				<Ranges />
+				<GroupBy />
+				<Having />
+				<OrderBy />
+			</AxQuerySimpleRootDataSource>
+		</DataSources>
+	</ViewMetadata>
+</AxDataEntityView>

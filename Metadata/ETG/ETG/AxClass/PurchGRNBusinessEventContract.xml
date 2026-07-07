@@ -1,0 +1,376 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>PurchGRNBusinessEventContract</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[DataContract]
+public final class PurchGRNBusinessEventContract extends BusinessEventsContract
+{
+    private PurchId             purchId;
+    private PackingSlipId       grnNumber;
+    private Qty                 totalQuantity;
+    private AmountCur           totalAmount;
+    private str                 transactionType;
+    private str                 source;
+    private CurrencyCode        currencyCode;
+    private TransDate           transactionDate;
+    private str                 purchAgreementNumber;
+    private str                 etgDealNumber;
+    private VendAccount         vendorAccount;
+    private RefRecId            recordId;
+    private str                 bolNo;
+    private TransDate           bolDate;
+    private str                 portOfLoading;
+    private str                 portOfDischarge;
+    private str                 shipmentFrom;
+    private str                 shipmentTo;
+    
+    private List                lines;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initialize</Name>
+				<Source><![CDATA[
+    protected void initialize(VendPackingSlipJour _journal)
+    {
+        PurchTable              purchTable;
+        PurchAgreementHeader    purchAgreementHeader;
+        AgreementHeaderDefault  agreementHeaderDefault;
+        
+        // Please update these table references if your ETG add-on uses different names for purchase orders
+        ETG_PurchTableTrade     etgPurchTableTrade;
+        ETG_BILLOFLADING        eTG_BILLOFLADING;
+
+        purchId         = _journal.PurchId;
+        grnNumber       = _journal.PackingSlipId;
+        transactionType = 'PurchaseGRN';
+        source          = 'D365';
+        
+        transactionDate = _journal.DeliveryDate;
+        vendorAccount   = _journal.OrderAccount;
+        recordId        = _journal.RecId;
+
+        // Fetching standard Purchase Order
+        purchTable = PurchTable::find(_journal.PurchId);
+        currencyCode = purchTable.CurrencyCode;
+        
+        // Lookup Purchase Agreement and Deal Number (Same logic as Sales)
+        select firstonly purchAgreementHeader
+            where purchAgreementHeader.RecId == purchTable.MatchingAgreement;
+
+        if (purchAgreementHeader.RecId)
+        {
+            purchAgreementNumber = purchAgreementHeader.PurchNumberSequence;
+
+            select firstonly agreementHeaderDefault
+                where agreementHeaderDefault.AgreementHeader == purchAgreementHeader.RecId;
+
+            if (agreementHeaderDefault.RecId)
+            {
+                etgDealNumber = agreementHeaderDefault.ETGDealNumber;
+            }
+        }
+
+       
+
+        bolNo   = _journal.BolNo;
+        bolDate = _journal.BolDate;
+
+       
+        select firstonly etgPurchTableTrade
+            where etgPurchTableTrade.PurchId == _journal.PurchId;
+        
+        portOfLoading   = etgPurchTableTrade.PortOfLoading;
+        portOfDischarge = etgPurchTableTrade.PortOfDischarge;
+        shipmentFrom    = etgPurchTableTrade.CountryOfOriginOfGoods;
+        shipmentTo      = etgPurchTableTrade.CountryOfFinalDestination;
+        
+        // Initialize the lines list
+        lines = new List(Types::Class);
+
+        this.populateLines(_journal);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>populateLines</Name>
+				<Source><![CDATA[
+    private void populateLines(VendPackingSlipJour _journal)
+    {
+        VendPackingSlipTrans packingSlipTrans;
+
+        totalQuantity = 0;
+        totalAmount = 0;
+
+        // Loop through lines for this specific GRN receipt
+        while select packingSlipTrans
+            where packingSlipTrans.VendPackingSlipJour == _journal.RecId
+        {
+            totalQuantity += packingSlipTrans.Qty;
+            totalAmount   += packingSlipTrans.ValueMST;
+            
+            // Make sure there are exactly 5 arguments passed here in this exact order:
+            PurchGRNLineBusinessEventContract lineContract = PurchGRNLineBusinessEventContract::construct(
+                _journal.PackingSlipId,      
+                packingSlipTrans.ItemId,    
+                packingSlipTrans.Qty,        
+                packingSlipTrans.ValueMST,   
+                currencyCode                 
+            );
+
+            lines.addEnd(lineContract);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>newFromVendPackingSlipJour</Name>
+				<Source><![CDATA[
+    public static PurchGRNBusinessEventContract newFromVendPackingSlipJour(VendPackingSlipJour _journal)
+    {
+        var contract = new PurchGRNBusinessEventContract();
+        contract.initialize(_journal);
+        return contract;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmLines</Name>
+				<Source><![CDATA[
+    // --- Data Member Definitions ---
+
+    [DataMember('Lines'),
+     DataCollectionAttribute(Types::Class, classStr(PurchGRNLineBusinessEventContract)),
+     BusinessEventsDataMember('GRN Lines')]
+    public List parmLines(List _lines = lines)
+    {
+        lines = _lines;
+        return lines;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmSource</Name>
+				<Source><![CDATA[
+    [DataMember('Document Source'), BusinessEventsDataMember('Source System')]
+    public str parmSource(str _source = source)
+    {
+        source = _source;
+        return source;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmTransactionType</Name>
+				<Source><![CDATA[
+    [DataMember('Transaction Type'), BusinessEventsDataMember('Transaction Type')]
+    public str parmTransactionType(str _transactionType = transactionType)
+    {
+        transactionType = _transactionType;
+        return transactionType;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmPurchId</Name>
+				<Source><![CDATA[
+    [DataMember('Purchase Order'), BusinessEventsDataMember('Purchase Order ID')]
+    public PurchId parmPurchId(PurchId _purchId = purchId)
+    {
+        purchId = _purchId;
+        return purchId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmGRNNumber</Name>
+				<Source><![CDATA[
+    [DataMember('GRN Number'), BusinessEventsDataMember('Goods Receipt Note ID')]
+    public PackingSlipId parmGRNNumber(PackingSlipId _grnNumber = grnNumber)
+    {
+        grnNumber = _grnNumber;
+        return grnNumber;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmTotalQuantity</Name>
+				<Source><![CDATA[
+    [DataMember('Total Quantity'), BusinessEventsDataMember('Total Quantity Received')]
+    public Qty parmTotalQuantity(Qty _totalQuantity = totalQuantity)
+    {
+        totalQuantity = _totalQuantity;
+        return totalQuantity;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmTotalAmount</Name>
+				<Source><![CDATA[
+    [DataMember('Total Amount'), BusinessEventsDataMember('Total GRN Value')]
+    public AmountCur parmTotalAmount(AmountCur _totalAmount = totalAmount)
+    {
+        totalAmount = _totalAmount;
+        return totalAmount;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmCurrencyCode</Name>
+				<Source><![CDATA[
+    [DataMember('Currency Code'), BusinessEventsDataMember('Currency Code')]
+    public CurrencyCode parmCurrencyCode(CurrencyCode _currencyCode = currencyCode)
+    {
+        currencyCode = _currencyCode;
+        return currencyCode;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmTransactionDate</Name>
+				<Source><![CDATA[
+    [DataMember('Transaction Date'), BusinessEventsDataMember('Transaction Date')]
+    public TransDate parmTransactionDate(TransDate _transactionDate = transactionDate)
+    {
+        transactionDate = _transactionDate;
+        return transactionDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmPurchAgreementNumber</Name>
+				<Source><![CDATA[
+    [DataMember('PurchaseAgreement Number'), BusinessEventsDataMember('Purchase Agreement Number')]
+    public str parmPurchAgreementNumber(str _purchAgreementNumber = purchAgreementNumber)
+    {
+        purchAgreementNumber = _purchAgreementNumber;
+        return purchAgreementNumber;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmETGDealNumber</Name>
+				<Source><![CDATA[
+    [DataMember('ETG Deal Number'), BusinessEventsDataMember('ETG Deal Number')]
+    public str parmETGDealNumber(str _etgDealNumber = etgDealNumber)
+    {
+        etgDealNumber = _etgDealNumber;
+        return etgDealNumber;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmVendorAccount</Name>
+				<Source><![CDATA[
+    [DataMember('Vendor Account'), BusinessEventsDataMember('Vendor Account')]
+    public VendAccount parmVendorAccount(VendAccount _vendorAccount = vendorAccount)
+    {
+        vendorAccount = _vendorAccount;
+        return vendorAccount;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmRecordId</Name>
+				<Source><![CDATA[
+    [DataMember('RecID'), BusinessEventsDataMember('Record Id')]
+    public RefRecId parmRecordId(RefRecId _recordId = recordId)
+    {
+        recordId = _recordId;
+        return recordId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmBolNo</Name>
+				<Source><![CDATA[
+    [DataMember('BOL No'), BusinessEventsDataMember('Bill of Lading No')]
+    public str parmBolNo(str _bolNo = bolNo)
+    {
+        bolNo = _bolNo;
+        return bolNo;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmBolDate</Name>
+				<Source><![CDATA[
+    [DataMember('BOL Date'), BusinessEventsDataMember('Bill of Lading Date')]
+    public TransDate parmBolDate(TransDate _bolDate = bolDate)
+    {
+        bolDate = _bolDate;
+        return bolDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmPortOfLoading</Name>
+				<Source><![CDATA[
+    [DataMember('Port Of Loading'), BusinessEventsDataMember('Port Of Loading')]
+    public str parmPortOfLoading(str _portOfLoading = portOfLoading)
+    {
+        portOfLoading = _portOfLoading;
+        return portOfLoading;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmPortOfDischarge</Name>
+				<Source><![CDATA[
+    [DataMember('Port Of Discharge'), BusinessEventsDataMember('Port Of Discharge')]
+    public str parmPortOfDischarge(str _portOfDischarge = portOfDischarge)
+    {
+        portOfDischarge = _portOfDischarge;
+        return portOfDischarge;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmShipmentFrom</Name>
+				<Source><![CDATA[
+    [DataMember('Shipment From'), BusinessEventsDataMember('Shipment From')]
+    public str parmShipmentFrom(str _shipmentFrom = shipmentFrom)
+    {
+        shipmentFrom = _shipmentFrom;
+        return shipmentFrom;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmShipmentTo</Name>
+				<Source><![CDATA[
+    [DataMember('Shipment To'), BusinessEventsDataMember('Shipment To')]
+    public str parmShipmentTo(str _shipmentTo = shipmentTo)
+    {
+        shipmentTo = _shipmentTo;
+        return shipmentTo;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

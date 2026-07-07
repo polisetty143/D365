@@ -1,0 +1,266 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_PurchAgreementCreateEventHandlers</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_PurchAgreementCreateEventHandlers
+{
+    
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>PurchAgreementHeader_OnActivated</Name>
+				<Source><![CDATA[
+    // <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataSourceEventHandler(formDataSourceStr(PurchAgreementCreate, PurchAgreementHeader), FormDataSourceEventType::Activated)]
+    public static void PurchAgreementHeader_OnActivated(FormDataSource sender, FormDataSourceEventArgs e)
+    {
+        FormDataSource      PurchAgreementHeader_ds   = sender.formrun().dataSource(formDataSourceStr(PurchAgreementCreate, PurchAgreementHeader)) as FormDataSource;
+        PurchAgreementHeader_ds.object(fieldNum(PurchAgreementHeader, DefaultAgreementLineEffectiveDate)).mandatory(true);
+        PurchAgreementHeader_ds.object(fieldNum(PurchAgreementHeader, DefaultAgreementLineExpirationDate)).mandatory(true);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETG_AgreementLineQualityGrp_GroupId_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(PurchAgreement, ETG_AgreementLineQualityGrp_GroupId), FormControlEventType::Modified)]
+    public static void ETG_AgreementLineQualityGrp_GroupId_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        AgreementLine                           agreementLine;
+        ETGAgrrementQualitySpecsLine            agrrementQualitySpecsLine;
+        ETG_QualitySubGrpView                   qualitySubGrpView;
+        Name        grpId   = sender.valueStr();
+
+        FormDataSource  agreementLine_ds   = sender.formRun().dataSource(formDataSourceStr(PurchAgreement,Aline))  as FormDataSource;
+        agreementLine                      = agreementLine_ds.cursor();
+      
+        while select * from qualitySubGrpView
+            where qualitySubGrpView.GroupID == grpId
+        {
+            agrrementQualitySpecsLine.MinRange       = qualitySubGrpView.MinRange;
+            agrrementQualitySpecsLine.MaxRange       = qualitySubGrpView.MaxRange;
+            agrrementQualitySpecsLine.AdjustmentType = qualitySubGrpView.AdjustmentType;
+            agrrementQualitySpecsLine.Increment      = qualitySubGrpView.Increment;
+            agrrementQualitySpecsLine.FixedValue     = qualitySubGrpView.FixedValue;
+            agrrementQualitySpecsLine.SubGroupId     = qualitySubGrpView.SubGroupIdRef;
+            agrrementQualitySpecsLine.AgreementLineRefrecid = agreementLine.RecId;
+            agrrementQualitySpecsLine.GroupID               = qualitySubGrpView.GroupID;
+            agrrementQualitySpecsLine.GroupDescription      = qualitySubGrpView.GroupDescription;
+            agrrementQualitySpecsLine.SubGrpId              = qualitySubGrpView.SubGroupID;
+            agrrementQualitySpecsLine.SubGroupDescription   = qualitySubGrpView.SubGroupDescription;
+            agrrementQualitySpecsLine.insert();
+        }
+        if(!agreementLine.IsModified)
+        {
+            agreementLine.IsModified = NoYes::Yes;
+            agreementLine.doUpdate();
+
+            agreementLine_ds.research();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>LineViewHeader_AgreementState_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(PurchAgreement, LineViewHeader_AgreementState), FormControlEventType::Modified)]
+    public static void LineViewHeader_AgreementState_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+
+        if(ETGACFParameters::find().EnableAbruptTerminationAgreement == NoYes::Yes)
+        {
+            AgreementLineQuantityCommitment qtyCommitment, qtyCommitmentLoc;
+            AgreementLine                   agreementLine, agreementLineCheck, agreementLineLoop;
+            FormDataSource                  PurchAgreementHeader_ds   = sender.formRun().dataSource(formDataSourceStr(PurchAgreement,PurchAgreementHeader))  as FormDataSource;
+            PurchAgreementHeader            purchagreementheader      = PurchAgreementHeader_ds.cursor();
+            
+            if(purchagreementheader.AgreementState == AgreementState::ETGTerminated || purchagreementheader.AgreementState == AgreementState::ETGForceClosed)
+            {
+                FormDataSource  agreementLine_ds   = sender.formRun().dataSource(formDataSourceStr(PurchAgreement,Aline))  as FormDataSource;
+                agreementLine                      = agreementLine_ds.cursor();
+
+                MultiSelectionHelper helper = MultiSelectionHelper::construct();
+                helper.parmDatasource(agreementLine_ds);
+                agreementLineLoop = helper.getFirst();
+
+                if(purchagreementheader.AgreementState == AgreementState::ETGTerminated)
+                {
+                    while (agreementLineLoop.RecId != 0)
+                    {
+                        while select qtyCommitmentLoc
+                        where qtyCommitmentLoc.RecId == agreementLineLoop.RecId
+                        {
+                            if(qtyCommitmentLoc.isReleased())
+                            {
+                                throw error("@ETG_New:ETGTerminationNotAllowed");
+                            }
+                        }
+                        agreementLineLoop = helper.getNext();
+                    }
+                }
+               
+                //CE - 18-02-2025
+
+                //NS, DLT, actiavte WF control, 09-july-25
+                boolean isActiveWorkflow = WorkflowTable::findActiveTemplate(workFlowTypeStr(ETGPurchAgreementType)).RecId;
+                if(isActiveWorkflow)
+                {
+                    purchagreementheader.WorkflowStatus_PSN = PurchAgreementWorkflowStatus::PendingApproval;
+                    Workflow::activateFromWorkflowType(workflowTypeStr(ETGPurchAgreementType), purchagreementheader.RecId, "", NoYes::No);
+                }
+                else
+                {
+                    isActiveWorkflow = WorkflowTable::findActiveTemplate(workFlowTypeStr(PurchAgreementType)).RecId;
+                    if(isActiveWorkflow)
+                    {
+                        purchagreementheader.WorkflowStatus_PSN = PurchAgreementWorkflowStatus::PendingApproval;
+                        Workflow::activateFromWorkflowType(workflowTypeStr(PurchAgreementType), purchagreementheader.RecId, "", NoYes::No);
+                    }
+                }
+                //NE, DLT, actiavte WF control, 09-july-25
+
+                real remainingQty;
+                while select qtyCommitment where qtyCommitment.RecId == agreementLine.RecId
+                {
+                    remainingQty += qtyCommitment.quantityRemainingRelease();
+                }
+                if(remainingQty == 0)
+                {
+                    if(!Box::yesNo("@ETG_New:ETGTerminateAgreementRemain",dialogButton::No))
+                    {
+                        throw Error("@ETG_New:ETGUpdateStateCancelled");
+                    }
+                }
+            }
+
+            //DMF Intergreations..*/
+
+            if (ETGACFParameters::find().EnableDMSIntegration
+                && BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGDMSReverePurchAgreementIntegrationEventClass)))
+            {
+
+                if(purchagreementheader.AgreementState == AgreementState::ETGTerminated)
+                {
+                    AgreementHeaderHistory       agreementHeaderHistory;
+                    select firstonly agreementHeaderHistory
+                    order by RecId desc
+                    where agreementHeaderHistory.AgreementHeader == purchAgreementHeader.RecId;
+
+                    str confirmationnumber  = strFmt("%1-%2", purchAgreementHeader.PurchNumberSequence, agreementHeaderHistory.ConfirmationNumber);
+                   // date    agrementdate  = DateTimeUtil::date(agreementHeaderHistory.CreatedDateTime);
+
+                    str formattedDateTime = DateTimeUtil::toStr(agreementHeaderHistory.CreatedDateTime);
+
+                    ETGDMSReverePurchAgreementIntegrationContract contract = new ETGDMSReverePurchAgreementIntegrationContract();
+
+                    contract.parmDealNumber(purchAgreementHeader.ETGDMSDealNumbers);
+                    contract.parmDataAreaId(curExt());
+                    contract.parmOperationType("Termination");
+                    contract.parmActivityName("Purchase Agreement Termination");
+                    contract.parmDocumentNumber(confirmationnumber);
+                    contract.parmDocumentDate(formattedDateTime);
+                    contract.parmActivityOwner(purchAgreementHeader.CreatedBy);
+                    contract.parmActivityRemarks(strFmt("The Purchase agreement %1 is Terminated",purchAgreementHeader.PurchNumberSequence));
+
+                    ETGDMSReverePurchAgreementIntegrationEventClass eventClass = ETGDMSReverePurchAgreementIntegrationEventClass::newFromContract(contract);
+                    eventClass.send();
+                }
+                else if(purchagreementheader.AgreementState == AgreementState::ETGForceClosed)
+                {
+                    AgreementHeaderHistory       agreementHeaderHistory;
+                    select firstonly agreementHeaderHistory
+                    order by RecId desc
+                    where agreementHeaderHistory.AgreementHeader == purchAgreementHeader.RecId;
+
+                    str confirmationnumber  = strFmt("%1-%2", purchAgreementHeader.PurchNumberSequence, agreementHeaderHistory.ConfirmationNumber);
+                   // date    agrementdate  = DateTimeUtil::date(agreementHeaderHistory.CreatedDateTime);
+
+                    str formattedDateTime = DateTimeUtil::toStr(agreementHeaderHistory.CreatedDateTime);
+
+
+                    ETGDMSReverePurchAgreementIntegrationContract contract = new ETGDMSReverePurchAgreementIntegrationContract();
+
+                    contract.parmDealNumber(purchAgreementHeader.ETGDMSDealNumbers);
+                    contract.parmDataAreaId(curExt());
+                    contract.parmOperationType("Force Closure");
+                    contract.parmActivityName("Purchase Agreement Force Closure");
+                    contract.parmDocumentNumber(confirmationnumber);
+                    contract.parmDocumentDate(formattedDateTime);
+                    contract.parmActivityOwner(purchAgreementHeader.CreatedBy);
+                    contract.parmActivityRemarks(strFmt("The Purchase agreement %1 is Force Closed",purchAgreementHeader.PurchNumberSequence));
+
+                    ETGDMSReverePurchAgreementIntegrationEventClass eventClass = ETGDMSReverePurchAgreementIntegrationEventClass::newFromContract(contract);
+                    eventClass.send();
+                }
+            }
+
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>PurchAgreementHeader_VendAccount1_OnLookup</Name>
+				<Source><![CDATA[
+    //NS, DLT ,05/03/2025  Only Trading vendors should be available for booking contracts
+
+    /// <summary>
+    /// this method Handles the lookup event for the PurchAgreementHeader_VendAccount1 control.
+    /// This method sets up a customized lookup for vendor account information
+    /// </summary>
+    /// <param name="sender">The form control that initiated the event</param>
+    /// <param name="e">The event arguments</param>
+    [FormControlEventHandler(formControlStr(PurchAgreementCreate, PurchAgreementHeader_VendAccount1), FormControlEventType::Lookup)]
+    public static void PurchAgreementHeader_VendAccount1_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        if(ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+        {
+            SysTableLookup          sysTableLookup = SysTableLookup::newParameters(tableNum(ETGVendLookupView),sender);
+            Query                   q   = new Query();
+            QueryBuildDataSource    qbds;
+            QueryBuildRange         qbr;
+       
+            qbds   = q.addDataSource(tableNum(ETGVendLookupView));
+        
+            sysTableLookup.addLookupfield(fieldNum(ETGVendLookupView, AccountNum));
+            sysTableLookup.addLookupfield(fieldNum(ETGVendLookupView, Name));
+            sysTableLookup.addLookupfield(fieldNum(ETGVendLookupView, NameAlias));
+            sysTableLookup.addLookupfield(fieldNum(ETGVendLookupView, VendGroup));
+            sysTableLookup.addLookupfield(fieldNum(ETGVendLookupView, City));
+            sysTableLookup.addLookupfield(fieldNum(ETGVendLookupView, State));
+            sysTableLookup.addLookupfield(fieldNum(ETGVendLookupView, CountryRegionId));
+            sysTableLookup.addLookupfield(fieldNum(ETGVendLookupView, ZipCode));
+            SysTableLookup.parmQuery(q);
+            SysTableLookup.performFormLookup();
+
+            FormControlCancelableSuperEventArgs ce = e as FormControlCancelableSuperEventArgs;
+            ce.CancelSuperCall();
+        }
+
+    }
+    //NE, DLT ,05/03/2025  Only Trading vendors should be available for booking contracts
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

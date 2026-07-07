@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_InventFairValuePostService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///  The <c>ETG_InventFairValuePostService</c> class handles the posting of fair value 
+/// </summary>
+class ETG_InventFairValuePostService extends SysOperationServiceBase
+{
+    LedgerJournalTable              _ledgerJournalTable;
+    ETG_InventFairValueHeaderTable   inventFairValueHeaderTable;
+    ETG_InventFairValueLineTable     inventFairValueLineTable;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>PostService</Name>
+				<Source><![CDATA[
+    public void PostService(ETG_InventFairValuePostContract _inventFairValuePostContract )
+    {
+        this.insertLedgerJournalData( _inventFairValuePostContract);
+        this.GenerateFairValueData(_inventFairValuePostContract,_ledgerJournalTable);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertLedgerJournalData</Name>
+				<Source><![CDATA[
+    public LedgerJournalTable insertLedgerJournalData( ETG_InventFairValuePostContract _inventFairValuePostContract)
+    {
+
+        _ledgerJournalTable.clear();
+        _ledgerJournalTable.initValue();
+        _ledgerJournalTable.JournalName                  = _inventFairValuePostContract.parmjournalName();
+        _ledgerJournalTable.initFromLedgerJournalName(); 
+        _ledgerJournalTable.Name                         = strFmt("Copy of %1, Date %2", _inventFairValuePostContract.parmjournalName());
+        _ledgerJournalTable.JournalTotalDebit            = _inventFairValuePostContract.parmAmount();
+        _ledgerJournalTable.insert();                    
+        return  _ledgerJournalTable;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>GenerateFairValueData</Name>
+				<Source><![CDATA[
+    public void GenerateFairValueData(ETG_InventFairValuePostContract _inventFairValuePostContract, LedgerJournalTable  ledgerJournalTable )
+    {
+        LedgerJournalTrans      ledgerJournalTrans;
+        LedgerJournalCheckPost  ledgerJournalCheckPost;
+        int                     i = 4;
+        Voucher                 voucher;
+
+        //Added by Sai -Begin
+        MainAccount                         mainAccount, offsetAccount;
+        DimensionAttribute                  dimensionAttribute;
+        DimensionAttributeValueSetStorage   valueSetStorage =  new DimensionAttributeValueSetStorage();
+        DimensionAttributeValueCombination  dimAttValueCombinationMainaccount,dimAttValueCombinationOffSetAccount;
+        DimensionAttributeValue             dimensionAttributeValue;
+        DimensionDefault                    defaultDimension;
+        ETGACFParameters                    parameters = ETGACFParameters::find();
+
+        inventFairValueHeaderTable = _inventFairValuePostContract.parmInventFairValueHeaderTable();
+
+        ledgerJournalTrans.clear();
+        //Added by Sai
+        while select sum(DifferenceValue), ETGVertical,ETGSubVertical,ETGCommodity,ETGSubCommodity
+            from inventFairValueLineTable
+            group by ETGVertical,ETGSubVertical,ETGCommodity,ETGSubCommodity
+            where inventFairValueLineTable.FairValuationSerialNumber == inventFairValueHeaderTable.FairValuationSerialNumber
+        {
+
+            if(!ledgerJournalTable.posted && !ledgerJournalTable.Approver)
+            {
+                ledgerJournalTrans.JournalNum   = ledgerJournalTable.JournalNum;
+                ledgerJournalTrans.CurrencyCode = Ledger::accountingCurrency(CompanyInfo::Find().recid);
+                ledgerJournalTrans.transDate    = inventFairValueHeaderTable.ValuationDate;//systemDateGet();
+                ledgerJournalTrans.Voucher      = new JournalVoucherNum(JournalTableData::newTable(_ledgerJournalTable)).getNew(true);
+ 
+                mainAccount     = MainAccount::findByMainAccountId(_inventFairValuePostContract.parmMainAccount(),false,Ledger::chartOfAccounts());//
+                offsetAccount   = MainAccount::findByMainAccountId(_inventFairValuePostContract.parmOffsetAccount(),false,Ledger::chartOfAccounts());//
+
+                select firstonly dimAttValueCombinationMainaccount
+                    where dimAttValueCombinationMainaccount.MainAccount == mainAccount.RecId;//
+ 
+                select firstonly dimAttValueCombinationOffSetAccount
+                    where dimAttValueCombinationOffSetAccount.MainAccount == offsetAccount.RecId;//
+ 
+                container   conAttr  = [parameters.Vertical,parameters.SubVertical,parameters.MainCommodity, parameters.SubCommodity];
+                container   conValue = [inventFairValueLineTable.ETGVertical, inventFairValueLineTable.ETGSubVertical,inventFairValueLineTable.ETGCommodity,inventFairValueLineTable.ETGSubCommodity];
+                str         dimValue;
+
+                for (i = 1; i <= conLen(conAttr); i++)
+                {
+                    dimensionAttribute = dimensionAttribute::findByName(conPeek(conAttr,i));
+                    if (dimensionAttribute.RecId == 0)
+                    {
+                        continue;
+                    }
+                    dimValue = conPeek(conValue,i);
+                    if (dimValue != "")
+                    {
+                        dimensionAttributeValue = dimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute,dimValue,false,true);
+                        valueSetStorage.addItem(dimensionAttributeValue);
+                    }
+                }
+                defaultDimension = valueSetStorage.save();
+                ledgerJournalTrans.AccountType  = LedgerJournalACType::Ledger;
+
+                ledgerJournalTrans.LedgerDimension  = LedgerDimensionFacade::serviceCreateLedgerDimension(LedgerDefaultAccountHelper::getDefaultAccountFromMainAccountRecId(
+                 MainAccount::findByMainAccountId(dimAttValueCombinationMainaccount.MainAccountValue).RecId), defaultDimension);
+
+                if(_inventFairValuePostContract.parmAmount() < 0)
+                {
+                    ledgerJournalTrans.AmountCurCredit  = abs(_inventFairValuePostContract.parmAmount());
+                }
+                else
+                {
+                    ledgerJournalTrans.AmountCurDebit   = _inventFairValuePostContract.parmAmount();
+                }
+                ledgerJournalTrans.OffsetAccountType    = LedgerJournalACType::Ledger;
+                ledgerJournalTrans.OffsetLedgerDimension = LedgerDimensionFacade::serviceCreateLedgerDimension(LedgerDefaultAccountHelper::getDefaultAccountFromMainAccountRecId(
+                MainAccount::findByMainAccountId(dimAttValueCombinationOffSetAccount.MainAccountValue).RecId), defaultDimension);
+
+                ledgerJournalTrans.documentNum      = ledgerJournalTable.documentNum;
+                ledgerJournalTrans.TransactionType  = LedgerTransType::GeneralJournal;
+                ledgerJournalTrans.ExchRate         = 1;
+                ledgerJournalTrans.ReverseEntry     = NoYes::No;
+                ledgerJournalTrans.ReverseDate      = dateNull();
+                if(parameters.ETGInventoryFairValueAutoReversal == NoYes::Yes) //Scenario 2 & 3: Auto Reversal is ON (set reverse entry/date)//Added by Sai as on June10th 2025
+                {
+                    ledgerJournalTrans.ReverseEntry = NoYes::Yes;//Reverse entry
+                    date today = systemDateGet();
+                    TransDate selectedDate = inventFairValueHeaderTable.ValuationDate;
+                    if (selectedDate)
+                    {
+                        int nextMonth = mthOfYr(selectedDate) + 1;
+                        int year      = year(selectedDate);
+                        if(nextMonth > 12)
+                        {
+                            nextMonth = 1;
+                            year++;
+                        }
+                        TransDate firstOfNextMonth      = mkDate(1, nextMonth, year);
+                        ledgerJournalTrans.ReverseDate  = firstOfNextMonth;//Reverse date
+                    }
+                }
+                    
+                    ledgerJournalTrans.ETGFairValuationSerialNumber = inventFairValueHeaderTable.FairValuationSerialNumber;//Added by Sai
+                    if (ledgerJournalTable.JournalType  == LedgerJournalType::Daily)
+                    {
+                        ledgerJournalTrans.Approved = NoYes::Yes;
+                        ledgerJournalTrans.Approver = HcmWorker::userId2Worker(curuserid());
+                    }
+                    ledgerJournalTrans.insert();
+
+                    ttsbegin;
+                    inventFairValueHeaderTable                       = _inventFairValuePostContract.parmInventFairValueHeaderTable();
+                    inventFairValueHeaderTable.selectForUpdate(true);
+                    inventFairValueHeaderTable.JournalNumber         = ledgerJournalTrans.JournalNum;
+                    inventFairValueHeaderTable.JournalDate           = systemDateGet();
+                    inventFairValueHeaderTable.update();
+                    ttscommit;
+                    if(parameters.ETGInventFairValueAutoPosting == NoYes::Yes)
+                    {   //Posting logic // Scenario 3 & 4 & 5: Post the journal (reversal will post if enabled)
+                        ledgerJournalCheckPost = ledgerJournalCheckPost::newLedgerJournalTable(ledgerJournalTable, NoYes::Yes);
+                        ledgerJournalCheckPost.runOperation();
+                    }
+                }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

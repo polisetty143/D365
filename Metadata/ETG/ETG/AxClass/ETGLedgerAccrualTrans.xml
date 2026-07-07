@@ -1,0 +1,873 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerAccrualTrans</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The <c>ETGLedgerAccrualTrans</c> class is the base class for creating ledger accrual transactions.
+/// </summary>
+abstract class ETGLedgerAccrualTrans
+{
+    LedgerAccrualTable              ledgerAccrualTable;
+    ETGLedgerJournalTransAccrual    ledgerJournalTransAccrual;
+    ETGLedgerJournalTransAccrualTrans ledgerJournalTransAccrualTrans;
+
+    LedgerDimensionAccount          baseLedgerDimension;
+    CurrencyCode                    baseCurrencyCode;
+    TransTxt                        baseTranstxt;
+    Voucher                         baseVoucher;
+    Voucher                         newVoucher;
+
+    TransDate                       periodStartDate;
+    TransDate                       periodEndDate;
+    recId                           calendarRecId;
+
+    CurrentOperationsTax            postingLayer;
+    DimensionDefault                offsetDefaultDimension;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>allocate</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method for allocation of transactions for Accrual.
+    /// </summary>
+    /// <returns>Boolean</returns>
+    public boolean allocate()
+    {
+        if (ETGLedgerJournalTransAccrualTrans::exist(
+            ledgerJournalTransAccrual.RefTableid, ledgerJournalTransAccrual.RefRecid))
+        {
+            if (ledgerAccrualTable.Voucher == LedgerAccrualVoucher::Base)
+            {
+                ETGLedgerJournalTransAccrualTrans::synchronizeVoucher(baseVoucher, ledgerJournalTransAccrual.RefTableid, ledgerJournalTransAccrual.RefRecid);
+            }
+
+            return false;
+        }
+
+        ledgerJournalTransAccrualTrans.clear();
+        ledgerJournalTransAccrualTrans.RefTableid   = ledgerJournalTransAccrual.RefTableid;
+        ledgerJournalTransAccrualTrans.RefRecid     = ledgerJournalTransAccrual.RefRecid;
+
+        //ledgerJournalTransAccrualTrans.JournalNumSource = LedgerJournalTrans::findRecId(ledgerJournalTransAccrualTrans.RefRecid,false).JournalNum;
+        LedgerJournalTrans  ledgerJournalTransLoc = LedgerJournalTrans::findRecId(ledgerJournalTransAccrualTrans.RefRecid,false);
+
+        ledgerJournalTransAccrualTrans.JournalNumSource = ledgerJournalTransLoc.JournalNum;
+
+        ledgerJournalTransAccrualTrans.AccrualId = ledgerJournalTransAccrual.AccrualId;
+        ledgerJournalTransAccrualTrans.OriginalVoucher =  ledgerJournalTransLoc.Voucher;
+       // this.setVoucher();
+        ledgerJournalTransAccrualTrans.CurrencyCode = ledgerJournalTransLoc.CurrencyCode;
+        return true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>endDate</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculate end date of the period.
+    /// </summary>
+    /// <param name = "_transDate">Transactio start date</param>
+    /// <returns>End date of period</returns>
+    abstract TransDate endDate(TransDate _transDate)
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getOffsetLedgerDimension</Name>
+				<Source><![CDATA[
+    public LedgerDimensionAccount getOffsetLedgerDimension(AmountCur _amountCur)
+    {
+        LedgerDimensionDefaultAccount defaultLedgerDimension = (_amountCur < 0 ? ledgerAccrualTable.CreditLedgerDimension : ledgerAccrualTable.DebitLedgerDimension);
+
+        LedgerDimensionAccount mergedLedgerDimension;
+
+        // To determine what ledger dimension to accrue into, we look first at the accrual rule default dimension.
+        if (offsetDefaultDimension)
+        {
+            mergedLedgerDimension = LedgerDimensionFacade::serviceCreateLedgerDimension(defaultLedgerDimension, offsetDefaultDimension);
+        }
+        // If no default dimension is available, we then check for a ledger dimension on the accrual rule.
+        else if (baseLedgerDimension)
+        {
+            mergedLedgerDimension = LedgerDimensionFacade::serviceMergeLedgerDimensions(defaultLedgerDimension, baseLedgerDimension);
+        }
+        // Lastly we generate using the ledger dimension on the transaction.
+        else
+        {
+            mergedLedgerDimension = LedgerDimensionFacade::serviceCreateLedgerDimension(defaultLedgerDimension);
+        }
+
+        return mergedLedgerDimension;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmOffsetDefaultDimension</Name>
+				<Source><![CDATA[
+    public DimensionDefault parmOffsetDefaultDimension(DimensionDefault _offsetDefaultDimension)
+    {
+        offsetDefaultDimension = _offsetDefaultDimension;
+        return offsetDefaultDimension;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertTaxInCostPriceForSourceLine</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Inserts the tax cost accrual amount and offset record into the
+    /// <c>LedgerJournalTransAccrualTrans</c> table.
+    /// </summary>
+    /// <param name="_ledgerJournalTransAccrualTrans">
+    /// The <c>LedgerJournalTransAccrualTrans</c> record buffer.
+    /// </param>
+    /// <param name="_voucher">
+    /// The voucher.
+    /// </param>
+    /// <param name="_ledgerDimension">
+    /// The ledger dimension.
+    /// </param>
+    protected void insertTaxInCostPriceForSourceLine(
+        ETGLedgerJournalTransAccrualTrans _ledgerJournalTransAccrualTrans,
+        Voucher _voucher,
+        LedgerDimensionAccount _ledgerDimension)
+    {
+        _ledgerJournalTransAccrualTrans.Voucher = _voucher;
+        _ledgerJournalTransAccrualTrans.LedgerDimension = _ledgerDimension;
+        _ledgerJournalTransAccrualTrans.IsTaxInCostPrice = NoYes::Yes;
+
+        _ledgerJournalTransAccrualTrans.insert();
+
+        _ledgerJournalTransAccrualTrans.LedgerDimension = this.getOffsetLedgerDimension(_ledgerJournalTransAccrualTrans.AmountCur);
+        _ledgerJournalTransAccrualTrans.AmountCur = -_ledgerJournalTransAccrualTrans.AmountCur;
+
+        _ledgerJournalTransAccrualTrans.insert();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>nextFreq</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculates the transaction date for the next accrual transaction.
+    /// </summary>
+    /// <param name = "_baseTransdate">The date to use to calculate the next date.</param>
+    /// <param name = "_init">Not used.</param>
+    /// <returns>The date for the next accrual transaction.</returns>
+    protected TransDate nextFreq(TransDate _baseTransdate, boolean _init = false)
+    {
+        return _baseTransdate + 1;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmBaseCurrency</Name>
+				<Source><![CDATA[
+    public CurrencyCode parmBaseCurrency(CurrencyCode _baseCurrencyCode)
+    {
+        baseCurrencyCode = _baseCurrencyCode;
+        return baseCurrencyCode;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmBaseLedgerDimension</Name>
+				<Source><![CDATA[
+    protected LedgerDimensionAccount parmBaseLedgerDimension(LedgerDimensionAccount _baseLedgerDimension)
+    {
+        baseLedgerDimension = _baseLedgerDimension;
+        return baseLedgerDimension;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmBaseTranstxt</Name>
+				<Source><![CDATA[
+    public TransTxt parmBaseTranstxt(TransTxt _baseTranstxt)
+    {
+        baseTranstxt = _baseTranstxt;
+        return baseTranstxt;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmBaseVoucher</Name>
+				<Source><![CDATA[
+    public Voucher parmBaseVoucher(Voucher _baseVoucher)
+    {
+        baseVoucher = _baseVoucher;
+        return baseVoucher;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmCalendarRecId</Name>
+				<Source><![CDATA[
+    protected recId parmCalendarRecId(recId _calendarRecId)
+    {
+        calendarRecId = _calendarRecId;
+        return calendarRecId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmLedgerAccrualTable</Name>
+				<Source><![CDATA[
+    protected LedgerAccrualTable parmLedgerAccrualTable(LedgerAccrualTable _ledgerAccrualTable)
+    {
+        ledgerAccrualTable = _ledgerAccrualTable;
+        return ledgerAccrualTable;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmLedgerJournalTrans</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Sets multiple parms based on the specified <c>LedgerJournalTrans</c> record.
+    /// </summary>
+    /// <param name = "_ledgerJournalTrans">The <c>LedgerJournalTrans</c> record.</param>
+    public void parmLedgerJournalTrans(LedgerJournalTrans _ledgerJournalTrans)
+    {
+        this.parmBaseCurrency(_ledgerJournalTrans.CurrencyCode);
+        this.parmBaseLedgerDimension(ledgerJournalTransAccrual.AccountOffsetaccount ==  AccountOffsetaccount::Account ? _ledgerJournalTrans.parmLedgerDimension() : _ledgerJournalTrans.parmOffsetLedgerDimension());
+        this.parmBaseTranstxt(_ledgerJournalTrans.Txt);
+        this.parmBaseVoucher(_ledgerJournalTrans.Voucher);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmLedgerJournalTransAccrual</Name>
+				<Source><![CDATA[
+    protected ETGLedgerJournalTransAccrual parmLedgerJournalTransAccrual(ETGLedgerJournalTransAccrual _ledgerJournalTransAccrual)
+    {
+        ledgerJournalTransAccrual = _ledgerJournalTransAccrual;
+        return ledgerJournalTransAccrual;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmPostingLayer</Name>
+				<Source><![CDATA[
+    public CurrentOperationsTax parmPostingLayer(CurrentOperationsTax _postingLayer = postingLayer)
+    {
+        postingLayer = _postingLayer;
+
+        return postingLayer;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>post</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Prepares the accrual transactions for posting.
+    /// </summary>
+    /// <param name = "_ledgerPostingController">
+    /// The <c>LedgerPostingController</c> instance used to post to the general ledger.
+    /// </param>
+    /// <param name = "_ledgerVoucherTransObject">The <c>LedgerVoucherTransObject</c> instance.</param>
+    /// <param name = "_exchangeRateHelper">The <c>CurrencyExchangeHelper</c> instance.</param>
+    /// <param name = "_currencyCode">The currency for posting the accrual transactions.</param>
+    /// <returns>Boolean</returns>
+    public boolean post(
+        LedgerPostingController _ledgerPostingController,
+        LedgerVoucherTransObject _ledgerVoucherTransObject,
+        CurrencyExchangeHelper   _exchangeRateHelper,
+        CurrencyCode             _currencyCode  = baseCurrencyCode)
+    {
+        boolean                     isFound;
+        Voucher                     originalReferenceNumber;
+        TransDate                   originalAccountingDate;
+        AmountCur                   transactionCurrencyRemaining;
+        AmountMST                   accountingCurrencyRemaining;
+        AmountMST                   reportingCurrencyRemaining;
+        LedgerVoucherTransObject    ledgerVoucherTransObject;
+        LedgerVoucherObject         ledgerPostingReference;
+        LedgerDimensionAccount      accrualLedgerDimension = this.getOffsetLedgerDimension(_ledgerVoucherTransObject.parmTransactionCurrencyAmount());
+        AmountMST                   accountingCurrencyAmount = _ledgerVoucherTransObject.parmAccountingCurrencyAmount();
+        AmountMSTSecondary          reportingCurrencyAmount = _ledgerVoucherTransObject.parmReportingCurrencyAmount();
+        AmountCur                   transactionCurrencyAmount = _ledgerVoucherTransObject.parmTransactionCurrencyAmount();
+
+        // <GEERU>
+        LedgerBondClient_RU         ledgerBondClient;
+        // </GEERU>
+
+        ledgerPostingReference = _ledgerPostingController.getReference();
+
+        _ledgerVoucherTransObject.parmAccrualInfo(ledgerJournalTransAccrual.RefTableid, ledgerJournalTransAccrual.RefRecid);
+        _ledgerVoucherTransObject.parmLedgerDimensionId(accrualLedgerDimension);
+
+        if (ledgerJournalTransAccrual.AmountCur != transactionCurrencyAmount)
+        {
+            if (ledgerJournalTransAccrual.AmountCur > 0)
+            {
+                if (ledgerJournalTransAccrual.AmountCur > transactionCurrencyAmount)
+                {
+                    throw error("@SYS330326");
+                }
+            }
+            else
+            {
+                if (ledgerJournalTransAccrual.AmountCur < transactionCurrencyAmount)
+                {
+                    throw error("@SYS330326");
+                }
+            }
+
+            // Calculate the remaining amount by subtracting out the accrual base amount.
+            transactionCurrencyRemaining = transactionCurrencyAmount - ledgerJournalTransAccrual.AmountCur;
+            accountingCurrencyRemaining = _exchangeRateHelper.calculateTransactionToAccounting(_ledgerVoucherTransObject.parmCurrencyCode(), transactionCurrencyRemaining, true);
+            reportingCurrencyRemaining = _exchangeRateHelper.calculateTransactionCurrencyToReportingCurrency(_ledgerVoucherTransObject.parmCurrencyCode(), transactionCurrencyRemaining);
+
+            // Use the accrual base amount for the transaction.
+            transactionCurrencyAmount = ledgerJournalTransAccrual.AmountCur;
+            accountingCurrencyAmount = _exchangeRateHelper.calculateTransactionToAccounting(_ledgerVoucherTransObject.parmCurrencyCode(), transactionCurrencyAmount, true);
+            reportingCurrencyAmount = _exchangeRateHelper.calculateTransactionCurrencyToReportingCurrency(_ledgerVoucherTransObject.parmCurrencyCode(), transactionCurrencyAmount);
+
+            // Create an adjustment for the remaining amount.
+            ledgerVoucherTransObject = this.createLedgerVoucherTransObjectAdjustmentForRemainingAmount(
+                _ledgerVoucherTransObject,
+                _exchangeRateHelper,
+                transactionCurrencyRemaining,
+                accountingCurrencyRemaining);
+
+            _ledgerPostingController.addTrans(ledgerVoucherTransObject);
+
+            // Complete the input adjustment.
+            _ledgerVoucherTransObject.parmTransactionCurrencyAmount(transactionCurrencyAmount);
+            _ledgerVoucherTransObject.parmAccountingCurrencyAmount(accountingCurrencyAmount);
+            _ledgerVoucherTransObject.parmReportingCurrencyAmount(
+                _exchangeRateHelper.calculateTransactionCurrencyToReportingCurrency(ledgerVoucherTransObject.parmCurrencyCode(), accountingCurrencyAmount));
+        }
+
+        originalReferenceNumber = ledgerPostingReference.parmReferenceNumber();
+        originalAccountingDate = ledgerPostingReference.parmAccountingDate();
+
+        _ledgerVoucherTransObject = this.initTaxRefLedgerVoucherObject(_ledgerVoucherTransObject);
+
+        _ledgerPostingController.addTrans(_ledgerVoucherTransObject);
+
+        // Create LedgerJournalTransAccrualTrans records.
+        this.allocate();
+
+        // <GEERU>
+        ledgerBondClient = _ledgerPostingController.getJournal().findLedgerVoucherObject().ledgerBondClient_RU();
+
+        if (ledgerBondClient)
+        {
+            ledgerBondClient.addNewLogObject();
+        }
+        // </GEERU>
+
+        select count(RecId) from ledgerJournalTransAccrualTrans
+            where ledgerJournalTransAccrualTrans.RefTableid == ledgerJournalTransAccrual.RefTableid
+                && ledgerJournalTransAccrualTrans.RefRecid   == ledgerJournalTransAccrual.RefRecid;
+
+        int numberOfAccrualLines = int642int(ledgerJournalTransAccrualTrans.RecId);
+
+        int currentLine = 0;
+
+        // The tax cost is not calculated for transactions with accrual basis of allocation key, so exclude
+        // the tax cost for this case.
+        if (ledgerAccrualTable.Period != LedgerAccrualPeriod::AllocationKey && !TaxParameters::find().PurchTaxOnOperations)
+        {
+            TaxAmountCur taxInCostPrice = TaxUncommitted::getActualTaxInCostPriceForSourceLine(
+                ledgerJournalTransAccrual.RefTableid,
+                ledgerJournalTransAccrual.RefRecid);
+
+            accountingCurrencyAmount += _exchangeRateHelper.calculateTransactionToAccounting(_currencyCode, taxInCostPrice, true);
+            reportingCurrencyAmount += _exchangeRateHelper.calculateTransactionCurrencyToReportingCurrency(_currencyCode, taxInCostPrice);
+        }
+
+        QueryRun queryRun = new QueryRun(this.createLedgerJournalTransAccrualTransQueryForPosting(ledgerJournalTransAccrual));
+
+        while (queryRun.next())
+        {
+            ledgerJournalTransAccrualTrans = queryRun.get(tableNum(LedgerJournalTransAccrualTrans));
+
+            currentLine++;
+
+            if (this.validateLedgerPostingReference(ledgerPostingReference))
+            {
+                isFound = _ledgerPostingController.findReference(
+                    ledgerJournalTransAccrualTrans.Voucher,
+                    ledgerJournalTransAccrualTrans.TransDate);
+
+                if (isFound)
+                {
+                    ledgerPostingReference = _ledgerPostingController.getReference();
+                }
+                else
+                {
+                    ledgerPostingReference = LedgerVoucherObject::newVoucher(
+                        ledgerJournalTransAccrualTrans.Voucher,
+                        ledgerJournalTransAccrualTrans.TransDate,
+                        _ledgerPostingController.getJournal().parmSysModuleDefault());
+
+                    // Accruals require an explicit budget check because the LedgerJournalTrans check does not include them.
+                    ledgerPostingReference.parmIsExplicitBudgetCheckRequired(true);
+                    ledgerPostingReference.parmPostingLayer(postingLayer);
+
+                    _ledgerPostingController.addReference(ledgerPostingReference);
+                }
+            }
+
+            ledgerVoucherTransObject = _ledgerVoucherTransObject.clone();
+
+            // the children are not an accrual
+            ledgerVoucherTransObject.parmAccrualInfo(0, 0);
+
+            ledgerVoucherTransObject.parmLedgerDimensionId(ledgerJournalTransAccrualTrans.LedgerDimension);
+            ledgerVoucherTransObject.parmText(ledgerJournalTransAccrualTrans.TransTxt);
+            ledgerVoucherTransObject.parmTransactionCurrencyAmount(ledgerJournalTransAccrualTrans.AmountCur);
+            if (ledgerJournalTransAccrualTrans.IsTaxInCostPrice)
+            {
+                ledgerVoucherTransObject.parmLedgerPostingType(LedgerPostingType::Tax);
+            }
+
+            if (currentLine <= numberOfAccrualLines - 2)
+            {
+                // Use the calculated accounting and reporting amounts for all but the last two lines of the accrual (the last accrual, 1 debit and 2 credit).
+                ledgerVoucherTransObject.parmAccountingCurrencyAmount(
+                    _exchangeRateHelper.calculateTransactionToAccounting(_currencyCode, ledgerJournalTransAccrualTrans.AmountCur, true));
+
+                ledgerVoucherTransObject.parmReportingCurrencyAmount(
+                    _exchangeRateHelper.calculateTransactionCurrencyToReportingCurrency(_currencyCode, ledgerJournalTransAccrualTrans.AmountCur));
+            }
+            else
+            {
+                // For the last two lines, we only post what's left rather than calculate again, to ensure we don't get any penny differences
+                // because of currency exchange and rounding.
+                ledgerVoucherTransObject.parmAccountingCurrencyAmount(accountingCurrencyAmount);
+                ledgerVoucherTransObject.parmReportingCurrencyAmount(reportingCurrencyAmount);
+
+                accountingCurrencyAmount = -accountingCurrencyAmount;
+                reportingCurrencyAmount = -reportingCurrencyAmount;
+            }
+
+            _ledgerPostingController.addTrans(ledgerVoucherTransObject);
+
+            // Adjust the remaining balances for the accrual account/amount
+            if (sign(ledgerJournalTransAccrualTrans.AmountCur) != sign(ledgerJournalTransAccrual.AmountCur))
+            {
+                accountingCurrencyAmount += ledgerVoucherTransObject.parmAccountingCurrencyAmount();
+                reportingCurrencyAmount += ledgerVoucherTransObject.parmAmountMSTSecondary();
+            }
+
+            // <GEERU>
+            if (ledgerBondClient && ledgerBondClient.currentLogLength(ledgerJournalTransAccrualTrans.TransDate) >= 2)
+            {
+                ledgerBondClient.bondLastVRef2CurrentLog(ledgerJournalTransAccrualTrans.TransDate);
+            }
+            // </GEERU>
+        }
+
+        // <GEERU>
+        if (ledgerBondClient)
+        {
+            ledgerBondClient.removeCurrentLogObject();
+        }
+        // </GEERU>
+
+        isFound = _ledgerPostingController.findReference(originalReferenceNumber, originalAccountingDate);
+        Debug::assert(isFound);
+
+        return true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createLedgerJournalTransAccrualTransQueryForPosting</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates <c>LedgerJournalTransAccrual</c> query for posting.
+    /// </summary>
+    /// <param name="_ledgerJournalTransAccrual">
+    /// The <c>LedgerJournalTransAccrual</c> record buffer.
+    /// </param>
+    /// <returns>The query instance</returns>
+    protected Query createLedgerJournalTransAccrualTransQueryForPosting(ETGLedgerJournalTransAccrual _ledgerJournalTransAccrual)
+    {
+        Query query = new Query();
+
+        QueryBuildDataSource qbdsLedgerJournalTransAccrualTrans = query.addDataSource(tableNum(ETGLedgerJournalTransAccrualTrans));
+
+        qbdsLedgerJournalTransAccrualTrans.addOrderByField(fieldnum(ETGLedgerJournalTransAccrualTrans, TransDate));
+        qbdsLedgerJournalTransAccrualTrans.addRange(fieldnum(ETGLedgerJournalTransAccrualTrans, RefTableid)).value(queryValue(_ledgerJournalTransAccrual.RefTableid));
+        qbdsLedgerJournalTransAccrualTrans.addRange(fieldnum(ETGLedgerJournalTransAccrualTrans, RefRecid)).value(queryValue(_ledgerJournalTransAccrual.RefRecid));
+
+        return query;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateLedgerPostingReference</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Validates the posting reference of <c>LedgerVoucherObject</c> instance.
+    /// </summary>
+    /// <param name="_ledgerPostingReference">
+    /// The <c>LedgerVoucherObject</c> instance.
+    /// </param>
+    /// <returns>
+    /// Returns true if there is no difference in the referenced <c>LedgerVocherObject</c>; otherwise false.
+    /// </returns>
+    protected boolean validateLedgerPostingReference(LedgerVoucherObject _ledgerPostingReference)
+    {
+        return  _ledgerPostingReference.parmReferenceNumber() != ledgerJournalTransAccrualTrans.Voucher ||
+                _ledgerPostingReference.parmAccountingDate() != ledgerJournalTransAccrualTrans.TransDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createLedgerVoucherTransObjectAdjustmentForRemainingAmount</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Initializes the <c>LedgerVoucherTransObject</c> instance for adjusted remaining amount.
+    /// </summary>
+    /// <param name = "_ledgerVoucherTransObject">
+    /// The <c>LedgerVoucherTransObject</c> instance.
+    /// </param>
+    /// <param name = "_exchangeRateHelper">
+    /// The <c>CurrencyExchangeHelper</c> instance.
+    /// </param>
+    /// <param name = "_transactionCurrencyRemaining">
+    /// The remaining transaction currency amount.
+    /// </param>
+    /// <param name = "_accountingCurrencyRemaining">
+    /// The remaining accounting currency amount.
+    /// </param>
+    /// <returns>
+    /// The initialized <c>LedgerVoucherTransObject</c> instance for the adjusted remaining amount.
+    /// </returns>
+    [Wrappable(true)]
+    protected final LedgerVoucherTransObject createLedgerVoucherTransObjectAdjustmentForRemainingAmount(
+        LedgerVoucherTransObject _ledgerVoucherTransObject,
+        CurrencyExchangeHelper _exchangeRateHelper,
+        AmountCur _transactionCurrencyRemaining,
+        AmountMST _accountingCurrencyRemaining)
+    {
+        // Create an adjustment for the remaining amount.
+        LedgerVoucherTransObject ledgerVoucherTransObject = _ledgerVoucherTransObject.clone();
+        
+        // The children are not an accrual.
+        ledgerVoucherTransObject.parmAccrualInfo(0, 0);
+
+        ledgerVoucherTransObject.parmTransactionCurrencyAmount(_transactionCurrencyRemaining);
+        ledgerVoucherTransObject.parmAccountingCurrencyAmount(_accountingCurrencyRemaining);
+        ledgerVoucherTransObject.parmReportingCurrencyAmount(
+                _exchangeRateHelper.calculateTransactionCurrencyToReportingCurrency(ledgerVoucherTransObject.parmCurrencyCode(), _accountingCurrencyRemaining));
+        ledgerVoucherTransObject.parmLedgerDimensionId(baseLedgerDimension);
+
+        return ledgerVoucherTransObject;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initTaxRefLedgerVoucherObject</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Initializes tax reference to the <c>LedgerVoucherTransObject</c> instance.
+    /// </summary>
+    /// <param name = "_ledgerVoucherTransObject">
+    /// The <c>LedgerVoucherTransObject</c> instance.
+    /// </param>
+    /// <returns>
+    /// The initialized <c>LedgerVoucherTransObject</c> instance.
+    /// </returns>
+    [Wrappable(true)]
+    protected final LedgerVoucherTransObject initTaxRefLedgerVoucherObject(LedgerVoucherTransObject _ledgerVoucherTransObject)
+    {
+        _ledgerVoucherTransObject.parmTaxParentReferenceRecId(ledgerJournalTransAccrual.RefRecid);
+        _ledgerVoucherTransObject.parmTaxParentReferenceTableId(ledgerJournalTransAccrual.RefTableid);
+
+        return _ledgerVoucherTransObject;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>saveOffsetloc</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates the <c>LedgerJournalTransAccrualTrans</c> record for the offset account.
+    /// </summary>
+    public void saveOffsetloc(ETGCostDistributionsLines             eTGCostDistributionsLines)
+    {
+        DimensionDefault                    defaultDimension, defaultDimensionOffSet;
+        DimensionAttributeValueSetStorage   dimStorage = new DimensionAttributeValueSetStorage();
+        DimensionAttributeValueSetStorage   dimStorageOffset = new DimensionAttributeValueSetStorage();
+        DimensionAttribute                  dimAttribute1, dimAttribute2, dimAttribute1Offset,dimAttribute2Offset;
+        DimensionAttributeValue             dimAttributeValue1, dimAttributeValue2, dimAttributeValue1Offset,dimAttributeValue2Offset;
+        LedgerParameters                    LedgerParameters;
+        DIMENSIONATTRIBUTEVALUECOMBINATION  DIMENSIONATTRIBUTEVALUECOMBINATION;
+
+        select firstonly DIMENSIONATTRIBUTEVALUECOMBINATION
+            where DIMENSIONATTRIBUTEVALUECOMBINATION.RecId == this.getOffsetLedgerDimension(ledgerJournalTransAccrualTrans.AmountCur);
+
+        AmountCur amountorg             = ledgerJournalTransAccrualTrans.AmountCur;
+
+
+        select firstonly LedgerParameters
+                                where LedgerParameters.DataAreaId == curExt();
+
+        defaultDimensionOffSet = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(this.getOffsetLedgerDimension(ledgerJournalTransAccrualTrans.AmountCur));
+        dimStorageOffset        = DimensionAttributeValueSetStorage::find(defaultDimensionOffSet);
+
+        if(eTGCostDistributionsLines.ETGFDVertical)
+        {
+            dimAttribute1Offset        = DimensionAttribute::findByName(LedgerParameters.ETGCostDistributionVerticalDimension);
+            dimAttributeValue1Offset   = DimensionAttributeValue::findByDimensionAttributeAndValue(dimAttribute1Offset,eTGCostDistributionsLines.ETGFDVertical, true, true);
+            dimStorageOffset.addItem(dimAttributeValue1Offset);
+        }
+
+        if(eTGCostDistributionsLines.ETGFDSubVertical)
+        {
+            dimAttribute2Offset       = DimensionAttribute::findByName(LedgerParameters.ETGCostDistributionSubVerticalDimension);
+            dimAttributeValue2Offset   = DimensionAttributeValue::findByDimensionAttributeAndValue(dimAttribute2Offset,eTGCostDistributionsLines.ETGFDSubVertical, true, true);
+            dimStorageOffset.addItem(dimAttributeValue2Offset);
+        }
+
+        defaultDimensionOffSet = dimStorageOffset.save();
+        ledgerJournalTransAccrualTrans.LedgerDimension = LedgerDimensionFacade::serviceCreateLedgerDimension(LedgerDefaultAccountHelper::getDefaultAccountFromMainAccountRecId(
+                                    MainAccount::findByMainAccountId(DIMENSIONATTRIBUTEVALUECOMBINATION.MainAccountValue).RecId), defaultDimensionOffSet);
+
+        //ledgerJournalTransAccrualTrans.LedgerDimension  = this.getOffsetLedgerDimension(ledgerJournalTransAccrualTrans.AmountCur);
+        ledgerJournalTransAccrualTrans.AmountCur        = - ledgerJournalTransAccrualTrans.AmountCur;
+        ledgerJournalTransAccrualTrans.insert();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>saveOffset</Name>
+				<Source><![CDATA[
+    public void saveOffset()
+    {        
+        ledgerJournalTransAccrualTrans.LedgerDimension  = this.getOffsetLedgerDimension(ledgerJournalTransAccrualTrans.AmountCur);
+        ledgerJournalTransAccrualTrans.AmountCur        = - ledgerJournalTransAccrualTrans.AmountCur;
+        ledgerJournalTransAccrualTrans.insert();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setTransTxt</Name>
+				<Source><![CDATA[
+    protected void setTransTxt()
+    {
+        if(!baseTranstxt)
+        {
+            ledgerJournalTransAccrualTrans.TransTxt = strFmt(ledgerAccrualTable.TransTxt,
+                                                             baseVoucher,
+                                                             periodStartDate,
+                                                             periodEndDate);
+        }
+        else
+        {
+            ledgerJournalTransAccrualTrans.TransTxt = baseTranstxt;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setVoucher</Name>
+				<Source><![CDATA[
+    protected void setVoucher()
+    {
+        switch (ledgerAccrualTable.Voucher)
+        {
+            case LedgerAccrualVoucher::Base :
+                ledgerJournalTransAccrualTrans.Voucher = this.getBaseVoucher();
+                break;
+
+            case LedgerAccrualVoucher::Single :
+                ledgerJournalTransAccrualTrans.Voucher = this.getSingleVoucher();
+                break;
+
+            case LedgerAccrualVoucher::Multiple :
+                ledgerJournalTransAccrualTrans.Voucher = this.getMultipleVoucher();
+                break;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getBaseVoucher</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the voucher number for the ledger accrual voucher is base.
+    /// </summary>
+    /// <returns>Returns voucher number for the ledger accrual voucher is base.</returns>
+    protected Voucher getBaseVoucher()
+    {
+        return baseVoucher;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getSingleVoucher</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the voucher number for the ledger accrual voucher is single.
+    /// </summary>
+    /// <returns>Returns voucher number for the ledger accrual voucher is single.</returns>
+    protected Voucher getSingleVoucher()
+    {
+        if (this.shouldGenerateNewVoucher())
+        {
+            newVoucher = NumberSeq::newGetVoucherFromId(ledgerAccrualTable.NumberSequenceTable, false).voucher();
+        }
+        return newVoucher;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>shouldGenerateNewVoucher</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Checks whether new voucher need to be generated.
+    /// </summary>
+    /// <returns>Returns true if voucher number need to be generated. otherwise, false.</returns>
+    protected boolean shouldGenerateNewVoucher()
+    {
+        boolean ret;
+
+        if (!newVoucher)
+        {
+            ret = true;
+        }
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getMultipleVoucher</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the voucher number for the ledger accrual voucher is multiple.
+    /// </summary>
+    /// <returns>Returns voucher number for the ledger accrual voucher is multiple.</returns>
+    protected Voucher getMultipleVoucher()
+    {
+        Voucher voucher;
+
+        if (this.shouldGenerateNewMultipleVoucher())
+        {
+            voucher = NumberSeq::newGetVoucherFromId(ledgerAccrualTable.NumberSequenceTable, false).voucher();
+        }
+        return voucher;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>shouldGenerateNewMultipleVoucher</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Checks whether new voucher need to be generated for the ledger accrual voucher is multiple.
+    /// </summary>
+    /// <returns>Returns boolean value.</returns>
+    protected boolean shouldGenerateNewMultipleVoucher()
+    {
+        return true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calcTaxInCostPriceAmountCur</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculates tax value based on accrual amount.
+    /// </summary>
+    /// <returns>
+    /// Returns TaxAmountCur value calculated based on accrual amount.
+    /// </returns>
+    protected TaxAmountCur calcTaxInCostPriceAmountCur()
+    {
+        TaxUncommitted  taxUncommittedLocal;
+        TaxAmountCur    taxInCostPriceAmountCur;
+    
+        taxInCostPriceAmountCur = TaxUncommitted::getActualTaxInCostPriceForSourceLine(ledgerJournalTransAccrual.RefTableid, ledgerJournalTransAccrual.RefRecid);
+    
+        select SourceBaseAmountCur from taxUncommittedLocal
+            where taxUncommittedLocal.SourceRecId == ledgerJournalTransAccrual.RefRecid
+                && taxUncommittedLocal.SourceTableId == ledgerJournalTransAccrual.RefTableid;
+    
+        if (taxInCostPriceAmountCur && (ledgerJournalTransAccrual.AmountCur != taxUncommittedLocal.SourceBaseAmountCur) && taxUncommittedLocal.SourceBaseAmountCur != 0)
+        {
+            taxInCostPriceAmountCur = (taxInCostPriceAmountCur * ledgerJournalTransAccrual.AmountCur) / taxUncommittedLocal.SourceBaseAmountCur;
+        }
+    
+        return taxInCostPriceAmountCur;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static ETGLedgerAccrualTrans construct(ETGLedgerJournalTransAccrual _ledgerJournalTransAccrual)
+    {
+        LedgerAccrualTable  ledgerAccrualTable = LedgerAccrualTable::find(_ledgerJournalTransAccrual.AccrualId);
+        ETGLedgerAccrualTrans  ledgerAccrualTrans;
+
+        switch (ledgerAccrualTable.Period)
+        {
+            case LedgerAccrualPeriod::AllocationKey:
+                ledgerAccrualTrans = new ETGLedgerAccrualTrans_AllocationKey();
+                break;
+            case LedgerAccrualPeriod::Calendar:
+                ledgerAccrualTrans = new ETGLedgerAccrualTrans_Calendar();
+                break;
+            case LedgerAccrualPeriod::Fiscal:
+                ledgerAccrualTrans = new ETGLedgerAccrualTrans_Fiscal();
+                break;
+            default:
+                return null;
+        }
+
+        ledgerAccrualTrans.parmLedgerJournalTransAccrual(_ledgerJournalTransAccrual);
+        ledgerAccrualTrans.parmLedgerAccrualTable(ledgerAccrualTable);
+        ledgerAccrualTrans.parmCalendarRecId(CompanyInfoHelper::fiscalCalendarRecId());
+
+        return ledgerAccrualTrans;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesTable_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This class is an extension of SalesTable form and SalesLine dataSource.
+/// </summary>
+[ExtensionOf(formDataSourceStr(SalesTable, SalesLine))]
+internal final class ETGSalesTable_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method contains the logic for making deposit amount as mandatory and
+    /// DepositAmount and DepositRate fields as non-editable based on flag.
+    /// </summary>
+    /// <returns>int</returns>
+    int active()
+    {
+        int ret =  next active();
+
+        if(SalesParameters::find().ETGEnableCylinderTracking)
+        {
+            FormDataSource    formDataSource    = this.formRun().dataSource("SalesLine");
+            SalesLine         salesLine         = formDataSource.cursor();
+            SalesTable        salesTable        = SalesTable::find(salesLine.SalesId);
+            boolean           isEditable, isMandatory;
+            InventTableModule inventTableModule = InventTableModule::find(salesLine.ItemId, ModuleInventPurchSales::Sales);
+
+            if(salesLine.ETGConnectionType == ETGConnectionType::NewConnectionorCylinder)
+            {
+                if(salesTable.ETGBusinessSegment == ETGBusinessSegment::Domestic)
+                {
+                    isEditable  = true;
+                    isMandatory = true;
+                }
+                if(salesTable.ETGBusinessSegment == ETGBusinessSegment::Commercial
+                    || salesTable.ETGBusinessSegment == ETGBusinessSegment::Industrial
+                    || salesTable.ETGBusinessSegment == ETGBusinessSegment::Distributor)
+                {
+                    isEditable  = true;
+                }
+            }
+
+            if(salesLine.ETGConnectionType == ETGConnectionType::Surrenderofcylinders)
+            {
+                if(salesTable.ETGBusinessSegment == ETGBusinessSegment::Domestic)
+                {
+                    isEditable  = true;
+                    isMandatory = true;
+                }
+                if(salesTable.ETGBusinessSegment == ETGBusinessSegment::Commercial
+                    || salesTable.ETGBusinessSegment == ETGBusinessSegment::Industrial
+                    || salesTable.ETGBusinessSegment == ETGBusinessSegment::Distributor)
+                {
+                    isEditable  = true;
+                }
+            }
+
+            formDataSource.object(fieldNum(SalesLine, ETGDepositRate)).allowEdit(inventTableModule.ETGDepositNeeded == NoYes::Yes && isEditable);
+            formDataSource.object(fieldNum(SalesLine, ETGDepositAmount)).allowEdit(inventTableModule.ETGDepositNeeded == NoYes::Yes && isEditable);
+            formDataSource.object(fieldNum(SalesLine, ETGDepositAmount)).mandatory(inventTableModule.ETGDepositNeeded == NoYes::Yes && isMandatory);
+            formDataSource.object(fieldNum(SalesLine, SalesPrice)).allowEdit(inventTableModule.ETGDepositNeeded == NoYes::No);
+            formDataSource.object(fieldNum(SalesLine, LineAmount)).allowEdit(inventTableModule.ETGDepositNeeded == NoYes::No);
+            formDataSource.object(fieldNum(SalesLine, ETGFilledOrEmpty)).allowEdit(inventTableModule.ETGFilledEmptyNeeded == NoYes::Yes);
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

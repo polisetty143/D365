@@ -1,0 +1,252 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerVoucherTransactionDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Data Provider class for ETG Ledger Voucher Transaction Details SSRS Report
+/// </summary>
+[SRSReportParameterAttribute(classStr(ETGLedgerVoucherTransactionContract))]
+public class ETGLedgerVoucherTransactionDP extends SRSReportDataProviderPreProcessTempDB
+{
+    ETG_GeneralJournalAccountTMP tmpTable;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETG_GeneralJournalAccountTMP</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETG_GeneralJournalAccountTMP))]
+    public ETG_GeneralJournalAccountTMP getETG_GeneralJournalAccountTMP()
+    {
+        select * from tmpTable;
+        return tmpTable;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETGLedgerVoucherTransactionContract contract = this.parmDataContract() as ETGLedgerVoucherTransactionContract;
+        
+        // Ensure user connection is set for TempDB
+        tmpTable.setConnection(this.parmUserConnection());
+
+        if (contract.parmFilterByCreatedDate())
+        {
+            this.processLedgerVoucher(contract.parmFromDate(), contract.parmToDate(), true);
+        }
+        else
+        {
+            this.processLedgerVoucher(contract.parmFromDate(), contract.parmToDate(), false);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processLedgerVoucher</Name>
+				<Source><![CDATA[
+    private void processLedgerVoucher(TransDate _fromDate, TransDate _toDate, boolean _useCreatedDate)
+    {
+        GeneralJournalAccountEntry      generalJournalAccountEntry;
+        GeneralJournalEntry             generalJournalEntry;
+        LedgerJournalTrans              ledgerJournalTrans;
+        MainAccount                     mainAccount;
+        CustTrans                       custTrans;
+        VendTrans                       vendTrans;
+        InventTable                     inventTable;
+        EcoResProductTranslation        ecoResProductTranslation;
+        
+        // Security Optimization: Pre-fetch permissions
+        ETGRecordLevelSecurity etgSecurity;
+        Set allowedBusinessUnits = new Set(Types::String);
+        boolean isRestrictedEntity = (curExt() == 'y002');
+        boolean shouldFilter = false;
+        str businessUnitName = "BusinessUnit";
+
+        if (isRestrictedEntity)
+        {
+            select firstonly RecId from etgSecurity where etgSecurity.UserId == curUserId();
+            if (etgSecurity.RecId)
+            {
+                shouldFilter = true;
+                while select DimensionValue from etgSecurity
+                    where etgSecurity.UserId == curUserId()
+                       && etgSecurity.DimensionAttribute == businessUnitName
+                {
+                    allowedBusinessUnits.add(etgSecurity.DimensionValue);
+                }
+            }
+        }
+
+        // --- QUERY CONSTRUCTION ---
+        Query query = new Query();
+        QueryBuildDataSource qbdsEntry = query.addDataSource(tableNum(GeneralJournalEntry));
+        
+        // Join GeneralJournalAccountEntry
+        QueryBuildDataSource qbdsAccount = qbdsEntry.addDataSource(tableNum(GeneralJournalAccountEntry));
+        qbdsAccount.relations(true);
+        qbdsAccount.joinMode(JoinMode::InnerJoin);
+
+        // FIX: Join MainAccount Table directly to GeneralJournalAccountEntry
+        // This ensures we get the clean MainAccountId and Name without parsing strings
+        QueryBuildDataSource qbdsMainAccount = qbdsAccount.addDataSource(tableNum(MainAccount));
+        qbdsMainAccount.joinMode(JoinMode::OuterJoin);
+        qbdsMainAccount.addLink(fieldNum(GeneralJournalAccountEntry, MainAccount), fieldNum(MainAccount, RecId));
+
+        // Apply Date Filters
+        qbdsEntry.addRange(fieldNum(GeneralJournalEntry, SubledgerVoucherDataAreaId)).value(curExt());
+
+        if (_useCreatedDate)
+        {
+            qbdsEntry.addRange(fieldNum(GeneralJournalEntry, CreatedDateTime)).value(queryRange(
+                datetobeginUtcDateTime(_fromDate, DateTimeUtil::getUserPreferredTimeZone()),
+                datetobeginUtcDateTime(_toDate + 1, DateTimeUtil::getUserPreferredTimeZone())));
+        }
+        else
+        {
+            qbdsEntry.addRange(fieldNum(GeneralJournalEntry, AccountingDate)).value(queryRange(_fromDate, _toDate));
+        }
+
+        QueryRun qr = new QueryRun(query);
+
+        // Transaction block for performance
+        ttsbegin;
+        
+        while (qr.next())
+        {
+            generalJournalEntry         = qr.get(tableNum(GeneralJournalEntry));
+            generalJournalAccountEntry  = qr.get(tableNum(GeneralJournalAccountEntry));
+            mainAccount                 = qr.get(tableNum(MainAccount)); // Now fetched directly
+
+            tmpTable.clear();
+            
+            // 1. DIMENSIONS
+            // (Assuming this helper method is necessary for specific dimension extraction)
+            tmpTable.BusinessUnit = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, businessUnitName);
+
+            // 2. SECURITY FILTER
+            if (isRestrictedEntity && shouldFilter)
+            {
+                if (!allowedBusinessUnits.in(tmpTable.BusinessUnit))
+                {
+                    continue; // Skip restricted records
+                }
+            }
+
+            // 3. MAIN ACCOUNT & LEDGER NAME (THE FIX)
+            // Use the direct MainAccount table fields
+            if (mainAccount.RecId)
+            {
+                tmpTable.LedgerCode = mainAccount.MainAccountId; // Clean ID (e.g., "12011401")
+                tmpTable.LedgerName = mainAccount.Name;          // Clean Name
+            }
+            
+            // 4. DIRECT FIELD MAPPINGS
+            tmpTable.AccountingCurrencyAmount   = generalJournalAccountEntry.AccountingCurrencyAmount;
+            tmpTable.AccountingDate             = generalJournalEntry.AccountingDate;
+            tmpTable.JournalNumber              = generalJournalEntry.JournalNumber;
+            tmpTable.SubledgerVoucher           = generalJournalEntry.SubledgerVoucher;
+            tmpTable.DocumentDate               = generalJournalEntry.DocumentDate;
+            tmpTable.DocumentNumber             = generalJournalEntry.DocumentNumber;
+            tmpTable.JournalCategory            = generalJournalEntry.JournalCategory;
+            tmpTable.LedgerAccount              = generalJournalAccountEntry.LedgerAccount;
+            tmpTable.LedgerDimension            = generalJournalAccountEntry.LedgerDimension;
+            tmpTable.PostingType                = generalJournalAccountEntry.PostingType;
+            tmpTable.Quantity                   = generalJournalAccountEntry.Quantity;
+            tmpTable.ReportingCurrencyAmount    = generalJournalAccountEntry.ReportingCurrencyAmount;
+            tmpTable.Text                       = generalJournalAccountEntry.Text;
+            tmpTable.TransactionCurrencyAmount  = generalJournalAccountEntry.TransactionCurrencyAmount;
+            tmpTable.TransactionCurrencyCode    = generalJournalAccountEntry.TransactionCurrencyCode;
+            tmpTable.MainAccount                = generalJournalAccountEntry.MainAccount;
+            tmpTable.TransactionText            = generalJournalAccountEntry.Text;
+            tmpTable.ETGCreatedBy               = generalJournalEntry.CreatedBy;
+            tmpTable.ETGCreatedDate             = generalJournalEntry.CreatedDateTime;
+            tmpTable.JournalrecId               = generalJournalAccountEntry.RecId;
+
+            if (_useCreatedDate)
+            {
+                tmpTable.HistoricalExchangeRateDate = generalJournalAccountEntry.HistoricalExchangeRateDate;
+            }
+
+            // 5. LEDGER JOURNAL TRANS LOOKUP (Optimized "firstonly")
+            select firstonly Invoice, ETGIntegrationContractNumber, PaymReference
+                from ledgerJournalTrans
+                where ledgerJournalTrans.Voucher == generalJournalEntry.SubledgerVoucher;
+            
+            if (ledgerJournalTrans.RecId)
+            {
+                tmpTable.ETGCTRMInvoiceReferance        = ledgerJournalTrans.Invoice;
+                tmpTable.ETGIntegrationContractNumber   = ledgerJournalTrans.ETGIntegrationContractNumber;
+                tmpTable.PaymentReference               = ledgerJournalTrans.PaymReference;
+            }
+
+            // 6. COUNTERPARTY LOOKUP (Optimized)
+            str counterParty = '';
+            str counterPartyName = '';
+
+            select firstonly AccountNum from custTrans where custTrans.Voucher == generalJournalEntry.SubledgerVoucher;
+            if (custTrans.RecId)
+            {
+                counterParty = custTrans.AccountNum;
+                counterPartyName = CustTable::find(custTrans.AccountNum).name();
+            }
+            else
+            {
+                select firstonly AccountNum from vendTrans where vendTrans.Voucher == generalJournalEntry.SubledgerVoucher;
+                if (vendTrans.RecId)
+                {
+                    counterParty = vendTrans.AccountNum;
+                    counterPartyName = VendTable::find(vendTrans.AccountNum).name();
+                }
+            }
+            tmpTable.CounterpartyCode = counterParty;
+            tmpTable.CounterpartyName = counterPartyName;
+
+            // 7. REMAINING DIMENSIONS
+            tmpTable.CostCenter        = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "CostCenter");
+            tmpTable.Item              = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "Item");
+            tmpTable.Location          = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "Locations");
+            tmpTable.ProfitCenter      = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "ProfitCenter");
+            tmpTable.Vertical          = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "Vertical");
+            tmpTable.ETGSubCommodity   = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "SubCommodity");
+            tmpTable.ETGSubVertical    = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "SubVertical");
+            tmpTable.InterCompany      = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "Intercompany");
+            tmpTable.Project           = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "Project");
+            tmpTable.ETGCommodity      = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "MainCommodity");
+            tmpTable.Product_Service   = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "Product_Service");
+            tmpTable.Department        = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "Department");
+            tmpTable.Region            = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "Region");
+            tmpTable.Contract          = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "Contract");
+            tmpTable.LineOfBusiness    = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "Line_of_Businesss");
+
+            // 8. PRODUCT DESCRIPTION LOOKUP
+            if (tmpTable.Item)
+            {
+                select firstonly Description from ecoResProductTranslation
+                    exists join inventTable
+                    where inventTable.Product == ecoResProductTranslation.Product
+                       && inventTable.ItemId == tmpTable.Item;
+                
+                if (ecoResProductTranslation.RecId)
+                {
+                    tmpTable.CommodityDescription = ecoResProductTranslation.Description;
+                }
+            }
+            
+            tmpTable.insert();
+        }
+        
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

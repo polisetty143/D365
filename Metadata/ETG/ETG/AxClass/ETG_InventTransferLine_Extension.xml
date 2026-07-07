@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_InventTransferLine_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tableStr(InventTransferLine))]
+final class ETG_InventTransferLine_Extension
+{
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>InventTransferParmLine_QtyOverReceiveNow_OnModified</Name>
+				<Source><![CDATA[
+ /*   public static InventQty inventTransSumDimShipped(
+        InventTransId   _inventTransIdReceive,
+        InventDim       _inventDim)
+    {
+        InventQty           shipOverDeliveryQty;
+        InventTransferLine  inventTransferLine; 
+        InventTransOrigin   InventTransOrigin;
+
+        shipOverDeliveryQty = next inventTransSumDimShipped(_inventTransIdReceive,_inventDim);
+
+        select firstonly ReferenceId from InventTransOrigin
+            where InventTransOrigin.InventTransId == _inventTransIdReceive
+        join inventTransferLine
+            where inventTransferLine.TransferId == InventTransOrigin.ReferenceId;
+
+        if(inventTransferLine.OverDeliveryPct)
+        {
+            shipOverDeliveryQty = inventTransferLine.QtyTransfer * inventTransferLine.OverDeliveryPct / 100 +  abs(shipOverDeliveryQty);
+        }
+
+        return -shipOverDeliveryQty;
+    }
+*/
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(InventTransferParmReceive, InventTransferParmLine_QtyOverReceiveNow), FormControlEventType::Modified)]
+    public static void InventTransferParmLine_QtyOverReceiveNow_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        FormRun                formrun                   = sender.formRun();
+        FormDataSource         InventTransferParmLine_ds = sender.formRun().dataSource(formDataSourceStr(InventTransferParmReceive,InventTransferParmLine));
+        InventTransferParmLine inventTransferParmLine    = InventTransferParmLine_ds.cursor();
+        InventQty              overReceiveQty            = str2Num(sender.valueStr());
+        InventTransferLine     inventTransferLine        = inventTransferParmLine.inventTransferLine();
+        InventQty              overDeliveryQty;
+        
+        overDeliveryQty = (inventTransferLine.QtyTransfer * inventTransferLine.OverDeliveryPct / 100) + inventTransferLine.QtyTransfer;
+
+        overDeliveryQty =  overDeliveryQty - (inventTransferLine.QtyShipped + inventTransferLine.QtyOverReceived);
+
+        if(overDeliveryQty < overReceiveQty)
+        {
+            throw Error(strFmt('Only over delivery %1 percent can be allowed',inventTransferLine.OverDeliveryPct));
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initFromInventTable</Name>
+				<Source><![CDATA[
+    ///SB, DLT, 30/04/2026
+    /// <summary>
+    /// COC of standard method to add custom BatchId
+    /// </summary>
+    public void initFromInventTable(InventTable _inventTable, InventDimId _inventDimId)
+    {
+        next initFromInventTable(_inventTable, _inventDimId);
+
+        if(ETGCanadaParameters::find().EnableDefaultBatchNumber == NoYes::Yes)
+        {
+            InventDim inventDim = InventDim::find(this.InventDimId);
+
+            // Default BatchId
+            inventDim.inventBatchId = _inventTable.ETGDefaultBatchNumber;
+
+            this.InventDimId            = InventDim::findOrCreate(inventDim).InventDimId;
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

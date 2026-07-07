@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGAgreementLineQuantityCommitment_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tablestr(AgreementLineQuantityCommitment))]
+internal final class ETGAgreementLineQuantityCommitment_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>insert</Name>
+				<Source><![CDATA[
+    public void insert()
+    {
+        this.ETGRemainingQuantity = this.CommitedQuantity;
+
+        ///SB, DLT, 10/04/2026, setting InterCompanySkipUpdate = Intercompany (to skip standard intercompanySync) for Intercompany/Third Party orders which are integrated from DMS
+        SalesAgreementHeader        salesAgreementHeaderCurrent;
+        PurchAgreementHeader        purchAgreementHeaderCurrent;
+        AgreementLineQuantityCommitment     agreementLinesLinked;
+
+        salesAgreementHeaderCurrent = SalesAgreementHeader::find(this.Agreement);
+        purchAgreementHeaderCurrent = PurchAgreementHeader::find(this.Agreement);
+
+        if(ETGCanadaParameters::find().EnableIntercompanyB2BSync)
+        {
+            if(purchAgreementHeaderCurrent.ETGDMSParentDealNumbers || salesAgreementHeaderCurrent.ETGDMSParentDealNumber)
+            {
+                this.InterCompanySkipUpdate = InterCompanySkipUpdate::InterCompany;
+            }
+        }
+        //end, SB, DLT, 10/04/2026
+
+        next insert();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>modifiedField</Name>
+				<Source><![CDATA[
+    public void modifiedField(FieldId _fieldId)
+    {
+        next modifiedField(_fieldId);
+        switch (_fieldId)
+        {
+            case fieldNum(AgreementLineQuantityCommitment, CommitedQuantity):
+                this.ETGRemainingQuantity = this.CommitedQuantity;
+                break;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>isLinkValid</Name>
+				<Source><![CDATA[
+    public boolean isLinkValid(SalesPurchLine _salesPurchLine, boolean _showInfolog)
+    {
+
+        boolean ret = next isLinkValid(_salesPurchLine, _showInfolog);
+
+        if(!ret && ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+        {
+            SalesPurchLineInterface salesPurchLineInterface = _salesPurchLine.salesPurchLineInterface();
+            ModuleSalesPurch    module = _salesPurchLine.TableId == tableNum(SalesLine) ? ModuleSalesPurch::Sales : ModuleSalesPurch::Purch;
+            SalesLine           salesLine;
+            PurchLine           purchLine;
+            boolean             isReturnLine;
+            AgreementLine       agreementLine;
+
+            if (module == ModuleSalesPurch::Sales)
+            {
+                salesLine     = _salesPurchLine;
+                agreementLine = AgreementLine::find(salesLine.MatchingAgreementLine);
+                if(purchLine.inventDim().InventLocationId != agreementLine.inventDim().InventLocationId)
+                {
+                    return true;
+                }
+            }
+            else if (_salesPurchLine.TableId == tableNum(PurchLine))
+            {
+                purchLine     = _salesPurchLine;
+                agreementLine = AgreementLine::find(purchLine.MatchingAgreementLine);
+
+                if(purchLine.inventDim().InventLocationId != agreementLine.inventDim().InventLocationId)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return ret;
+       
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

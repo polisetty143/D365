@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGVendTableDS_TradeLimit_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formDataFieldStr(VendTable, VendTable, ETGTradeLimitPurchReal))]
+internal final class ETGVendTableDS_TradeLimit_Extension
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>modified</Name>
+				<Source><![CDATA[
+    public void modified()     
+    {
+        next modified();
+        
+        if(ETGACFParameters::find().EnableTradeLimit == NoYes::Yes)
+        {
+            FormDataObject formDataObject = any2Object(this) as FormDataObject;
+            FormDataSource formDataSource = formDataObject.datasource();
+            VendTable      vendTable      = formDataSource.cursor();
+            this.calculateTradeLimitInVendorCurrency(vendTable);
+            if(vendTable.ETGRemainingTradeLimitPurchReal == 0)
+            {
+                vendTable.ETGRemainingTradeLimitPurchReal = vendTable.ETGTradeLimitPurchReal;
+            }
+                    
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateTradeLimitInVendorCurrency</Name>
+				<Source><![CDATA[
+    private void calculateTradeLimitInVendorCurrency(VendTable vendTable)
+    {
+        CurrencyCode vendorCurrency = vendTable.Currency;
+        CurrencyCode companyCurrency = Ledger::accountingCurrency();
+
+        if (!vendorCurrency || !companyCurrency)
+        {
+            return;
+        }
+
+        vendTable.ETGTradeLimitInVendorCurrency = this.convertAmountToVendorCurrency(
+            vendTable.ETGTradeLimitPurchReal, companyCurrency, vendorCurrency);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>convertAmountToVendorCurrency</Name>
+				<Source><![CDATA[
+    private real convertAmountToVendorCurrency(AmountCur _amount, CurrencyCode _fromCurrency, CurrencyCode _toCurrency)
+    {
+        if (_amount == 0 || !_fromCurrency || !_toCurrency)
+        {
+            return 0;
+        }
+
+        CurrencyExchangeHelper currencyExchangeHelper = CurrencyExchangeHelper::newExchangeDate(
+            Ledger::current(), systemDateGet());
+
+        AmountMst convertedAmount = currencyExchangeHelper.calculateCurrencyToCurrency(
+            _fromCurrency, _toCurrency, _amount, true);
+
+        return convertedAmount;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

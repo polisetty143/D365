@@ -1,0 +1,667 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSPAINInventTransOperationDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// <c>ETGSPAINInventTransOperationDP</c> is the Data Provider class
+/// for the Transactions by Operation Report in the ETGSPAIN model.
+/// </summary>
+[
+    SRSReportParameterAttribute(classStr(ETGSPAINInventTransOperationContract)),
+    SRSReportQueryAttribute(queryStr(ETGSPAINInventTransOperationQuery))
+]
+class ETGSPAINInventTransOperationDP extends SrsReportDataProviderPreProcessTempDB
+{
+    protected ETGSPAINInventTransOperationReportTmp  ETGSPAINInventTransOperationReportTmp;
+    protected ParmId                            parmId;
+    protected int                               minus;
+    protected InventDimParm                     inventDimParm;
+    protected FromDate                          fromDate;
+    protected ToDate                            toDate;
+    protected NoYes                             showItem;
+    protected InventDimItemTmp                  inventDimItemTmpInventTrans;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGSPAINInventTransOperationReportTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Populates the temporary table <c>ETGSPAINInventTransOperationReportTmp</c> that will appear in the report.
+    /// </summary>
+    /// <returns>The temporary table <c>ETGSPAINInventTransOperationReportTmp</c>.</returns>
+    [
+        SRSReportDataSetAttribute('ETGSPAINInventTransOperationReportTmp')
+    ]
+    public ETGSPAINInventTransOperationReportTmp getETGSPAINInventTransOperationReportTmp()
+    {
+        select * from ETGSPAINInventTransOperationReportTmp;
+        return ETGSPAINInventTransOperationReportTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initInventDimParm</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Initializes the inventory dimension parameters to generate the report.
+    /// </summary>
+    /// <param name="_contract">The contract class.</param>
+    protected void initInventDimParm(ETGSPAINInventTransOperationContract _contract)
+    {        
+        InventDimViewContract inventDimViewContract = _contract.parmInventDimViewContract();
+
+        inventDimParm.data(inventDimViewContract.parmInventDimParm());
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Processes the report by inserting data into the temporary table.
+    /// </summary>
+    public void processReport()
+    {
+        ETGSPAINInventTransOperationContract contract = this.parmDataContract();
+
+        super();        
+
+        this.initInventDimParm(contract);
+
+        parmId   = NumberSeq::newGetNum(CompanyInfo::numRefParmId()).num();
+        minus    = -1;
+        fromDate = contract.parmFromDate();
+        toDate   = contract.parmToDate() ? contract.parmToDate() : dateMax();
+        showItem = contract.parmShowItem();
+
+        // Solo generamos los cálculos si está activada el Número de Operación (Número de Lote)
+        if (inventDimParm.InventBatchIdFlag)
+        {
+            this.deleteTransactions();        
+
+            this.calcData();
+
+            this.constructETGSPAINInventTransOperationReportTmp();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setUserConnection</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adds the connection to the table.
+    /// </summary>
+    /// <param name="_common">The table.</param>
+    private void setUserConnection(Common _common)
+    {
+        UserConnection con = this.parmUserConnection();
+
+        if (con)
+        {
+            _common.setConnection(con);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>deleteTransactions</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Deletes previously stored transactions for the same parmId.
+    /// </summary>
+    protected void deleteTransactions()
+    {
+        ETGSPAINInventTransOperation       ETGSPAINInventTransOperation;
+
+        if (this.parmUserConnection())
+        {
+            ETGSPAINInventTransOperation.setConnection(this.parmUserConnection());
+        }
+
+        if (parmId)
+        {
+            delete_from ETGSPAINInventTransOperation
+                  where ETGSPAINInventTransOperation.ParmId == parmId;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calcData</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculates quantities for the selected records.
+    /// </summary>
+    private void calcData()
+    {
+        InventTrans     inventTrans;
+        
+        if (this.parmUserConnection())
+        {
+            inventTrans.setConnection(this.parmUserConnection());
+        }
+        
+        QueryBuildDataSource qbds = this.parmQuery().dataSourceTable(tableNum(InventTrans));
+        
+        qbds.addRange(fieldNum(InventTrans, DateStatus)).value(queryRange(fromDate, toDate));        
+
+        QueryRun queryRun = new QueryRun(this.parmQuery());
+
+        while (queryRun.next())
+        {
+            inventTrans = queryRun.get(tableNum(InventTrans));
+
+            this.calcUnsoldByInventDimItem(inventTrans.ItemId, inventTrans.inventDimId);
+            this.calcPhysicalByInventDimItem(inventTrans.ItemId, inventTrans.inventDimId);
+            this.calcFinancialByInventDimItem(inventTrans.ItemId, inventTrans.inventDimId);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calcUnsoldByInventDimItem</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculates the unsold quantity.
+    /// </summary>
+    /// <param name="_itemId">Item ID.</param>
+    /// <param name="_inventDimId">Inventory dimensions.</param>
+    private void calcUnsoldByInventDimItem(ItemId _itemId, InventDimId _inventDimId)
+    {
+        ETGSPAINInventTransOperation    etgspainInventTransOperation;
+        ETGSPAINInventTransApplication  etgspainInventTransApplication;
+        ETGSPAINUnsoldInventTrans       etgspainUnsoldInventTrans;
+        InventDim                       inventDim;
+        InventTrans                     inventTrans;
+        InventTransOrigin               inventTransOrigin;
+
+        if (this.parmUserConnection())
+        {
+            etgspainInventTransOperation.setConnection(this.parmUserConnection());
+            etgspainUnsoldInventTrans.setConnection(this.parmUserConnection());
+            inventDim.setConnection(this.parmUserConnection());
+            inventTrans.setConnection(this.parmUserConnection());
+            inventTransOrigin.setConnection(this.parmUserConnection());
+        }
+        
+        UTCDateTime dateTimeFromDate = fromDate != dateNull()                                                               ? 
+                                        DateTimeUtil::newDateTime(fromDate, 0, DateTimeUtil::getUserPreferredTimeZone())    : 
+                                        DateTimeUtil::minValue();
+
+        UTCDateTime dateTimeToDate   = toDate != dateMax()                                                                      ? 
+                                        DateTimeUtil::newDateTime(toDate, timeMax(), DateTimeUtil::getUserPreferredTimeZone())  : 
+                                        DateTimeUtil::maxValue();        
+
+        insert_recordset etgspainInventTransOperation
+        (
+            ParmId,
+            QtyApplication,
+            ItemId,
+            InventDimId,                        
+            #InventDimGroupAllFields
+        )
+        select parmId,UnsoldQty from etgspainUnsoldInventTrans
+            where etgspainUnsoldInventTrans.CreatedDateTime     >= dateTimeFromDate
+                && etgspainUnsoldInventTrans.CreatedDateTime    <= dateTimeToDate
+            join itemId, inventDimId from inventTrans
+                where etgspainUnsoldInventTrans.RefRecId        == inventTrans.RecId
+                    && inventTrans.ItemId                       == _itemId
+                    && inventTrans.inventDimId                  == _inventDimId
+                    && inventTrans.ETGSPAINInventTransIsUnsold  == NoYes::Yes
+                join #InventDimGroupAllFields from inventDim
+                    where inventDim.inventDimId                 == inventTrans.inventDimId;
+
+        /*
+        while select etgspainUnsoldInventTrans
+            where etgspainUnsoldInventTrans.CreatedDateTime     >= dateTimeFromDate
+                && etgspainUnsoldInventTrans.CreatedDateTime    <= dateTimeToDate
+            join inventTrans
+                where etgspainUnsoldInventTrans.RefRecId        == inventTrans.RecId                    
+                    && inventTrans.ItemId                       == _itemId
+                    && inventTrans.inventDimId                  == _inventDimId
+                    && inventTrans.ETGSPAINInventTransIsUnsold  == NoYes::Yes
+            join #InventDimGroupAllFields
+                from     inventDim                
+                    where    inventDim.inventDimId           == inventTrans.inventDimId
+        {
+            etgspainInventTransOperation.clear();
+            etgspainInventTransOperation.initValue();
+            etgspainInventTransOperation.ItemId         = _itemId;
+            etgspainInventTransOperation.InventDimId    = _inventDimId;
+            etgspainInventTransOperation.ParmId         = parmid;
+            etgspainInventTransOperation.QtyApplication = etgspainUnsoldInventTrans.UnsoldQty;
+            etgspainInventTransOperation.configId 	 = inventDim.configId;
+            etgspainInventTransOperation.InventColorId = inventDim.InventColorId;
+            etgspainInventTransOperation.InventSizeId  = inventDim.InventSizeId;
+            etgspainInventTransOperation.InventSiteId  = inventDim.InventSiteId;
+            etgspainInventTransOperation.InventLocationId = inventDim.InventLocationId;
+            etgspainInventTransOperation.inventBatchId = inventDim.inventBatchId;
+            etgspainInventTransOperation.InventDimension1 = inventDim.InventDimension1;
+            etgspainInventTransOperation.InventVersionId = inventDim.InventVersionId;
+            etgspainInventTransOperation.InventStyleId = inventDim.InventStyleId;
+            etgspainInventTransOperation.wMSLocationId = inventDim.wMSLocationId;
+            etgspainInventTransOperation.LicensePlateId = inventDim.LicensePlateId;
+            etgspainInventTransOperation.InventSerialId = inventDim.InventSerialId;
+            etgspainInventTransOperation.InventStatusId = inventDim.InventStatusId;
+            etgspainInventTransOperation.InventDimension2 = inventDim.InventDimension2;
+            etgspainInventTransOperation.InventDimension3 = inventDim.InventDimension3;
+            etgspainInventTransOperation.InventDimension4 = inventDim.InventDimension4;
+            etgspainInventTransOperation.InventDimension5 = inventDim.InventDimension5;
+            etgspainInventTransOperation.InventDimension6 = inventDim.InventDimension6;
+            etgspainInventTransOperation.InventDimension7 = inventDim.InventDimension7;
+            etgspainInventTransOperation.InventDimension8 = inventDim.InventDimension8;
+            etgspainInventTransOperation.InventDimension9 = inventDim.InventDimension9;
+            etgspainInventTransOperation.InventDimension10 = inventDim.InventDimension10;
+            etgspainInventTransOperation.InventDimension11 = inventDim.InventDimension11;
+            etgspainInventTransOperation.InventDimension12 = inventDim.InventDimension12;
+            etgspainInventTransOperation.InventGtdId_RU = inventDim.InventGtdId_RU;
+            etgspainInventTransOperation.InventProfileId_RU = inventDim.InventProfileId_RU;
+            etgspainInventTransOperation.InventOwnerId_RU = inventDim.InventOwnerId_RU;
+
+            etgspainInventTransOperation.insert();
+        }
+*/
+        /*
+        insert_recordset ETGSPAINInventTransOperation (QtyApplication, ItemId, InventDimId, #InventDimGroupAllFields, ParmId)
+            select UnsoldQty from etgspainUnsoldInventTrans
+            where etgspainUnsoldInventTrans.CreatedDateTime     >= dateTimeFromDate
+                && etgspainUnsoldInventTrans.CreatedDateTime    <= dateTimeToDate				
+            join ItemId, InventDimId from inventTrans
+                where etgspainUnsoldInventTrans.RefRecId        == inventTrans.RecId
+                    && inventTrans.InventTransOrigin            == inventTransOrigin.RecId
+                    && inventTrans.ItemId                       == _itemId
+                    && inventTrans.inventDimId                  == _inventDimId
+                    && inventTrans.ETGSPAINInventTransIsUnsold  == NoYes::Yes
+            join #InventDimGroupAllFields, parmId
+                from     inventDim
+                group by #InventDimGroupAllFields
+                    where    inventDim.inventDimId           == inventTrans.inventDimId;
+        
+
+        
+        // Aplicado Compras: PurchApplicationQty (Valor positivo)
+        insert_recordset ETGSPAINInventTransOperation (ItemId, InventDimId, #InventDimGroupAllFields, ParmId, QtyApplication)
+            select ItemId, InventDimId
+                from     ETGSPAINInventTransApplication
+                group by ItemId, InventDimId
+                where    ETGSPAINInventTransApplication.DateApplicationQty  >=  fromDate
+                &&       ETGSPAINInventTransApplication.DateApplicationQty  <=  toDate            
+            join         #InventDimGroupAllFields, parmId
+                from     inventDim
+                group by #InventDimGroupAllFields
+                where    inventDim.inventDimId           == ETGSPAINInventTransApplication.inventDimId
+            exists join  inventTransOrigin
+                where    inventTransOrigin.InventTransId == ETGSPAINInventTransApplication.InventTransId
+            join  inventTrans
+                where    inventTrans.InventTransOrigin   == inventTransOrigin.RecId
+                &&       inventTrans.ItemId              == _itemId
+                &&       inventTrans.inventDimId         == _inventDimId
+                &&       inventTrans.ETGSPAINInventTransIsUnsold    == NoYes::Yes
+            join UnsoldQty from etgspainUnsoldInventTrans
+                where etgspainUnsoldInventTrans.RefRecId == inventTrans.RecId;
+
+        // Aplicado Ventas: SalesApplicationQty (Valor negativo)
+        insert_recordset ETGSPAINInventTransOperation (ItemId, InventDimId, QtyApplication, #InventDimGroupAllFields, ParmId, Sign)
+            select ItemId, InventDimId, sum(SalesApplicationQty)
+                from     ETGSPAINInventTransApplication
+                group by ItemId, InventDimId
+                where    ETGSPAINInventTransApplication.DateApplicationQty  >=  fromDate
+                &&       ETGSPAINInventTransApplication.DateApplicationQty  <=  toDate
+            join         #InventDimGroupAllFields, parmId, minus
+                from     inventDim
+                group by #InventDimGroupAllFields
+                where    inventDim.inventDimId           == ETGSPAINInventTransApplication.inventDimId
+            exists join  inventTransOrigin
+                where    inventTransOrigin.InventTransId == ETGSPAINInventTransApplication.InventTransId
+            exists join  inventTrans
+                where    inventTrans.InventTransOrigin   == inventTransOrigin.RecId
+                &&       inventTrans.ItemId              == _itemId
+                &&       inventTrans.inventDimId         == _inventDimId;
+        */
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calcPhysicalByInventDimItem</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculates the physical quantity.
+    /// </summary>
+    /// <param name="_itemId">Item ID.</param>
+    /// <param name="_inventDimId">Inventory dimensions.</param>
+    private void calcPhysicalByInventDimItem(ItemId _itemId, InventDimId _inventDimId)
+    {
+        ETGSPAINInventTransOperation   ETGSPAINInventTransOperation;
+        InventTrans               inventTrans;
+        InventDim                 inventDim;
+        InventLocation            inventLocation;             
+
+        if (this.parmUserConnection())
+        {
+            ETGSPAINInventTransOperation.setConnection(this.parmUserConnection());
+            inventTrans.setConnection(this.parmUserConnection());
+            inventDim.setConnection(this.parmUserConnection());
+            inventLocation.setConnection(this.parmUserConnection());
+        }
+
+        // Compras: Registrado + Recibido + Comprado += Qty
+        insert_recordset ETGSPAINInventTransOperation (ItemId, InventDimId, QtyPhysical, #InventDimGroupAllFields, ParmId)
+            select       ItemId, InventDimId, sum(Qty)
+                from     inventTrans
+                group by ItemId, InventDimId
+                where    inventTrans.DatePhysical  >= fromDate
+                &&       inventTrans.DatePhysical  <= toDate
+                &&      (inventTrans.StatusReceipt == StatusReceipt::Received
+                ||       inventTrans.StatusReceipt == StatusReceipt::Registered
+                ||       inventTrans.StatusReceipt == StatusReceipt::Purchased)
+                &&       inventTrans.StatusIssue   == StatusIssue::None
+                &&       inventTrans.ItemId        == _itemId
+                &&       inventTrans.InventDimId   == _inventDimId
+            join         #InventDimGroupAllFields, parmId
+                from     inventDim
+                group by #InventDimGroupAllFields
+                where    inventDim.inventDimId == inventTrans.inventDimId
+            exists join  inventLocation
+                where    inventLocation.InventLocationId == inventDim.InventLocationId
+                &&       inventLocation.ETGSPAINIsPrevInvoice == NoYes::No;
+
+        // Ventas: Seleccionado + Deducido -= Qty
+        insert_recordset ETGSPAINInventTransOperation (ItemId, InventDimId, QtyPhysical, #InventDimGroupAllFields, ParmId, Sign)
+            select       ItemId, InventDimId, sum(Qty)
+                from     inventTrans
+                group by ItemId, InventDimId
+                where    inventTrans.DatePhysical  >= fromDate
+                &&       inventTrans.DatePhysical  <= toDate
+                &&       inventTrans.StatusReceipt == StatusReceipt::None
+                &&      (inventTrans.StatusIssue   == StatusIssue::Picked
+                ||       inventTrans.StatusIssue   == StatusIssue::Deducted
+                ||       inventTrans.StatusIssue   == StatusIssue::Sold)
+                &&       inventTrans.ItemId        == _itemId
+                &&       inventTrans.InventDimId   == _inventDimId
+            join         #InventDimGroupAllFields, parmId, minus
+                from     inventDim
+                group by #InventDimGroupAllFields
+                where    inventDim.inventDimId == inventTrans.inventDimId
+            exists join  inventLocation
+                where    inventLocation.InventLocationId == inventDim.InventLocationId
+                &&       inventLocation.ETGSPAINIsPrevInvoice == NoYes::No;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calcFinancialByInventDimItem</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculates the financial quantity.
+    /// </summary>
+    /// <param name="_itemId">Item ID.</param>
+    /// <param name="_inventDimId">Inventory dimensions.</param>
+    private void calcFinancialByInventDimItem(ItemId _itemId, InventDimId _inventDimId)
+    {
+        ETGSPAINInventTransOperation   ETGSPAINInventTransOperation;
+        InventTrans               inventTrans;
+        InventDim                 inventDim;
+
+        if (this.parmUserConnection())
+        {
+            ETGSPAINInventTransOperation.setConnection(this.parmUserConnection());
+            inventTrans.setConnection(this.parmUserConnection());
+            inventDim.setConnection(this.parmUserConnection());
+        }
+
+        // Comprado += Qty
+        insert_recordset ETGSPAINInventTransOperation (ItemId, InventDimId, QtyFinancial, #InventDimGroupAllFields, ParmId)
+            select       ItemId, InventDimId, sum(Qty)
+                from     inventTrans
+                group by ItemId, InventDimId
+                where    inventTrans.DateFinancial >= fromDate
+                &&       inventTrans.DateFinancial <= toDate
+                &&       inventTrans.StatusReceipt == StatusReceipt::Purchased
+                &&       inventTrans.StatusIssue   == StatusIssue::None
+                &&       inventTrans.ItemId        == _itemId
+                &&       inventTrans.InventDimId   == _inventDimId
+            join         #InventDimGroupAllFields, parmId
+                from     inventDim
+                group by #InventDimGroupAllFields
+                where    inventDim.inventDimId == inventTrans.inventDimId;
+
+        // Vendido -= Qty        
+        insert_recordset ETGSPAINInventTransOperation (ItemId, InventDimId, QtyFinancial, #InventDimGroupAllFields, ParmId, Sign)
+            select       ItemId, InventDimId, sum(Qty)
+                from     inventTrans
+                group by ItemId, InventDimId
+                where    inventTrans.DateFinancial >= fromDate
+                &&       inventTrans.DateFinancial <= toDate
+                &&       inventTrans.StatusReceipt == StatusReceipt::None
+                &&       inventTrans.StatusIssue   == StatusIssue::Sold
+                &&       inventTrans.ItemId        == _itemId
+                &&       inventTrans.InventDimId   == _inventDimId
+            join         #InventDimGroupAllFields, parmId, minus
+                from     inventDim
+                group by #InventDimGroupAllFields
+                where    inventDim.inventDimId == inventTrans.inventDimId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>constructETGSPAINInventTransOperationReportTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Populates the temporary table <c>ETGSPAINInventTransOperationReportTmp</c> with the calculated data.
+    /// </summary>
+    private void constructETGSPAINInventTransOperationReportTmp()
+    {
+        ETGSPAINInventTransOperation       ETGSPAINInventTransOperation;
+        boolean                       showCustVendName  = false;
+        Counter                       countDimensionsActivated = 0;
+
+        if (this.parmUserConnection())
+        {
+            ETGSPAINInventTransOperation.setConnection(this.parmUserConnection());
+        }
+        
+        Query targetQuery = new Query();
+
+        QueryBuildDataSource qbds = targetQuery.addDataSource(tableNum(ETGSPAINInventTransOperation));
+
+        qbds.addRange(fieldNum(ETGSPAINInventTransOperation, ParmId)).value(queryValue(parmId));
+        
+        
+        Enumerator inventDimFieldsEnumerator = InventDim::dimEnabledFieldList().getEnumerator();
+        while (inventDimFieldsEnumerator.moveNext())
+        {
+            FieldId inventDimFieldId = inventDimFieldsEnumerator.current();
+            FieldId inventDimParmFieldId = InventDim::dim2dimParm(inventDimFieldId);
+
+            if (inventDimParm.(inventDimParmFieldId))
+            {
+                FieldId inventTransOperationFieldId = ETGSPAINInventTransOperation::getInventTransOperationFieldIdFromInventDimFieldId(inventDimFieldId);
+                qbds.addSelectionField(inventTransOperationFieldId);
+                qbds.addGroupByField(inventTransOperationFieldId);
+                
+                countDimensionsActivated++;
+            }
+        }
+
+        // Comprobamos si debemos mostrar la información de Proveedor/Cliente
+        // Solamente si hay activadas más dimensiones a parte de la Operación.
+        if (countDimensionsActivated > 1)
+        {
+            showCustVendName = true;
+        }
+
+        if (showItem)
+        {
+            qbds.addSelectionField(fieldNum(ETGSPAINInventTransOperation, ItemId));
+            qbds.addGroupByField(fieldNum(ETGSPAINInventTransOperation, ItemId));
+        }
+
+        qbds.addSelectionField(fieldNum(ETGSPAINInventTransOperation, QtyApplication), SelectionField::Sum);
+        qbds.addSelectionField(fieldNum(ETGSPAINInventTransOperation, QtyFinancial), SelectionField::Sum);
+        qbds.addSelectionField(fieldNum(ETGSPAINInventTransOperation, QtyPhysical), SelectionField::Sum);
+        
+        QueryRun queryRun = new QueryRun(targetQuery);
+        queryRun.setCursor(ETGSPAINInventTransOperation);
+
+        while (queryRun.next())
+        {
+            ETGSPAINInventTransOperation = queryRun.get(tableNum(ETGSPAINInventTransOperation));
+
+            if (ETGSPAINInventTransOperation.QtyApplication   != 0 ||
+                ETGSPAINInventTransOperation.QtyFinancial     != 0 ||
+                ETGSPAINInventTransOperation.QtyPhysical      != 0 )
+            {
+                InventDim inventDim;
+
+                inventDim.ETGSPAINinitFromETGSPAINInventTransOperation(ETGSPAINInventTransOperation);
+
+                ETGSPAINInventTransOperationReportTmp.clear();
+
+                ETGSPAINInventTransOperationReportTmp.initFromETGSPAINInventTransOperation(ETGSPAINInventTransOperation, inventDim);
+                
+                ETGSPAINInventTransOperationReportTmp.ShowCustVendName = showCustVendName;                
+
+                if (showCustVendName)
+                {
+                    if (inventDimParm.InventSerialIdFlag || inventDimParm.InventDimension1Flag)
+                    {
+                        ETGSPAINInventTransOperationReportTmp.CustVendName = this.getCustVendNameFromDim(inventDim);
+                    }
+                    else
+                    {
+                        ETGSPAINInventTransOperationReportTmp.CustVendName = "@ETGSPAINLabels:Several";
+                    }
+                }
+
+                if (inventDimParm.InventDimension1Flag)
+                {
+                    ETGSPAINInventTransOperationReportTmp.ETGSPAINPlateDueDate = this.getPurchVendETGSPAINPlateDueDateFromDim(inventDim);
+                }
+
+                ETGSPAINInventTransOperationReportTmp.insert();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getCustVendNameFromDim</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Retrieves the vendor/customer name through the inventory dimensions.
+    /// </summary>
+    /// <param name="_inventDim">Inventory dimensions.</param>
+    /// <returns>The vendor/customer name.</returns>
+    private CustVendName getCustVendNameFromDim(InventDim _inventDim)
+    {        
+        // Revisamos si está activada y rellenada la dimensión "Aplicación"
+        if (inventDimParm.InventDimension1Flag && _inventDim.InventDimension1)
+        {
+            PurchTable  purchTable;
+            SalesTable  salesTable;
+
+            purchTable = PurchTable::find(_inventDim.InventDimension1);
+
+            if (!purchTable)
+            {
+                salesTable = SalesTable::find(_inventDim.InventDimension1);
+
+                return salesTable.customerName();
+            }
+            else
+            {
+                return purchTable.vendorName();
+            }
+        }
+
+        // Revisamos si está activada y rellenada la dimensión "Contrato"
+        if (inventDimParm.InventSerialIdFlag && _inventDim.inventSerialId)
+        {
+            PurchAgreementHeader    purchAgreementHeader;            
+            SalesAgreementHeader    salesAgreementHeader;
+            AgreementHeader         agreementHeader;
+            AgreementLine           agreementLine;
+            InventDim               inventDim;
+
+            select firstonly agreementHeader
+                join         agreementLine
+                where        agreementLine.Agreement == agreementHeader.RecId
+                exists join  inventDim
+                where        inventDim.inventDimId == agreementLine.InventDimId
+                &&           inventDim.inventSerialId == _inventDim.inventSerialId;
+
+            if (agreementHeader)
+            {
+                purchAgreementHeader = PurchAgreementHeader::find(agreementHeader.RecId);
+
+                if (!purchAgreementHeader)
+                {
+                    salesAgreementHeader = SalesAgreementHeader::find(agreementHeader.RecId);
+
+                    return salesAgreementHeader.custName();
+                }
+                else
+                {
+                    return purchAgreementHeader.vendName();
+                }
+            }
+
+        }
+
+        return '';
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getPurchVendETGSPAINPlateDueDateFromDim</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Retrieves the plate due date of the purchase/sales order through the inventory dimensions.
+    /// </summary>
+    /// <param name="_inventDim">Inventory dimensions.</param>
+    /// <returns>The plate due date of the purchase/sales order.</returns>
+    private TransDate getPurchVendETGSPAINPlateDueDateFromDim(InventDim _inventDim)
+    {
+        // Revisamos si está activada y rellenada la dimensión "Aplicación"
+        if (inventDimParm.InventDimension1Flag && _inventDim.InventDimension1)
+        {
+            PurchTable  purchTable;
+            SalesTable  salesTable;
+
+            purchTable = PurchTable::find(_inventDim.InventDimension1);
+
+            if (!purchTable)
+            {
+                salesTable = SalesTable::find(_inventDim.InventDimension1);
+
+                return salesTable.ETGSPAINPlateDueDate;
+            }
+            else
+            {
+                return purchTable.ETGSPAINPlateDueDate;
+            }
+        }
+
+        return dateNull();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,463 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxDataEntityView xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGInventTransBiEntity</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGInventTransBiEntity extends common
+{
+
+
+    
+
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>postLoad</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// </summary>
+    public void postLoad()
+    {
+        super();
+
+       
+
+        // Variable declarations
+        ExchangeRateUnionView exchangeRateUnionView;
+        CurrencyExchangeHelper currencyExchangeHelper;
+        AmountMst convertedAmount;
+        AmountMST amtUSD;
+        CurrencyCode fromCurrency = this.CurrecyLC; // Note spelling fix from 'CurrecyLC' to 'CurrencyLC' if needed
+        CurrencyCode toCurrency = 'USD';
+        AmountMst amountToConvert = this.CostAmountAdjustment + this.CostAmountPosted;
+        TransDate transactionDate = systemDateGet();
+
+        // Determine exchange rate in USD
+        if (this.CurrencyCode == 'USD')
+        {
+            this.ExchInUSD = 1;
+        }
+        else
+        {
+            // Try direct rate: Currency -> USD
+            select firstonly exchangeRateUnionView
+        order by exchangeRateUnionView.ValidFrom desc
+        where exchangeRateUnionView.FromCurrencyCode == this.CurrencyCode
+            && exchangeRateUnionView.ToCurrencyCode == 'USD'
+            && exchangeRateUnionView.ValidFrom <= this.DateFinancial
+            && exchangeRateUnionView.ValidTo >= this.DateFinancial;
+
+            if (exchangeRateUnionView)
+            {
+                this.ExchInUSD = exchangeRateUnionView.ExchangeRate / 100.0;
+            }
+            else
+            {
+                // Try reverse rate: USD -> Currency (invert)
+                select firstonly exchangeRateUnionView
+            order by exchangeRateUnionView.ValidFrom desc
+            where exchangeRateUnionView.FromCurrencyCode == 'USD'
+                && exchangeRateUnionView.ToCurrencyCode == this.CurrencyCode
+                && exchangeRateUnionView.ValidFrom <= this.DateFinancial
+                && exchangeRateUnionView.ValidTo >= this.DateFinancial;
+
+                if (exchangeRateUnionView && exchangeRateUnionView.ExchangeRate != 0)
+                {
+                    this.ExchInUSD = 100.0 / exchangeRateUnionView.ExchangeRate;
+                }
+                else
+                {
+                    this.ExchInUSD = 0; // Fallback if no rate found
+                }
+            }
+        }
+
+        // Use CurrencyExchangeHelper to convert amount from local currency to USD
+        currencyExchangeHelper = CurrencyExchangeHelper::newExchangeDate(Ledger::current(), transactionDate);
+
+        convertedAmount = currencyExchangeHelper.calculateCurrencyToCurrency(
+    toCurrency,
+    fromCurrency,
+    amountToConvert,
+    true
+);
+
+        this.AmountInUSD = convertedAmount;
+
+        ExchangeRateUnionView ExchangeRateUnionViewLoc;
+
+
+        select firstonly  ExchangeRateUnionViewLoc
+            order by ExchangeRateUnionViewLoc.ValidFrom desc
+      where ExchangeRateUnionViewLoc.FromCurrencyCode == this.CurrencyCode && ExchangeRateUnionViewLoc.ToCurrencyCode == Ledger::accountingCurrency(CompanyInfo::current())
+      && ExchangeRateUnionViewLoc.ValidFrom <= this.DateFinancial &&  ExchangeRateUnionViewLoc.ValidTo >=this.DateFinancial;
+
+        if (this.CurrencyCode == Ledger::accountingCurrency(CompanyInfo::current() ))
+        {
+            this.ExchInLC   = 1;
+        }
+        else
+
+        {
+            this.ExchInLC = (ExchangeRateUnionViewLoc.ExchangeRate)/100.00;
+        }
+
+        DataArea dataArea;
+        select firstonly Name from dataArea
+            where dataArea.id       == this.DataAreaId;
+
+        this.EntityName             = dataArea.name;
+
+        InventItemGroupItem inventModelGroupItem;
+        InventItemGroup    inventItemGroup;
+
+        //select firstonly Name
+        //    from inventItemGroup
+        //        join inventModelGroupItem
+        //        where inventModelGroupItem.ItemId == this.ItemId
+        //            && inventItemGroup.itemGroupId == inventModelGroupItem.ModelGroupId;
+
+        select firstonly inventModelGroupItem where inventModelGroupItem.ItemId == this.itemid;
+
+        select firstonly Name from inventItemGroup where inventItemGroup.ItemGroupId == inventModelGroupItem.itemgroupid;
+
+        this.InventItemModelGroup = inventItemGroup.Name;
+
+        ETG_InventFairValueLineTable    inventFairValueLineTable  ;
+        ETG_InventFairValueHeaderTable  inventFairValueHeaderTable;
+
+        select firstonly fairvalue from  inventFairValueLineTable
+            join inventFairValueHeaderTable
+            where inventFairValueHeaderTable.JournalDate == this.DateFinancial
+             && inventFairValueLineTable.FairValuationSerialNumber == inventFairValueHeaderTable.FairValuationSerialNumber
+             && inventFairValueLineTable.ItemNumber == this.ItemId;
+
+        this.FairValue = inventFairValueLineTable.fairValue;
+
+        ModuleInventPurchSales typeId;
+
+        if (this.ReferenceCategory == InventTransType::Sales)
+        {
+            typeId =  ModuleInventPurchSales::Sales;
+        }
+        else if (this.ReferenceCategory == InventTransType::Purch)
+        {
+            typeId =  ModuleInventPurchSales::Purch;
+        }
+        else
+        {
+            typeId =  ModuleInventPurchSales::Invent;
+        }
+
+        this.UnitId = InventTableModule::find(this.ItemId, typeId).UnitId;
+        this.CurrecyLC      = Ledger::accountingCurrency();
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>latestExchangeRate</Name>
+				<Source><![CDATA[
+    public static str latestExchangeRate()
+    {
+        str sqlExpr = @"
+        (
+            SELECT TOP 1 (ER.ExchangeRate)/100
+            FROM ExchangeRateUnionView AS ER
+            WHERE ER.FromCurrencyCode ='USD'
+              AND ER.ToCurrencyCode = 'AED'
+            ORDER BY ER.ValidFrom DESC
+        )";
+        return sqlExpr;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+	<ConfigurationKey>LogisticsBasic</ConfigurationKey>
+	<Label>ETG Invent trans Bi entity</Label>
+	<SubscriberAccessLevel>
+		<Read>Allow</Read>
+	</SubscriberAccessLevel>
+	<DataManagementEnabled>Yes</DataManagementEnabled>
+	<DataManagementStagingTable>ETGInventTransBiStaging</DataManagementStagingTable>
+	<EntityCategory>Transaction</EntityCategory>
+	<IsPublic>Yes</IsPublic>
+	<PrimaryCompanyContext>DataAreaId</PrimaryCompanyContext>
+	<PrimaryKey>EntityKey</PrimaryKey>
+	<PublicCollectionName>ETGInventTransBiEntities</PublicCollectionName>
+	<PublicEntityName>ETGInventTransBiEntity</PublicEntityName>
+	<SupportsSetBasedSqlOperations>Yes</SupportsSetBasedSqlOperations>
+	<DeleteActions />
+	<FieldGroups>
+		<AxTableFieldGroup>
+			<Name>AutoReport</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoLookup</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoIdentification</Name>
+			<AutoPopulate>Yes</AutoPopulate>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoSummary</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoBrowse</Name>
+			<Fields />
+		</AxTableFieldGroup>
+	</FieldGroups>
+	<Fields>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>ItemDIm</Name>
+			<ExtendedDataType>ItemId</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>ExchInUSD</Name>
+			<ExtendedDataType>CurrencyExchangeRate</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>ExchMT</Name>
+			<ExtendedDataType>UnitOfMeasureConversionFactor</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>ExchInLC</Name>
+			<ExtendedDataType>CurrencyExchangeRate</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ItemId</Name>
+			<DataField>ItemId</DataField>
+			<DataSource>InventTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Qty</Name>
+			<DataField>Qty</DataField>
+			<DataSource>InventTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>CostAmountPosted</Name>
+			<DataField>CostAmountPosted</DataField>
+			<DataSource>InventTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>DateFinancial</Name>
+			<DataField>DateFinancial</DataField>
+			<DataSource>InventTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>DateInvent</Name>
+			<DataField>DateInvent</DataField>
+			<DataSource>InventTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>StatusIssue</Name>
+			<DataField>StatusIssue</DataField>
+			<DataSource>InventTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>StatusReceipt</Name>
+			<DataField>StatusReceipt</DataField>
+			<DataSource>InventTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>InventTransId</Name>
+			<DataField>InventTransId</DataField>
+			<DataSource>InventTransOrigin</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ReferenceCategory</Name>
+			<DataField>ReferenceCategory</DataField>
+			<DataSource>InventTransOrigin</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ReferenceId</Name>
+			<DataField>ReferenceId</DataField>
+			<DataSource>InventTransOrigin</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SourceKey</Name>
+			<DataField>RecId</DataField>
+			<DataSource>InventTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>CurrencyCode</Name>
+			<DataField>CurrencyCode</DataField>
+			<DataSource>InventTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>CurrecyLC</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>EntityName</Name>
+			<ExtendedDataType>UserIdStr</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>InventItemModelGroup</Name>
+			<ExtendedDataType>Name</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>FairValue</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>InventTransOrginRecid</Name>
+			<DataField>RecId</DataField>
+			<DataSource>InventTransOrigin</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>VoucherPhysical</Name>
+			<DataField>VoucherPhysical</DataField>
+			<DataSource>InventTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Voucher</Name>
+			<DataField>Voucher</DataField>
+			<DataSource>InventTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>UnitId</Name>
+			<ExtendedDataType>UnitOfMeasureSymbol</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>CostAmountAdjustment</Name>
+			<DataField>CostAmountAdjustment</DataField>
+			<DataSource>InventTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>AvgExcRate</Name>
+			<ComputedFieldMethod>latestExchangeRate</ComputedFieldMethod>
+			<StringSize>30</StringSize>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>AmountInUSD</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>ItemDesc</Name>
+			<ExtendedDataType>Name</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Company</Name>
+			<DataField>DataAreaId</DataField>
+			<DataSource>InventTrans</DataSource>
+		</AxDataEntityViewField>
+	</Fields>
+	<Keys>
+		<AxDataEntityViewKey>
+			<Name>EntityKey</Name>
+			<Fields>
+				<AxDataEntityViewKeyField>
+					<DataField>SourceKey</DataField>
+				</AxDataEntityViewKeyField>
+			</Fields>
+		</AxDataEntityViewKey>
+	</Keys>
+	<Mappings />
+	<Ranges>
+		<AxDataEntityViewRange>
+			<Name>DataAreaId</Name>
+			<Field>Company</Field>
+			<Value>O001</Value>
+		</AxDataEntityViewRange>
+	</Ranges>
+	<Relations />
+	<StateMachines />
+	<ViewMetadata>
+		<Name>Metadata</Name>
+		<SourceCode>
+			<Methods>
+				<Method>
+					<Name>classDeclaration</Name>
+					<Source><![CDATA[
+[Query]
+public class Metadata extends QueryRun
+{
+}
+]]></Source>
+				</Method>
+			</Methods>
+		</SourceCode>
+		<DataSources>
+			<AxQuerySimpleRootDataSource>
+				<Name>InventTrans</Name>
+				<ChangeTrackingEnabled>No</ChangeTrackingEnabled>
+				<DynamicFields>Yes</DynamicFields>
+				<Table>InventTrans</Table>
+				<DataSources>
+					<AxQuerySimpleEmbeddedDataSource>
+						<Name>InventTransOrigin</Name>
+						<DynamicFields>Yes</DynamicFields>
+						<Table>InventTransOrigin</Table>
+						<DataSources />
+						<DerivedDataSources />
+						<Fields />
+						<Ranges />
+						<Relations>
+							<AxQuerySimpleDataSourceRelation>
+								<Name>QueryDataSourceRelation1</Name>
+								<Field>InventTransOrigin</Field>
+								<JoinDataSource>InventTrans</JoinDataSource>
+								<RelatedField>RecId</RelatedField>
+							</AxQuerySimpleDataSourceRelation>
+						</Relations>
+					</AxQuerySimpleEmbeddedDataSource>
+				</DataSources>
+				<DerivedDataSources />
+				<Fields />
+				<Ranges />
+				<GroupBy />
+				<Having />
+				<OrderBy />
+			</AxQuerySimpleRootDataSource>
+		</DataSources>
+	</ViewMetadata>
+</AxDataEntityView>

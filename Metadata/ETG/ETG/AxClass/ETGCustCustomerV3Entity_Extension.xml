@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCustCustomerV3Entity_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tableStr(CustCustomerV3Entity))]
+internal final class ETGCustCustomerV3Entity_Extension
+{
+
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>mapEntityToDataSource</Name>
+				<Source><![CDATA[
+    public void mapEntityToDataSource(DataEntityRuntimeContext entityCtx, DataEntityDataSourceRuntimeContext dataSourceCtx)
+    {
+        next mapEntityToDataSource(entityCtx, dataSourceCtx);
+
+        switch (dataSourceCtx.name())
+        {
+            case dataEntityDataSourceStr(CustCustomerV3Entity, CustTable):
+                if(ETGACFParameters::find().EnableTradeLimit == NoYes::Yes)
+                {
+                    CustTable custTable = dataSourceCtx.getBuffer();
+                    if(custTable.ETGTradeLimitSalesReal != 0 && custTable.ETGApplicableTradeLimit == NoYes::Yes)
+                    {
+                        if(custTable.Currency == Ledger::accountingCurrency())
+                        {
+                            custTable.ETGTradeLimitInCustomerCurrency = custTable.ETGTradeLimitSalesReal;
+                        }
+                        else
+                        {
+                            CurrencyExchangeHelper currencyExchangeHelper = CurrencyExchangeHelper::newExchangeDate(Ledger::current(),
+                                DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()));
+                            custTable.ETGTradeLimitInCustomerCurrency     = currencyExchangeHelper.calculateCurrencyToCurrency(Ledger::accountingCurrency(),
+                                                                           custTable.Currency,
+                                                                           custTable.ETGTradeLimitSalesReal,
+                                                                           true);
+                        }
+                    }
+                }
+                break;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateEntityDataSource</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// DMS Integration Narayani - Code for trade and credit limit calculation in transaction currency sent before deal creation 
+    /// </summary>
+    
+    public boolean updateEntityDataSource(
+    DataEntityRuntimeContext _entityCtx,
+    DataEntityDataSourceRuntimeContext _dataSourceCtx)
+    {
+        boolean ret = next updateEntityDataSource(_entityCtx, _dataSourceCtx);
+
+        try
+        {
+            if (ETGACFParameters::find().EnableDMSIntegration == NoYes::Yes
+            && ETGACFParameters::find().EnableTradeLimit == NoYes::Yes)
+            {
+                Ledger ledger = Ledger::find(Ledger::current());
+
+                CurrencyCode tradeCurrency      = ledger.AccountingCurrency;      //this.SalesCurrencyCode;
+                CurrencyCode transactionalCurr  = this.ETGTransactionCurrency;
+                AmountCur    convertedAmount;
+                AmountCur    tradeLimit         = this.ETGRemainingTradeLimitSalesReal;
+                AmountCur    creditLimit        = this.CreditLimit;
+                AmountCur    creditConvertedAmount;
+
+                CustTable custTable = _dataSourceCtx.getBuffer() as CustTable;
+
+                if (custTable)
+                {
+                    if (tradeLimit != 0 && tradeCurrency && transactionalCurr)
+                    {
+                        if (tradeCurrency != transactionalCurr)
+                        {
+                            CurrencyExchangeHelper currencyExchangeHelper =
+                            CurrencyExchangeHelper::newExchangeDate(Ledger::current(), systemDateGet());
+
+                            convertedAmount = currencyExchangeHelper.calculateCurrencyToCurrency(
+                            tradeCurrency,
+                            transactionalCurr,
+                            tradeLimit,
+                            true);
+
+                            custTable.ETGRemainingTradeLimitTransCurrency = convertedAmount;
+                        }
+                        else
+                        {
+                            custTable.ETGRemainingTradeLimitTransCurrency = tradeLimit;
+                        }
+                    }
+                    else
+                    {
+                        custTable.ETGRemainingTradeLimitTransCurrency = 0;
+                    }
+
+                    if (creditLimit != 0 && tradeCurrency && transactionalCurr)
+                    {
+                        if (tradeCurrency != transactionalCurr)
+                        {
+                            CurrencyExchangeHelper currencyExchangeHelper =
+                            CurrencyExchangeHelper::newExchangeDate(Ledger::current(), systemDateGet());
+
+                            creditConvertedAmount = currencyExchangeHelper.calculateCurrencyToCurrency(
+                            tradeCurrency,
+                            transactionalCurr,
+                            creditLimit,
+                            true);
+
+                            custTable.ETGCredLimitTransCurrency = creditConvertedAmount;
+                        }
+                        else
+                        {
+                            custTable.ETGCredLimitTransCurrency = creditLimit;
+                        }
+                    }
+                    else
+                    {
+                        custTable.ETGCredLimitTransCurrency = 0;
+                    }
+
+                    ttsbegin;
+                    custTable.update();
+                    ttscommit;
+                }
+            }
+
+            ret = true;
+        }
+        catch (Exception::Error)
+        {
+            error(strFmt("Error while updating trade/credit limit currency conversion for customer %1", this.CustomerAccount));
+            ret = false;
+        }
+        catch (Exception::CLRError)
+        {
+            System.Exception ex = CLRInterop::getLastException();
+            error(strFmt("CLR Error: %1", ex.get_Message()));
+            ret = false;
+        }
+
+     return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

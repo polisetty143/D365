@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGInventAgingTmpEventhanler</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This class used to insert the UOM MT KG Lbs Values InventAgingTmp table
+/// </summary>
+class ETGInventAgingTmpEventhanler
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>InventAgingTmp_onInserting</Name>
+				<Source><![CDATA[
+    //NS, DLT ,11/03/2025  UOM we required along with MT & LBS, KGS AT closing Stock level
+
+    /// <summary>
+    /// This method used to insert the UOM MT KG Lbs Values InventAgingTmp table
+    /// </summary>
+    /// <param name="sender">The source object triggering the event, expected to be an InventAgingTmp record</param>
+    /// <param name="e">Event arguments associated with the inserting event.</param>
+    [DataEventHandler(tableStr(InventAgingTmp), DataEventType::Inserting)]
+    public static void InventAgingTmp_onInserting(Common sender, DataEventArgs e)
+    {
+     
+        if(ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+        {
+            InventAgingTmp           inventAgingTmp = sender as InventAgingTmp;
+            UnitOfMeasureConversion  unitOfMeasureConversion;
+            str                      fromUnit,toUnit;
+            UnitOfMeasure            fromUnitOfMeasure, toUnitOfMeasure;
+            boolean                  isvalid;
+
+            InventTable              inventTable        = InventTable::find(inventAgingTmp.ItemId);
+            InventTableModule        inventTableModule  = InventTableModule::find(inventTable.ItemId,ModuleInventPurchSales::Invent);
+
+            fromUnit         = inventTableModule.UnitId;
+            fromUnitOfMeasure = UnitOfMeasure::findBySymbol(fromUnit);
+
+           while select  unitOfMeasureConversion
+                    where unitOfMeasureConversion.FromUnitOfMeasure  == fromUnitOfMeasure.RecId
+            {
+              
+                toUnit   = UnitOfMeasure::find(unitOfMeasureConversion.ToUnitOfMeasure).Symbol;
+
+                if(unitOfMeasureConversion.FromUnitOfMeasure  == fromUnitOfMeasure.RecId && unitOfMeasureConversion.Product ==0)
+                {
+
+                    if(fromUnit == toUnit && toUnit == "@ETG_New:MT")
+                    {
+                        inventAgingTmp.ETGMT = inventAgingTmp.QtyOnHand;
+                        isvalid = true;
+                    }
+                    else if(fromUnit && toUnit == "@ETG_New:KG")
+                    {
+                        inventAgingTmp.ETGKG =unitOfMeasureConversion.Factor * inventAgingTmp.QtyOnHand;
+                        isvalid = true;
+                    }
+                    if(fromUnit == toUnit && toUnit == "@ETG_New:KG")
+                    {
+                        inventAgingTmp.ETGKG  = inventAgingTmp.QtyOnHand;
+                        isvalid = true;
+                    }
+                    else if(fromUnit  && toUnit == "@ETG_New:MT")
+                    {
+                        inventAgingTmp.ETGMT = unitOfMeasureConversion.Factor * inventAgingTmp.QtyOnHand;
+                        isvalid = true;
+                    }
+                    if(fromUnit == toUnit && toUnit == "@ETG_New:LBS")
+                    {
+                        inventAgingTmp.ETGLBS  = inventAgingTmp.QtyOnHand;
+                        isvalid = true;
+                    }
+                    else if(fromUnit && toUnit == "@ETG_New:LBS")
+                    {
+                        inventAgingTmp.ETGLBS = unitOfMeasureConversion.Factor * inventAgingTmp.QtyOnHand;
+                        isvalid = true;
+                    }
+           
+                }
+                else
+                {
+                    if(!isvalid)
+                    {
+                        select firstonly  unitOfMeasureConversion
+                               where  unitOfMeasureConversion.Product  == inventTable.Product
+                                 &&   unitOfMeasureConversion.FromUnitOfMeasure == fromUnitOfMeasure.RecId;
+
+                        if(fromUnit == toUnit && toUnit == "@ETG_New:MT")
+                        {
+                            inventAgingTmp.ETGMT = inventAgingTmp.QtyOnHand;
+                        }
+                        else if(fromUnit && toUnit == "@ETG_New:KG")
+                        {
+                            inventAgingTmp.ETGKG =unitOfMeasureConversion.Factor * inventAgingTmp.QtyOnHand;
+                        }
+                        if(fromUnit == toUnit && toUnit == "@ETG_New:KG")
+                        {
+                            inventAgingTmp.ETGKG  = inventAgingTmp.QtyOnHand;
+                        }
+                        else if(fromUnit  && toUnit == "@ETG_New:MT")
+                        {
+                            inventAgingTmp.ETGMT = unitOfMeasureConversion.Factor * inventAgingTmp.QtyOnHand;
+                        }
+                        if(fromUnit == toUnit && toUnit == "@ETG_New:LBS")
+                        {
+                            inventAgingTmp.ETGLBS  = inventAgingTmp.QtyOnHand;
+                        }
+                        else if(fromUnit && toUnit == "@ETG_New:LBS")
+                        {
+                            inventAgingTmp.ETGLBS = unitOfMeasureConversion.Factor * inventAgingTmp.QtyOnHand;
+                        }
+                    }
+                }
+                if(inventAgingTmp.ETGMT == 0 && fromUnit == "MT")
+                {
+                    inventAgingTmp.ETGMT =inventAgingTmp.QtyOnHand;
+                }
+                if(inventAgingTmp.ETGKG == 0 && fromUnit =="KG")
+                {
+                    inventAgingTmp.ETGKG =inventAgingTmp.QtyOnHand;
+                }
+                if(inventAgingTmp.ETGLBS == 0 && fromUnit == "LBS")
+                {
+                    inventAgingTmp.ETGLBS =inventAgingTmp.QtyOnHand;
+                }
+            }
+            
+        }
+        //NE, DLT ,11/03/2025  UOM we required along with MT & LBS, KGS AT closing Stock level
+           
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

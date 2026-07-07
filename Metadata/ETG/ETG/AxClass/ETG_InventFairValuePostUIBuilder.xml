@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_InventFairValuePostUIBuilder</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///  Provides functionality to build parameter UI based on report metadata.
+/// </summary>
+class ETG_InventFairValuePostUIBuilder extends SrsReportDataContractUIBuilder
+{
+    ETG_InventFairValuePostContract     Contract;
+    DialogField		availableCompanies;
+    DialogField         valueField;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>postBuild</Name>
+				<Source><![CDATA[
+    public void postBuild()
+    {
+        contract		    = this.dataContractObject() as ETG_InventFairValuePostContract;
+        availableCompanies	= this.bindInfo().getDialogField(contract, methodStr(ETG_InventFairValuePostContract,  parmjournalName));
+        availableCompanies .lookupButton(FormLookupButton::Always);
+        valueField	= this.bindInfo().getDialogField(contract, methodstr(ETG_InventFairValuePostContract,parmAmount));
+        valueField.enabled(false);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postRun</Name>
+				<Source><![CDATA[
+    public void postRun()
+    {
+        Query		        query		    = new Query();
+        QueryBuildDataSource    qbdsLegalEntity     = query.addDataSource(tablenum(LedgerJournalTable));
+        QueryBuildRange     qbr;
+ 
+        qbdsLegalEntity.fields().addField(fieldNum(LedgerJournalTable,JournalName));
+        //Add range to exclude blnak value
+        qbr = qbdsLegalEntity.addRange(fieldNum(LedgerJournalTable, JournalName));
+        qbr.value(SysQuery::valueNotEmptyString());// Exclude blank value
+        qbdsLegalEntity.addGroupByField(fieldNum(LedgerJournalTable, JournalName));
+ 
+        container selectedFields = [tableNum(LedgerJournalTable), fieldNum(LedgerJournalTable,JournalName)];
+        SysLookupMultiSelectCtrl::constructWithQuery(this.dialog().dialogForm().formRun(), availableCompanies.control(), query, false, selectedFields);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

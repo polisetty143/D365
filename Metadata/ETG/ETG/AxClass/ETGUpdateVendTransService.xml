@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGUpdateVendTransService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+internal final class ETGUpdateVendTransService extends SysOperationServiceBase
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>process</Name>
+				<Source><![CDATA[
+    public void process()
+    {
+
+        ETGACFParameters aCFParameters = ETGACFParameters::find();
+
+        if (aCFParameters.EnablePowerBIFields)
+        {
+
+            ETGVendTransMMR               vendTransMMR;
+            VendTrans                     vendTrans,vendTransLocal,vendTransLoc;
+            DataArea                      dataArea;
+            DefaultDimensionView          DefaultDimensionView;
+            DimAttributeOMBusinessUnit    dimAttributeOMBusinessUnit;
+            GeneralJournalAccountEntry    generalJournalAccountEntry;
+            GeneralJournalEntry           generalJournalEntry;
+            VendInvoiceJour               vendInvoiceJour;
+
+            while select vendTrans
+                where vendTrans.DataAreaId   == curExt()
+                notexists join vendTransMMR
+                         where vendTransMMR.VendTransRecId   == vendTrans.RecId
+                            && vendTransMMR.AccountNum       == vendTrans.AccountNum
+                            && vendTransMMR.Voucher          == vendTrans.Voucher
+            {
+                if(vendTrans.RecId != vendTransMMR.VendTransRecId)
+                {
+
+                    vendTransMMR.VendTransRecId               = vendTrans.RecId;
+                    vendTransMMR.AccountNum                   = vendTrans.AccountNum;
+                    vendTransMMR.TransType                    =vendTrans.TransType;
+                    vendTransMMR.Voucher                      = vendTrans.Voucher;
+                    vendTransMMR.AmountCur                    = vendTrans.AmountCur;
+                    vendTransMMR.CountryName                  = VendTable::find(vendTrans.AccountNum).countryRegionName();
+                    vendTransMMR.VendorName                   = VendTable::find(vendTrans.AccountNum).name();
+                    vendTransMMR.EntityStandardNameOfSupplier = VendTable::find(vendTrans.AccountNum).nameAlias();
+                    vendTransMMR.GroupCompanyCode             = VendTable::find(vendTrans.AccountNum).organizationNumber();
+
+
+                    vendTransMMR.Commidity = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(vendTrans.DefaultDimension, acfparameters.MainCommodity);
+                    vendTransMMR.SubCommidity = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(vendTrans.DefaultDimension, acfparameters.SubCommodity);
+                    vendTransMMR.Vertical = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(vendTrans.DefaultDimension, acfparameters.Vertical);
+
+                    select * from DefaultDimensionView where DefaultDimensionView.DEFAULTDIMENSION == vendTrans.DefaultDimension
+                                                     && DefaultDimensionView.Name == acfparameters.SubVertical;
+        
+                    select * from dimAttributeOMBusinessUnit
+                        where dimAttributeOMBusinessUnit.value == DefaultDimensionView.DisplayValue;
+
+                    if (dimAttributeOMBusinessUnit)
+                    {
+                        vendTransMMR.SubVertical            = dimAttributeOMBusinessUnit.Name;
+                    }
+
+
+                    vendTransLocal = VendTrans::find(vendTrans.RecId);
+
+                    vendTransMMR.AmountoutstandinginLC = VendTrans::balanceReportingCurrency(vendTransLocal.AccountNum);
+                    vendTransMMR.AmountUSD             = VendTrans::balanceUSD(vendTransLocal);
+                    vendTransMMR.CurrencyLC            = Ledger::accountingCurrency();
+
+                    select firstonly Name from dataArea
+                 where dataArea.id       == vendTrans.DataAreaId;
+                    vendTransMMR.EntityName           = dataArea.name;
+                    VendTable vendTable = VendTable::find(vendTrans.AccountNum);
+                    vendTransMMR.AmountoutstandinginTC =  VendTable.balancePerDate(vendTrans.TransDate);
+
+                
+                    ExchangeRateUnionView ExchangeRateUnionView, ExchangeRateUnionViewLoc;
+
+       
+                    select firstonly ExchangeRateUnionView order by ExchangeRateUnionView.ValidFrom desc
+               where ExchangeRateUnionView.FromCurrencyCode == vendTrans.CurrencyCode && ExchangeRateUnionView.ToCurrencyCode == 'USD'
+                && ExchangeRateUnionView.ValidFrom <= vendTrans.TransDate &&  ExchangeRateUnionView.ValidTo >= vendTrans.TransDate;
+
+                    if (vendTrans.CurrencyCode == 'USD')
+                    {
+                        vendTransMMR.ExchInUSD = 1;
+                    }
+                    else
+                    {
+                        vendTransMMR.ExchInUSD  = ( ExchangeRateUnionView.ExchangeRate) /100.00;
+                    }
+
+                    select firstonly  ExchangeRateUnionViewLoc order by ExchangeRateUnionViewLoc.ValidFrom desc
+                       where      ExchangeRateUnionViewLoc.FromCurrencyCode == vendTrans.CurrencyCode && ExchangeRateUnionViewLoc.ToCurrencyCode == Ledger::accountingCurrency(CompanyInfo::current())
+                           && ExchangeRateUnionViewLoc.ValidFrom <= vendTrans.TransDate &&  ExchangeRateUnionViewLoc.ValidTo >=vendTrans.TransDate;
+ 
+                    if (vendTrans.CurrencyCode == Ledger::accountingCurrency(CompanyInfo::current() ))
+                    {
+                        vendTransMMR.ExchInLC   = 1;
+                    }
+                    else
+                    {
+                        vendTransMMR.ExchInLC = (ExchangeRateUnionViewLoc.ExchangeRate)/100.00;
+                    }
+
+
+                    select firstonly SubledgerVoucher, RecId from generalJournalEntry
+                       where generalJournalEntry.SubledgerVoucher == vendTrans.Voucher;
+
+                    select firstonly MainAccount from generalJournalAccountEntry
+                   where generalJournalAccountEntry.GeneralJournalEntry == generalJournalEntry.RecId
+                      && generalJournalAccountEntry.PostingType == LedgerPostingType::VendBalance;
+
+                    MainAccount mainAccount =  MainAccount::find(generalJournalAccountEntry.mainAccount);
+
+                    vendTransMMR.GLCode         = mainAccount.MainAccountId;
+                    vendTransMMR.GLDescription  = mainAccount.Name;
+
+
+                    // Assuming 'this.GLCode' is a variable of appropriate type (e.g., real, str, etc.)
+                    select firstOnly Qty from vendInvoiceJour
+                         where vendInvoiceJour.LedgerVoucher == vendTransLocal.Voucher
+                         && vendInvoiceJour.InvoiceAccount == vendTransLocal.AccountNum
+                         && vendInvoiceJour.DataAreaId == vendTransLocal.DataAreaId;
+
+
+                    vendTransMMR.Qty = vendInvoiceJour.Qty;
+                    vendTransLoc = VendTrans::find(vendTrans.RecId);
+
+                    vendTransMMR.GLCodeProstingProfile = DimensionAttributeValueCombination::find( VendLedgerAccounts::summaryLedgerDimension(vendTrans.AccountNum, vendTrans.PostingProfile)).DisplayValue;
+                    vendTransMMR.GLDescriptionPostingProfile = MainAccount::findByMainAccountId(vendTransMMR.GLCodeProstingProfile).Name;
+                    vendTransMMR.VendBalance =vendTransLoc.remainAmountCur();
+
+                    vendTransMMR.insert();
+                }
+            
+            }
+
+
+        }
+     
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

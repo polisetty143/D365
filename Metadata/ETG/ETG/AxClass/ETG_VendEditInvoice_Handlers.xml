@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_VendEditInvoice_Handlers</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_VendEditInvoice_Handlers
+{
+
+
+    
+
+    
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>ETG_BLnumber_vend_OnModified</Name>
+				<Source><![CDATA[
+    [FormDataFieldEventHandler(formDataFieldStr(vendEditInvoice, VendInvoiceInfoTable, ETG_BLnumber), FormDataFieldEventType::Modified)]
+    public static void ETG_BLnumber_vend_OnModified(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        /*VendInvoiceInfoTable    vendInvoiceInfoTable        = sender.datasource().formRun().dataSource('VendInvoiceInfoTable').cursor();
+        PurchParmTable      parmtable;
+        PurchParmUpdate     parmUpdate;
+        FormRun             formrun = sender.datasource().formRun().dataSource("VendInvoiceInfoTable").formRun();
+        Args                args    = new Args();
+        FormRun             formRunSelectJour;
+        VendInvoiceInfoLine vendInvoiceInfoLine;
+        VendPackingSlipTrans vendPackingSlipTrans;
+        Qty                  qty;
+        FormDataSource      vendInvoiceInfoLineDS,vendInvoiceInfoTableDS;
+        vendInvoicePackingSlipQuantityMatch     vendInvoicePackingSlipQuantityMatch;
+          
+        vendInvoiceInfoLineDS   = sender.datasource().formRun().dataSource('VendInvoiceInfoLine');
+        vendInvoiceInfoTableDS  = sender.datasource().formRun().dataSource('VendInvoiceInfoTable');
+      
+        select firstonly BOLDate,BOLNo,RecId from vendPackingSlipTrans
+            where vendPackingSlipTrans.BOLNo == vendInvoiceInfoTable.ETG_BLnumber
+                && vendPackingSlipTrans.OrigPurchid == vendInvoiceInfoTable.PurchId       
+         notexists join vendInvoicePackingSlipQuantityMatch
+            where vendInvoicePackingSlipQuantityMatch.PackingSlipSourceDocumentLine == vendPackingSlipTrans.SourceDocumentLine;
+      
+        if(!vendPackingSlipTrans)
+        {
+            throw error("Selected BOL number is invalid or posted already");
+        }
+
+        else
+        {
+            args.record(vendInvoiceInfoTable);
+            args.caller(formrun);
+            args.name(formstr(VendJournalMatch_PackingSlip));
+            formRunSelectJour = ClassFactory.formRunClass(args);
+            formRunSelectJour.run();
+            formRunSelectJour.wait();
+
+            vendInvoiceInfoTable.ETG_BLDate    = vendPackingSlipTrans.BOLDate;
+            vendInvoiceInfoTable.ETG_BLnumber  = vendPackingSlipTrans.BOLNo;
+         
+        }*/           
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>VendInvoiceInfoLine_ETGActualPurchPrice_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(VendEditInvoice, VendInvoiceInfoLine_ETGActualPurchPrice), FormControlEventType::Modified)]
+    public static void VendInvoiceInfoLine_ETGActualPurchPrice_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        if(ETGACFParameters::find().EnablePTBFContractsPurch == NoYes::Yes)
+        {
+            VendInvoiceInfoLine InvoiceInfoLine = sender.formRun().dataSource().cursor();
+            PurchLine purchLine;
+
+            select firstonly purchLine
+                where purchLine.RecId == InvoiceInfoLine.PurchLineRecId;
+                    
+
+            if(purchLine)
+            {
+                real checkPlus = 100 + purchLine.ETGPriceTolerance;
+                real checkMinus = 100 - purchLine.ETGPriceTolerance;
+
+                real ActualUnitprice = str2Num(sender.valueStr());
+
+                real a = (purchLine.PurchPrice * checkPlus) / 100;
+                real b = (purchLine.PurchPrice * checkMinus) / 100;
+
+                if(ActualUnitprice < b || ActualUnitprice > a)
+                {
+                    throw error("@ETG_New:ETGCrDeActualUnitPrice");
+                }
+          
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>VendInvoiceInfoLine_ETGActualQty_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Abhinav 11-02-2025
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(VendEditInvoice, VendInvoiceInfoLine_ETGActualQty), FormControlEventType::Modified)]
+    public static void VendInvoiceInfoLine_ETGActualQty_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        if(ETGACFParameters::find().EnablePTBFContractsPurch == NoYes::Yes)
+        {
+            VendInvoiceInfoLine InvoiceInfoLine = sender.formRun().dataSource().cursor();
+            PurchLine purchLine;
+
+            select firstonly purchLine
+                where purchLine.RecId == InvoiceInfoLine.PurchLineRecId;
+
+            if(purchLine)
+            {
+                real checkPlus = 100 + purchLine.OverDeliveryPct;
+
+                real ActualUnitprice = str2Num(sender.valueStr());
+
+                real a = (purchLine.PurchQty * checkPlus) / 100;
+
+                if(ActualUnitprice > a)
+                {
+                    throw error("@ETG_New:ETGOverdeliveryError");
+                }
+          
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>UpdateMatchStatus_OnClicked</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Abhinav - 11-02-2025
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(VendEditInvoice, UpdateMatchStatus), FormControlEventType::Clicked)]
+    public static void UpdateMatchStatus_OnClicked(FormControl sender, FormControlEventArgs e)
+    {
+        if(ETGACFParameters::find().EnablePTBFContractsPurch == NoYes::Yes)
+        {
+           // VendInvoiceInfoLine InvoiceInfoLine = sender.formRun().dataSource().cursor();
+            VendInvoiceInfoLine InvoiceInfoLine = sender.formRun().dataSource('VendInvoiceInfoLine').cursor(); 
+            VendInvoiceTrans    VendInvoiceTrans;
+            PurchLine  purchline; 
+            boolean        enableactualprice = false;
+            Purchtable purchTableLoc;
+
+            purchline = purchline::findInventTransId(InvoiceInfoLine.InventTransId);
+
+            Select sum(Qty) from  VendInvoiceTrans where VendInvoiceTrans.InventTransId == InvoiceInfoLine.InventTransId
+            && VendInvoiceTrans.PurchID == InvoiceInfoLine.OrigPurchId;
+
+            if(purchline.ETGCrDrNoteCreated ==NoYes::Yes)
+            {
+                enableactualprice = false;
+            }
+            else
+            {
+                enableactualprice =  (purchline.PurchQty == (VendInvoiceTrans.Qty + InvoiceInfoLine.ReceiveNow)) ? true :false;
+            }
+           
+            purchTableLoc = Purchtable::find(purchline.PurchId);
+
+            if(purchTableLoc.PurchStatus == PurchStatus::Received)
+            {
+                enableactualprice = true;
+            }
+
+            if(InvoiceInfoLine.ETGActualPurchPrice == 0 && enableactualprice && InvoiceInfoLine.ETGActualQuantity == 0)
+            {
+                if(Box::yesNoCancel("@ETG_New:ETGEditActualUnitQuantity",dialogButton::No,"Edit actual purch price"))
+                {
+                    throw Error("@ETG_New:ETGUpdateMatchCancelled");
+                }
+                    
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

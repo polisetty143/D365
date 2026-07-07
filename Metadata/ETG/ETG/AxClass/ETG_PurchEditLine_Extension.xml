@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_PurchEditLine_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[Extensionof(Formstr(PurchEditLines))]
+final class ETG_PurchEditLine_Extension
+{
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>init</Name>
+				<Source><![CDATA[
+    public void  init()
+    {
+
+        next init();
+        ETG_ProductReceiptQualityGrp productReceiptQualityGrp;
+
+        ttsbegin;
+        update_recordset productReceiptQualityGrp
+            setting ResultValue = 0
+                where productReceiptQualityGrp.PurchId ==  purchFormLetter.purchTable().PurchId;
+        ttscommit;
+         
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>closeOk</Name>
+				<Source><![CDATA[
+    void closeOk()
+    {      
+        FormRun                     form = this as FormRun;
+        FormDataSource              PurchParmTable_ds = form.dataSource(formDataSourceStr(PurchEditLines, PurchParmTable)) as FormDataSource;
+        PurchParmTable              PurchParmTable    = PurchParmTable_ds.cursor();
+        PurchParmLine               PurchParmLineLoop,PurchParmLine;
+        CustPackingSlipTrans        custPackingSlipTrans;
+        VendPackingSlipTrans        vendPackingSlipTrans;
+        Qty                         qtysales = 0, qtypurch = 0,qtyRemain;
+        Description                 PurchParmLineLoopid;
+
+        if(curExt() != "O001" || curExt() != "P031")
+        {
+            if(PurchParmTable.purchTable().InterCompanySalesId)
+            {
+                while select RecId,InventTransId,ReceiveNow,ItemId from PurchParmLineLoop
+                where PurchParmLineLoop.ParmId == PurchParmTable.ParmId
+                {
+                    qtyRemain = PurchLine::findInventTransId(PurchParmLineLoop.InventTransId).RemainPurchPhysical - PurchParmLineLoop.ReceiveNow;
+                
+
+                    select firstonly crosscompany RecId from custPackingSlipTrans
+                    where custPackingSlipTrans.InterCompanyInventTransId == PurchParmLineLoop.InventTransId
+                        && custPackingSlipTrans.Qty == PurchParmLineLoop.ReceiveNow
+                        && custPackingSlipTrans.Remain ==  qtyRemain;
+              
+                    if(!custPackingSlipTrans)
+                    {
+                        PurchParmLineLoopid = strFmt('%1', PurchParmLineLoop.ItemId);
+                        throw error("@ETG:PackingSlipProductReceiptValidationMsg"+ ' ' + PurchParmLineLoopid);
+                    }
+                
+                }
+            }
+        }
+      
+        next closeOk();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

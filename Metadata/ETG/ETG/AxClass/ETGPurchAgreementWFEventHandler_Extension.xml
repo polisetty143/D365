@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchAgreementWFEventHandler_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(PurchAgreementWFEventHandler))]
+internal final class ETGPurchAgreementWFEventHandler_Extension
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>completed</Name>
+				<Source><![CDATA[
+    public void completed(WorkflowEventArgs _workflowEventArgs)
+    {
+        next   completed(_workflowEventArgs);
+
+        RecId documentRecId = _workflowEventArgs.parmWorkflowContext().parmRecId();
+
+        if (ETGACFParameters::find().EnableDMSIntegration 
+            && BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGDMSReverePurchAgreementIntegrationEventClass)))
+        {
+            PurchAgreementHeader     purchAgreementHeader;
+
+
+            select firstonly purchAgreementHeader
+            where purchAgreementHeader.RecId == documentRecId;
+
+            AgreementHeaderHistory       agreementHeaderHistory;
+            select firstonly agreementHeaderHistory
+                    order by RecId desc
+                    where agreementHeaderHistory.AgreementHeader == purchAgreementHeader.RecId;
+
+            str confirmationnumber  = strFmt("%1-%2", purchAgreementHeader.PurchNumberSequence, agreementHeaderHistory.ConfirmationNumber);
+            str formattedDateTime = DateTimeUtil::toStr(agreementHeaderHistory.CreatedDateTime);
+
+            ETGDMSReverePurchAgreementIntegrationContract contract = new ETGDMSReverePurchAgreementIntegrationContract();
+
+            contract.parmDealNumber(purchAgreementHeader.ETGDMSDealNumbers);
+            contract.parmDataAreaId(curExt());
+            contract.parmOperationType("Agreement Workflow Approval");
+            contract.parmActivityName("Purchase Agreement Workflow Approval");
+            contract.parmDocumentNumber(confirmationnumber);
+            contract.parmDocumentDate(formattedDateTime);
+            contract.parmActivityOwner(purchAgreementHeader.CreatedBy);
+            contract.parmActivityRemarks(strFmt("The Purchase agreement %1 is approved",confirmationnumber));
+
+            ETGDMSReverePurchAgreementIntegrationEventClass eventClass = ETGDMSReverePurchAgreementIntegrationEventClass::newFromContract(contract);
+            eventClass.send();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>canceled</Name>
+				<Source><![CDATA[
+    public void canceled(WorkflowEventArgs _workflowEventArgs)
+    {
+        next   canceled(_workflowEventArgs);
+
+        RecId documentRecId = _workflowEventArgs.parmWorkflowContext().parmRecId();
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

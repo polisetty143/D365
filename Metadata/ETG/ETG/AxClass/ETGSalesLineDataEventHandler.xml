@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesLineDataEventHandler</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGSalesLineDataEventHandler
+{
+    static Amount lastLineAmount;
+    static Qty    lastSalesQty;
+    static real   lastPriceUnit;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>recalcPrice</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Recalculates SalesPrice based on LineAmount / SalesQty
+    /// </summary>
+    public static void recalcPrice(SalesLine _salesLine)
+    {
+        if (_salesLine.LineAmount != 0 && _salesLine.SalesQty != 0)
+        {
+            real calculatedPrice = (_salesLine.LineAmount * _salesLine.PriceUnit) / _salesLine.SalesQty;
+
+            if (_salesLine.SalesPrice != calculatedPrice)
+            {
+                _salesLine.SalesPrice = calculatedPrice;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>SalesLine_LineAmount_OnModified</Name>
+				<Source><![CDATA[
+    [FormDataFieldEventHandler(formDataFieldStr(SalesTable, SalesLine, LineAmount), FormDataFieldEventType::Modified)]
+    public static void SalesLine_LineAmount_OnModified(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        FormDataSource  salesLine_ds = sender.datasource();
+        SalesLine       salesLine    = salesLine_ds.cursor() as SalesLine;
+
+        ETGSalesLineDataEventHandler::lastLineAmount = salesLine.LineAmount;
+        ETGSalesLineDataEventHandler::lastSalesQty   = salesLine.SalesQty;
+        ETGSalesLineDataEventHandler::lastPriceUnit  = salesLine.PriceUnit;
+
+        ETGSalesLineDataEventHandler::recalcPrice(salesLine);
+        salesLine_ds.refresh();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>InventDim_InventSiteId_OnValidated</Name>
+				<Source><![CDATA[
+    [FormDataFieldEventHandler(formDataFieldStr(SalesTable, InventDim, InventSiteId), FormDataFieldEventType::Validated)]
+    public static void InventDim_InventSiteId_OnValidated(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        FormDataSource  inventDim_ds = sender.datasource();
+        FormDataSource  salesLine_ds = inventDim_ds.formRun().dataSource(formDataSourceStr(SalesTable, SalesLine));
+        SalesLine       salesLine    = salesLine_ds.cursor() as SalesLine;
+
+        Amount  lineAmt   = ETGSalesLineDataEventHandler::lastLineAmount;
+        Qty     salesQty  = salesLine.SalesQty  != 0 ? salesLine.SalesQty  : ETGSalesLineDataEventHandler::lastSalesQty;
+        real    priceUnit = salesLine.PriceUnit != 0 ? salesLine.PriceUnit : ETGSalesLineDataEventHandler::lastPriceUnit;
+
+        if (lineAmt != 0 && salesQty != 0)
+        {
+            real calculatedPrice = (lineAmt * priceUnit) / salesQty;
+
+            salesLine.SalesPrice = calculatedPrice;
+            salesLine.LineAmount = lineAmt;
+
+            salesLine_ds.research(false);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>SalesLine_OnActivated</Name>
+				<Source><![CDATA[
+    [FormDataSourceEventHandler(formDataSourceStr(SalesTable, SalesLine), FormDataSourceEventType::Activated)]
+    public static void SalesLine_OnActivated(FormDataSource sender, FormDataSourceEventArgs e)
+    {
+        SalesLine salesLine = sender.cursor() as SalesLine;
+
+        Amount  lineAmt   = ETGSalesLineDataEventHandler::lastLineAmount;
+        Qty     salesQty  = salesLine.SalesQty  != 0 ? salesLine.SalesQty  : ETGSalesLineDataEventHandler::lastSalesQty;
+        real    priceUnit = salesLine.PriceUnit != 0 ? salesLine.PriceUnit : ETGSalesLineDataEventHandler::lastPriceUnit;
+
+        if (lineAmt != 0 && salesQty != 0)
+        {
+            real calculatedPrice = (lineAmt * priceUnit) / salesQty;
+
+            if (salesLine.SalesPrice != calculatedPrice)
+            {
+                salesLine.SalesPrice = calculatedPrice;
+                sender.refresh();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>SalesLine_OnValidatingWrite</Name>
+				<Source><![CDATA[
+    [FormDataSourceEventHandler(formDataSourceStr(SalesTable, SalesLine), FormDataSourceEventType::ValidatingWrite)]
+    public static void SalesLine_OnValidatingWrite(FormDataSource sender, FormDataSourceEventArgs e)
+    {
+        SalesLine salesLine = sender.cursor() as SalesLine;
+
+        Amount  lineAmt   = ETGSalesLineDataEventHandler::lastLineAmount;
+        Qty     salesQty  = salesLine.SalesQty  != 0 ? salesLine.SalesQty  : ETGSalesLineDataEventHandler::lastSalesQty;
+        real    priceUnit = salesLine.PriceUnit != 0 ? salesLine.PriceUnit : ETGSalesLineDataEventHandler::lastPriceUnit;
+
+        if (lineAmt != 0 && salesQty != 0)
+        {
+            real calculatedPrice = (lineAmt * priceUnit) / salesQty;
+            salesLine.SalesPrice = calculatedPrice;
+            salesLine.LineAmount = lineAmt;
+
+            sender.refresh();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

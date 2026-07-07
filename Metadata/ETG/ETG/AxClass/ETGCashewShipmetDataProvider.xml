@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCashewShipmetDataProvider</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(ETGCashewshipmentContract))]
+class ETGCashewShipmetDataProvider extends  SRSReportDataProviderPreProcessTempDB
+
+{
+    ETGCashewShipmentTmp                    ETGCashewShipmentTmp;
+    TransDate                               _fromDate,_ToDate;
+    List                                    _InvoiceId= new List(Types::String);
+    List                                    _CustAccount= new List(Types::String);
+    CustInvoiceJour                         _CustInvoiceJour;
+    CustInvoiceTrans                        _CustInvoiceTrans;
+    ETGSalesShipmentCashew                  _ETGSalesShipmentCashew;
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGCashewShipmentTmp</Name>
+				<Source><![CDATA[
+    [SrsReportDataSetAttribute(tableStr(ETGCashewShipmentTmp))]
+    public ETGCashewShipmentTmp getETGCashewShipmentTmp()
+    {
+        select * from ETGCashewShipmentTmp;
+        return ETGCashewShipmentTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ProcessReport</Name>
+				<Source><![CDATA[
+    public void ProcessReport()
+    {
+        Query                               query;
+        QueryRun                            queryRun;
+        QueryBuildDataSource                queryBuildDataSource, queryBuildDataSource1;
+        QueryBuildDataSource                queryBuildDataSource2;
+        QueryBuildRange                     queryBuildRange;
+        QueryBuildRange                     queryBuildRange2;
+        
+        ETGCashewshipmentContract   Contract;
+
+        Contract        = this.parmDataContract();
+
+        _fromDate       = Contract.parmFromDate();
+        _ToDate         = Contract.parmToDate();
+        _CustAccount    = Contract.parmCustAccount();
+        _InvoiceId      = Contract.parmInvoiceId();
+        ListIterator             ItemIdListIterator,journalIdListIterator;
+        ListEnumerator           ListEnumerator;
+
+        query   =   new query();
+        queryBuildDataSource    =   query.addDataSource(tableNum(CustInvoiceJour));
+        queryBuildDataSource1   =   queryBuildDataSource.addDataSource(tableNum(CustInvoiceTrans));
+        queryBuildDataSource1.addLink(fieldNum(CustInvoiceJour,InvoiceId),fieldNum(CustInvoiceTrans,InvoiceId));
+        if(_fromDate && !_ToDate)
+        {
+            queryBuildRange = queryBuildDataSource.addRange(fieldNum(CustInvoiceJour,INVOICEDATE));
+            queryBuildRange.value(strFmt('>%1',queryvalue(_fromDate-1)));
+        }
+        if(!_fromDate && _ToDate)
+        {
+            queryBuildDataSource.addRange(fieldNum(CustInvoiceJour,INVOICEDATE)).value(strFmt("<%1",queryValue(_ToDate+1)));
+        }
+        if(_fromDate && _ToDate)
+        {
+            queryBuildDataSource.addRange(fieldNum(CustInvoiceJour,INVOICEDATE)).value(queryRange(_fromDate,_toDate));
+        }
+        if(_CustAccount !=null)
+        {
+            ListEnumerator  = _CustAccount.getEnumerator();
+            while (ListEnumerator.moveNext())
+            {
+                queryBuildDataSource.addRange(fieldNum(CustInvoiceJour,ORDERACCOUNT)).value(ListEnumerator.current());
+            }
+        }
+        if(_InvoiceId !=null)
+        {
+            ListEnumerator  = _InvoiceId.getEnumerator();
+            while (ListEnumerator.moveNext())
+            {
+                queryBuildDataSource.addRange(fieldNum(CustInvoiceJour,Invoiceid)).value(ListEnumerator.current());
+            }
+        }
+        queryRun    = new queryRun(query) ;
+        while (queryRun.next())
+        {
+
+
+            _custinvoicejour            =   queryRun.get(tableNum(CustInvoiceJour)) ;
+            _custinvoicetrans           =   queryRun.get(tableNum(CustInvoiceTrans)) ;
+
+            select  _ETGSalesShipmentCashew
+                where _ETGSalesShipmentCashew.RefInvoiceId == _custinvoicetrans.InvoiceId
+                && _ETGSalesShipmentCashew.CustInvoiceTrans == _CustInvoiceTrans.RecId;
+
+            ETGCashewShipmentTmp.clear();
+            ETGCashewShipmentTmp.initValue();
+            ETGCashewShipmentTmp.InvoiceDate                = _CustInvoiceJour.InvoiceDate;
+            ETGCashewShipmentTmp.InvoiceId                  = _CustInvoiceJour.InvoiceId;
+            ETGCashewShipmentTmp.CustomerCode               = _CustInvoiceJour.OrderAccount;
+            ETGCashewShipmentTmp.CustomerName               = CustTable::find(_CustInvoiceJour.OrderAccount).name();
+            ETGCashewShipmentTmp.ACFCONTRACT                = _ETGSalesShipmentCashew.ACFContractNUMBER;
+            ETGCashewShipmentTmp.Bags                       = _ETGSalesShipmentCashew.Bags;
+            ETGCashewShipmentTmp.ContractQuantity           = _ETGSalesShipmentCashew.ContractQuantity;
+            ETGCashewShipmentTmp.DeclarationNumber          = _ETGSalesShipmentCashew.DeclarationNumber;
+            ETGCashewShipmentTmp.OutturnNutCount            = _ETGSalesShipmentCashew.OutturnNutCount;
+            ETGCashewShipmentTmp.SHIPMENT                   = _ETGSalesShipmentCashew.SHIPMENT;
+            ETGCashewShipmentTmp.PORTOF                     = _ETGSalesShipmentCashew.PORTOFDischarge;
+            ETGCashewShipmentTmp.PKL                        = _ETGSalesShipmentCashew.PKL;
+            ETGCashewShipmentTmp.LINE                       = _ETGSalesShipmentCashew.LINE;
+            ETGCashewShipmentTmp.NumberofContainer          = _ETGSalesShipmentCashew.NumberofContainer;
+            ETGCashewShipmentTmp.NetWeight                  = _ETGSalesShipmentCashew.NetWeight;
+            ETGCashewShipmentTmp.GrossWeight                = _ETGSalesShipmentCashew.GrossWeight;
+            ETGCashewShipmentTmp.Warehouse                  = _ETGSalesShipmentCashew.Warehouse;
+            ETGCashewShipmentTmp.Vessel                     = _ETGSalesShipmentCashew.Vessel;
+            ETGCashewShipmentTmp.insert();
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

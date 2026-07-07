@@ -1,0 +1,313 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPaymentUploaderService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+using System.IO;
+using OfficeOpenXml;
+using OfficeOpenXml.ExcelPackage;
+using OfficeOpenXml.ExcelRange;
+public final class ETGPaymentUploaderService extends SysOperationServiceBase
+{
+    System.IO.Stream                 stream;
+    FileUploadTemporaryStorageResult fileUploadResult;
+    ExcelSpreadsheetName             sheeet;
+    Filename                         filename;
+
+    protected   CommaStreamIo importFile;
+
+    int             settlementNumber, settlementNumberLoc;
+    str             voucher,voucherloc,accountType,accountTypeLoc;
+    real            settlementAmount;
+    TransDate       settlementDate, settlementDateLoc;
+    AccountNum      accountNum;
+    boolean         validate;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>importPaymentTransfer</Name>
+				<Source><![CDATA[
+    public void importPaymentTransfer(ETGPaymentUploaderContract  _contract)
+    {
+        #OCCRetryCount
+
+        try
+        {
+            if (_contract.parmStorageResult() != conNull())
+            {
+                FileUploadTemporaryStorageResult fileUploadResultLoc = new FileUploadTemporaryStorageResult();
+                fileUploadResultLoc.unpack(_contract.parmStorageResult());
+
+                if (fileUploadResultLoc != null && fileUploadResultLoc.getUploadStatus())
+                {
+                    stream = fileUploadResultLoc.openResult();
+
+                    using (ExcelPackage Package = new ExcelPackage(stream))
+                    {
+                        int                         rowCount, i,columncount,j;
+                        Package.Load(stream);
+                        ExcelWorksheet              worksheet   = package.get_Workbook().get_Worksheets().get_Item(1);
+                        OfficeOpenXml.ExcelRange    range       = worksheet.Cells;
+                        rowCount                                = (worksheet.Dimension.End.Row) - (worksheet.Dimension.Start.Row)  + 1;
+                        columncount                             = (worksheet.Dimension.End.Column);
+
+                        for (i = 2; i<= rowCount; i++)//data validation
+                        {
+                            try
+                            {
+                                validate = true;
+                                this.validatePaymentRecord(range, i);
+                                if(validate && rowCount > 2)
+                                {
+                                    this.initilizePaymentRecord(range, i);
+                                }
+                            }
+                            catch
+                            {
+                                warning(ETGPaymentUploaderService::getError());
+                                continue;
+                            }
+                        }
+                        if(rowCount < 2)
+                        {
+                            throw Error(strFmt("@ETG_New:PaymentUploaderInsufficientRecordError"));
+                        }
+                    }
+                }
+                else
+                {
+                    throw Error(strfmt("@SYS62207",filename));
+                }
+            }
+        }
+
+        catch (Exception::Deadlock)
+        {
+            retry;
+        }
+
+        catch (Exception::UpdateConflict)
+        {
+            if (appl.ttsLevel() == 0)
+            {
+                if (xSession::currentRetryCount() >= #RetryNum)
+                {
+                    throw Exception::UpdateConflictNotRecovered;
+                }
+                else
+                {
+                    retry;
+                }
+            }
+            else
+            {
+                throw Exception::UpdateConflict;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validatePaymentRecord</Name>
+				<Source><![CDATA[
+    public void validatePaymentRecord(OfficeOpenXml.ExcelRange    range, int i)
+    {
+        ETGPaymentUploaderTable     paymentUploader;
+        CustTrans                   custTransUpload;
+        VendTrans                   vendTransUpload;
+        settlementNumber            = str2Int(range.get_Item(i, 1).value);
+        voucher                     = range.get_Item(i, 2).value;
+        settlementAmount            = range.get_Item(i, 3).value;
+        settlementDate              = str2Date(range.get_Item(i, 4).Text.ToString(), 123);
+        accountType                 = range.get_Item(i, 5).value;
+
+        if(settlementNumber != 0)
+        {
+            if(settlementNumberLoc == settlementNumber)
+            {
+                while select paymentUploader where paymentUploader.SettlementNumber == settlementNumber
+                {
+                    if(paymentUploader.Voucher == voucher && !paymentUploader.Posted)
+                    {
+                        validate = false;
+                        throw Error(strFmt("@ETG_New:PaymentUploaderSameVoucherError"));
+                    }
+                    if((paymentUploader.SettlementDate != settlementDate || enum2Str(paymentUploader.AccountType) != accountType) && !paymentUploader.Posted)
+                    {
+                        validate = false;
+                        throw Error(strFmt("@ETG_New:PaymentUploaderDateorAcntTypeMismatch",settlementNumber));
+                    }
+                    else
+                    {
+                        if(paymentUploader.AccountType == ModuleCustVend::Cust)
+                        {
+                            select * from custTransUpload where custTransUpload.Voucher == voucher;
+                            if((!custTransUpload || custTransUpload.AccountNum != paymentUploader.AccountNum) && !paymentUploader.Posted)
+                            {
+                                validate = false;
+                                throw Error(strFmt("@ETG_New:PaymentUploaderCustDataError",settlementNumber));
+                            }
+                        }
+                        if(paymentUploader.AccountType == ModuleCustVend::Vend)
+                        {
+                            select * from vendTransUpload where vendTransUpload.Voucher == voucher;
+                            if((!vendTransUpload || vendTransUpload.AccountNum != paymentUploader.AccountNum) && !paymentUploader.Posted)
+                            {
+                                validate = false;
+                                throw Error(strFmt("@ETG_New:PaymentUploaderVendDataError",settlementNumber));
+                            }
+                        }
+                    }
+                }
+            }
+            else
+            {
+                paymentUploader = ETGPaymentUploaderTable::find(settlementNumber);
+                if(paymentUploader.RecId && !paymentUploader.Posted)
+                {
+                    validate = false;
+                    throw Error(strFmt("@ETG_New:PaymentUploaderRecordExistsError",paymentUploader.SettlementNumber));
+                }
+                settlementNumberLoc                 = settlementNumber;
+                if(accountType == "Customer")
+                {
+                    select * from custTransUpload where custTransUpload.Voucher == voucher;
+                    if(!custTransUpload)
+                    {
+                        validate = false;
+                        throw Error(strFmt("@ETG_New:PaymentUploaderTransactionMissing",voucher));
+                    }
+                }
+                else if(accountType == "Vendor")
+                {
+                    select * from vendTransUpload where vendTransUpload.Voucher == voucher;
+                    if(!vendTransUpload)
+                    {
+                        validate = false;
+                        throw Error(strFmt("@ETG_New:PaymentUploaderTransactionMissing",voucher));
+                    }
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initilizePaymentRecord</Name>
+				<Source><![CDATA[
+    public void initilizePaymentRecord(OfficeOpenXml.ExcelRange    range, int i)
+    {
+        ETGPaymentUploaderTable     paymentUploader;
+        CustTrans                   custTransUpload;
+        VendTrans                   vendTransUpload;
+        settlementNumber        = str2Int(range.get_Item(i, 1).value);
+        voucher                 = range.get_Item(i, 2).value;
+        settlementAmount        = range.get_Item(i, 3).value;
+        settlementDate          = str2Date(range.get_Item(i, 4).Text.ToString(), 123);
+        accountType             = range.get_Item(i, 5).value;
+
+        ttsbegin;
+        paymentUploader.clear();
+        paymentUploader.SettlementNumber    = settlementNumber;
+        paymentUploader.Voucher             = voucher;
+        paymentUploader.SettlementAmount    = settlementAmount;
+        paymentUploader.SettlementDate      = settlementDate;
+        if(accountType == "Customer")
+        {
+            paymentUploader.AccountType     = ModuleCustVend::Cust;
+        }
+        else if(accountType == "Vendor")
+        {
+            paymentUploader.AccountType     = ModuleCustVend::Vend;
+        }
+        if(paymentUploader.AccountType == ModuleCustVend::Cust)
+        {
+            select * from custTransUpload where custTransUpload.Voucher == paymentUploader.Voucher;
+            if(custTransUpload)
+            {
+                paymentUploader.AccountNum      = custTransUpload.AccountNum;
+                paymentUploader.InvoiceNumber   = custTransUpload.Invoice;
+                paymentUploader.CurrencyCode    = custTransUpload.CurrencyCode;
+                paymentUploader.AmountCur       = custTransUpload.AmountCur;
+            }
+            else
+            {
+                throw Error(strFmt("@ETG_New:PaymentUploaderTransactionMissing"), paymentUploader.Voucher);
+            }
+        }
+        else if(paymentUploader.AccountType == ModuleCustVend::Vend)
+        {
+            select * from vendTransUpload where vendTransUpload.Voucher == paymentUploader.Voucher;
+            if(vendTransUpload )
+            {
+                paymentUploader.AccountNum      = vendTransUpload.AccountNum;
+                paymentUploader.InvoiceNumber   = vendTransUpload.Invoice;
+                paymentUploader.CurrencyCode    = vendTransUpload.CurrencyCode;
+                paymentUploader.AmountCur       = vendTransUpload.AmountCur;
+                paymentUploader.TransDate       = vendTransUpload.TransDate;
+            }
+            else
+            {
+                throw Error(strFmt("@ETG_New:PaymentUploaderTransactionMissing"), paymentUploader.Voucher);
+            }
+        }
+        if(paymentUploader.validateWrite())
+        {
+            paymentUploader.insert();
+            Info(strFmt("@ETG_New:PaymentUploaderRecordImported", paymentUploader.SettlementNumber));
+        }
+        else
+        {
+            warning(strFmt("@ETG_New:PaymentUploaderRecordNotImported", paymentUploader.SettlementNumber));
+        }
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getError</Name>
+				<Source><![CDATA[
+    public static str getError()
+    {
+        SysInfologEnumerator    sysInfologEnumerator;
+        SysInfologMessageStruct infoMessageStruct;
+        str                     logMessage;
+        str                           logString;
+        str                          ret;
+        int                          i;
+        #Define.NewLine('\n')
+        sysInfologEnumerator = SysInfologEnumerator::newData(infolog.infologData());
+        while (sysInfologEnumerator.moveNext())
+        {
+            i = 1;
+            if (logMessage)
+            {
+                logMessage += #Newline;
+            }
+            infoMessageStruct = SysInfologMessageStruct::construct(sysInfologEnumerator.currentMessage());
+
+            while (i <= infoMessageStruct.prefixDepth())
+            {
+                logString = logString + infoMessageStruct.preFixTextElement(i) + '. ';
+                i++;
+            }
+
+            logString = logString + infoMessageStruct.message();
+            logMessage = logMessage + infoMessageStruct.message();
+        }
+
+        infolog().clear();
+
+        return logMessage;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

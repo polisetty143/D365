@@ -1,0 +1,267 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ProdTableCreate_OKETG_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formControlStr(ProdTableCreate, Ok))]
+final class ProdTableCreate_OKETG_Extension
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>Clicked</Name>
+				<Source><![CDATA[
+    public void Clicked()
+    {
+        FormDatasource  ProdTable_Ds;
+        ProdTable       prodTable;
+        boolean         orderType;
+        FormControl     control = this;
+
+        next Clicked();
+          
+        prodTable   = control.formRun().dataSource(formDataSourceStr(prodtablecreate,ProdTable )).cursor();
+        orderType   = prodTable.ETGOrderType == ETGOrderType::None ? true : false;
+
+        if(orderType)
+        {
+            throw Error(strFmt("@ETG_New:ETGOrderType"));
+        }
+
+        //SB, 14/04/2026, Default Batch Id for Canada Entity
+        InventDim  inventDimBatchId;
+        inventDimBatchId = prodTable.inventDim();
+        inventDimBatchId.inventBatchId = InventTable::find(prodTable.ItemId).ETGDefaultBatchNumber;
+        prodTable.InventDimId = InventDim::findOrCreate(inventDimBatchId).inventDimId;
+        //end, SB, 14/04/2026
+
+        //CS - Abhinav - Creation of Prodorder in subcontracting entity
+        if(ETGCanadaParameters::find().EnableSubContractingPO && prodTable.ETGIsSubContractingOrder)
+        {
+            ProdTable prodTableNew;
+            InventDim inventDim,inventDimNew;
+            inventDim = prodTable.inventDim();
+
+            if (!prodTable.ETGParentEntity)
+            {
+                throw error("@ETG_New:ETGParentEntity");
+            }
+            if (!prodTable.ETGParentWareHouse)
+            {
+                throw error("@ETG_New:ETGRawMaterial");
+            }
+
+            InventLocation inventLocation = InventLocation::findInLegalEntity(prodTable.ETGParentWareHouse,prodTable.ETGParentEntity);
+            inventDim.InventLocationId = prodTable.ETGParentWareHouse;
+            inventDim.InventSiteId = inventLocation.InventSiteId;
+            inventDim.wMSLocationId = inventLocation.WMSlocationIdDefaultIssue;
+            
+
+            changecompany(prodTable.ETGParentEntity)
+            {
+                ttsbegin;
+                prodTableNew.initValue();
+                buf2Buf(prodTable,prodTableNew);
+                NumberSeq numberSeq;
+                numberSeq = NumberSeq::newGetNum(ProdParameters::numRefProdId());
+                //numberSeq.used();
+                prodTableNew.ProdId = numberSeq.num();
+                inventDim.inventSerialId = InventTable::find(prodTable.ItemId).ETGDefaultSerialNumber;
+
+                //CS, DLT, SB, Assign Custom BatchId
+                inventDim.inventBatchId = InventTable::find(prodTable.ItemId).ETGDefaultBatchNumber;
+                //CE, DLT, SB
+
+                inventDimNew = InventDim::findOrCreate(inventDim);
+                prodTableNew.InventDimId = inventDimNew.inventDimId;
+                prodTableNew.ETGChildProdId = prodTable.ProdId;
+                prodTableNew.initFromInventTable(InventTable::find(prodTableNew.ItemId));
+
+                prodTableNew.BOMId = BOMVersion::findActive(prodTableNew.ItemId,
+                                                prodTableNew.BOMDate,
+                                                prodTableNew.QtySched,
+                                                inventDimNew).BOMId;
+        
+                prodTableNew.RouteId = RouteVersion::findActive(prodTableNew.ItemId,
+                                                    prodTableNew.BOMDate,
+                                                    prodTableNew.QtySched,
+                                                    inventDimNew).RouteId;
+
+                prodTableNew.initBOMVersion();
+                prodTableNew.initRouteVersion();
+                prodTableNew.insert();
+                ttscommit;
+            }
+            if(prodTableNew.ProdId)
+            {
+                prodTable.ETGParentProdId = prodTableNew.ProdId;
+            }
+            
+            if(prodTable.ETGSalesId && prodTable.ETGItemId)
+            {
+                SalesLine            markSalesline       = this.findMatchingSalesLine(prodTableNew,prodTable.ETGParentEntity,prodTable.ETGSalesId,prodTable.ETGItemId);
+
+                if (markSalesline)
+                {
+                    // Mark PO and SO
+                    this.markPO(prodTable, markSalesline);
+
+                    ttsbegin;
+                    prodTable.ETGSalesId     =   markSalesline.SalesId;
+                    prodTable.ETGItemId      =   markSalesline.ItemId;
+                    //prod.InventTransId  =  markSalesline.InventTransId;
+                    //ProdTable_Ds.write();
+                    ttscommit;
+
+                    //update Salesid on Parent ProdId as well
+
+                    changecompany(prodTable.ETGParentEntity)
+                    {
+                        ttsbegin;
+                        //prodParent.selectForUpdate(true);
+                        prodTableNew.reread();
+                        prodTableNew.ETGSalesId       = markSalesline.SalesId;
+                        prodTableNew.ETGItemId        = markSalesline.ItemId;
+                    
+                        prodTableNew.update();
+                        ttscommit;
+                    }
+                }
+
+                else
+                {
+                    Error(strFmt("Matching salesline doesn't exist for sales order %1", prodTable.ETGSalesId));
+                    prodTable.ETGSalesId        = "";
+                    prodTable.ETGItemId         = "";
+            
+                    changecompany(prodTable.ETGParentEntity)
+                    {
+                        //update the production order in parent entity
+                        ttsbegin;
+                        ProdTable           updateParentProd          = ProdTable::find(prodTable.ETGParentProdId,true);
+                        updateParentProd.ETGSalesId         = "";
+                        updateParentProd.ETGItemId          = "";
+                        updateParentProd.update();
+                        ttscommit;
+                    }
+                }
+            }
+        }
+        //CE - Abhinav
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>markPO</Name>
+				<Source><![CDATA[
+    public void markPO(ProdTable _prod, SalesLine   _markSalesline)
+    {
+        changecompany(_prod.ETGParentEntity)
+        {
+            InventTransId           issueInventTransId, receiptInventTransId;
+            ProdTable               parentProd  = ProdTable::find(_prod.ETGParentProdId);
+            issueInventTransId      = _markSalesline.InventTransId;
+            receiptInventTransId    = parentProd.InventTransId;
+ 
+            InventTransOriginId receiptInventTransOriginId = InventTransOrigin::findByInventTransId(receiptInventTransId).RecId;
+            InventTrans         receiptInventTrans         = InventTrans::findByInventTransOrigin(receiptInventTransOriginId);
+            InventTransOriginId issueInventTransOriginId = InventTransOrigin::findByInventTransId(issueInventTransId).RecId;
+            InventTrans         issueInventTrans ;
+            InventTransOrigin   inventTransOrigin_loc;
+
+            select firstonly issueInventTrans
+                join inventTransOrigin_loc
+                where inventTransOrigin_loc.RecId         ==  issueInventTrans.InventTransOrigin
+                    && inventTransOrigin_loc.InventTransId == issueInventTransId
+                    && issueInventTrans.StatusIssue  == StatusIssue::OnOrder;
+
+            if (!issueInventTrans.RecId)
+            {
+                throw error("Cannot Mark further as already marked.");
+            }
+
+            TmpInventTransMark      tmpInventTransMark;
+
+            InventTransMarkCollection   collection = TmpInventTransMark::markingCollection(
+            InventTransOrigin::find(receiptInventTransOriginId),
+            receiptInventTrans.inventDim(), receiptInventTrans.Qty);
+
+            collection.insertCollectionToTmpTable(tmpInventTransMark);
+ 
+            select firstonly tmpInventTransMark
+                where tmpInventTransMark.InventTransOrigin == issueInventTrans.InventTransOrigin
+                && tmpInventTransMark.InventDimId       == issueInventTrans.InventDimId;
+ 
+            if (tmpInventTransMark.RecId != 0)
+            {
+                Qty receiptQty = abs(receiptInventTrans.Qty);
+                Qty issueQty   = abs(issueInventTrans.Qty);
+                Qty qtyToMark = min(receiptQty, issueQty);
+
+                tmpInventTransMark.Qty = -qtyToMark;
+                tmpInventTransMark.QtyMarkNow =  -qtyToMark;
+
+                if(receiptQty >= issueQty)
+                {
+                    tmpInventTransMark.QtyRemain -= tmpInventTransMark.QtyMarkNow;
+                }
+                else
+                {
+                    tmpInventTransMark.QtyRemain = abs(receiptInventTrans.Qty) - abs(tmpInventTransMark.QtyRemain);
+                }
+
+                Map mapUpdated = new Map(Types::Int64, Types::Record);
+                mapUpdated.insert(tmpInventTransMark.RecId, tmpInventTransMark);
+
+                TmpInventTransMark::updateTmpMark(
+                receiptInventTransOriginId,
+                receiptInventTrans.inventDim(),
+                receiptInventTrans.Qty,
+                mapUpdated.pack());
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>findMatchingSalesLine</Name>
+				<Source><![CDATA[
+    public  SalesLine findMatchingSalesLine(ProdTable prodTable, LegalEntityDataAreaId  comp,SalesId _salesId,InventTransId _inventTransId )
+    {
+        changecompany(comp)
+        {
+            SalesLine        salesLine, matchedLine;
+            InventDim        prodDim, salesDim;
+            //ItemId           itemId = prodTable.ETGItemId;
+
+            // 1. Get ProdTable InventDim
+            prodDim = InventDim::find(prodTable.InventDimId);
+
+            // 3. Loop SalesLines for same SalesId + ItemId
+            while select salesLine
+            where salesLine.SalesId == _salesId
+            && salesLine.InventTransId == _inventTransId
+            {
+                salesDim = InventDim::find(salesLine.InventDimId);
+
+                // 4. Compare using built-in method
+                if (InventDim::isInventDimEqual(salesDim, prodDim))
+                {
+                    matchedLine = salesLine;
+                    break;
+                }
+            }
+
+            return matchedLine;
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

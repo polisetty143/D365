@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGInventFairValueReversalService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The <c>ETGInventFairValueReversalService</c> class is the base class for services that provide common runtime
+/// functions.
+/// </summary>
+
+/// </summary>
+public final class ETGInventFairValueReversalService extends SysOperationServiceBase
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>processReversal</Name>
+				<Source><![CDATA[
+    public void processReversal(ETGInventFairValueReversalContract _contract)
+    {
+        TransDate reverseDate = _contract.parmReverseDate();
+
+        LedgerJournalTable      journalTable;
+        LedgerJournalTrans      journalTrans,journalTransLoc;
+        LedgerJournalTable      newJournalTable;
+        LedgerJournalTrans      newJournalTrans;
+        LedgerJournalName       ledgerJournalName; 
+        NumberSeq               numberSeq;
+        Voucher                 voucher;
+        LedgerJournalCheckPost  ledgerJournalCheckPost;
+        ETGACFParameters        parameters = ETGACFParameters::find();
+
+        // Loop through journal lines with reversing date
+        while select journalTable 
+            exists join journalTrans order by JournalNum desc
+            where journalTrans.ReverseEntry == NoYes::Yes 
+            &&    journalTrans.ReverseDate  == reverseDate
+            &&    journalTrans.JournalNum == journalTable.JournalNum
+            &&    journalTable.Posted == NoYes::Yes
+        { 
+            ledgerJournalName = LedgerJournalName::find(journalTable.JournalName);
+
+            newJournalTable.JournalName = journalTable.JournalName;
+            newJournalTable.initFromLedgerJournalName();
+            newJournalTable.NumberSequenceTable = ledgerJournalName.NumberSequenceTable;
+            newJournalTable.insert();
+            
+            while select journalTransLoc 
+                where journalTransLoc.JournalNum == journalTable.JournalNum
+            {
+                newJournalTrans.data(journalTransLoc);
+                newJournalTrans.JournalNum                      = newJournalTable.JournalNum;
+                newJournalTrans.LineNum                         = journalTransLoc.LineNum;
+                voucher                                         = new JournalVoucherNum(JournalTableData::newTable(newJournalTable)).getNew(false);
+                newJournalTrans.Voucher                         = voucher;
+                if(reverseDate)
+                {
+                    newJournalTrans.TransDate                   = reverseDate;
+                }
+                else
+                {
+                    newJournalTrans.TransDate                   = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+                }
+                newJournalTrans.AmountCurCredit                 = journalTransLoc.AmountCurDebit;
+                newJournalTrans.AmountCurDebit                  = journalTransLoc.AmountCurCredit;
+                newJournalTrans.ETGFairValuationSerialNumber    = journalTransLoc.ETGFairValuationSerialNumber;
+                newJournalTrans.ETGFairValueJournalNum          = journalTransLoc.JournalNum;
+                newJournalTrans.insert();
+            }
+            if(parameters.ETGInventoryFairValueAutoReversal == NoYes::Yes)
+            {
+                //Posting logic // Scenario 3 & 4 & 5: Post the journal (reversal will post if enabled)
+                ledgerJournalCheckPost = ledgerJournalCheckPost::newLedgerJournalTable(newJournalTable, NoYes::Yes);
+                ledgerJournalCheckPost.runOperation();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

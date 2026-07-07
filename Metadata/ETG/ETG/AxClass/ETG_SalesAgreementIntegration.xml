@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesAgreementIntegration</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_SalesAgreementIntegration
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>createPurchAgreement</Name>
+				<Source><![CDATA[
+    public void createPurchAgreement(str _ARAPRef)
+    {
+        ETGsalesAgreementheaderAPI agreementHeader;
+        ETGsalesAgreementLinesAPI agreementLineAPI;
+        SalesAgreementHeader SalesAgreementHeader;
+        CustTable custTable;
+        AgreementHeaderDefault agreementHeaderDefault;
+        SalesAgreementHeaderDefault salesAgreementHeaderDefault;
+        purchAgreementCertification salesAgreementCertification;
+        ETG_SalesAgreementHeader ETG_SalesAgreementHeaderNew;
+        AgreementLineQuantityCommitment agreementLineQuantityCommitment;
+        AgreementLine agreementLine;
+        NumberSequenceReference numberSequenceReference;
+        NumberSeq num;
+ 
+        select * from numberSequenceReference where numberSequenceReference.NumberSequenceId == salesParameters::numRefsalesAgreementId().NumberSequenceId;
+        num = NumberSeq::newGetNum(numberSequenceReference);
+ 
+        salesagreementHeader.initValue();
+        salesagreementHeader.CustAccount = agreementHeader.CustAccount;
+        custTable   = CustTable::find(agreementHeader.CustAccount);
+        salesagreementHeader.initFromCustTable(custTable);
+        //salesagreementHeader.AgreementClassification = agreementClassificationNew.RecId;
+        salesagreementHeader.SalesNumberSequence = num.num();//PurchAgreementId
+        //salesagreementHeader.DocumentExternalReference   = salesagreementHeader.DocumentExternalReference;
+        //salesagreementHeader.PrimaryResponsibleWorker  =  salesagreementHeader.PrimaryResponsibleWorker;//worker
+        //salesagreementHeader.DocumentTitle   = salesagreementHeader.DocumentTitle;
+        salesagreementHeader.DefaultAgreementLineEffectiveDate   = agreementHeader.EffectiveDate;
+        salesagreementHeader.DefaultAgreementLineExpirationDate  = agreementHeader.ExpirationDate;
+        salesagreementHeader.AgreementState  = AgreementState::OnHold;
+        //salesagreementHeader.DefaultDimension    = salesagreementHeader.DefaultDimension; // for this need to get logic
+        salesagreementHeader.insert();
+ 
+        agreementHeaderDefault.initFromCustTable(custTable);
+        agreementHeaderDefault.AgreementHeader   = salesagreementHeader.RecId;
+        agreementHeaderDefault.PaymentTerms = agreementHeader.PaymentTerms;
+        agreementHeaderDefault.DeliveryTerm = agreementHeader.DeliveryTerm;
+        agreementHeaderDefault.DeliveryMode = agreementHeader.DeliveryMode;
+        agreementHeaderDefault.insert();
+ 
+        salesagreementHeaderDefault.SalesAgreementHeader  = salesagreementHeader.RecId;
+        salesagreementHeaderDefault.initFromCustTable(custTable);
+        salesagreementHeaderDefault.insert();
+ 
+        //purchAgreementCertification.salesagreementHeader = salesagreementHeader.RecId;
+        //purchAgreementCertification.cust    = custTable.AccountNum;
+        //purchAgreementCertification.insert();
+ 
+        ETG_SalesAgreementHeaderNew.SalesAgreementId    = salesagreementHeader.SalesNumberSequence;
+        ETG_SalesAgreementHeaderNew.PortOfLoading       = agreementHeader.PortOfLoading;
+        ETG_SalesAgreementHeaderNew.PortOfDischarge     = agreementHeader.PortOfDischarge;
+        ETG_SalesAgreementHeaderNew.insert();
+ 
+        while select agreementLineAPI
+            where agreementLineAPI.DealNumber == agreementHeader.DealNumber
+        {
+            agreementLineQuantityCommitment.initValue();
+            agreementLineQuantityCommitment.Agreement = salesagreementHeader.RecId;
+            agreementLineQuantityCommitment.initFromAgreementHeader(salesagreementHeader);
+ 
+            agreementLineQuantityCommitment.ItemId                 = agreementLineAPI.ItemId;
+            agreementLineQuantityCommitment.CommitedQuantity       = agreementLineAPI.Quantity;
+            agreementLineQuantityCommitment.ProductUnitOfMeasure   = agreementLineAPI.Unit;
+            agreementLineQuantityCommitment.PricePerUnit           = agreementLineAPI.UnitPrice;
+            agreementLineQuantityCommitment.ItemDataAreaId         = agreementLineAPI.DataAreaId;
+            agreementLineQuantityCommitment.EffectiveDate          = agreementHeader.EffectiveDate;
+            agreementLineQuantityCommitment.ExpirationDate         = agreementHeader.ExpirationDate;
+ 
+            agreementLineQuantityCommitment.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

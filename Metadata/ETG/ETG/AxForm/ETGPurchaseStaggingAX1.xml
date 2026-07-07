@@ -1,0 +1,1254 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxForm xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V6">
+	<Name>ETGPurchaseStaggingAX1</Name>
+	<SourceCode>
+		<Methods xmlns="">
+			<Method>
+				<Name>classDeclaration</Name>
+				<Source><![CDATA[
+[Form]
+public class ETGPurchaseStaggingAX1 extends FormRun
+{
+}
+]]></Source>
+			</Method>
+		</Methods>
+		<DataSources xmlns="">
+			<DataSource>
+				<Name>ETGHapayPurchTable</Name>
+				<Methods>
+					<Method>
+						<Name>active</Name>
+						<Source><![CDATA[
+        public int active()
+        {
+            int ret;
+            
+            FormFunctionButtonControl postButton;
+
+            ret = super();
+
+            
+            Post.enabled(!ETGHapayPurchTable.Reference_Number);
+
+            // Method B: If Method A fails, use this safer lookup
+            // postButton = element.design().controlName("Post");
+            // if (postButton)
+            // {
+            //    postButton.enabled(!ETGHapayPurchTable.Reference_Number);
+            // }
+
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields />
+			</DataSource>
+		</DataSources>
+		<DataControls xmlns="">
+			<Control>
+				<Name>Post</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        public void clicked()
+        {
+            super();
+
+            
+            if (!ETGHapayPurchTable.RecId)
+            {
+                Info("No header record selected.");
+                return;
+            }
+
+            
+            if (ETGHapayPurchTable.Reference_Number)
+            {
+                Warning("Purchase Order is already created for this record.");
+                return;
+            }
+
+            ttsbegin;
+            try
+            {
+                PurchTable        purchTable;
+                PurchLine         purchLine;
+                ETGHapayPurchLine lineDataSource;
+                NumberSeq         numberSeq;
+                VendTable         vendTable;
+                DirPartyTable     dirPartyTable;
+               
+                
+                purchTable.initValue();
+                numberSeq = NumberSeq::newGetNum(PurchParameters::numRefPurchId());
+                purchTable.PurchId        = numberSeq.num();
+                purchTable.PurchName = ETGHapayPurchTable.VendorName;
+
+                select firstOnly vendTable
+                              join dirPartyTable
+                                 where vendTable.Party == dirPartyTable.RecId
+                               && dirPartyTable.Name == purchTable.PurchName;
+
+                if (vendTable)
+                {
+                    purchTable.OrderAccount   = vendTable.AccountNum;
+                    purchTable.VendGroup      = vendTable.VendGroup;
+                }
+               
+                purchTable.LanguageId     =  "en-US";
+                purchTable.InvoiceAccount = purchTable.OrderAccount;
+                purchTable.CurrencyCode   = ETGHapayPurchTable.CurrencyCode;
+                purchTable.DlvMode        = lineDataSource.DlvMode;
+                purchTable.DlvTerm        = lineDataSource.DlvTerm;
+                purchTable.DefaultDimension = ETGHapayPurchTable.DimensionDefault;
+
+             
+                if (purchTable.validateWrite())
+                {
+                    purchTable.insert();
+                }
+                else
+                {
+                    throw error("Failed to validate purchase header. Check vendor account and other mandatory fields.");
+                }
+
+               
+                ETGHapayPurchTable.selectForUpdate(true);
+                ETGHapayPurchTable.Reference_Number = purchTable.PurchId;
+                ETGHapayPurchTable.update();
+
+                
+                for (lineDataSource = ETGHapayPurchLine_DS.getFirst() as ETGHapayPurchLine; lineDataSource; lineDataSource = ETGHapayPurchLine_DS.getNext() as ETGHapayPurchLine)
+                {
+                    purchLine.clear();
+                    purchLine.initValue();
+
+                    purchLine.PurchId = purchTable.PurchId; 
+
+                    
+                    purchLine.ItemId     = lineDataSource.ItemId;
+                
+                
+
+                    
+                    InventDim inventDim;
+                    inventDim.InventSiteId     = lineDataSource.InventSiteId;
+                    inventDim.InventLocationId = lineDataSource.InventLocationId;
+                    inventDim.configId         = lineDataSource.configId;
+                    inventDim.InventSizeId     = lineDataSource.InventSizeId;
+                    inventDim.InventColorId    = lineDataSource.InventColorId;
+                    inventDim.InventStyleId    =  lineDataSource.InventStyleId;
+                    purchLine.InventDimId      = InventDim::findOrCreate(inventDim).inventDimId;
+        
+                    
+                    purchLine.createLine(true, true, true, true, true, true);
+                    purchLine.selectForUpdate(true);
+                    purchLine.PurchQty   = lineDataSource.PurchQty;
+                    purchLine.PurchPrice = lineDataSource.PurchPrice;
+                    purchLine.LineAmount = purchLine.PurchQty * purchLine.PurchPrice;
+
+                    purchLine.update();
+
+
+                    
+                    lineDataSource.selectForUpdate(true);
+                    lineDataSource.Reference_Number = purchTable.PurchId;
+                    lineDataSource.update();
+                }
+
+                ttscommit;
+                
+                Info(strFmt("Purchase order %1 created successfully.", purchTable.PurchId));
+
+                ETGHapayPurchTable_ds.reread();  // Re-read current record from DB
+                ETGHapayPurchTable_ds.refresh(); // Refresh display
+                ETGHapayPurchTable_ds.active();  // Force execution of active() method to disable button
+            }
+            catch (Exception::Error)
+            {
+                ttsabort;
+                Error("An error occurred while posting the purchase order.");
+            }
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+		</DataControls>
+		<Members xmlns="" />
+	</SourceCode>
+	<DataSources>
+		<AxFormDataSource xmlns="">
+			<Name>ETGHapayPurchTable</Name>
+			<Table>ETGHapayPurchTable</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>BusinessUnit</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CountryOfFinalDestination</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CountryOfOriginOfGoods</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CreatedBy</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CreatedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CurrencyCode</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DimensionDefault</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DlvTerm</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DocumentDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGDataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InvoiceAccount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InvoiceDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LanguageId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>MainCommodity</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ModifiedBy</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ModifiedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>NumRef</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>OrderAccount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PaymentDueDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PaymentTerms</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PlaceOfDischarge</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PlaceOfLoading</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PurchId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Reference_Number</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SharepointURL</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SubCommodity</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TradeDetails</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Vendor</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>VendorName</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Vertical</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+		<AxFormDataSource xmlns="">
+			<Name>ETGHapayPurchLine</Name>
+			<Table>ETGHapayPurchLine</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>AccountingDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>AirFreightCharges</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Amount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>BLNo</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>configId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CreatedBy</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CreatedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CurrencyCode</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Dateofissue</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Dateofsail</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DeliveryReference</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DescriptionDetails</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DimensionDefault</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DlvMode</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DlvTerm</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>FromDatePort</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>GrossWeight</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventBatchId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventColorId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventLocationId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventSerialId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventSiteId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventSizeId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventStatusId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventStyleId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InvoiceAccount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ItemId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Material</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>MaterialCode</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ModifiedBy</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ModifiedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>NetWeight</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>NumRef</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>OrderAccount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>OverDeliveryPct</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PackingGroup</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PartNo</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PortOfDischarge</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PortOfDischargeDesc</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PortOfLoading</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PortOfLoadingDesc</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PostingProfile</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PurchId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PurchPrice</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PurchQty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PurchUnit</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Reference_Number</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SupplierInvoiceNo</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TaxGroup</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ToDatePort</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TransferDateBLDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>UnderDeliveryPct</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<JoinSource>ETGHapayPurchTable</JoinSource>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+	</DataSources>
+	<Design>
+		<Caption xmlns="">Integration Purchase Orders</Caption>
+		<Pattern xmlns="">Custom</Pattern>
+		<ShowDeleteButton xmlns="">Yes</ShowDeleteButton>
+		<ShowNewButton xmlns="">No</ShowNewButton>
+		<Style xmlns="">SimpleList</Style>
+		<Controls xmlns="">
+			<AxFormControl xmlns=""
+				i:type="AxFormActionPaneControl">
+				<Name>FormActionPaneControl1</Name>
+				<Type>ActionPane</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormButtonGroupControl">
+						<Name>FormButtonGroupControl1</Name>
+						<Type>ButtonGroup</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonControl">
+								<Name>Post</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<Type>Button</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Text>Post</Text>
+							</AxFormControl>
+						</Controls>
+					</AxFormControl>
+				</Controls>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGridControl">
+				<Name>HeaderDetails</Name>
+				<Type>Grid</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchTable_PurchId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>PurchId</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchTable_Reference_Number</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Reference_Number</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchTable_VendorName</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>VendorName</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchTable_CountryOfFinalDestination</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>CountryOfFinalDestination</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchTable_CountryOfOriginOfGoods</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>CountryOfOriginOfGoods</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchTable_CurrencyCode</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>CurrencyCode</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchTable_DataAreaId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>DataAreaId</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchTable_DlvTerm</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>DlvTerm</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormDateControl">
+						<Name>ETGHapayPurchTable_DocumentDate</Name>
+						<Type>Date</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>DocumentDate</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchTable_ETGDataAreaId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ETGDataAreaId</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormDateControl">
+						<Name>ETGHapayPurchTable_InvoiceDate</Name>
+						<Type>Date</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>InvoiceDate</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchTable_NumRef</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>NumRef</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormInt64Control">
+						<Name>ETGHapayPurchTable_Partition</Name>
+						<Type>Int64</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Partition</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormDateControl">
+						<Name>ETGHapayPurchTable_PaymentDueDate</Name>
+						<Type>Date</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>PaymentDueDate</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchTable_PaymentTerms</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>PaymentTerms</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchTable_PlaceOfDischarge</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>PlaceOfDischarge</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchTable_PlaceOfLoading</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>PlaceOfLoading</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormInt64Control">
+						<Name>ETGHapayPurchTable_RecId</Name>
+						<Type>Int64</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>RecId</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormIntegerControl">
+						<Name>ETGHapayPurchTable_TableId</Name>
+						<Type>Integer</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>TableId</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchTable_TradeDetails</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>TradeDetails</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchTable_Vendor</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Vendor</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchTable_SharepointURL</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>SharepointURL</DataField>
+						<DataSource>ETGHapayPurchTable</DataSource>
+					</AxFormControl>
+				</Controls>
+				<DataSource>ETGHapayPurchTable</DataSource>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGridControl">
+				<Name>LineDetails</Name>
+				<Type>Grid</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_PurchId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>PurchId</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_Reference_Number</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Reference_Number</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormDateControl">
+						<Name>ETGHapayPurchLine_AccountingDate</Name>
+						<Type>Date</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>AccountingDate</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_AirFreightCharges</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>AirFreightCharges</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormRealControl">
+						<Name>ETGHapayPurchLine_Amount</Name>
+						<Type>Real</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Amount</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_BLNo</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>BLNo</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_configId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>configId</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_CurrencyCode</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>CurrencyCode</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_DataAreaId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>DataAreaId</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormDateControl">
+						<Name>ETGHapayPurchLine_Dateofissue</Name>
+						<Type>Date</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Dateofissue</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormDateControl">
+						<Name>ETGHapayPurchLine_Dateofsail</Name>
+						<Type>Date</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Dateofsail</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_DeliveryReference</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>DeliveryReference</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_DescriptionDetails</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>DescriptionDetails</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_DlvMode</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>DlvMode</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_DlvTerm</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>DlvTerm</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormDateControl">
+						<Name>ETGHapayPurchLine_FromDatePort</Name>
+						<Type>Date</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>FromDatePort</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormRealControl">
+						<Name>ETGHapayPurchLine_GrossWeight</Name>
+						<Type>Real</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>GrossWeight</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_inventBatchId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>inventBatchId</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_InventColorId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>InventColorId</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_InventLocationId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>InventLocationId</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_inventSerialId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>inventSerialId</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_InventSiteId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>InventSiteId</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_InventSizeId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>InventSizeId</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_InventStatusId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>InventStatusId</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_InventStyleId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>InventStyleId</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_InvoiceAccount</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>InvoiceAccount</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_ItemId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ItemId</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_Material</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Material</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_MaterialCode</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>MaterialCode</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormRealControl">
+						<Name>ETGHapayPurchLine_NetWeight</Name>
+						<Type>Real</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>NetWeight</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_NumRef</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>NumRef</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_OrderAccount</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>OrderAccount</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormRealControl">
+						<Name>ETGHapayPurchLine_OverDeliveryPct</Name>
+						<Type>Real</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>OverDeliveryPct</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_PackingGroup</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>PackingGroup</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormInt64Control">
+						<Name>ETGHapayPurchLine_Partition</Name>
+						<Type>Int64</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Partition</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_PartNo</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>PartNo</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_PortOfDischarge</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>PortOfDischarge</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_PortOfDischargeDesc</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>PortOfDischargeDesc</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_PortOfLoading</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>PortOfLoading</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_PortOfLoadingDesc</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>PortOfLoadingDesc</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_PostingProfile</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>PostingProfile</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormRealControl">
+						<Name>ETGHapayPurchLine_PurchPrice</Name>
+						<Type>Real</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>PurchPrice</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormRealControl">
+						<Name>ETGHapayPurchLine_PurchQty</Name>
+						<Type>Real</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>PurchQty</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_PurchUnit</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>PurchUnit</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormInt64Control">
+						<Name>ETGHapayPurchLine_RecId</Name>
+						<Type>Int64</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>RecId</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_SupplierInvoiceNo</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>SupplierInvoiceNo</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormIntegerControl">
+						<Name>ETGHapayPurchLine_TableId</Name>
+						<Type>Integer</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>TableId</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGHapayPurchLine_TaxGroup</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>TaxGroup</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormDateControl">
+						<Name>ETGHapayPurchLine_ToDatePort</Name>
+						<Type>Date</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ToDatePort</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormDateControl">
+						<Name>ETGHapayPurchLine_TransferDateBLDate</Name>
+						<Type>Date</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>TransferDateBLDate</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormRealControl">
+						<Name>ETGHapayPurchLine_UnderDeliveryPct</Name>
+						<Type>Real</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>UnderDeliveryPct</DataField>
+						<DataSource>ETGHapayPurchLine</DataSource>
+					</AxFormControl>
+				</Controls>
+				<DataSource>ETGHapayPurchLine</DataSource>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormTabControl">
+				<Name>FinancialDimension</Name>
+				<Type>Tab</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls />
+				<DataSource>ETGHapayPurchTable</DataSource>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGroupControl">
+				<Name>FormGroupControl1</Name>
+				<Pattern>DimensionEntryControl</Pattern>
+				<PatternVersion>1.1</PatternVersion>
+				<Type>Group</Type>
+				<WidthMode>SizeToAvailable</WidthMode>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormContainerControl">
+						<Name>DimensionEntryControl1</Name>
+						<Type>Container</Type>
+						<WidthMode>SizeToAvailable</WidthMode>
+						<FormControlExtension>
+							<Name>DimensionEntryControl</Name>
+							<ExtensionComponents />
+							<ExtensionProperties>
+								<AxFormControlExtensionProperty>
+									<Name>parmControllerClassName</Name>
+									<Type>ExtendedDataType</Type>
+									<TypeName>ClassName</TypeName>
+									<Value>LedgerDefaultDimensionEntryController</Value>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>parmControlLabelText</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>parmEnumerationName</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>parmDataSourceName</Name>
+									<Type>String</Type>
+									<Value>ETGHapayPurchTable</Value>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>parmValueSetReferenceField</Name>
+									<Type>String</Type>
+									<Value>DimensionDefault</Value>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>parmEnumValueSetReferenceField</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+							</ExtensionProperties>
+						</FormControlExtension>
+						<Controls />
+					</AxFormControl>
+				</Controls>
+				<HideIfEmpty>No</HideIfEmpty>
+			</AxFormControl>
+		</Controls>
+	</Design>
+	<Parts />
+</AxForm>

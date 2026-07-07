@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGDeliveryScheduleReportDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The<c>ETGDeliveryScheduleReportDP</c> class is the report data provider class for delivery schedule report
+/// </summary>
+[SRSReportParameterAttribute(classStr(ETGDeliveryScheduleReportContract))]
+public class ETGDeliveryScheduleReportDP extends SRSReportDataProviderBase
+{
+    ETGDeliveryScheduleReportTmp          deliveryScheduleReportTmp;
+    ETGTimelineTable                      timelineTable;
+    InventDim                             inventDim;
+    ETG_SalesLineTrade                    etg_salesLineTrade;
+    
+    /// <summary>
+    ///  Selects the <c>ETGDeliveryScheduleReportTmp</c> table.
+    /// </summary>
+    /// <returns>
+    ///    The <c>ETGDeliveryScheduleReportTmp</c> table.
+    /// </returns>
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getDeliveryScheduleReportTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETGDeliveryScheduleReportTmp))]
+    public ETGDeliveryScheduleReportTmp getDeliveryScheduleReportTmp()
+    {
+        select * from deliveryScheduleReportTmp;
+        return deliveryScheduleReportTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        Query                               query;
+        QueryRun                            queryRun;
+        QueryBuildDataSource                qbdsSalesTable, qbdsSalesLine,qbdsInventDim;
+        QueryBuildDataSource                qbdsSalesAgreementHeader;
+        QueryBuildRange                     qbrDeliveryDate;
+        TransDate                           fromDate,toDate;
+        SalesTable                          salesTableLocal;
+        SalesLine                           salesLineLocal;
+        AgreementLine                       aLine;
+        SalesAgreementHeader                salesAgreementHeader;
+        AgreementHeader                     agreementHeader;
+        InventDim                           inventDimLocal;
+        str                                 etgCommodity;
+        str                                 etgSubCommodity;
+
+        ETGACFParameters acfParameters = ETGACFParameters::find();
+
+        ETGDeliveryScheduleReportContract contract;
+        contract = new ETGDeliveryScheduleReportContract();
+        contract =   this.parmDataContract() as ETGDeliveryScheduleReportContract;
+        
+        fromDate = contract.parmFromDate();
+        toDate   = contract.parmToDate();
+        etgCommodity = contract.parmETGCommodity();
+        etgSubCommodity = contract.parmETGSubCommodity();
+        //SalesAgreementId  agreementNumber      = contract.parmSalesAgreementNumber();
+        //TransDate         agreementDate        = contract.parmSalesAgreementDate();
+
+        query           =   new query();
+        qbdsSalesTable  =   query.addDataSource(tableNum(SalesTable));
+        qbdsSalesLine   =   qbdsSalesTable.addDataSource(tableNum(SalesLine));
+        qbdsSalesLine.joinMode(JoinMode::InnerJoin);
+        qbdsSalesLine.relations(true);
+
+        if(fromDate && !toDate)
+        {
+            qbdsSalesTable.addRange(fieldNum(SalesTable, ShippingDateRequested)).value(strFmt('>%1',queryvalue(fromDate-1)));
+        }
+        if(!fromDate && toDate)
+        {
+            qbdsSalesTable.addRange(fieldNum(SalesTable, ShippingDateRequested)).value(strFmt("<%1",queryValue(toDate+1)));
+        }
+        if(fromDate && toDate)
+        {
+            qbdsSalesTable.addRange(fieldNum(SalesTable,ShippingDateRequested)).value(queryRange(fromDate,toDate));
+        }
+
+        if(etgCommodity)
+        {
+
+        }
+
+        qbdsSalesTable.addRange(fieldNum(SalesTable, SalesStatus)).value(SysQuery::value(SalesStatus::Backorder));
+        qbdsSalesLine.addRange(fieldNum(SalesLIne, RemainSalesPhysical)).value(SysQuery::valueNot(0));
+
+        queryRun = new QueryRun(query);
+
+        while(queryRun.next())
+        {
+            
+            salesLineLocal  = queryRun.get(tableNum(SalesLine));
+
+            deliveryScheduleReportTmp.clear();
+            deliveryScheduleReportTmp.ETGCommodity     = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(salesLineLocal.DefaultDimension,acfParameters.MainCommodity);
+            deliveryScheduleReportTmp.ETGSubCommodity  = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(salesLineLocal.DefaultDimension,acfParameters.SubCommodity);
+            if(etgCommodity && (etgCommodity != deliveryScheduleReportTmp.ETGCommodity))
+            {
+                continue;
+            }
+            if(etgSubCommodity && (etgSubCommodity !=  deliveryScheduleReportTmp.ETGSubCommodity))
+            {
+                continue;
+            }
+
+            salesTableLocal = queryRun.get(tableNum(SalesTable));
+            inventDim       = salesLineLocal.inventDim();
+
+            deliveryScheduleReportTmp.SalesId          = salesTableLocal.SalesId;
+            deliveryScheduleReportTmp.SalesDate        =  DateTimeUtil::date(salesTableLocal.CreatedDateTime);
+            deliveryScheduleReportTmp.CustAccount      = salesTableLocal.CustAccount;
+            deliveryScheduleReportTmp.CustomerBankName = CustTable::find(salesTableLocal.CustAccount).name();
+            deliveryScheduleReportTmp.ETGTransitTime   = ETG_SalesTableTrade::findFromSalesTrade(salesTableLocal.SalesId).ETGTransitTime;
+            deliveryScheduleReportTmp.DeliveryDate     = salesTableLocal.ShippingDateRequested;
+            deliveryScheduleReportTmp.ItemId           = salesLineLocal.ItemId;
+            deliveryScheduleReportTmp.Name             = salesLineLocal.Name;
+            deliveryScheduleReportTmp.configId         = inventDim.configId;
+            deliveryScheduleReportTmp.InventSizeId     = inventDim.InventSizeId;
+            deliveryScheduleReportTmp.InventColorId    = inventDim.InventColorId;
+            deliveryScheduleReportTmp.InventStyleId    = inventDim.InventStyleId;
+            deliveryScheduleReportTmp.InventSiteId     = inventDim.InventSiteId;
+            deliveryScheduleReportTmp.InventLocationId = inventDim.InventLocationId;
+            deliveryScheduleReportTmp.wMSLocationId    = inventDim.wMSLocationId;
+            deliveryScheduleReportTmp.inventBatchId    = inventDim.inventBatchId;
+            deliveryScheduleReportTmp.inventSerialId   = inventDim.inventSerialId;
+            deliveryScheduleReportTmp.SalesQty         = salesLineLocal.RemainSalesPhysical;
+            deliveryScheduleReportTmp.LineAmount       = salesLineLocal.LineAmount;
+            deliveryScheduleReportTmp.SalesPrice       = salesLineLocal.SalesPrice;
+            if (salesLineLocal.MatchingAgreementLine)
+            {
+                AgreementLine agreementLine = AgreementLine::find(salesLineLocal.MatchingAgreementLine);
+
+                if (agreementLine.RecId)
+                {
+                    salesAgreementHeader                              = agreementLine.agreementHeader();
+                    deliveryScheduleReportTmp.ETGSalesAgreementNumber = salesAgreementHeader.SalesNumberSequence;
+                    deliveryScheduleReportTmp.ETGSalesAgreementDate   = salesAgreementHeader.DefaultAgreementLineEffectiveDate;
+                }
+           }
+
+            select firstonly etg_salesLineTrade where etg_salesLineTrade.SalesLineRecId == salesLineLocal.RecId;
+
+            deliveryScheduleReportTmp.PortOfLoading   = etg_salesLineTrade.PortOfLoadingDesc;
+            deliveryScheduleReportTmp.PortOfDischarge = etg_salesLineTrade.PortOfDischargeDesc;
+            deliveryScheduleReportTmp.ETGDestination  = etg_salesLineTrade.PortOfDischargeDesc;
+            deliveryScheduleReportTmp.ShipmentFromDate = ETG_SalesTableTrade::findFromSalesTrade(salesTableLocal.SalesId).FromDatePort;
+            deliveryScheduleReportTmp.ShipmentToDate = ETG_SalesTableTrade::findFromSalesTrade(salesTableLocal.SalesId).ToDatePort;
+            deliveryScheduleReportTmp.FixedDueDate    = deliveryScheduleReportTmp.ETGTransitTime + salesTableLocal.ShippingDateRequested;
+            deliveryScheduleReportTmp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

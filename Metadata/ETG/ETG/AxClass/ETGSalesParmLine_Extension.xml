@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesParmLine_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///  Extension class for table <c>SalesParmLine</c>
+/// </summary>
+[ExtensionOf(TableStr(SalesParmLine))]
+internal final class ETGSalesParmLine_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>validateWrite</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method overides validateWrite to call validateTermoNumberUsage() for field TERMO value usage
+    ///  when TERMONumberFeature is Enabled
+    /// </summary>
+    /// <returns>Boolean</returns>
+    public boolean validateWrite()
+    {
+        boolean isValid = next validateWrite();
+        if(isValid && this.salesParmTable().Ordering == DocumentStatus::Invoice && VendParameters::find().ETGEnableTermoNumberFeature == NoYes::Yes)
+        {
+            this.validateTermoNumberUsage();
+        }
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>termoValueUsage</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method overrides display to populate Line Amount in Termo value usage
+    /// </summary>
+    /// <param name = "_salesParmLine"></param>
+    /// <returns>Integer</returns>
+    [SysClientCacheDataMethodAttribute(false)]
+    public static display int termoValueUsage(SalesParmLine _salesParmLine)
+    {
+        return real2int(_salesParmLine.LineAmount);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateTermoNumberUsage</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method makes TERMO Value usage field mandatory when TERMONumber is entered(not null) 
+    /// It validates field TERMO Value usage to be less than or equal to Line Amount, Remaining amount, TERMO Value
+    /// </summary>
+    public void validateTermoNumberUsage()
+    {
+        SalesParmLine  salesParmLine = this;
+        ETGTermonumbertable  termoNumberTable;
+        ETGTermonumbertable termoNumberMother;
+        SalesParmTable salesParmTable = salesParmLine.salesParmTable();
+        
+
+        if(salesParmTable &&  salesParmTable.ETGTERMONumber == "")
+        {
+            return;
+        }
+
+        termoNumberTable = ETGTERMONumberTable::findFromTermoNumber(salesParmTable.ETGTERMONumber);
+     
+        if(termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Regular || termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Mother)
+        {
+            if(this.LineAmount > termoNumberTable.RemainingTermoValueReal)
+            {
+                throw error(strFmt("@ETG_New:TERMOValueUsageValidationRemainingTERMOValue",
+                this.LineAmount,
+                termoNumberTable.RemainingTermoValueReal,
+                salesParmTable.ETGTERMONumber));
+            }
+            if(this.LineAmount > termoNumberTable.TermoValueReal)
+            {
+                throw error(strFmt("@ETG_New:TERMOValueUsageValidationTERMOValue",
+                this.LineAmount,
+                termoNumberTable.TermoValueReal,
+                salesParmTable.ETGTERMONumber));
+            }
+        }
+
+        if(termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Child)
+        {
+            termoNumberMother = ETGTERMONumberTable::findFromTermoNumber(termoNumberTable.MotherTERMOReference, true);
+
+            if(this.LineAmount > termoNumberMother.RemainingTermoValueReal)
+            {
+                throw error(strFmt("@ETG_New:ChildTERMOValueUsageValidationRemainingTERMOValue",
+                this.LineAmount,
+                termoNumberMother.RemainingTermoValueReal,
+                salesParmTable.ETGTERMONumber));
+            }
+            if(this.LineAmount > termoNumberMother.TermoValueReal)
+            {
+                throw error(strFmt("@ETG_New:ChildTERMOValueUsageValidationTERMOValue",
+                this.LineAmount,
+                termoNumberMother.TermoValueReal,
+                salesParmTable.ETGTERMONumber));
+            }
+
+            if(this.ETGTermoValueUsageReal > this.LineAmount)
+            {
+                throw error(strFmt("@ETG_New:TERMOValueUsageValidationLineAmount",
+                this.ETGTermoValueUsageReal,
+                this.LineAmount,
+                salesParmTable.ETGTERMONumber));
+            }
+           
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initFromSalesLine</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method initializes the fields from salesline.
+    /// </summary>
+    /// <param name = "_salesLine">SalesLine</param>
+    /// <param name = "_salesTable">SalesTable</param>
+    void  initFromSalesLine(SalesLine  _salesLine, SalesTable  _salesTable)
+    {
+        next initFromSalesLine(_salesLine, _salesTable);
+        
+        this.ETGGrossWeight     = _salesLine.SalesQty;
+        //CS, DLT, Abhinav 04022025
+        if(ETGACFParameters::find().EnableSOInvoiceDifferentQty == NoYes::Yes)
+        {
+            ETGSalesEditLines ETGSalesEditLinesLoc;
+            select firstonly  ETGSalesEditLinesLoc
+                order by PackingSlipId desc
+            where ETGSalesEditLinesLoc.SalesId == _salesLine.SalesId
+              &&  ETGSalesEditLinesLoc.ItemId == _salesLine.ItemId
+            && ETGSalesEditLinesLoc.ETGRefDefaultDimension == _salesLine.DefaultDimension;
+
+            if(ETGSalesEditLinesLoc)
+            {
+                this.ETGGrossWeight = ETGSalesEditLinesLoc.Remain;
+            }
+        }
+         
+        //this.ETGGrossWeight     = _salesLine.SalesQty;
+        //CE, DLT, Abhinav
+
+        if(SalesParameters::find().ETGEnableCylinderTracking)
+        {
+            this.ETGConnectionType  = _salesLine.ETGConnectionType;
+            this.ETGDepositAmount   = _salesLine.ETGDepositAmount;
+            this.ETGDepositRate     = _salesLine.ETGDepositRate;
+            this.ETGFilledOrEmpty   = _salesLine.ETGFilledOrEmpty;
+        }
+        this.ETGRefSalesId = _salesLine.ETGRefSalesId;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

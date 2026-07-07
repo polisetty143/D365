@@ -1,0 +1,232 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_AgreementLine_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tableStr(AgreementLineQuantityCommitment))]
+final class ETG_AgreementLine_Extension
+{
+   
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>intercompanySync</Name>
+				<Source><![CDATA[
+    public void intercompanySync()
+    {
+        ETG_AgreementLineNotes              agreementLineNotesSrc,agreementLineNotesDes,agreementLineNotesChk;
+        ETG_AgreementLineQualityGrp         agreementLineQualityGrpSrc,agreementLineQualityGrpDes,agreementLineQualityGrpChk;
+        boolean                             isNotes = false;
+        DataAreaId                          srcLE;
+        ETG_IsCreatedAgreement              isCreatedAgreement;
+        ETGAgrrementQualitySpecsLine        agreementQualitySpecsLineSrc,agreementQualitySpecsLineDes;
+        RecordInsertList    tmpInsNotes = new RecordInsertList(tableNum(ETG_AgreementLineNotes));
+
+        next intercompanySync();
+        AgreementLineQuantityCommitment agreementLineQuantityCommitment = this.intercompanyAgreementLine(true) as AgreementLineQuantityCommitment;
+
+        if(agreementLineQuantityCommitment)
+        {
+            srcLE       = curext();
+             
+            changecompany(agreementLineQuantityCommitment.InventDimDataAreaId)
+            {
+                agreementLineQuantityCommitment.ETG_IsGrossWeight       = this.ETG_IsGrossWeight;
+                agreementLineQuantityCommitment.ETG_ItemAlternativeName = this.ETG_ItemAlternativeName;
+                agreementLineQuantityCommitment.ETG_OverDeliveryPct     = this.ETG_OverDeliveryPct;
+                agreementLineQuantityCommitment.ETG_UnderDeliveryPct    = this.ETG_UnderDeliveryPct;
+                agreementLineQuantityCommitment.ETG_PriceType           = this.ETG_PriceType;
+                agreementLineQuantityCommitment.DefaultDimension        = InventTable::find(agreementLineQuantityCommitment.ItemId).DefaultDimension;
+                agreementLineQuantityCommitment.ETG_ItemQuantityGroup   = this.ETG_ItemQuantityGroup;
+                agreementLineQuantityCommitment.ETG_ReleaseOrderLowerLimit = this.ETG_ReleaseOrderLowerLimit;
+                agreementLineQuantityCommitment.ETG_ReleaseOrderUpperLimit = this.ETG_ReleaseOrderUpperLimit;
+                agreementLineQuantityCommitment.doUpdate();
+
+                select firstonly isCreatedAgreement
+                    where isCreatedAgreement.AgreementLine == agreementLineQuantityCommitment.RecId;
+       
+                if(!isCreatedAgreement)
+                {
+                    isCreatedAgreement.clear();
+                    isCreatedAgreement.AgreementLine = agreementLineQuantityCommitment.RecId;
+                    isCreatedAgreement.insert();
+                }
+
+                select firstonly RecId from agreementLineNotesChk
+                    where agreementLineNotesChk.AgreementLine == agreementLineQuantityCommitment.RecId
+                        && agreementLineNotesChk.ItemId       == agreementLineQuantityCommitment.ItemId;
+
+                if(!agreementLineNotesChk)
+                {
+                    while select crosscompany EnumNotes,Description,ItemId,PrintNotesInContract from agreementLineNotesSrc
+                        where agreementLineNotesSrc.AgreementLine == this.RecId
+                            && agreementLineNotesSrc.DataAreaId == srcLE
+                    {
+                    
+                        agreementLineNotesDes.AgreementLine        = agreementLineQuantityCommitment.RecId;
+                        agreementLineNotesDes.EnumNotes            = agreementLineNotesSrc.EnumNotes;
+                        agreementLineNotesDes.Description          = agreementLineNotesSrc.Description;
+                        agreementLineNotesDes.ItemId               = agreementLineNotesSrc.ItemId;
+                        agreementLineNotesDes.PrintNotesInContract = agreementLineNotesSrc.PrintNotesInContract;
+               
+                        tmpInsNotes.add(agreementLineNotesDes);
+                        isNotes = true;
+                    }
+                    if(isNotes)
+                    {
+                        tmpInsNotes.insertDatabase();
+                        isNotes = false;
+                    }
+                }
+
+                select firstonly RecId from agreementLineQualityGrpChk
+                    where agreementLineQualityGrpChk.AgreementLine == agreementLineQuantityCommitment.RecId;
+
+                if(!agreementLineQualityGrpChk)
+                {
+                    while select crosscompany GroupId from agreementLineQualityGrpSrc
+                        where agreementLineQualityGrpSrc.AgreementLine == this.RecId
+                             && agreementLineQualityGrpSrc.DataAreaId == srcLE
+                    {
+                        agreementLineQualityGrpDes.AgreementLine   = agreementLineQuantityCommitment.RecId;
+                        agreementLineQualityGrpDes.GroupId         = agreementLineQualityGrpSrc.GroupId;
+                        agreementLineQualityGrpDes.insert();
+                    }
+                    while select crosscompany * from agreementQualitySpecsLineSrc
+                        where agreementQualitySpecsLineSrc.AgreementLineRefrecid == this.RecId
+                             && agreementQualitySpecsLineSrc.DataAreaId == srcLE
+                    {
+                        agreementQualitySpecsLineDes.MinRange       = agreementQualitySpecsLineSrc.MinRange;
+                        agreementQualitySpecsLineDes.MaxRange       = agreementQualitySpecsLineSrc.MaxRange;
+                        agreementQualitySpecsLineDes.AdjustmentType = agreementQualitySpecsLineSrc.AdjustmentType;
+                        agreementQualitySpecsLineDes.Increment      = agreementQualitySpecsLineSrc.Increment;
+                        agreementQualitySpecsLineDes.FixedValue     = agreementQualitySpecsLineSrc.FixedValue;
+                        agreementQualitySpecsLineDes.SubGroupId     = agreementQualitySpecsLineSrc.SubGroupId;
+                        agreementQualitySpecsLineDes.AgreementLineRefrecid = agreementLineQuantityCommitment.RecId;
+                        agreementQualitySpecsLineDes.GroupID               = agreementQualitySpecsLineSrc.GroupID;
+                        agreementQualitySpecsLineDes.GroupDescription      = agreementQualitySpecsLineSrc.GroupDescription;
+                        agreementQualitySpecsLineDes.SubGrpId              = agreementQualitySpecsLineSrc.SubGrpId;
+                        agreementQualitySpecsLineDes.SubGroupDescription   = agreementQualitySpecsLineSrc.SubGroupDescription;
+                        agreementQualitySpecsLineDes.insert();
+                    }
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getProfitCenterDimensionAttributeValue</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Retrieves the concatenated <c>DimensionDisplayValue</c> value of the dimenion attibute values for the given default dimension.
+    /// </summary>
+    /// <param name="_defaultDimension">
+    /// Reference of the default dimension to get the value string.
+    /// </param>
+    /// <param name="_dimensionName">
+    /// Dimension name to be checked.
+    /// </param>
+    /// <returns>
+    /// The <c>DimensionDisplayValue</c> string of the dimension attribute value set items.
+    /// </returns>
+    public DimensionValue getProfitCenterDimensionAttributeValue(DimensionDefault _defaultDimension,Name _dimensionName)
+    {
+        DimensionAttribute                  dimensionAttribute;
+        DimensionAttributeValueSetItemView  dimensionAttributeValueSetItemView;
+        DimensionAttributeSetItem           dimensionAttributeSetItem;
+        DimensionEnumeration                dimensionStructure;
+
+        dimensionStructure = DimensionCache::getDimensionAttributeSetForLedger();
+
+        select firstonly DisplayValue from dimensionAttributeValueSetItemView
+            where dimensionAttributeValueSetItemView.DimensionAttributeValueSet == _defaultDimension
+            join RecId,Name from dimensionAttribute
+                order by dimensionAttribute.Name
+                where dimensionAttributeValueSetItemView.DimensionAttribute == dimensionAttribute.RecId
+                    && dimensionAttribute.Name == _dimensionName
+            exists join dimensionAttributeSetItem
+                where dimensionAttributeSetItem.DimensionAttribute == dimensionAttribute.RecId
+                    && dimensionAttributeSetItem.DimensionAttributeSet == dimensionStructure;
+
+        return dimensionAttributeValueSetItemView.DisplayValue;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateWrite</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Validates a record in the <c>AgreementLine</c> table.
+    /// </summary>
+    /// <returns>
+    /// true if the value in the field is valid; otherwise, false.
+    /// </returns>
+    public boolean validateWrite()
+    {
+        boolean ret = next validateWrite();
+
+        if(PurchParameters::find().ETGEnableFinDimProfitCenterValidation == NoYes::Yes)
+        {
+            DimensionValue agreementHeaderProfitCenterDimensionValue, itemProfitCenterDimensionValue;
+            String20 profitCenter = PurchParameters::find().ETGFinDimProfitCenterName;
+
+            if(this.agreementModuleType() == ModuleSalesPurch::Purch)
+            {
+                agreementHeaderProfitCenterDimensionValue = this.getProfitCenterDimensionAttributeValue(this.purchAgreementHeader().DefaultDimension,profitCenter);
+            }
+            else if(this.agreementModuleType() == ModuleSalesPurch::Sales)
+            {
+                agreementHeaderProfitCenterDimensionValue = this.getProfitCenterDimensionAttributeValue(this.salesAgreementHeader().DefaultDimension,profitCenter);
+            }
+
+            //Fetch Item profitCenter financial dimension value.
+            itemProfitCenterDimensionValue = this.getProfitCenterDimensionAttributeValue(InventTable::find(this.ItemId).DefaultDimension,profitCenter);
+                    
+            if (agreementHeaderProfitCenterDimensionValue != itemProfitCenterDimensionValue)
+            {
+                ret = checkFailed("@ETG:ProfitCenterValidationMsg");
+            }
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>update</Name>
+				<Source><![CDATA[
+    public void update()
+    {
+        //if sales agreement workflow is enabled and workflow status is approved then any changes in agreement will set wf status to Draft
+        if(this.agreementModuleType() == ModuleSalesPurch::Sales && ETGACFParameters::find().EnableSalesAgreementWorkflow == NoYes::Yes)
+        {
+            SalesAgreementHeader salesAgreementHeader;
+            salesAgreementHeader = SalesAgreementHeader::find(this.Agreement);
+
+            if(salesAgreementHeader && salesAgreementHeader.ETGWorkflowStatus == VersioningDocumentState::Approved)
+            {
+                if( this.orig().CommitedQuantity != this.CommitedQuantity 
+                    || this.orig().PricePerUnit != this.PricePerUnit)
+                {
+                    ttsbegin;
+                    salesAgreementHeader.selectForUpdate(true);
+                    salesAgreementHeader.ETGWorkflowStatus = VersioningDocumentState::Draft;
+                    salesAgreementHeader.doUpdate();
+                    ttscommit;
+                }
+            }
+        }
+
+        next update();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

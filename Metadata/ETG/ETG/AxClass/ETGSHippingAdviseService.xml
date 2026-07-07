@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSHippingAdviseService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+using Microsoft.Dynamics365.LocalizationFramework;
+
+class ETGShippingAdviseService
+{
+    public const str ERFormatModelName          = 'Model';
+    public const str ParametersDataSourceName   = 'RunTimeParameters';
+    public const str reportFormatName           = 'ETG Shipping documentary advise format (Word)';
+   
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>generateReportByGER</Name>
+				<Source><![CDATA[
+    public void generateReportByGER(ETGShippingAdviseContract _contract)
+    {
+        ERFormatMappingId           formatMappingId;
+        ETGShippingAdviseDP         dataProvider;
+        ETGShippingAdviseTmp        shippingAdviseHeaderTmp;
+        ERIFormatMappingRun         formatMappingRun;
+        ERFormatMappingTable        formatMappingTable;
+        SalesAgreementId            agreementId;
+
+        select firstonly Name, RecId from formatMappingTable
+            where formatMappingTable.Name == reportFormatName;
+
+        dataProvider            =   ETGShippingAdviseDP::construct();
+        formatMappingId         =   formatMappingTable.RecId;
+        shippingAdviseHeaderTmp =   dataProvider.processReport(_contract);
+        
+        if (formatMappingId)
+        {
+            try
+            {
+
+                ERIModelDefinitionParamsAction  parameters = new ERModelDefinitionParamsUIActionComposite().
+                    Add(new ERModelDefinitionDatabaseContext().addTemporaryTable(shippingAdviseHeaderTmp)).
+                    Add(new ERModelDefinitionObjectParameterAction(ERFormatModelName, ParametersDataSourceName, _contract, true)).
+                    Add(new ERModelDefinitionDatabaseContext().addValue(tableNum(CompanyInfo), fieldNum(CompanyInfo, DataArea),curExt()));
+                
+                formatMappingRun    =   ERObjectsFactory::createFormatMappingRunByFormatMappingId(formatMappingId);
+
+                formatMappingRun.withParameter(parameters);
+                formatMappingRun.parmFileName(reportFormatName);
+                formatMappingRun.withFileDestination(_contract.getFileDestination());
+                formatMappingRun.parmShowPromptDialog(false);
+                formatMappingRun.run();
+
+            }
+            catch
+            {
+                info("@SYS300117");
+            }
+        }
+        else
+        {
+            info("@SYS300117");
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

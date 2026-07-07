@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGBonDePaimentCacaoDataProvider</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(ETGBonDePaimentCacaoContract))]
+class ETGBonDePaimentCacaoDataProvider extends  SRSReportDataProviderPreProcessTempDB
+
+{
+    ETGBonDePaimentCacaoReportTmp            ETGBonDePaimentCacaoReportTmp;
+   
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGBonDePaimentCacaoReportTmp</Name>
+				<Source><![CDATA[
+    [SrsReportDataSetAttribute(tableStr(ETGBonDePaimentCacaoReportTmp))]
+    public ETGBonDePaimentCacaoReportTmp getETGBonDePaimentCacaoReportTmp()
+    {
+        select * from ETGBonDePaimentCacaoReportTmp;
+        return ETGBonDePaimentCacaoReportTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ProcessReport</Name>
+				<Source><![CDATA[
+    public void ProcessReport()
+    {
+        Query                               query;
+        QueryRun                            queryRun;
+        QueryBuildDataSource                queryBuildDataSource, queryBuildDataSource1;
+        QueryBuildDataSource                queryBuildDataSource2;
+        QueryBuildRange                     queryBuildRange;
+        QueryBuildRange                     queryBuildRange2;
+        RecId                               _RecId;
+        ETGPurchLineCoCOAQuality            _ETGPurchLineCoCOAQuality,_ETGPurchLineCoCOAQualityRec;
+        PurchLine                           _PurchLine;
+        PurchTable                          _PurchTable;
+        VendPackingSlipJour                 vendPackingSlipJour;
+        MarkupTrans                         _MarkupTrans;
+        VendParameters                      vendParameters;
+        VendPackingSlipTrans                vendPackingSlipTrans;
+        CompanyInfo      CompanyInfo = CompanyInfo::find();
+        
+        ETGBonDePaimentCacaoContract   Contract;
+
+        Contract        = this.parmDataContract();
+
+        _RecId          = Contract.parmRecId();
+
+
+        select vendPackingSlipJour
+            where VendPackingSlipJour.RecId == _RecId;
+
+
+        ETGBonDePaimentCacaoReportTmp.clear();
+        ETGBonDePaimentCacaoReportTmp.initValue();
+
+        select firstonly _ETGPurchLineCoCOAQualityRec
+            join _PurchLine
+                where _PurchLine.RecId == _ETGPurchLineCoCOAQualityRec.PurchLineRecId
+            && _PurchLine.PurchId == _ETGPurchLineCoCOAQualityRec.RefPurchId
+            join _PurchTable
+                where _PurchTable.PurchId == _PurchLine.PurchId
+                    && _PurchTable.PurchId == vendPackingSlipJour.PurchId
+             join VendPackingSlipTrans
+                 where VendPackingSlipTrans.vendPackingslipJour == vendPackingSlipJour.RecId
+                 &&    _PurchLine.InventTransId == VendPackingSlipTrans.InventTransId;
+
+        ETGBonDePaimentCacaoReportTmp.Port      = _ETGPurchLineCoCOAQualityRec.Port;
+        ETGBonDePaimentCacaoReportTmp.PONumber  = vendPackingSlipJour.PurchId;
+        ETGBonDePaimentCacaoReportTmp.POGrnDate = vendPackingSlipJour.DeliveryDate;
+        ETGBonDePaimentCacaoReportTmp.Campagne  = _ETGPurchLineCoCOAQuality.Campane;
+        ETGBonDePaimentCacaoReportTmp.VendorCode   = _PurchTable.InvoiceAccount;
+        ETGBonDePaimentCacaoReportTmp.VendorName    = _PurchTable.invoiceName();
+        ETGBonDePaimentCacaoReportTmp.ProductReceiptCode    = vendPackingSlipJour.PackingSlipId;
+        ETGBonDePaimentCacaoReportTmp.Origin    = _ETGPurchLineCoCOAQualityRec.Origin;
+        ETGBonDePaimentCacaoReportTmp.NatureDuProduit   = _ETGPurchLineCoCOAQualityRec.Mark;
+        ETGBonDePaimentCacaoReportTmp.BillOfLaddingNum  = vendPackingSlipJour.BOLNo;
+        ETGBonDePaimentCacaoReportTmp.TruckTrailer  = _ETGPurchLineCoCOAQualityRec.TruckTrailer;
+        ETGBonDePaimentCacaoReportTmp.CompanyName   = CompanyInfo.Name;
+        ETGBonDePaimentCacaoReportTmp.CompanyLogo   = CompanyImage::findByRecord(CompanyInfo).Image;
+
+
+
+        while select * from _ETGPurchLineCoCOAQuality
+            join _PurchLine
+                where _PurchLine.RecId == _ETGPurchLineCoCOAQuality.PurchLineRecId
+            && _PurchLine.PurchId == _ETGPurchLineCoCOAQuality.RefPurchId
+            join _PurchTable
+                where _PurchTable.PurchId == _PurchLine.PurchId
+                && _PurchTable.PurchId == vendPackingSlipJour.PurchId
+             join VendPackingSlipTrans
+                 where VendPackingSlipTrans.vendPackingslipJour == vendPackingSlipJour.RecId
+                 &&    _PurchLine.InventTransId == VendPackingSlipTrans.InventTransId
+        {
+            ETGBonDePaimentCacaoReportTmp.GrossWeight += _ETGPurchLineCoCOAQuality.GrossWeight;
+           // ETGBonDePaimentCacaoReportTmp.Bagscount     += _ETGPurchLineCoCOAQuality.Bagscount;
+            ETGBonDePaimentCacaoReportTmp.Bagscount     += _ETGPurchLineCoCOAQuality.WeightofBags;
+            ETGBonDePaimentCacaoReportTmp.TareSacKg +=_ETGPurchLineCoCOAQuality.Bagscount;
+           // ETGBonDePaimentCacaoReportTmp.PoisNetAvantRefactionkg =0;
+            ETGBonDePaimentCacaoReportTmp.PoisNetAvantRefactionkg = ETGBonDePaimentCacaoReportTmp.GrossWeight - ETGBonDePaimentCacaoReportTmp.Bagscount;
+            ETGBonDePaimentCacaoReportTmp.Humidityreaction  += _ETGPurchLineCoCOAQuality.Humidityreaction;
+            ETGBonDePaimentCacaoReportTmp.Qualityreaction   += _ETGPurchLineCoCOAQuality.Qualityreaction;
+            ETGBonDePaimentCacaoReportTmp.NetWeight         += _ETGPurchLineCoCOAQuality.NetWeight;
+            // ETGBonDePaimentCacaoReportTmp.LandedPrice       = round((vendPackingSlipTrans.ValueMST/VendPackingSlipTrans.Qty),0.01);
+            ETGBonDePaimentCacaoReportTmp.LandedPrice = _ETGPurchLineCoCOAQuality.FixedGovernmentPrice;
+            //+= _ETGPurchLineCoCOAQuality.LandedPrice;
+            //ETGBonDePaimentCacaoReportTmp.TransportRate
+
+            
+
+
+            while select Value from _MarkupTrans
+            where _MarkupTrans.TransRecId      == _ETGPurchLineCoCOAQuality.PurchLineRecId
+            {
+                //  ETGBonDePaimentCacaoReportTmp.TransportAmount += abs(_MarkupTrans.CalculatedAmount);
+                ETGBonDePaimentCacaoReportTmp.TransportAmount +=    abs(_MarkupTrans.Value);
+                //  ETGBonDePaimentCacaoReportTmp.TKMAmount       += abs(_MarkupTrans.Value);
+                if (ETGBonDePaimentCacaoReportTmp.NetWeight != 0)
+                {
+                    ETGBonDePaimentCacaoReportTmp.TKMAmount  = ETGBonDePaimentCacaoReportTmp.TransportAmount / ETGBonDePaimentCacaoReportTmp.NetWeight;
+                }
+                else
+                {
+                    ETGBonDePaimentCacaoReportTmp.TKMAmount = 0;
+                }
+            }
+            ETGBonDePaimentCacaoReportTmp.BicAmount +=  _ETGPurchLineCoCOAQuality.BicAmount;
+            if (ETGBonDePaimentCacaoReportTmp.NetWeight != 0)
+            {
+                ETGBonDePaimentCacaoReportTmp.BICFactor = ETGBonDePaimentCacaoReportTmp.BicAmount / ETGBonDePaimentCacaoReportTmp.NetWeight;
+                ETGBonDePaimentCacaoReportTmp.AmountPayable  = ETGBonDePaimentCacaoReportTmp.LandedPrice * ETGBonDePaimentCacaoReportTmp.NetWeight;
+            }
+            else
+            {
+                ETGBonDePaimentCacaoReportTmp.BICFactor = 0;
+                ETGBonDePaimentCacaoReportTmp.AmountPayable =0;
+            }
+
+            select VendParameters;
+            // ETGBonDePaimentCacaoReportTmp.BICFactor = vendParameters.ETGBICAmountFactor;
+            
+            //ETGBonDePaimentCacaoReportTmp.OnAccountFactor   = vendParameters.ETGOnAccountFactor;
+            ETGBonDePaimentCacaoReportTmp.Onaccount += _ETGPurchLineCoCOAQuality.Onaccount;
+            if (ETGBonDePaimentCacaoReportTmp.NetWeight != 0)
+            {
+                ETGBonDePaimentCacaoReportTmp.OnAccountFactor   = ETGBonDePaimentCacaoReportTmp.Onaccount /ETGBonDePaimentCacaoReportTmp.NetWeight;
+            }
+            else
+            {
+                ETGBonDePaimentCacaoReportTmp.OnAccountFactor =0;
+            }
+
+
+
+            //  ETGBonDePaimentCacaoReportTmp.AmountPayable += vendPackingSlipTrans.ValueMST; //_ETGPurchLineCoCOAQuality.AmountPayable;
+           // ETGBonDePaimentCacaoReportTmp.MTNValue += _ETGPurchLineCoCOAQuality.AmountPayable;
+            ETGBonDePaimentCacaoReportTmp.MTNValue += ETGBonDePaimentCacaoReportTmp.AmountPayable + ETGBonDePaimentCacaoReportTmp.TransportAmount-ETGBonDePaimentCacaoReportTmp.Onaccount-ETGBonDePaimentCacaoReportTmp.BicAmount;
+                                                    
+          
+        }
+        ETGBonDePaimentCacaoReportTmp.Mark      = this.CompanyPrimaryEmail();
+        
+        ETGBonDePaimentCacaoReportTmp.insert();
+        
+
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>CompanyPrimaryEmail</Name>
+				<Source><![CDATA[
+    Public  str CompanyPrimaryEmail()
+    {
+        LogisticsLocationAccessView         logisticsLocationAccessView;
+        LogisticsLocation                   contactLocation, logisticsLocation1;
+        LogisticsElectronicAddress          elecAddress;
+        CompanyInfo      CompanyInfo = CompanyInfo::find();
+
+    
+        select logisticsLocationAccessView
+        where logisticsLocationAccessView.Entity    == companyInfo.RecId;//inventLocation.RecId;
+
+        select elecAddress
+        join contactLocation
+        where   contactLocation.ParentLocation  == logisticsLocationAccessView.Location
+        &&      contactLocation.RecId           == elecAddress.Location
+        &&      elecAddress.IsPrimary           == NoYes::Yes
+        &&      elecAddress.Type   == LogisticsElectronicAddressMethodType::Email;
+   
+        return elecAddress.Locator;
+      
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCylinderTrackingInputReportDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This is the DP class for report CylinderTrackingInputReport
+/// </summary>
+[SRSReportParameterAttribute(classStr(ETGCylinderTrackingInputReportContract))]
+internal final class ETGCylinderTrackingInputReportDP extends SRSReportDataProviderBase
+{
+    FromDate                                fromDate;
+    ToDate                                  toDate;
+    List                                    custAccount = new List(Types::String);
+    List                                    productNum = new List(Types::String);
+    ETGBusinessSegment                      etgBusinessSegment;
+    ETGConnectionType                       etgConnectionType;
+    ETGFilledOrEmpty                        etgFilledOrEmpty;
+    NoYesId                                 deposit;
+    ETGCylinderTrackingInputReportContract  etgCylinderTrackingInputReportContract;
+    ETGCylinderTrackingInputReportTmp       etgCylinderTrackingInputReportTmp;
+    ETGInputReportHeaderTableTmp  etgInputReportHeaderTableTmp;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getTmpTable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the temporary table
+    /// </summary>
+    /// <returns>ETGCylinderTrackingInputReportTmp temporary table</returns>
+    [ SrsReportDataSetAttribute(tableStr(ETGCylinderTrackingInputReportTmp))]
+    public ETGCylinderTrackingInputReportTmp getTmpTable()
+    {
+        select * from etgCylinderTrackingInputReportTmp;
+        return etgCylinderTrackingInputReportTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getHeaderTmpTable</Name>
+				<Source><![CDATA[
+    [ SrsReportDataSetAttribute(tableStr(ETGInputReportHeaderTableTmp))]
+    public ETGInputReportHeaderTableTmp getHeaderTmpTable()
+    {
+        select * from etgInputReportHeaderTableTmp;
+        return etgInputReportHeaderTableTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Processes the business logic for the report
+    /// </summary>
+    public void processReport()
+    {
+        Query                               query;
+        QueryRun                            queryRun;
+        QueryBuildDataSource                qbds, queryBuildDataSourceCustInvoiceJour, queryBuildDataSourceCustInvoiceTrans;
+        QueryBuildRange                     queryBuildRange, qbr;
+        SalesLine                           salesLine;
+        CustInvoiceJour                     custInvoiceJour;
+        CustPackingSlipJour                 custPackingSlipJour;
+        CustInvoiceTrans                    custInvoiceTrans;
+        CustPackingSlipTrans                custPackingSlipTrans;
+        EcoResSize                          ecoResSize;
+        ListEnumerator listEnumerator;
+
+        etgCylinderTrackingInputReportContract = new ETGCylinderTrackingInputReportContract();
+        etgCylinderTrackingInputReportContract = this.parmDataContract() as ETGCylinderTrackingInputReportContract;
+
+        fromDate            = etgCylinderTrackingInputReportContract.parmFromDate();
+        toDate              = etgCylinderTrackingInputReportContract.parmToDate();
+        custAccount         = etgCylinderTrackingInputReportContract.parmCustAccount();
+        etgBusinessSegment  = etgCylinderTrackingInputReportContract.parmBusinessSegment();
+        etgConnectionType   = etgCylinderTrackingInputReportContract.parmConnectionType();
+        etgFilledOrEmpty    = etgCylinderTrackingInputReportContract.parmFilledOrEmpty();
+        deposit             = etgCylinderTrackingInputReportContract.parmDeposit();
+        productNum          = etgCylinderTrackingInputReportContract.parmProductNum();
+
+        listEnumerator = productNum.getEnumerator();
+        while(listEnumerator.moveNext())
+        {
+            etgInputReportHeaderTableTmp.ETGProductName = etgInputReportHeaderTableTmp.ETGProductName + "," + listEnumerator.current();
+        }
+        etgInputReportHeaderTableTmp.insert();
+
+        query = new Query();
+
+        queryBuildDataSourceCustInvoiceJour           = query.addDataSource(tableNum(CustInvoiceJour));
+        queryBuildDataSourceCustInvoiceTrans          = queryBuildDataSourceCustInvoiceJour.addDataSource(tableNum(CustInvoiceTrans));
+        queryBuildDataSourceCustInvoiceTrans.joinMode(JoinMode::InnerJoin);
+        queryBuildDataSourceCustInvoiceTrans.relations(true);
+        queryBuildDataSourceCustInvoiceTrans.addLink(fieldNum(CustInvoiceJour, SalesId), fieldNum(CustInvoiceTrans, SalesId));
+        queryBuildDataSourceCustInvoiceTrans.addLink(fieldNum(CustInvoiceJour, InvoiceId), fieldNum(CustInvoiceTrans, InvoiceId));
+        queryBuildDataSourceCustInvoiceTrans.addLink(fieldNum(CustInvoiceJour, InvoiceDate), fieldNum(CustInvoiceTrans, InvoiceDate));
+
+        query.dataSourceTable(tableNum(CustInvoiceJour)).addRange(fieldNum(CustInvoiceJour, InvoiceDate)).value(queryRange(fromDate, toDate));
+        if(custAccount != null)
+        {
+            listEnumerator = custAccount.getEnumerator();
+            while(listEnumerator.moveNext())
+            {
+                queryBuildDataSourceCustInvoiceJour.addRange(fieldNum(CustInvoiceJour, InvoiceAccount)).value(listEnumerator.current());
+            }
+        }
+
+        if(productNum != null)
+        {
+            qbds = queryBuildDataSourceCustInvoiceTrans.addDataSource(tableNum(InventTable));
+            qbds.joinMode(JoinMode::InnerJoin);
+            qbds.relations(true);
+            qbds.addLink(fieldNum(CustInvoiceTrans, ItemId), fieldNum(InventTable, ItemId));
+            listEnumerator = productNum.getEnumerator();
+            while(listEnumerator.moveNext())
+            {
+                qbds.addRange(fieldNum(InventTable, ItemId)).value(listEnumerator.current());
+            }
+        }
+
+        if(etgBusinessSegment)
+        {
+            queryBuildRange = queryBuildDataSourceCustInvoiceJour.addRange(fieldNum(CustInvoiceJour, ETGBusinessSegment));
+            queryBuildRange.value(queryValue(etgBusinessSegment));
+        }
+        if(etgConnectionType)
+        {
+            queryBuildRange = queryBuildDataSourceCustInvoiceTrans.addRange(fieldNum(CustInvoiceTrans, ETGConnectionType));
+            queryBuildRange.value(queryValue(etgConnectionType));
+        }
+        if(etgFilledOrEmpty)
+        {
+            queryBuildRange = queryBuildDataSourceCustInvoiceTrans.addRange(fieldNum(CustInvoiceTrans, ETGFilledOrEmpty));
+            queryBuildRange.value(queryValue(etgFilledOrEmpty));
+        }
+        if(deposit)
+        {
+            queryBuildRange = queryBuildDataSourceCustInvoiceTrans.addRange(fieldNum(CustInvoiceTrans, ETGDepositAmount));
+            queryBuildRange.value(SysQuery::valueNot('0'));
+        }
+
+        queryRun = new QueryRun(query);
+        while(queryRun.next())
+        {
+            etgCylinderTrackingInputReportTmp.clear();
+
+            custInvoiceJour         = queryRun.get(tableNum(CustInvoiceJour));
+            custInvoiceTrans        = queryRun.get(tableNum(CustInvoiceTrans));
+            salesLine               = SalesLine::findInventTransId(custInvoiceTrans.InventTransId);
+
+            etgCylinderTrackingInputReportTmp.InvoiceDate               = custInvoiceJour.InvoiceDate;
+            etgCylinderTrackingInputReportTmp.InvoiceId                 = custInvoiceJour.InvoiceId;
+            etgCylinderTrackingInputReportTmp.CustName                  = CustTable::find(custInvoiceJour.InvoiceAccount).name();
+            etgCylinderTrackingInputReportTmp.ETGBusinessSegment        = custInvoiceJour.ETGBusinessSegment;
+            etgCylinderTrackingInputReportTmp.SalesId                   = custInvoiceJour.SalesId;
+            etgCylinderTrackingInputReportTmp.ETGFilledOrEmpty          = custInvoiceTrans.ETGFilledOrEmpty;
+            etgCylinderTrackingInputReportTmp.ETGConnectionType         = custInvoiceTrans.ETGConnectionType;
+            etgCylinderTrackingInputReportTmp.ETGDepositAmount          = custInvoiceTrans.ETGDepositAmount;
+            etgCylinderTrackingInputReportTmp.SalesQty                  = custInvoiceTrans.Qty;
+            etgCylinderTrackingInputReportTmp.ItemId                    = custInvoiceTrans.ItemId;
+            etgCylinderTrackingInputReportTmp.ItemName                  = custInvoiceTrans.itemName();
+
+            select  custPackingSlipTrans where custPackingSlipTrans.InventTransId == custInvoiceTrans.InventTransId;
+            etgCylinderTrackingInputReportTmp.DeliveryNoteNumber = custPackingSlipTrans.PackingSlipId;
+
+            if(custInvoiceTrans.Qty < 0)
+            {
+                etgCylinderTrackingInputReportTmp.MaterialReceivedNumber = custPackingSlipTrans.PackingSlipId;
+            }
+            else
+            {
+                etgCylinderTrackingInputReportTmp.MaterialReceivedNumber = custPackingSlipTrans.PackingSlipId;
+            }
+            if(custInvoiceTrans.ETGDepositAmount != 0 && custInvoiceTrans.ETGDepositRate != 0)
+            {
+                etgCylinderTrackingInputReportTmp.Deposit = NoYes::Yes;
+            }
+
+            InventTableModule inventTableModule = InventTableModule::find(custInvoiceTrans.ItemId, ModuleInventPurchSales::Sales);
+            etgCylinderTrackingInputReportTmp.PackSize = inventTableModule.ETGPackSize;
+
+            if(custInvoiceTrans.ETGFilledOrEmpty == ETGFilledOrEmpty::FilledIn || custInvoiceTrans.ETGFilledOrEmpty == ETGFilledOrEmpty::FilledOut)
+            {
+                switch(inventTableModule.ETGPackSize)
+                {
+                    case '6KG':
+                        etgCylinderTrackingInputReportTmp.Filled6 = custInvoiceTrans.Qty;
+                        break;
+                    case '13KG':
+                        etgCylinderTrackingInputReportTmp.Filled13 = custInvoiceTrans.Qty;
+                        break;
+                    case '38KG':
+                        etgCylinderTrackingInputReportTmp.Filled38 = custInvoiceTrans.Qty;
+                        break;
+                    case '48KG':
+                        etgCylinderTrackingInputReportTmp.Filled48 = custInvoiceTrans.Qty;
+                        break;
+                }
+            }
+
+            else if(custInvoiceTrans.ETGFilledOrEmpty == ETGFilledOrEmpty::EmptyIn || custInvoiceTrans.ETGFilledOrEmpty == ETGFilledOrEmpty::EmptyOut)
+            {
+                switch(inventTableModule.ETGPackSize)
+                {
+                    case '6KG':
+                        etgCylinderTrackingInputReportTmp.Empty6 = custInvoiceTrans.Qty;
+                        break;
+                    case '13KG':
+                        etgCylinderTrackingInputReportTmp.Empty13 = custInvoiceTrans.Qty;
+                        break;
+                    case '38KG':
+                        etgCylinderTrackingInputReportTmp.Empty38 = custInvoiceTrans.Qty;
+                        break;
+                    case '48KG':
+                        etgCylinderTrackingInputReportTmp.Empty48 = custInvoiceTrans.Qty;
+                        break;
+                }
+
+            }
+            if(custInvoiceTrans.ETGFilledOrEmpty == ETGFilledOrEmpty::EmptyOut || custInvoiceTrans.ETGFilledOrEmpty == ETGFilledOrEmpty::FilledIn)
+            {
+                etgCylinderTrackingInputReportTmp.Filled6  = etgCylinderTrackingInputReportTmp.Filled6 * -1;
+                etgCylinderTrackingInputReportTmp.Filled13 = etgCylinderTrackingInputReportTmp.Filled13 * -1;
+                etgCylinderTrackingInputReportTmp.Filled38 = etgCylinderTrackingInputReportTmp.Filled38 * -1;
+                etgCylinderTrackingInputReportTmp.Filled48 = etgCylinderTrackingInputReportTmp.Filled48 * -1;
+           
+                etgCylinderTrackingInputReportTmp.Empty6  = etgCylinderTrackingInputReportTmp.Empty6 * -1;
+                etgCylinderTrackingInputReportTmp.Empty13 = etgCylinderTrackingInputReportTmp.Empty13 * -1;
+                etgCylinderTrackingInputReportTmp.Empty38 = etgCylinderTrackingInputReportTmp.Empty38 * -1;
+                etgCylinderTrackingInputReportTmp.Empty48 = etgCylinderTrackingInputReportTmp.Empty48 * -1;
+            }
+            etgCylinderTrackingInputReportTmp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

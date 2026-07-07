@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGVolumeFromCustomersDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This is an DP class for report VolumeFromCustomers
+/// </summary>
+[SRSReportParameterAttribute(classStr(ETGVolumeFromCustomersContract))]
+internal final class ETGVolumeFromCustomersDP extends SRSReportDataProviderBase
+{
+    FromDate                                fromDate;
+    ToDate                                  toDate;
+    List                                    custAccount = new List(Types::String);
+    NoYesId                                 deposit;
+    List                                    invoiceId = new List(Types::String);
+    List                                    size = new List(Types::String);
+    ETGVolumeFromCustomersContract          etgVolumeFromCustomersContract;
+    ETGVolumeFromCustomersTmp               etgVolumeFromCustomersTmp;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getTmpTable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the temporary table
+    /// </summary>
+    /// <returns>ETGVolumeFromCustomersTmp temporary table</returns>
+    [SrsReportDataSetAttribute(tableStr(ETGVolumeFromCustomersTmp))]
+    public ETGVolumeFromCustomersTmp getTmpTable()
+    {
+        select * from etgVolumeFromCustomersTmp;
+        return etgVolumeFromCustomersTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Processes the business logic for the report
+    /// </summary>
+    public void processReport()
+    {
+        Query                               query;
+        QueryRun                            queryRun;
+        QueryBuildDataSource                queryBuildDataSourceCustInvoiceJour, queryBuildDataSourceCustInvoiceTrans, qbds;
+        QueryBuildRange                     queryBuildRange,qbr;
+        CustInvoiceJour                     custInvoiceJour;
+        CustInvoiceTrans                    custInvoiceTrans;
+        SalesLine                           salesLine;
+        EcoResSize                          ecoResSize;
+        ExchangeRate                        exchangeRate;
+        ExchangeRateType                    ExchangeRateType;
+        ExchangeRateCurrencyPair            exchangeRateCurrencyPair;
+        real                                exchRate, exchRateLoc;
+        ListEnumerator                      listEnumerator;
+        UnitOfMeasureConversion             unitOfMeasureConversion;
+
+
+        etgVolumeFromCustomersContract = new ETGVolumeFromCustomersContract();
+        etgVolumeFromCustomersContract = this.parmDataContract() as ETGVolumeFromCustomersContract;
+
+        fromDate            = etgVolumeFromCustomersContract.parmFromDate();
+        toDate              = etgVolumeFromCustomersContract.parmToDate();
+        custAccount         = etgVolumeFromCustomersContract.parmCustAccount();
+        deposit             = etgVolumeFromCustomersContract.parmDeposit();
+        invoiceId           = etgVolumeFromCustomersContract.parmInvoiceId();
+        size                = etgVolumeFromCustomersContract.parmSize();
+
+        query = new Query();
+
+        queryBuildDataSourceCustInvoiceJour           = query.addDataSource(tableNum(CustInvoiceJour));
+        queryBuildDataSourceCustInvoiceTrans          = queryBuildDataSourceCustInvoiceJour.addDataSource(tableNum(CustInvoiceTrans));
+        queryBuildDataSourceCustInvoiceTrans.joinMode(JoinMode::InnerJoin);
+        queryBuildDataSourceCustInvoiceTrans.relations(true);
+        queryBuildDataSourceCustInvoiceTrans.addLink(fieldNum(CustInvoiceJour, SalesId), fieldNum(CustInvoiceTrans, SalesId));
+        queryBuildDataSourceCustInvoiceTrans.addLink(fieldNum(CustInvoiceJour, InvoiceId), fieldNum(CustInvoiceTrans, InvoiceId));
+        queryBuildDataSourceCustInvoiceTrans.addLink(fieldNum(CustInvoiceJour, InvoiceDate), fieldNum(CustInvoiceTrans, InvoiceDate));
+
+        query.dataSourceTable(tableNum(CustInvoiceJour)).addRange(fieldNum(CustInvoiceJour, InvoiceDate)).value(queryRange(fromDate, toDate));
+
+        if(custAccount != null)
+        {
+            listEnumerator = custAccount.getEnumerator();
+            while(listEnumerator.moveNext())
+            {
+                queryBuildDataSourceCustInvoiceJour.addRange(fieldNum(CustInvoiceJour, InvoiceAccount)).value(listEnumerator.current());
+            }
+        }
+
+        if(invoiceId != null)
+        {
+            listEnumerator = invoiceId.getEnumerator();
+            while(listEnumerator.moveNext())
+            {
+                queryBuildDataSourceCustInvoiceJour.addRange(fieldNum(CustInvoiceJour, InvoiceId)).value(listEnumerator.current());
+            }
+        }
+        if(deposit)
+        {
+            queryBuildRange = queryBuildDataSourceCustInvoiceTrans.addRange(fieldNum(CustInvoiceTrans, ETGDepositAmount));
+            queryBuildRange.value(SysQuery::valueNot('0'));
+        }
+       
+        queryRun = new QueryRun(query);
+        while(queryRun.next())
+        {
+            etgVolumeFromCustomersTmp.clear();
+
+            custInvoiceJour         = queryRun.get(tableNum(CustInvoiceJour));
+            custInvoiceTrans        = queryRun.get(tableNum(CustInvoiceTrans));
+            salesLine               = SalesLine::findInventTransId(custInvoiceTrans.InventTransId);
+            SalesTable  salesTable  = SalesTable::find(salesLine.SalesId);
+
+            etgVolumeFromCustomersTmp.CustName              = CustTable::find(custInvoiceJour.InvoiceAccount).name();
+            etgVolumeFromCustomersTmp.CustAccount           = CustTable::find(custInvoiceJour.InvoiceAccount).AccountNum;
+            etgVolumeFromCustomersTmp.ItemId                = custInvoiceTrans.ItemId;
+            etgVolumeFromCustomersTmp.ItemName              = custInvoiceTrans.itemName();
+            etgVolumeFromCustomersTmp.SalesId               = custInvoiceJour.SalesId;
+            etgVolumeFromCustomersTmp.ETGBusinessSegment    = custInvoiceJour.ETGBusinessSegment;
+            etgVolumeFromCustomersTmp.ETGConnectionType     = custInvoiceTrans.ETGConnectionType;
+            etgVolumeFromCustomersTmp.InvoiceDate           = custInvoiceTrans.InvoiceDate;
+
+            InventTableModule inventTableModule = InventTableModule::find(custInvoiceTrans.ItemId,ModuleInventPurchSales::Sales);
+
+            etgVolumeFromCustomersTmp.ETGPackSize = inventTableModule.ETGPackSize;
+
+            if(custInvoiceTrans.ETGDepositAmount != 0 && custInvoiceTrans.ETGDepositRate != 0)
+            {
+                etgVolumeFromCustomersTmp.ETGDeposit = NoYes::Yes;
+            }
+
+            CurrencyCode fromCurrency  = custInvoiceJour.CurrencyCode;
+            CurrencyCode toCurrency    = "@ETG_New:USD";
+            CurrencyCode accontingCurrency = Ledger::accountingCurrency();
+            TransDate    transDate     = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+            
+            CurrencyExchangeHelper currencyExchangeHelper = CurrencyExchangeHelper::newExchangeDate(Ledger::current(), transDate);
+            if(fromCurrency == toCurrency)
+            {
+                etgVolumeFromCustomersTmp.ETGValueInUSD = custInvoiceTrans.LineAmount;
+            }
+            else
+            {
+                etgVolumeFromCustomersTmp.ETGValueInUSD       = currencyExchangeHelper.calculateCurrencyToCurrency(fromCurrency, toCurrency, custInvoiceTrans.LineAmount, true);
+            }
+            
+            if(fromCurrency == accontingCurrency && fromCurrency == "@ETG_New:USD")
+            {
+                etgVolumeFromCustomersTmp.ETGValueInLocalCurrency = custInvoiceTrans.LineAmount;
+                etgVolumeFromCustomersTmp.ETGValueInUSD = custInvoiceTrans.LineAmount;
+            }
+            else
+            {
+                etgVolumeFromCustomersTmp.ETGValueInLocalCurrency  = currencyExchangeHelper.calculateCurrencyToCurrency(fromCurrency, accontingCurrency, custInvoiceTrans.LineAmount, true);
+            }
+
+            etgVolumeFromCustomersTmp.ETGPrimaryUnit        = custInvoiceTrans.SalesUnit;
+            etgVolumeFromCustomersTmp.ETGQtyInPrimaryUnit   = custInvoiceTrans.Qty;
+
+            InventTable              inventTable    = InventTable::find(custInvoiceTrans.ItemId);
+            UnitOfMeasureRecId       fromUnitId     = UnitOfMeasure::unitOfMeasureIdBySymbol(inventTable.inventUnitId());
+            select firstonly  unitOfMeasureConversion
+                   where      unitOfMeasureConversion.Product           == inventTable.Product
+                   &&         unitOfMeasureConversion.FromUnitOfMeasure == fromUnitId;
+
+            etgVolumeFromCustomersTmp.ETGSecondaryUnit      = UnitOfMeasure::find(unitOfMeasureConversion.ToUnitOfMeasure).Symbol;
+            etgVolumeFromCustomersTmp.ETGQtyInSecondaryUnit = custInvoiceTrans.Qty * unitOfMeasureConversion.Factor;
+
+            etgVolumeFromCustomersTmp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

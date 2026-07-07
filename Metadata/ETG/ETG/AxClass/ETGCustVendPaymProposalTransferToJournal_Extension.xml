@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCustVendPaymProposalTransferToJournal_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension class for class <c>CustVendPaymProposalTransferToJournal</c>
+/// </summary>
+[ExtensionOf(classStr(CustVendPaymProposalTransferToJournal))]
+internal final class ETGCustVendPaymProposalTransferToJournal_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initLedgerJournalTransFromPaymLine</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method initialize fields from table - CustVendPaymProposalTransferToJournal
+    /// </summary>
+    /// <param name = "_ledgerJournalTrans"></param>
+    /// <param name = "_custVendPaymProposalLine"></param>
+    /// <returns>LedgerJournalTrans</returns>
+    protected LedgerJournalTrans initLedgerJournalTransFromPaymLine(LedgerJournalTrans _ledgerJournalTrans, CustVendPaymProposalLine _custVendPaymProposalLine)
+    {
+        //NS, TermoNumberTracking, 28052024, DLT
+        //Populate termo number, invoice id from create payment proposal form to vendor payment journal lines
+        if(VendParameters::find().ETGEnableTermoNumberFeature == NoYes::Yes)
+        {
+            CustVendTrans custVendTrans = this.retrieveCustVendTrans(_custVendPaymProposalLine);
+            if (custVendTrans && custVendTrans.TableId == tableNum(VendTrans))
+            {
+                VendTrans vendTrans = custVendTrans;
+                VendInvoiceJour vendInvoiceJour;
+
+                select firstonly ETGTERMONumber from vendInvoiceJour
+                where vendInvoiceJour.InvoiceId == vendTrans.Invoice
+                    && vendInvoiceJour.DataAreaId == vendTrans.DataAreaId;
+
+                _ledgerJournalTrans.ETGCustVendInvoiceId  = vendTrans.Invoice;
+                _ledgerJournalTrans.ETGTERMONumber        = vendInvoiceJour.ETGTERMONumber;
+                _ledgerJournalTrans.ETGMotherTERMONumber  = ETGTERMONumberTable::findFromTermoNumber(vendInvoiceJour.ETGTERMONumber).MotherTERMOReference;
+            }
+            if (custVendTrans && custVendTrans.TableId == tableNum(CustTrans))
+            {
+                CustTrans custTrans = custVendTrans;
+                CustInvoiceJour custInvoiceJour;
+
+                select firstonly ETGTERMONumber from custInvoiceJour
+                where custInvoiceJour.InvoiceId == custTrans.Invoice
+                    && custInvoiceJour.DataAreaId == custTrans.DataAreaId;
+
+                _ledgerJournalTrans.ETGCustVendInvoiceId = custTrans.Invoice;
+                _ledgerJournalTrans.ETGTERMONumber       = custInvoiceJour.ETGTERMONumber;
+                _ledgerJournalTrans.ETGMotherTERMONumber = ETGTERMONumberTable::findFromTermoNumber(custInvoiceJour.ETGTERMONumber).MotherTERMOReference;
+            }
+        }
+        //NE, TermoNumberTracking, 28052024, DLT
+
+        return next initLedgerJournalTransFromPaymLine(_ledgerJournalTrans, _custVendPaymProposalLine);
+    
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

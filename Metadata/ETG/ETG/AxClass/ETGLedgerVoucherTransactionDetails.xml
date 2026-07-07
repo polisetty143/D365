@@ -1,0 +1,375 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerVoucherTransactionDetails</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGLedgerVoucherTransactionDetails
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>dialog</Name>
+				<Source><![CDATA[
+    public void dialog()
+    {
+        Dialog                       dialog;
+        TransDate                    fromDate,toDate;
+        DialogField                  dialogFromDate,dialogToDate;
+        dialog = new dialog("Ledger Voucher transactions");
+        dialogFromDate       = dialog.addField(extendedTypeStr(TransDate), "From Date");
+        dialogToDate         = dialog.addField(extendedTypeStr(TransDate), "To Date");
+        DialogButton diagBut;
+
+        str strMessage = "FilterByCreatedDate";
+        str strTitle = "FilterByCreatedDate";
+
+        diagBut = Box::yesNo(strMessage, DialogButton::No, strTitle);
+        dialog.run();
+
+        //if(dialogFromDate.value() >= today())
+        //{
+        //    throw error("As of date should not be greater than Today's Date'");
+        //}
+         if (dialog.run() && diagBut == DialogButton::No)
+        {
+            this.createLedgerVoucherTransData(dialogFromDate.value(),dialogToDate.value());
+        }
+        else if (dialog.run() && diagBut == DialogButton::Yes)
+        {
+            this.createLedgerVouchercreateddate(dialogFromDate.value(),dialogToDate.value());
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createLedgerVoucherTransData</Name>
+				<Source><![CDATA[
+    public void createLedgerVoucherTransData(date _fromdate,date _todate)
+    {
+       
+        ETG_GeneralJournalAccountEntryEntity ETG_GeneralJournalAccountEntryEntity;
+        GeneralJournalAccountEntry generalJournalAccountEntry;
+        GENERALJOURNALENTRY   GENERALJOURNALENTRY;
+        LedgerJournalTrans ledgerJournalTrans;
+        MainAccount             mainAccount;
+        DimensionAttributeLevelValueAllView dimAttrView;
+        DimensionAttribute dimAttr;
+        date fromdate, todate;
+        timeofday fromtime, totime;
+
+
+
+        str bussinessunit = "BusinessUnit";
+        str costcenter = "CostCenter";
+        str country  = "Country";
+        str customer = "Customer";
+        str Department = "Department";
+        str entity     = "Entity";
+        str FixedAsset  = "FixedAsset";
+        str Item  = "Item";
+        str Locations = "Locations";
+        str ProfitCenter = "ProfitCenter";
+        str Region = "Region";
+        str SubRegion = "SubRegion";
+        str SubVertical = "Line_of_Businesss";
+        str Vendor  = "Vendor";
+        str Vertical  = "Vertical";
+        str Worker = "Worker";
+        str SubCommodity = "SubCommodity";
+
+
+        Args args = new Args();
+        ;
+        ttsbegin;
+        delete_from ETG_GeneralJournalAccountEntryEntity;
+        ttscommit;
+
+        while select GENERALJOURNALENTRY 
+                    where GENERALJOURNALENTRY.SubledgerVoucherDataAreaId == curExt()  &&
+                       GENERALJOURNALENTRY.AccountingDate  >= _fromdate  &&
+                       GENERALJOURNALENTRY.AccountingDate  <= _todate    
+                  join  generalJournalAccountEntry                
+                     where  generalJournalAccountEntry.GeneralJournalEntry == GENERALJOURNALENTRY.recid
+        {
+          
+                    ETG_GeneralJournalAccountEntryEntity.AccountingCurrencyAmount = generalJournalAccountEntry.AccountingCurrencyAmount;
+                    ETG_GeneralJournalAccountEntryEntity.AccountingDate               = GENERALJOURNALENTRY.AccountingDate;
+                    ETG_GeneralJournalAccountEntryEntity.JournalNumber                = GENERALJOURNALENTRY.JournalNumber;
+                    ETG_GeneralJournalAccountEntryEntity.SubledgerVoucher             = GENERALJOURNALENTRY.SubledgerVoucher;
+                    ETG_GeneralJournalAccountEntryEntity.DocumentDate                 = GENERALJOURNALENTRY.DocumentDate;
+                    ETG_GeneralJournalAccountEntryEntity.DocumentNumber               = GENERALJOURNALENTRY.DocumentNumber;
+                    ETG_GeneralJournalAccountEntryEntity.JournalCategory              = GENERALJOURNALENTRY.JournalCategory;
+                    ETG_GeneralJournalAccountEntryEntity.LedgerAccount                  = generalJournalAccountEntry.LedgerAccount;
+                    ETG_GeneralJournalAccountEntryEntity.LedgerDimension                = generalJournalAccountEntry.LedgerDimension;
+                    ETG_GeneralJournalAccountEntryEntity.PostingType                    = generalJournalAccountEntry.PostingType;
+                    ETG_GeneralJournalAccountEntryEntity.Quantity                       = generalJournalAccountEntry.Quantity;
+                    ETG_GeneralJournalAccountEntryEntity.ReportingCurrencyAmount        = generalJournalAccountEntry.ReportingCurrencyAmount;
+                    ETG_GeneralJournalAccountEntryEntity.Text                           = generalJournalAccountEntry.Text;
+                    ETG_GeneralJournalAccountEntryEntity.TransactionCurrencyAmount      = generalJournalAccountEntry.TransactionCurrencyAmount;
+                    ETG_GeneralJournalAccountEntryEntity.TransactionCurrencyCode        = generalJournalAccountEntry.TransactionCurrencyCode;
+                    ETG_GeneralJournalAccountEntryEntity.MainAccount                    = generalJournalAccountEntry.MainAccount;                                      
+                    ETG_GeneralJournalAccountEntryEntity.TransactionText                 = generalJournalAccountEntry.Text;
+                    ETG_GeneralJournalAccountEntryEntity.ETGCreatedBy                = GENERALJOURNALENTRY.CreatedBy;
+                    ETG_GeneralJournalAccountEntryEntity.ETGCreatedDate              = GENERALJOURNALENTRY.CreatedDateTime;
+                    ETG_GeneralJournalAccountEntryEntity.JournalrecId                = generalJournalAccountEntry.RecId;
+
+                    select * from ledgerJournalTrans where   ledgerJournalTrans.Voucher == GENERALJOURNALENTRY.SubledgerVoucher ;
+                    if(ledgerJournalTrans)
+                    {
+                        ETG_GeneralJournalAccountEntryEntity.ETGCTRMInvoiceReferance = ledgerJournalTrans.Invoice;
+                        ETG_GeneralJournalAccountEntryEntity.ETGIntegrationContractNumber = ledgerJournalTrans.ETGIntegrationContractNumber;
+                    }                  
+
+                    DimensionAttributeLevelValueAllView  dimAttriView;
+                    DimensionAttribute                  dimAttri;
+                    str mainAccount1;
+                    Ledger                   Ledger;
+
+                select DisplayValue from dimAttriView
+                where dimAttriView.ValueCombinationRecId == generalJournalAccountEntry.LedgerDimension
+                join BackingEntityType from dimAttri
+                where dimAttri.RecId == dimAttriView.DimensionAttribute
+                && dimAttri.Name == "MainAccount";
+
+                    if(dimAttriView)
+                    {
+                        mainAccount1 = dimAttriView.DisplayValue;
+                    }
+                    ETG_GeneralJournalAccountEntryEntity.LedgerCode                 = mainAccount1;
+
+                    select * from Ledger where Ledger.Name  == curExt();
+                    select * from mainAccount where mainAccount.MainAccountId == ETG_GeneralJournalAccountEntryEntity.LedgerCode
+                        && mainAccount.LedgerChartOfAccounts == Ledger.ChartOfAccounts;
+
+                    ETG_GeneralJournalAccountEntryEntity.LedgerName                 = mainAccount.Name;
+
+                    CustTrans custTrans;
+                    VendTrans vendTrans;
+                    BANKACCOUNTTRANS        bANKACCOUNTTRANS;
+                    CUSTPACKINGSLIPJOUR     cUSTPACKINGSLIPJOUR;
+                    str counterParty;
+                    CustName counterPartyName;
+ 
+            
+                    select * from custTrans
+                            where custTrans.Voucher == GENERALJOURNALENTRY.SubledgerVoucher;
+ 
+                    if(custTrans)
+                    {
+                        counterParty = CustTable::find(custTrans.AccountNum).AccountNum;
+                        counterPartyName = CustTable::find(custTrans.AccountNum).name();
+                    }
+ 
+                    select * from vendTrans
+                             where vendTrans.Voucher == GENERALJOURNALENTRY.SubledgerVoucher;
+ 
+                    if(vendTrans)
+                    {
+                        counterParty = VendTable::find(vendTrans.AccountNum).AccountNum;
+                        counterPartyName = VendTable::find(vendTrans.AccountNum).name();
+                    }
+                    ETG_GeneralJournalAccountEntryEntity.CounterpartyCode = counterParty;
+                    ETG_GeneralJournalAccountEntryEntity.CounterpartyName = counterPartyName;
+
+
+                    ETG_GeneralJournalAccountEntryEntity.BusinessUnit      = ETG_Dimension_Class::getDimensionDisplayValue(generalJournalAccountEntry.LedgerDimension,bussinessunit);
+                    ETG_GeneralJournalAccountEntryEntity.CostCenter         = ETG_Dimension_Class::getDimensionDisplayValue(generalJournalAccountEntry.LedgerDimension,costcenter);                  
+                    ETG_GeneralJournalAccountEntryEntity.Item               = ETG_Dimension_Class::getDimensionDisplayValue(generalJournalAccountEntry.LedgerDimension,Item);
+                    ETG_GeneralJournalAccountEntryEntity.Location           = ETG_Dimension_Class::getDimensionDisplayValue(generalJournalAccountEntry.LedgerDimension,Locations);
+                    ETG_GeneralJournalAccountEntryEntity.ProfitCenter       = ETG_Dimension_Class::getDimensionDisplayValue(generalJournalAccountEntry.LedgerDimension,ProfitCenter);                  
+                    ETG_GeneralJournalAccountEntryEntity.Vertical           = ETG_Dimension_Class::getDimensionDisplayValue(generalJournalAccountEntry.LedgerDimension,Vertical);                                    
+                    ETG_GeneralJournalAccountEntryEntity.insert();
+                }
+
+                new MenuFunction(menuItemdisplayStr(ETGLedgerVoucherTransactionDetails),MenuItemType::Display).run();
+
+           // }
+       // }
+       
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createLedgerVouchercreateddate</Name>
+				<Source><![CDATA[
+        public void createLedgerVouchercreateddate(date _fromdate,date _todate)
+        {
+       
+            ETG_GeneralJournalAccountEntryEntity ETG_GeneralJournalAccountEntryEntity;
+            GeneralJournalAccountEntry generalJournalAccountEntry;
+            GENERALJOURNALENTRY   GENERALJOURNALENTRY;
+            LedgerJournalTrans ledgerJournalTrans;
+            MainAccount             mainAccount;
+            DimensionAttributeLevelValueAllView dimAttrView;
+            DimensionAttribute dimAttr;
+            date fromdate, todate;
+            timeofday fromtime, totime;
+
+        str bussinessunit = "BusinessUnit";
+        str costcenter = "CostCenter";
+        str country  = "Country";
+        str customer = "Customer";
+        str Department = "Department";
+        str entity     = "Entity";
+        str FixedAsset  = "FixedAsset";
+        str Item  = "Item";
+        str Locations = "Locations";
+        str ProfitCenter = "ProfitCenter";
+        str Region = "Region";
+        str SubRegion = "SubRegion";
+        str SubVertical = "Line_of_Businesss";
+        str Vendor  = "Vendor";
+        str Vertical  = "Vertical";
+        str Worker = "Worker";
+        str SubCommodity = "SubCommodity";
+
+
+            Args args = new Args();
+            ;
+            ttsbegin;
+            delete_from ETG_GeneralJournalAccountEntryEntity;
+            ttscommit;
+
+            while select GENERALJOURNALENTRY
+                    where GENERALJOURNALENTRY.SubledgerVoucherDataAreaId == curExt()  &&
+                       GENERALJOURNALENTRY.CreatedDateTime  >= datetobeginUtcDateTime(_fromdate, DateTimeUtil::getUserPreferredTimeZone()) &&
+                       GENERALJOURNALENTRY.CreatedDateTime  <= datetobeginUtcDateTime(_todate+1, DateTimeUtil::getUserPreferredTimeZone())
+                  join  generalJournalAccountEntry
+                     where  generalJournalAccountEntry.GeneralJournalEntry == GENERALJOURNALENTRY.recid
+            {
+                        ETG_GeneralJournalAccountEntryEntity.AccountingCurrencyAmount = generalJournalAccountEntry.AccountingCurrencyAmount;
+                        ETG_GeneralJournalAccountEntryEntity.AccountingDate               = GENERALJOURNALENTRY.AccountingDate;
+                        ETG_GeneralJournalAccountEntryEntity.JournalNumber                = GENERALJOURNALENTRY.JournalNumber;
+                        ETG_GeneralJournalAccountEntryEntity.SubledgerVoucher             = GENERALJOURNALENTRY.SubledgerVoucher;
+                        ETG_GeneralJournalAccountEntryEntity.DocumentDate                 = GENERALJOURNALENTRY.DocumentDate;
+                        ETG_GeneralJournalAccountEntryEntity.DocumentNumber               = GENERALJOURNALENTRY.DocumentNumber;
+                        ETG_GeneralJournalAccountEntryEntity.JournalCategory              = GENERALJOURNALENTRY.JournalCategory;                      
+                        ETG_GeneralJournalAccountEntryEntity.HistoricalExchangeRateDate     = generalJournalAccountEntry.HistoricalExchangeRateDate;
+                        ETG_GeneralJournalAccountEntryEntity.LedgerAccount                  = generalJournalAccountEntry.LedgerAccount;
+                        ETG_GeneralJournalAccountEntryEntity.LedgerDimension                = generalJournalAccountEntry.LedgerDimension;
+                        ETG_GeneralJournalAccountEntryEntity.PostingType                    = generalJournalAccountEntry.PostingType;
+                        ETG_GeneralJournalAccountEntryEntity.Quantity                       = generalJournalAccountEntry.Quantity;
+                        ETG_GeneralJournalAccountEntryEntity.ReportingCurrencyAmount        = generalJournalAccountEntry.ReportingCurrencyAmount;
+                        ETG_GeneralJournalAccountEntryEntity.Text                           = generalJournalAccountEntry.Text;
+                        ETG_GeneralJournalAccountEntryEntity.TransactionCurrencyAmount      = generalJournalAccountEntry.TransactionCurrencyAmount;
+                        ETG_GeneralJournalAccountEntryEntity.TransactionCurrencyCode        = generalJournalAccountEntry.TransactionCurrencyCode;
+                        ETG_GeneralJournalAccountEntryEntity.MainAccount                    = generalJournalAccountEntry.MainAccount;
+                        
+                        ETG_GeneralJournalAccountEntryEntity.TransactionText                = generalJournalAccountEntry.Text;
+                        ETG_GeneralJournalAccountEntryEntity.ETGCreatedBy                = GENERALJOURNALENTRY.CreatedBy;
+                        ETG_GeneralJournalAccountEntryEntity.ETGCreatedDate              = GENERALJOURNALENTRY.CreatedDateTime;
+                        ETG_GeneralJournalAccountEntryEntity.JournalrecId                = generalJournalAccountEntry.RecId;
+
+                        select * from ledgerJournalTrans where   ledgerJournalTrans.Voucher == GENERALJOURNALENTRY.SubledgerVoucher ;
+                        if(ledgerJournalTrans)
+                        {
+                            ETG_GeneralJournalAccountEntryEntity.ETGCTRMInvoiceReferance = ledgerJournalTrans.Invoice;
+                            ETG_GeneralJournalAccountEntryEntity.ETGIntegrationContractNumber = ledgerJournalTrans.ETGIntegrationContractNumber;
+                        }
+
+
+                        
+
+                        DimensionAttributeLevelValueAllView  dimAttriView;
+                        DimensionAttribute                  dimAttri;
+                        str mainAccount1;
+                        Ledger   Ledger;
+
+                        select DisplayValue from dimAttriView
+                where dimAttriView.ValueCombinationRecId == generalJournalAccountEntry.LedgerDimension
+                join BackingEntityType from dimAttri
+                where dimAttri.RecId == dimAttriView.DimensionAttribute
+                && dimAttri.Name == "MainAccount";
+                        if(dimAttriView)
+                        {
+                            mainAccount1 = dimAttriView.DisplayValue;
+                        }
+                        ETG_GeneralJournalAccountEntryEntity.LedgerCode                 = mainAccount1;
+
+                    select * from Ledger where Ledger.Name  == curExt();
+                    select * from mainAccount where mainAccount.MainAccountId == ETG_GeneralJournalAccountEntryEntity.LedgerCode
+                        && mainAccount.LedgerChartOfAccounts == Ledger.ChartOfAccounts;
+
+                        ETG_GeneralJournalAccountEntryEntity.LedgerName                 = mainAccount.Name;
+
+                        CustTrans custTrans;
+                        VendTrans vendTrans;
+                        str counterParty;
+                        CustName counterPartyName;
+ 
+                        select * from custTrans
+                            where custTrans.Voucher == GENERALJOURNALENTRY.SubledgerVoucher;
+ 
+                        if(custTrans)
+                        {
+                            counterParty = CustTable::find(custTrans.AccountNum).AccountNum;
+                            counterPartyName = CustTable::find(custTrans.AccountNum).name();
+                        }
+ 
+                        select * from vendTrans
+                             where vendTrans.Voucher == GENERALJOURNALENTRY.SubledgerVoucher;
+ 
+                        if(vendTrans)
+                        {
+                            counterParty = VendTable::find(vendTrans.AccountNum).AccountNum;
+                            counterPartyName = VendTable::find(vendTrans.AccountNum).name();
+                        }
+                        ETG_GeneralJournalAccountEntryEntity.CounterpartyCode = counterParty;
+                        ETG_GeneralJournalAccountEntryEntity.CounterpartyName = counterPartyName;
+
+                    
+                ETG_GeneralJournalAccountEntryEntity.BusinessUnit      = ETG_Dimension_Class::getDimensionDisplayValue(generalJournalAccountEntry.LedgerDimension,bussinessunit);
+                ETG_GeneralJournalAccountEntryEntity.CostCenter         = ETG_Dimension_Class::getDimensionDisplayValue(generalJournalAccountEntry.LedgerDimension,costcenter);
+                ETG_GeneralJournalAccountEntryEntity.Item               = ETG_Dimension_Class::getDimensionDisplayValue(generalJournalAccountEntry.LedgerDimension,Item);
+                ETG_GeneralJournalAccountEntryEntity.Location           = ETG_Dimension_Class::getDimensionDisplayValue(generalJournalAccountEntry.LedgerDimension,Locations);
+                ETG_GeneralJournalAccountEntryEntity.ProfitCenter       = ETG_Dimension_Class::getDimensionDisplayValue(generalJournalAccountEntry.LedgerDimension,ProfitCenter);
+                ETG_GeneralJournalAccountEntryEntity.Vertical           = ETG_Dimension_Class::getDimensionDisplayValue(generalJournalAccountEntry.LedgerDimension,Vertical);
+                ETG_GeneralJournalAccountEntryEntity.insert();
+                            
+                        
+                    
+                    
+                    ETG_GeneralJournalAccountEntryEntity.insert();
+                }
+                new MenuFunction(menuItemdisplayStr(ETGLedgerVoucherTransactionDetails),MenuItemType::Display).run();
+            
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    public void run()
+    {
+        this.dialog();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name = "_args"></param>
+    public static void main(Args _args)
+    {
+        ETGLedgerVoucherTransactionDetails ledgerVoucherTransactionDetails;
+        ledgerVoucherTransactionDetails = new ETGLedgerVoucherTransactionDetails();
+        ledgerVoucherTransactionDetails.run();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

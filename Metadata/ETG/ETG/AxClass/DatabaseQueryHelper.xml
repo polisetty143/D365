@@ -1,0 +1,385 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>DatabaseQueryHelper</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class DatabaseQueryHelper
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>process</Name>
+				<Source><![CDATA[
+    public static void process(str _sqlQuery, boolean _isInfoOnly, boolean _isExcelOutput)
+    {
+        boolean restrictUpdateQuery = true;
+        boolean isSelectStmt        = DatabaseQueryHelper::isSelectStatement(_sqlQuery);
+        str fileName                = DatabaseQueryHelper::generateExportFileName(_sqlQuery);
+
+        if (restrictUpdateQuery && !isSelectStmt)
+        {
+            throw error("Only SELECT statements are permitted.");
+        }
+        
+        if(_isInfoOnly)
+        {
+            DatabaseQueryHelper::printSelectToInfo(
+            _sqlQuery,
+            true    // apply schema prefix
+            ); 
+        }
+        else if(_isExcelOutput)
+        {
+            DatabaseQueryHelper::exportToXlsxWithOptions(
+            _sqlQuery,
+            fileName,
+            true    // apply schema prefix
+            );
+        }
+        else
+        {
+            DatabaseQueryHelper::executeQuery(
+            _sqlQuery,
+            true    // apply schema prefix
+            );
+        }
+        
+    
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>executeQuery</Name>
+				<Source><![CDATA[
+    public static void executeQuery(str _sqlQuery, boolean _applySchemaPrefix = true)
+    {
+        int64 affected = 0;
+        System.Diagnostics.Stopwatch sw = new System.Diagnostics.Stopwatch();
+        sw.Start();
+
+        str sql = _applySchemaPrefix
+            ? DatabaseQueryHelper::applySchemaPrefixToQuery(_sqlQuery)
+            : _sqlQuery;
+
+        try
+        {
+            affected = DatabaseQueryHelper::runNonQuery(sql);
+            info(strFmt("Statement executed. Rows affected: %1.", affected));
+        }
+        catch (Exception::Error)
+        {
+            error("Failed to execute non-SELECT statement.");
+            throw Exception::Error;
+        }
+        finally
+        {
+            sw.Stop();
+            info(strFmt("Processed in %1 ms.", sw.get_ElapsedMilliseconds()));
+            CodeAccessPermission::revertAssert();
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>exportToXlsxWithOptions</Name>
+				<Source><![CDATA[
+    /// Configurable entry.
+    public static void exportToXlsxWithOptions(str _sqlQuery, str _fileName, boolean _applySchemaPrefix = true)
+    {
+       
+        str sql = _applySchemaPrefix
+            ? DatabaseQueryHelper::applySchemaPrefixToQuery(_sqlQuery)
+            : _sqlQuery;
+
+        // Prepare in-memory stream and Excel package (EPPlus)
+        System.IO.MemoryStream ms = new System.IO.MemoryStream();
+        OfficeOpenXml.ExcelPackage ep = new OfficeOpenXml.ExcelPackage(ms);
+        OfficeOpenXml.ExcelWorksheet ws = ep.get_Workbook().get_Worksheets().Add("Data");
+
+ 
+
+        int row = 1;
+        int colCount;
+        
+        int64 rowsWritten = 0; // STATS
+
+        // ---- TIMING: start
+        System.Diagnostics.Stopwatch stopwatch = new System.Diagnostics.Stopwatch();
+        stopwatch.Start();
+
+        try
+        {
+            ResultSet rs = DatabaseQueryHelper::runSelectQuery(sql);
+            if (!rs)
+            {
+                throw error("No ResultSet returned.");
+            }
+
+            // Prime once to materialize metadata
+            boolean hasRow = rs && rs.next();
+
+            if (hasRow)
+            {
+                // Header from primed rs
+                colCount = DatabaseQueryHelper::writeHeaderPrimedToXlsx(rs, ws, row);
+                row++;
+
+                // First data row (current)
+                DatabaseQueryHelper::writeCurrentRowToXlsx(rs, ws, row, colCount);
+                rowsWritten++; // STATS
+                row++;
+
+                // Remaining rows
+                while (rs.next())
+                {
+                    DatabaseQueryHelper::writeCurrentRowToXlsx(rs, ws, row, colCount);
+                    rowsWritten++; // STATS
+                    row++;
+                }
+
+                
+                // Some usability niceties
+                if (colCount > 0)
+                {
+                    ws.get_Cells().AutoFitColumns();
+                    ws.get_View().FreezePanes(2, 1);
+                    ws.get_Cells().get_Item(1, 1, 1, colCount).get_Style().get_Font().set_Bold(true);
+                }
+
+            }
+            else
+            {
+                info("No rows returned. Header skipped.");
+                colCount = 0; // STATS
+            }
+
+            // Save and download
+            ep.Save();             // writes workbook to the MemoryStream
+            ms.Position = 0;
+            File::SendFileToUser(ms, _fileName);
+        }
+        catch (Exception::Error)
+        {
+            error("An error occurred while executing the SQL query. Validate syntax/permissions and try again.");
+            throw Exception::Error;
+        }
+        finally
+        {
+
+            stopwatch.Stop(); // TIMING: stop
+
+            // TIMING/STATS: display message
+            // If header was written, colCount is set; if zero-row, we set colCount = 0 above.
+            int64 elapsedMs = stopwatch.get_ElapsedMilliseconds();
+            int seconds = elapsedMs div 1000;
+
+            info(strFmt("%1 completed in %1:%2 min (%3 ms) (rows: %4; columns: %5).",
+                    seconds div 60,seconds mod 60, elapsedMs,rowsWritten, colCount));
+
+            CodeAccessPermission::revertAssert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>printSelectToInfo</Name>
+				<Source><![CDATA[
+    public static void printSelectToInfo(str _sqlQuery, boolean _applySchemaPrefix = true)
+    {
+        str sql = _applySchemaPrefix
+        ? DatabaseQueryHelper::applySchemaPrefixToQuery(_sqlQuery)
+        : _sqlQuery;
+
+        ResultSet rs = DatabaseQueryHelper::runSelectQuery(sql);
+
+        int colCount;
+        str rowText;
+
+        if (rs && rs.next())
+        {
+            colCount = rs.getMetaData().getColumnCount();
+
+            do
+            {
+                rowText = "";
+
+                for (int c = 1; c <= colCount; c++)
+                {
+                    rowText += rs.getString(c) + " | ";
+                }
+
+                info(rowText);
+
+            }
+            while (rs.next());
+        }
+        else
+        {
+            info("No rows returned.");
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>writeHeaderPrimedToXlsx</Name>
+				<Source><![CDATA[
+    // ==============
+    // XLSX WRITERS
+    // ==============
+
+    /// Header writer when rs has been primed with rs.next().
+    private static int writeHeaderPrimedToXlsx(
+        ResultSet _rs,
+        OfficeOpenXml.ExcelWorksheet _ws,
+        int _headerRow)
+    {
+        int colCount = _rs.getMetaData().getColumnCount();
+
+        for (int c = 1; c <= colCount; c++)
+        {
+            str colName = _rs.getMetaData().getColumnName(c);
+            OfficeOpenXml.ExcelRange cell = _ws.get_Cells().get_Item(_headerRow, c);
+            cell.set_Value(colName);
+        }
+        return colCount;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>writeCurrentRowToXlsx</Name>
+				<Source><![CDATA[
+    /// Writes current row to sheet using a fixed colCount.
+    private static void writeCurrentRowToXlsx(
+        ResultSet _rs,
+        OfficeOpenXml.ExcelWorksheet _ws,
+        int _row,
+        int _colCount)
+    {
+        for (int c = 1; c <= _colCount; c++)
+        {
+            str v = _rs.getString(c);
+            OfficeOpenXml.ExcelRange cell = _ws.get_Cells().get_Item(_row, c);
+            cell.set_Value(v); // keep as text to avoid locale/type surprises
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>runSelectQuery</Name>
+				<Source><![CDATA[
+    // ===============
+    // SQL UTILITIES
+    // ===============
+
+    private server static ResultSet runSelectQuery(str _query)
+    {
+        Connection                      connection  = new Connection();
+        Statement                       stmt        = connection.createStatement();
+        SqlStatementExecutePermission   perm        = new SqlStatementExecutePermission(_query);
+        ResultSet                       rs;
+ 
+        perm.assert();
+
+        rs = stmt.executeQuery(_query);   // SELECT only
+
+        return rs;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>runNonQuery</Name>
+				<Source><![CDATA[
+    //Run non select query
+    private server static int64 runNonQuery(str _query)
+    {
+        Connection                      connection  = new Connection();
+        Statement                       stmt        = connection.createStatement();
+        SqlStatementExecutePermission   perm        = new SqlStatementExecutePermission(_query);
+        int                             affected;
+
+        perm.assert();
+        affected = stmt.executeUpdate(_query);  // UPDATE/INSERT/DELETE returns row count
+        return affected;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>isSelectStatement</Name>
+				<Source><![CDATA[
+    private static boolean isSelectStatement(str _sql)
+    {
+        str s = strUpr(strLTrim(_sql));
+        // Allow WITH CTE + SELECT: handle queries starting with "WITH"
+        if (subStr(s, 1, 4) == "WITH")
+        {
+            // crude but effective: look for the first non-CTE SELECT
+            // If you want a stricter parser later, we can add it.
+            return strScan(s, " SELECT ", 1, strLen(s)) > 0
+            || strScan(s, "\nSELECT ", 1, strLen(s)) > 0
+            || strScan(s, "\tSELECT ", 1, strLen(s)) > 0;
+        }
+
+        return subStr(s, 1, 6) == "SELECT";
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>applySchemaPrefixToQuery</Name>
+				<Source><![CDATA[
+    private static str applySchemaPrefixToQuery(str _sql)
+    {
+        // Assumes SQL contains %1 for schema prefix (e.g., 'dbo.')
+        return strFmt(_sql, SRSStatementQuery::getDbSchemaPrefix());
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>generateExportFileName</Name>
+				<Source><![CDATA[
+    private static str generateExportFileName(str _sqlQuery)
+    {
+        str tableName = "SQLExport";
+        str datePart;
+        str timePart;
+
+        // Try extracting table name after FROM
+        int posFrom = strScan(strUpr(_sqlQuery), " FROM ", 1, strLen(_sqlQuery));
+        if (posFrom)
+        {
+            str afterFrom = subStr(_sqlQuery, posFrom + 6, 50);
+            tableName = strUpr(strLRTrim(subStr(afterFrom, 1, strScan(afterFrom, " ", 1, strLen(afterFrom)) - 1)));
+        }
+
+        utcdatetime utcNow = DateTimeUtil::utcNow();
+        Timezone tz = DateTimeUtil::getUserPreferredTimeZone();
+
+        utcdatetime userDateTime = DateTimeUtil::applyTimeZoneOffset(utcNow, tz);
+
+        date userDate = DateTimeUtil::date(userDateTime);
+        timeOfDay userTime = DateTimeUtil::time(userDateTime);
+
+
+        datePart = date2Str(userDate, 321, DateDay::Digits2, DateSeparator::None, DateMonth::Digits2, DateSeparator::None, DateYear::Digits4);
+        timePart = strRem(time2Str(userTime, TimeSeparator::Colon, TimeFormat::Hour24), ":");
+
+        return strFmt("%1_%2_%3.xlsx", tableName, datePart, timePart);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

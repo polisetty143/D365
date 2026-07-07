@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGGrainReceiptReportDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(ETGGrainReceiptReportContract))]
+internal final class ETGGrainReceiptReportDP extends SRSReportDataProviderBase
+{
+    ETGGrainReceiptHeaderReportTmp headerTmp;
+    ETGGrainReceiptLineReportTmp lineTmp;
+    ETGGrainReceiptChargesReportTmp chargesTmp;
+    ETGGrainReceiptPaymentReportTmp paymentTmp;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getHeaderTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETGGrainReceiptHeaderReportTmp))]
+    public ETGGrainReceiptHeaderReportTmp getHeaderTmp()
+    {
+        select * from headerTmp;
+        return headerTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getLineTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETGGrainReceiptLineReportTmp))]
+    public ETGGrainReceiptLineReportTmp getLineTmp()
+    {
+        select * from lineTmp;
+        return lineTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getChargesTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETGGrainReceiptChargesReportTmp))]
+    public ETGGrainReceiptChargesReportTmp getChargesTmp()
+    {
+        select * from chargesTmp;
+        return chargesTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getPaymentTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETGGrainReceiptPaymentReportTmp))]
+    public ETGGrainReceiptPaymentReportTmp getPaymentTmp()
+    {
+        select * from paymentTmp;
+        return paymentTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETGGrainReceiptReportContract contract =
+        this.parmDataContract() as ETGGrainReceiptReportContract;
+
+        ETGGrainReceiptNoteId grnId = contract.parmGrainReceiptNum();
+
+        ETGGrainReceiptNoteTable header;
+        ETGGrainReceiptNoteLine  line;
+        ETGGrainReceiptCharges charges;
+        ETGGrainReceiptPaymentTable payment;
+        str companyPhone, companyFax;
+        PurchTable purchTable;
+
+        // Header
+        select firstonly header
+        where header.GrainReceiptNoteId == grnId;
+        ETGGrainReceiptChargesHelper::generateCharges(header);
+        if (header)
+        {
+            headerTmp.clear();
+            headerTmp.GrainReceiptNoteId         = header.GrainReceiptNoteId;
+            headerTmp.ProducerName               = header.ProducerName;
+            headerTmp.ProducerAddress            = header.ProducerAddress;
+            headerTmp.ContractNumber             = header.ContractNumber;
+            headerTmp.Commodity                  = header.Commodity;
+            headerTmp.Grade                      = header.Grade;
+            headerTmp.CropYearCopy               = header.CropYearCopy;
+            headerTmp.GrossWeight                = header.GrossWeight;
+            headerTmp.VehicleWeight              = header.VehicleWeight;
+            headerTmp.ProductUnloaded            = header.ProductUnloaded;
+            headerTmp.MainPrice                  = header.MainPrice;
+            headerTmp.NetWeight                  = header.NetWeight;
+            headerTmp.NetPurchAmt                = header.NetPurchAmtDisplay();
+            headerTmp.NetAmountPayable           = header.NetAmountPayableDisplay();
+            headerTmp.StationName                = header.StationName;
+            headerTmp.StationAddress             = header.StationAddress;
+            headerTmp.ReceiptDate                = header.ReceiptDate;
+            headerTmp.ProductionEntity           = header.ProductionEntity;
+            headerTmp.SplitsPercentage           = header.SplitsPercentage;
+            headerTmp.SplitsTermsPercentage      = header.SplitsTermsPercentage;
+            headerTmp.DockagePercentage          = header.DockagePercentage;
+            headerTmp.DockageTermsPercentage     = header.DockageTermsPercentage;
+            headerTmp.BelowSizePercentage        = header.BelowSizePercentage;
+            headerTmp.BelowSizeTermsPercentage   = header.BelowSizeTermsPercentage;
+            headerTmp.PaymentInstruction         = header.PaymentInstruction;
+            headerTmp.ScaleTicketNumber          = header.ScaleTicketNumber;
+            headerTmp.SettlementNum              = header.SettlementNum;
+
+            purchTable = PurchTable::find(header.PurchId);
+
+            Currency currency = Currency::find(purchTable.CurrencyCode);
+
+            headerTmp.CurrencyCode = currency.Symbol;
+
+            CompanyInfo companyInfo = CompanyInfo::find();
+            headerTmp.CompanyLogo   = CompanyImage::findByRecord(companyInfo).Image;
+
+            headerTmp.CompanyName = companyInfo.postalAddress().Address;
+
+            companyPhone =
+    LogisticsElectronicAddress::findPrimary(companyInfo.RecId, LogisticsElectronicAddressMethodType::Phone).Locator;
+
+            companyFax =
+    LogisticsElectronicAddress::findPrimary(companyInfo.RecId, LogisticsElectronicAddressMethodType::Fax).Locator;
+
+            headerTmp.CompanyTeleFax = strFmt("Tel: %1  Fax: %2",
+                companyPhone, companyFax);
+            headerTmp.insert();
+        }
+
+        // Lines
+        while select line
+        where line.GrainReceiptNoteId == grnId
+        {
+            lineTmp.clear();
+            lineTmp.GrainReceiptNoteId = grnId;
+            lineTmp.Classification     = line.Classification;
+            lineTmp.Description        = line.Description;
+            lineTmp.Qty                = line.Qty;
+            lineTmp.Price              = line.Price;
+            lineTmp.LineAmount         = line.LineAmount;
+            lineTmp.insert();
+        }
+
+        //ETGGrainReceiptChargesHelper::generateCharges(header);
+        while select charges
+        where charges.GrainReceiptNoteId == grnId
+        {
+            chargesTmp.clear();
+            chargesTmp.ChargeMarkupCode = charges.ChargeMarkupCode;
+            chargesTmp.Description =      charges.Description;
+            chargesTmp.Amount =           charges.Amount;
+            chargesTmp.insert();
+        }
+
+        while select payment
+        where payment.GrainReceiptNoteId == grnId
+        {
+            paymentTmp.clear();
+
+            if( payment.PaymentMode == ETGGrainPaymentMode::Cheque)
+            {
+                paymentTmp.ModeOfPayment = strFmt("Cheque");
+            }
+            else if(payment.PaymentMode == ETGGrainPaymentMode::Cash)
+            {
+                paymentTmp.ModeOfPayment = strFmt("Cash");
+            }
+            else
+            {
+                paymentTmp.ModeOfPayment = strFmt("EFT");
+            }
+
+            paymentTmp.PaymentTo =     payment.PaymentTo;
+            paymentTmp.PaymentAmount = payment.PaymentAmount;
+            paymentTmp.Percentage =    payment.Percentage;
+            paymentTmp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

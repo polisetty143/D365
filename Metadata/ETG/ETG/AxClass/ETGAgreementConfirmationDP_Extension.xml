@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGAgreementConfirmationDP_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classstr(AgreementConfirmationDP))]
+final class ETGAgreementConfirmationDP_Extension
+{
+        
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initializeAgreementHeaderTmp</Name>
+				<Source><![CDATA[
+            protected AgreementHeaderTmp initializeAgreementHeaderTmp()
+        {
+            AgreementHeaderTmp               agreementHeaderTmp;
+            PaymTerm                         patmterm;
+            ETG_PurchTableTrade              eTG_PurchTableTrade;
+            purchTable                       purchTable;
+            AgreementHeader                  agreementHeader;
+            ETG_purchAgreementHeader         eTG_purchAgreementHeader;
+            AgreementClassification          agreementClassification;
+            PurchAgreementHeader             purchAgreementHeader;
+            PurchAgreementHeaderHistory        purchAgreementHeaderHistory;
+            LogisticsElectronicAddress          logisticsElectronicAddresBuyer,logisticsElectronicAddresSeller;
+            Logisticspostaladdress                  logisticspostaladdress;
+            LogisticsLocation                       LogisticsLocation;
+            DirPartyTable                       dirpartySeller,dirpartyBuyer;
+            ETG_PurchaseAgreementHeader         purchaseAgreementHeaderETG;
+
+            AgreementConfirmationDPLineCreationParameters _parameters;
+            AgreementHeaderTmp = next initializeAgreementHeaderTmp();
+
+            select firstonly purchaseAgreementHeaderETG
+            where purchaseAgreementHeaderETG.PurchAgreementId == AgreementHeaderTmp.AgreementId;
+
+            select purchAgreementHeader
+            where purchAgreementHeader.PurchNumberSequence == purchaseAgreementHeaderETG.PurchAgreementId;
+
+
+            select agreementHeader
+            where agreementHeader.RecId == purchAgreementHeader.RecId;
+
+            select purchTable
+            where purchtable.MatchingAgreement == agreementHeader.RecId;
+
+
+            select firstonly dirpartyBuyer
+            join logisticsElectronicAddresBuyer
+            where dirpartyBuyer.RecId == logisticsElectronicAddresBuyer.PrivateForParty
+            join logisticsLocation
+            where logisticsElectronicAddresBuyer.Location == logisticsLocation.RecId
+            join logisticspostaladdress
+            where LogisticsLocation.RecId == logisticspostaladdress.Location
+            join eTG_PurchTableTrade
+                where logisticspostaladdress.RecId == eTG_PurchTableTrade.BuyerDeliveryAddress
+            && eTG_PurchTableTrade.PurchId == purchTable.PurchId;
+
+            Select firstonly dirpartyseller
+            join logisticsElectronicAddresseller
+            where dirpartyBuyer.RecId == logisticsElectronicAddresBuyer.PrivateForParty
+            join logisticsLocation
+            where logisticsElectronicAddresBuyer.Location == logisticsLocation.RecId
+            join logisticspostaladdress
+            where LogisticsLocation.RecId == logisticspostaladdress.Location
+            join eTG_PurchTableTrade
+                where logisticspostaladdress.RecId == eTG_PurchTableTrade.SellerDeliveryAddress
+            && eTG_PurchTableTrade.PurchId == purchTable.PurchId;
+
+        
+            AgreementHeaderTmp.ETGPortpalceofdischarge    =          purchaseAgreementHeaderETG.PortOfDischargeDesc;
+            AgreementHeaderTmp.ETGPortplaceofloading      =          purchaseAgreementHeaderETG.PortOfLoadingDesc;
+            AgreementHeaderTmp.ETGTermsOfPayment          =          purchTable.Payment;
+            AgreementHeaderTmp.ETGContractNo              =          purchAgreementHeader.PurchNumberSequence;
+            AgreementHeaderTmp.ETGSellerName              =          dirpartySeller.Name;
+            AgreementHeaderTmp.ETGBuyerName               =          dirpartyBuyer.Name;
+            AgreementHeaderTmp.ETGSellerAddress           =          int2Str(logisticsElectronicAddresSeller.Location);
+            AgreementHeaderTmp.ETGBuyerAddress            =          int2Str(logisticsElectronicAddresBuyer.Location);
+            AgreementHeaderTmp.ETGBuyerAddress            =           logisticspostaladdress.Address;
+        
+            if (!CurrentCompanyIsSpanishCompany())
+            {
+                AgreementHeaderTmp.insert();
+            }
+
+            //AgreementHeaderTmp = next initializeAgreementHeaderTmp();
+
+            return AgreementHeaderTmp;
+
+        }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initializeQuantityCommitmentHistoryAgreementLine</Name>
+				<Source><![CDATA[
+        //protected void getAgreementLine(AgreementLineTmp _agreementLineTmp)
+        // {
+        //     next getAgreementLine(_agreementLineTmp);
+
+
+        // }
+
+        //protected void initializeQuantityCommitmentAgreementLine(AgreementConfirmationDPLineCreationParameters _parameters)
+        // {
+        //    ETG_AgreementLineNotes           eTG_AgreementLineNotes;
+        //      AgreementLine            agreementLine;
+
+
+        //    next initializeQuantityCommitmentAgreementLine(_parameters);
+
+        //    agreementLine = _parameters.agreementLineQuantityCommitment;
+
+        //    //Select firstonly eTG_AgreementheaderNotes
+        //    //     join eTG_AgreementLineNotes
+        //    //     where eTG_AgreementLineNotes.AgreementLine == AgreementLine.RecId;
+
+        //    select firstonly eTG_AgreementLineNotes
+        //         where eTG_AgreementLineNotes.AgreementLine == AgreementLine.RecId
+
+        //    {
+        //        agreementLineTmp.ETGDescription = eTG_AgreementLineNotes.Description;
+        //       agreementLineTmp.insert();
+        //    }
+        //}        
+        protected void initializeQuantityCommitmentHistoryAgreementLine(AgreementConfirmationDPLineHistoryCreationParameters _parameters)
+        {
+            // InventDim                             inventDim =
+            EcoResItemSizeName                   ecoResItemSizeName;
+            EcoResSize                          ecoResSize;
+            AgreementLine                       AgreementLine;
+            ETG_AgreementLineNotes              AgreementLineNotes;
+            AgreementLineHistory                agreementLineHistory;
+
+
+            next initializeQuantityCommitmentHistoryAgreementLine(_parameters);
+
+            AgreementLine = AgreementLine::find(agreementLineHistory.AgreementLine);
+
+            agreementLineTmp.ETGOrigin                =       InventDim::findDim(_parameters.inventDim).InventSizeId;
+       
+            while select Description from AgreementLineNotes
+            where AgreementLineNotes.AgreementLine ==  AgreementLine.RecId
+            {
+                if(agreementLineTmp.ETGDescription)
+                {
+                    agreementLineTmp.ETGDescription = agreementLineTmp.ETGDescription + ',' + AgreementLineNotes.Description;
+                }
+                else
+                {
+                    agreementLineTmp.ETGDescription =  AgreementLineNotes.Description;
+                }
+            }
+        
+            if (!CurrentCompanyIsSpanishCompany())
+            {
+                agreementLineTmp.insert();
+            }
+            
+        }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

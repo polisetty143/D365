@@ -1,0 +1,327 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGTermoNumberHelper</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This is the Helper class for Termonumber
+/// </summary>
+public class ETGTermoNumberHelper
+{
+    LedgerJournalTable ledgerJournalTable;
+    CustInvoiceJour    custInvoiceJour;
+    VendInvoiceJour    vendInvoiceJour;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static ETGTermoNumberHelper construct()
+    {
+        return new ETGTermoNumberHelper();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmLedgerJournalTable</Name>
+				<Source><![CDATA[
+    public LedgerJournalTable parmLedgerJournalTable(LedgerJournalTable _ledgerJournalTable = ledgerJournalTable)
+    {
+        ledgerJournalTable = _ledgerJournalTable;
+        return ledgerJournalTable;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmCustInvoiceJour</Name>
+				<Source><![CDATA[
+    public CustInvoiceJour parmCustInvoiceJour(CustInvoiceJour _custInvoiceJour = custInvoiceJour)
+    {
+        custInvoiceJour = _custInvoiceJour;
+        return custInvoiceJour;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmVendInvoiceJour</Name>
+				<Source><![CDATA[
+    public VendInvoiceJour parmVendInvoiceJour(VendInvoiceJour _vendInvoiceJour = vendInvoiceJour)
+    {
+        vendInvoiceJour = _vendInvoiceJour;
+        return vendInvoiceJour;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processPaymentJournal</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method updates TERMO number status, remaining TERMO value and other details after invoice is posted
+    /// Details of TERMO Number corresponding to TERMO Number from custInvoiceJour table are updated
+    /// </summary>
+    public boolean processPaymentJournal()
+    {
+        ETGTERMONumberTable termoNumberTable, termoNumberTableMother, termoNumberTableChild;
+        LedgerJournalTrans  ledgerJournalTrans;
+        ETGTermoValueUsageReal  termoValueUsage;
+
+        boolean allOK = true;
+
+        if(!ledgerJournalTable)
+        {
+            return allOK;
+        }
+        
+        while select ledgerJournalTrans
+                where ledgerJournalTrans.JournalNum == ledgerJournalTable.JournalNum
+                    && ledgerJournalTrans.ETGTERMONumber != ""
+        {
+            termoValueUsage  = ledgerJournalTrans.AmountCurCredit ? ledgerJournalTrans.AmountCurCredit : ledgerJournalTrans.AmountCurDebit;
+            termoNumberTable = ETGTERMONumberTable::findFromTermoNumber(ledgerJournalTrans.ETGTERMONumber, true);
+
+            if(termoValueUsage == 0)
+            {
+                return allOK;
+            }
+
+            ttsbegin;
+
+            if(termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Regular)
+            {
+                if(ledgerJournalTrans.Prepayment == NoYes::Yes)
+                {
+                    termoNumberTable.AdvanceAmt = termoValueUsage;
+                }
+                termoNumberTable.RemainingClosedTERMOValueReal = termoNumberTable.RemainingClosedTERMOValueReal - termoValueUsage;
+                if(termoNumberTable.RemainingClosedTERMOValueReal < 0)
+                {
+                    termoNumberTable.RemainingClosedTERMOValueReal = 0;
+                }
+                if(termoNumberTable.RemainingClosedTERMOValueReal == 0 && termoNumberTable.RemainingTermoValueReal == 0)
+                {
+                    termoNumberTable.TERMONumberStatus = ETGTERMONumberStatus::Close;
+                    termoNumberTable.ClosedDate        = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+                }
+            
+                termoNumberTable.doUpdate();
+            }
+
+            if(termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Mother)
+            {
+                if(ledgerJournalTrans.Prepayment == NoYes::Yes)
+                {
+                    termoNumberTable.AdvanceAmt = termoValueUsage;
+                }
+                termoNumberTable.RemainingClosedTERMOValueReal = termoNumberTable.RemainingClosedTERMOValueReal - termoValueUsage;
+                if(termoNumberTable.RemainingClosedTERMOValueReal < 0)
+                {
+                    termoNumberTable.RemainingClosedTERMOValueReal = 0;
+                }
+                if(termoNumberTable.RemainingClosedTERMOValueReal == 0 && termoNumberTable.RemainingTermoValueReal == 0)
+                {
+                    select firstonly RecId from termoNumberTableChild 
+                        where termoNumberTableChild.MotherTERMOReference == termoNumberTable.TERMONumber
+                        && termoNumberTableChild.TERMONumberStatus != ETGTERMONumberStatus::Close;
+
+                    if(termoNumberTableChild.RecId == 0)
+                    {
+                        termoNumberTable.TERMONumberStatus = ETGTERMONumberStatus::Close;
+                        termoNumberTable.ClosedDate        = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+                    }
+                }
+            
+                termoNumberTable.doUpdate();
+            }
+
+            if(termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Child)
+            {
+                termoNumberTable.TERMONumberStatus = ETGTERMONumberStatus::Close;
+                termoNumberTable.ShipmentValue     = abs(termoValueUsage);
+                termoNumberTable.ClosedDate        = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+                termoNumberTable.doUpdate();
+                termoNumberTableMother = ETGTERMONumberTable::findFromTermoNumber(termoNumberTable.MotherTERMOReference, true);
+                termoNumberTableMother.RemainingClosedTERMOValueReal = termoNumberTableMother.RemainingClosedTERMOValueReal - termoValueUsage;
+                if(termoNumberTableMother.RemainingClosedTERMOValueReal < 0)
+                {
+                    termoNumberTableMother.RemainingClosedTERMOValueReal = 0;
+                }
+                if(termoNumberTableMother.RemainingClosedTERMOValueReal == 0 && termoNumberTableMother.RemainingTermoValueReal == 0)
+                {
+                    select firstonly RecId from termoNumberTableChild
+                        where termoNumberTableChild.MotherTERMOReference == termoNumberTable.MotherTERMOReference
+                        && termoNumberTableChild.TERMONumberStatus != ETGTERMONumberStatus::Close
+                        && termoNumberTableChild.TERMONumber != termoNumberTable.TERMONumber;
+
+                    if(termoNumberTableChild.RecId == 0)
+                    {
+                        termoNumberTableMother.TERMONumberStatus = ETGTERMONumberStatus::Close;
+                        termoNumberTableMother.ClosedDate        = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+                    }
+                }
+                termoNumberTableMother.doUpdate();
+            }
+                
+            ttscommit;
+           
+        }
+
+        return allOK;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processCustomerInvoice</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method updates TERMO number status, remaining TERMO value and other details after invoice is posted
+    /// Details of TERMO Number corresponding to TERMO Number from custInvoiceJour table are updated
+    /// </summary>
+    public void processCustomerInvoice()
+    {
+        ETGTERMONumberTable termoNumberTable, termoNumberTableMother;
+        CustInvoiceTrans  custInvoiceTrans;
+
+        if(!custInvoiceJour|| !custInvoiceJour.ETGTERMONumber)
+        {
+            return;
+        }
+
+        select sum(ETGTermoValueUsageReal) from custInvoiceTrans
+            where custInvoiceTrans.SalesId == custInvoiceJour.SalesId
+            && custInvoiceTrans.InvoiceId == custInvoiceJour.InvoiceId
+            && custInvoiceTrans.numberSequenceGroup == custInvoiceJour.numberSequenceGroup
+            && custInvoiceTrans.InvoiceDate == custInvoiceJour.InvoiceDate;
+
+        termoNumberTable = ETGTERMONumberTable::findFromTermoNumber(custInvoiceJour.ETGTERMONumber, true);
+        if(termoNumberTable)
+        {
+            ttsbegin;
+
+            if(termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Regular)
+            {
+                termoNumberTable.RemainingTermoValueReal = termoNumberTable.RemainingTermoValueReal - custInvoiceTrans.ETGTermoValueUsageReal;
+                if(!termoNumberTable.StartDate)
+                {
+                    termoNumberTable.StartDate        = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+                }
+
+                if(termoNumberTable.RemainingTermoValueReal < 0)
+                {
+                    termoNumberTable.RemainingTermoValueReal = 0;
+                }
+                if(termoNumberTable.RemainingTermoValueReal == 0)
+                {
+                    termoNumberTable.TERMONumberStatus = ETGTERMONumberStatus::Exhausted;
+                }
+                termoNumberTable.doUpdate();
+            }
+
+            if(termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Child)
+            {
+                termoNumberTable.TERMONumberStatus             = ETGTERMONumberStatus::Exhausted;
+                termoNumberTableMother                         = ETGTERMONumberTable::findFromTermoNumber(termoNumberTable.MotherTERMOReference, true);
+                termoNumberTableMother.RemainingTermoValueReal = termoNumberTableMother.RemainingTermoValueReal - custInvoiceTrans.ETGTermoValueUsageReal;
+                termoNumberTable.StartDate                     = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+
+                if(!termoNumberTableMother.StartDate)
+                {
+                    termoNumberTableMother.StartDate = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+                }
+                if(termoNumberTableMother.RemainingTermoValueReal < 0)
+                {
+                    termoNumberTableMother.RemainingTermoValueReal = 0;
+                }
+                if(termoNumberTableMother.RemainingTermoValueReal == 0)
+                {
+                    termoNumberTableMother.TERMONumberStatus = ETGTERMONumberStatus::Exhausted;
+                }
+                termoNumberTable.ShipmentValue = abs(custInvoiceTrans.ETGTermoValueUsageReal);
+                termoNumberTable.doUpdate();
+                termoNumberTableMother.doUpdate();
+            }
+            ttscommit;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processVendorInvoice</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method updates TERMO number status, remaining TERMO value and other details after invoice is posted
+    /// Details of TERMO Number corresponding to TERMO Number from vendInvoiceJour table are updated
+    /// </summary>
+    public void processVendorInvoice()
+    {
+        ETGTERMONumberTable termoNumberTable, termoNumberTableMother;
+        VendInvoiceTrans    vendInvoiceTrans;
+
+        if(!vendInvoiceJour || !vendInvoiceJour.ETGTERMONumber)
+        {
+            return;
+        }
+        select sum(ETGTermoValueUsageReal) from vendInvoiceTrans
+            where vendInvoiceTrans.PurchID == vendInvoiceJour.PurchID
+            && vendInvoiceTrans.InvoiceId == vendInvoiceJour.InvoiceId
+            && vendInvoiceTrans.numberSequenceGroup == vendInvoiceJour.numberSequenceGroup
+            && vendInvoiceTrans.InvoiceDate == vendInvoiceJour.InvoiceDate;
+
+        termoNumberTable = ETGTERMONumberTable::findFromTermoNumber(vendInvoiceJour.ETGTERMONumber, true);
+        if(termoNumberTable)
+        {
+            ttsbegin;
+
+            if(termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Regular)
+            {
+                termoNumberTable.RemainingTermoValueReal = termoNumberTable.RemainingTermoValueReal - vendInvoiceTrans.ETGTermoValueUsageReal;
+                if(termoNumberTable.RemainingTermoValueReal < 0)
+                {
+                    termoNumberTable.RemainingTermoValueReal = 0;
+                }
+                if(termoNumberTable.RemainingTermoValueReal == 0)
+                {
+                    termoNumberTable.TERMONumberStatus = ETGTERMONumberStatus::Exhausted;
+                }
+                if(!termoNumberTable.StartDate)
+                {
+                    termoNumberTable.StartDate = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+                }
+                termoNumberTable.doUpdate();
+            }
+
+            if(termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Child)
+            {
+                termoNumberTable.TERMONumberStatus             = ETGTERMONumberStatus::Exhausted;
+                termoNumberTableMother                         = ETGTERMONumberTable::findFromTermoNumber(termoNumberTable.MotherTERMOReference, true);
+                termoNumberTableMother.RemainingTermoValueReal = termoNumberTableMother.RemainingTermoValueReal - vendInvoiceTrans.ETGTermoValueUsageReal;
+                termoNumberTable.StartDate                     = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+
+                if(termoNumberTableMother.RemainingTermoValueReal == 0)
+                {
+                    termoNumberTableMother.TERMONumberStatus = ETGTERMONumberStatus::Exhausted;
+                }
+                if(!termoNumberTableMother.StartDate)
+                {
+                    termoNumberTableMother.StartDate = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+                }
+                termoNumberTable.ShipmentValue = abs(vendInvoiceTrans.ETGTermoValueUsageReal);
+                termoNumberTable.doUpdate();
+                termoNumberTableMother.doUpdate();
+            }
+
+            ttscommit;
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

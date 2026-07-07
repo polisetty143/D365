@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>SalesFormletterParmDataInvoiceETGSPAIN_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the <c>SalesFormletterParmDataInvoice</c> class for the ETGSPAIN model.
+/// </summary>
+[ExtensionOf(classStr(SalesFormletterParmDataInvoice))]
+final class SalesFormletterParmDataInvoiceETGSPAIN_Extension
+{
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initParmTable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>initParmTable</c> method.
+    /// </summary>
+    /// <param name="_salesTable">SalesTable.</param>
+    /// <param name="_salesLine">SalesLine.</param>
+    /// <param name="_tableRefId">TradeLineRefId.</param>
+    /// <param name="_postingProfile">CustPostingProfile.</param>
+    /// <param name="_inventProfileType">InventProfileType_RU.</param>
+    /// <param name="_inventOwnerId">InventOwnerId_RU.</param>
+    /// <param name="_mcrPackingBoxName">MCRPackingBoxName.</param>
+    /// <returns>Returns a SalesParmTable object.</returns>
+    protected SalesParmTable initParmTable(SalesTable _salesTable, Common _salesLine, TradeLineRefId _tableRefId, CustPostingProfile _postingProfile, InventProfileType_RU _inventProfileType, InventOwnerId_RU _inventOwnerId, MCRPackingBoxName _mcrPackingBoxName)
+    {
+        // Validamos el almacén de Factura Previa.
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            this.ETGSPAINcheckPrevInvoice(_salesTable);
+        }
+
+        return next initParmTable(_salesTable, _salesLine, _tableRefId, _postingProfile, _inventProfileType, _inventOwnerId, _mcrPackingBoxName);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSPAINcheckPrevInvoice</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method to validate the selected warehouse.
+    /// </summary>
+    /// <param name="_salesTable">SalesTable record.</param>
+    private void ETGSPAINcheckPrevInvoice(SalesTable _salesTable)
+    {
+        SalesLine       salesLine;
+        InventDim       inventDim;
+        InventLocation  inventLocation;
+        AgreementHeader agreementHeader;
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            if (_salesTable.MatchingAgreement)
+            {
+                agreementHeader = AgreementHeader::find(_salesTable.MatchingAgreement);
+
+                // Comprobamos que el tipo de facturación del acuerdo sea "Previa"
+                if (agreementHeader.ETGSPAINPurchInvoiceType == ETGSPAINPurchInvoiceType::Previous)
+                {
+                    // Comprobamos si existe algún almacén que no sera "Facturación Previa". En caso de haberlo, generamos error.
+                    select firstonly salesLine
+                    where        salesLine.SalesId == _salesTable.SalesId
+                join             inventDim
+                    where        inventDim.inventDimId == salesLine.InventDimId
+                exists join      inventLocation
+                    where        inventLocation.InventLocationId == inventDim.InventLocationId
+                    &&           inventLocation.ETGSPAINIsPrevInvoice == NoYes::No;
+    
+                    if (salesLine)
+                    {
+                        throw error(strFmt("@ETGSPAINLabels:SalesInvoicePrevInvoiceError", inventDim.InventLocationId));
+                    }
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

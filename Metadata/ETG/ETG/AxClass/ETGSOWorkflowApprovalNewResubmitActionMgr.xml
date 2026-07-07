@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSOWorkflowApprovalNewResubmitActionMgr</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The ETGSOWorkflowApprovalNewResubmitActionMgr menu item action event handler.
+/// </summary>
+public class ETGSOWorkflowApprovalNewResubmitActionMgr 
+{
+    SalesTable  salesTable;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Workflow resubmit code main method
+    /// </summary>
+    /// <param name = "_args">Selected recod buffer args</param>
+    public static void main(Args _args)
+    {
+
+        recID                           recID = _args.record().RecId;
+        SalesTable                      salesTableLoc = _args.record();;
+        WorkflowWorkItemTable           workItem = _args.caller().getActiveWorkflowWorkItem();
+        WorkflowWorkItemActionDialog    workflowWorkItemActionDialog;
+
+        if (workItem.RecId > 0)
+        {
+            try
+            {
+
+                workflowWorkItemActionDialog = WorkflowWorkItemActionDialog::construct( workItem,
+                    WorkflowWorkItemActionType::Resubmit,
+                    new MenuFunction(_args.menuItemName(),_args.menuItemType()));
+                workflowWorkItemActionDialog.run();
+
+                if (workflowWorkItemActionDialog.parmIsClosedOK())
+                {
+                    workItem = _args.caller().getActiveWorkflowWorkItem();
+                    WorkflowWorkItemActionManager::dispatchWorkItemAction(workItem,
+                                                                    workflowWorkItemActionDialog.parmWorkflowComment(),
+                                                                    workflowWorkItemActionDialog.parmTargetUser(),
+                                                                    WorkflowWorkItemActionType::Resubmit,
+                                                                    _args.menuItemName(),
+                                                                    'False');
+                    ETGSOWorkflowApprovalNewResubmitActionMgr::newSalesOrder(salesTableLoc).createResubmit();
+                }
+                else
+                {
+                    throw Exception::Error;
+                }
+            }
+            catch(Exception::Error)
+            {
+                throw error("Error in workflow submission");
+            }
+        }
+
+       
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>newSalesOrder</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Constructing the Resubmiting class
+    /// </summary>
+    /// <param name = "_salesTable">Table Record buffer</param>
+    /// <returns></returns>
+    public static ETGSOWorkflowApprovalNewResubmitActionMgr newSalesOrder( SalesTable _salesTable )
+    {
+        ETGSOWorkflowApprovalNewResubmitActionMgr resubmit = ETGSOWorkflowApprovalNewResubmitActionMgr::construct();
+        resubmit.parmSales(_salesTable);
+        return resubmit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Construct method
+    /// </summary>
+    /// <returns>new instance of ETGSORequestChange</returns>
+    protected static ETGSOWorkflowApprovalNewResubmitActionMgr construct()
+    {
+        return new ETGSOWorkflowApprovalNewResubmitActionMgr();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmSales</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// parameter method for SalesTable
+    /// </summary>
+    /// <param name = "_salesTable">salesTable value</param>
+    /// <returns>salesTable value</returns>
+    protected SalesTable parmSales(SalesTable _salesTable = salesTable)
+    {
+        salesTable = _salesTable;
+
+        return salesTable;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createResubmit</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Updating the table field after resubmition
+    /// </summary>
+    public void createResubmit()
+    {
+
+        salesTable = this.parmSales();
+
+        ttsbegin;
+
+        if(salesTable.ETGWorkflowStatus == VersioningDocumentState::Rejected || salesTable.ETGWorkflowStatus == VersioningDocumentState::InReview)
+        {
+            salesTable::updateWorkflowStatus(salesTable.RecId, VersioningDocumentState::InReview);
+        }
+        
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,1004 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGITMCreatorTableGeneration</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// this class will generate data for outbound order sales order shipment and transfer order shipment
+/// </summary>
+public class ETGITMCreatorTableGeneration
+{
+    private ITMCreatorOptions shipCreatorOptions;
+    private ITMTmpCreatorTable tmpShipCreatorTable;
+    ITMTmpCreatorTable tmpShipCreatorTableETG;
+    private ITMTmpCreatorLine tmpShipCreatorLine;
+    private Common inventTransRefBuffer;
+    private Set records;
+    private boolean detectedProjPurchLine;
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>buildInventTransId</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// build invntory transactions lines for outbound orders
+    /// </summary>
+    /// <param name = "_inventTransId">InventTransId _inventTransId</param>
+    /// <param name = "_purchUnit">PurchUnit _purchUnit</param>
+    public void buildInventTransId(InventTransId _inventTransId, PurchUnit _purchUnit)
+    {
+        ITMTmpCreatorLine tmpShipCreatorLineLocal;
+        InventTrans inventTrans;
+        InventTransOrigin inventTransOrigin;
+        InventDim inventDim;
+    
+        tmpShipCreatorLineLocal.setTmpData(tmpShipCreatorLine);
+    
+        while select inventTransOrigin
+            group by inventTrans.DateExpected,
+                     inventTransOrigin.ReferenceCategory,
+                     inventTransOrigin.ReferenceId,
+                     inventTransOrigin.ItemId,
+                     inventTransOrigin.dataAreaId,
+                     inventTrans.inventDimId,
+                     inventDim.InventSiteId,
+                     inventDim.InventLocationId
+            where inventTransOrigin.InventTransId == _inventTransId
+            join sum(Qty) from inventTrans
+            where inventTrans.InventTransOrigin == inventTransOrigin.RecId 
+                && inventTrans.StatusIssue == StatusIssue::None       
+                && inventTrans.StatusReceipt == StatusReceipt::Ordered
+            join inventDim
+            where inventDim.InventDimId == inventTrans.InventDimId
+        {
+            tmpShipCreatorLineLocal.clear();
+            tmpShipCreatorLineLocal.InventTransId = _inventTransId;
+            tmpShipCreatorLineLocal.InventTransType = inventTransOrigin.ReferenceCategory;
+            tmpShipCreatorLineLocal.InventTransRefId = inventTransOrigin.ReferenceId;
+            tmpShipCreatorLineLocal.DateStatus = inventTrans.DateExpected;
+            tmpShipCreatorLineLocal.InventDimId = inventTrans.InventDimId;
+            tmpShipCreatorLineLocal.InventSiteId = inventDim.InventSiteId;
+            tmpShipCreatorLineLocal.InventLocationId = inventDim.InventLocationId;
+            tmpShipCreatorLineLocal.InventQty = abs(inventTrans.Qty);
+            tmpShipCreatorLineLocal.ShipDataArea = inventTransOrigin.dataAreaId;
+            tmpShipCreatorLineLocal.PurchUnit = _purchUnit;
+            this.initLineValues(tmpShipCreatorLineLocal, inventTransOrigin.ItemId, tmpShipCreatorLineLocal.InventQty);
+            tmpShipCreatorLineLocal.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>storeBucketRecord</Name>
+				<Source><![CDATA[
+    protected void storeBucketRecord()
+    {
+        ITMTmpCreatorLine tmpShipCreatorLineLocal;
+
+        tmpShipCreatorLineLocal.setTmpData(tmpShipCreatorLine);
+
+        records = new Set(Types::Record);
+
+        while select tmpShipCreatorLineLocal where tmpShipCreatorLineLocal.AddedToBucket == NoYes::Yes
+        {
+            records.add(tmpShipCreatorLineLocal);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buildLines</Name>
+				<Source><![CDATA[
+    public void buildLines()
+    {
+        ITMTmpCreatorTable tmpShipCreatorTableLocal;
+        ITMTmpCreatorLine tmpShipCreatorLineLocal;
+        Map transTypesMap = new Map(Types::Enum, Types::Class);
+        Set transRefIdSet;
+        InventTransType inventTransType;
+    
+        tmpShipCreatorTableLocal.setTmpData(tmpShipCreatorTable);
+        tmpShipCreatorLineLocal.setTmpData(tmpShipCreatorLine);
+    
+        this.storeBucketRecord();
+
+        delete_from tmpShipCreatorLineLocal;
+    
+        while select tmpShipCreatorTableLocal
+        {
+            inventTransType = tmpShipCreatorTableLocal.InventTransType;
+            if (!transTypesMap.exists(inventTransType))
+            {
+                transRefIdSet = new Set(Types::String);
+                transTypesMap.insert(inventTransType, transRefIdSet);
+            }
+            else
+            {
+                transRefIdSet = transTypesMap.lookup(inventTransType);
+            }
+
+            if (!transRefIdSet.in(tmpShipCreatorTableLocal.ShipDataArea + tmpShipCreatorTableLocal.InventTransRefId))
+            {
+                changeCompany (tmpShipCreatorTableLocal.ShipDataArea)
+                {
+                    this.buildReference(tmpShipCreatorTableLocal.InventTransType, tmpShipCreatorTableLocal.InventTransRefId);
+                }
+
+                transRefIdSet.add(tmpShipCreatorTableLocal.ShipDataArea + tmpShipCreatorTableLocal.InventTransRefId);
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buildPurch</Name>
+				<Source><![CDATA[
+    public void buildPurch(SalesId _salesId)
+    {
+        SalesLine salesLine;
+        ITMLine shipLine;
+    
+        while select InventTransId, SalesUnit, ProjId from salesLine
+            where salesLine.SalesId == _salesId
+            notExists join shipLine
+            where shipLine.RefRecId == salesLine.RecId
+                && shipLine.RefTableId == salesLine.TableId
+        {
+            this.buildInventTransId(salesLine.InventTransId, salesLine.SalesUnit);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buildQuery</Name>
+				<Source><![CDATA[
+    public Query buildQuery()
+    {
+        Query query = new Query();
+        QueryBuildDataSource qbd_InventTransOrigin = query.addDataSource(tableNum(InventTransOrigin));
+        QueryBuildDataSource qbd_InventTrans = qbd_InventTransOrigin.addDataSource(tableNum(InventTrans));
+        QueryBuildDataSource qbd_InventDim = qbd_InventTrans.addDataSource(tableNum(InventDim));
+    
+        query.recordLevelSecurity(true);
+    
+        if (shipCreatorOptions.parmItemId())
+        {
+            qbd_InventTransOrigin.addRange(fieldNum(InventTransOrigin, ItemId)).value(shipCreatorOptions.parmItemId());
+        }
+    
+        if (shipCreatorOptions.parmPurchId())
+        {
+            qbd_InventTransOrigin.addRange(fieldNum(InventTransOrigin, ReferenceId)).value(shipCreatorOptions.parmPurchId());
+            qbd_InventTransOrigin.addRange(fieldnum(InventTransOrigin, ReferenceCategory)).value(queryValue(InventTransType::Sales));
+        }
+        else if (shipCreatorOptions.parmTransferId())
+        {
+            qbd_InventTransOrigin.addRange(fieldnum(InventTransOrigin, ReferenceId)).value(shipCreatorOptions.parmTransferId());
+            qbd_InventTransOrigin.addRange(fieldnum(InventTransOrigin, ReferenceCategory)).value(queryValue(InventTransType::TransferOrderShip));
+        }
+        else
+        {
+            QueryBuildRange typeRange = qbd_InventTransOrigin.addRange(fieldNum(InventTransOrigin, ReferenceCategory));
+    
+            str typeRangeStr = '';
+
+            if (true)
+            {
+                typeRangeStr += (typeRangeStr ? ', ' : '') + queryValue(InventTransType::Sales);
+            }
+            if (true)
+            {
+                if (ITMFeatureManagementVisibilityManager::isEnabled())
+                {
+                    typeRangeStr += (typeRangeStr ? ', ' : '') + queryValue(InventTransType::TransferOrderShip);
+                }
+            }
+    
+            typeRange.value(typeRangeStr ? typeRangeStr : queryValue(-1));
+        }
+    
+        qbd_InventTrans.joinMode(JoinMode::InnerJoin);
+        qbd_InventTrans.addLink(fieldNum(InventTransOrigin, RecId), fieldNum(InventTrans, InventTransOrigin));
+    
+        qbd_InventDim.joinMode(JoinMode::InnerJoin);
+        qbd_InventDim.relations(true);
+    
+        qbd_InventTrans.addRange(fieldNum(InventTrans, StatusIssue)).value(queryValue(StatusIssue::OnOrder));
+        qbd_InventTrans.addRange(fieldNum(InventTrans, StatusReceipt)).value(queryValue(StatusReceipt::None));
+    
+        if (shipCreatorOptions.parmSiteRange())
+        {
+            qbd_InventDim.addRange(fieldNum(InventDim, InventSiteId)).value(shipCreatorOptions.parmSiteRange());
+        }
+
+        if (shipCreatorOptions.parmWarehouseRange())
+        {
+            qbd_InventDim.addRange(fieldNum(InventDim, InventLocationId)).value(shipCreatorOptions.parmWarehouseRange());
+        }
+
+        if (shipCreatorOptions.parmInventColorId())
+        {
+            qbd_InventDim.addRange(fieldNum(InventDim, InventColorId)).value(shipCreatorOptions.parmInventColorId());
+        }
+
+        if (shipCreatorOptions.parmInventSizeId())
+        {
+            qbd_InventDim.addRange(fieldNum(InventDim, InventSizeId)).value(shipCreatorOptions.parmInventSizeId());
+        }
+        if (shipCreatorOptions.parmInventStyleId())
+        {
+            qbd_InventDim.addRange(fieldNum(InventDim, InventStyleId)).value(shipCreatorOptions.parmInventStyleId());
+        }
+        if (shipCreatorOptions.parmconfigId())
+        {
+            qbd_InventDim.addRange(fieldNum(InventDim, configId)).value(shipCreatorOptions.parmconfigId());
+        }
+    
+        qbd_InventTrans.addGroupByField(fieldNum(InventTrans, DateExpected));
+        qbd_InventTransOrigin.addGroupByField(fieldNum(InventTransOrigin, ReferenceCategory));
+        qbd_InventTransOrigin.addGroupByField(fieldNum(InventTransOrigin, ReferenceId));
+        qbd_InventTrans.addGroupByField(fieldNum(InventTrans, dataAreaId));
+
+        qbd_InventTrans.fetchMode(QueryFetchMode::One2One);
+        qbd_InventDim.fetchMode(QueryFetchMode::One2One);
+    
+        QueryBuildDataSource qbds = qbd_InventTransOrigin.addDataSource(tableNum(ITMLine));
+        qbds.joinMode(JoinMode::NoExistsJoin);
+        qbds.fetchMode(QueryFetchMode::One2One);
+
+        if (ETGOTMEditorQueryMatchIndexFlight::instance().isEnabled())
+        {
+            qbds.addLink(fieldNum(InventTransOrigin, InventTransId), fieldNum(ITMLine, InventTransId), qbd_InventTransOrigin.name());
+            qbds.addLink(fieldNum(InventTransOrigin, DataAreaId), fieldNum(ITMLine, ShipDataArea), qbd_InventTransOrigin.name());
+        }
+        else
+        {
+            qbds.relations(true);
+        }
+    
+        if (shipCreatorOptions.parmCustVendAC())
+        {
+            qbds = qbd_InventTransOrigin.addDataSource(tableNum(CustTable));
+            qbds.joinMode(JoinMode::ExistsJoin);
+            qbds.fetchMode(QueryFetchMode::One2One);
+            qbds.addLink(fieldNum(InventTransOrigin, Party), fieldNum(CustTable, Party));
+            qbds.addRange(fieldNum(CustTable, AccountNum)).value(shipCreatorOptions.parmCustVendAC());
+        }
+
+        return query;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buildReference</Name>
+				<Source><![CDATA[
+    protected void buildReference(
+        InventTransType _inventTransType,
+        InventTransRefId _inventTransRefId)
+    {
+        switch (_inventTransType)
+        {
+            case InventTransType::Sales:
+                this.buildPurch(_inventTransRefId);
+                break;
+   
+            case InventTransType::TransferOrderShip:
+                this.buildTransferOrder(_inventTransRefId);
+                break;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buildTransferOrder</Name>
+				<Source><![CDATA[
+    public void buildTransferOrder(InventTransferId _inventTransferId)
+    {
+        InventTransferLine inventTransferLine;
+        ITMLine shipLine;
+    
+        while select InventTransIdReceive, UnitId from inventTransferLine
+            where inventTransferLine.TransferId == _inventTransferId
+            notExists join shipLine
+            where shipLine.RefRecId == inventTransferLine.RecId &&
+                  shipLine.RefTableId == inventTransferLine.TableId
+        {
+            this.buildInventTransId(inventTransferLine.InventTransIdReceive, inventTransferLine.UnitId);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>fillTables</Name>
+				<Source><![CDATA[
+    protected void fillTables()
+    {
+        ttsBegin;
+    
+        delete_from tmpShipCreatorTable;
+    
+        Query query = this.buildQuery();
+
+        QueryRun queryRun = new QueryRun(query);
+    
+        while (queryRun.next())
+        {
+            InventTrans inventTrans = queryRun.get(tableNum(InventTrans));
+            InventTransOrigin InventTransOrigin = queryRun.get(tableNum(inventTransOrigin));
+            changeCompany (inventTrans.dataAreaId)
+            {
+                if (this.includeReference(inventTransOrigin.ReferenceCategory, inventTransOrigin.ReferenceId))
+                {
+                    InventDim inventDim = queryRun.get(tableNum(InventDim));
+                    tmpShipCreatorTable.clear();
+                    this.initTableValues(tmpShipCreatorTable,
+                                         inventTrans.DateExpected,
+                                         inventTransOrigin.ReferenceCategory,
+                                         inventTransOrigin.ReferenceId,
+                                         inventDim.InventSiteId,
+                                         inventDim.InventLocationId);
+                    tmpShipCreatorTable.insert();
+                }
+            }
+        }
+    
+        this.buildLines();
+
+        this.updateBucket();
+
+        this.updateOverviewInformation();
+    
+        ttsCommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>includeReference</Name>
+				<Source><![CDATA[
+    public NoYes includeReference(
+        InventTransType _inventTransType,
+        InventTransRefId _inventTransRefId)
+    {
+    
+        inventTransRefBuffer = null;
+    
+        switch (_inventTransType)
+        {
+            case InventTransType::Sales:
+                SalesTable salesTable;
+                if (shipCreatorOptions.parmDlvModeId())
+                {
+                    salesTable = this.parmInventTransRefBuffer(SalesTable::find(_inventTransRefId));
+                    if (shipCreatorOptions.parmDlvModeId() != salesTable.DlvMode)
+                    {
+                        return NoYes::No;
+                    }
+                }
+
+                if (shipCreatorOptions.parmCustVendAC())
+                {
+                    if (!salesTable)
+                    {
+                        salesTable = this.parmInventTransRefBuffer(SalesTable::find(_inventTransRefId));
+                    }
+                }
+
+                break;
+    
+            case InventTransType::TransferOrderShip:
+
+                if (shipCreatorOptions.parmCustVendAC() || shipCreatorOptions.parmSalesId())
+                {
+                    return NoYes::No;
+                }
+
+                if (shipCreatorOptions.parmDlvModeId())
+                {
+                    inventTransferTable inventTransferTable = this.parmInventTransRefBuffer(InventTransferTable::find(_inventTransRefId));
+                    if (shipCreatorOptions.parmDlvModeId() != inventTransferTable.DlvModeId)
+                    {
+                        return NoYes::No;
+                    }
+                }
+
+                break;
+        }
+    
+        return NoYes::Yes;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initLineValues</Name>
+				<Source><![CDATA[
+    public void initLineValues(ITMTmpCreatorLine _tmpShipCreatorLine, ItemId _itemId, InventQty _qty)
+    {
+        EcoResProductUnitConverter productUnitConverter;
+        InventTable inventTable = InventTable::find(_itemId);
+        Weight weight = inventTable.grossWeight();
+        
+        _tmpShipCreatorLine.ItemId = _itemId;
+    
+        _tmpShipCreatorLine.Volume = _qty * inventTable.grossVolume();
+
+        if (!_tmpShipCreatorLine.Volume)
+        {
+            _tmpShipCreatorLine.VolumeMissing = NoYes::Yes;
+        }
+    
+        _tmpShipCreatorLine.Weight = _qty * weight;
+
+        if (!weight)
+        {
+            _tmpShipCreatorLine.WeightMissing = NoYes::Yes;
+        }
+    
+        productUnitConverter = EcoResProductUnitConverter::newGivenUnitSymbolsForReleasedProduct(
+                                            _tmpShipCreatorLine.ItemId,
+                                            _tmpShipCreatorLine.InventDimId,
+                                            inventTable.inventUnitId(),
+                                            _tmpShipCreatorLine.PurchUnit,
+                                            NoYes::Yes);
+
+        _tmpShipCreatorLine.PurchQty = productUnitConverter.convertValue(_qty);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initTableValues</Name>
+				<Source><![CDATA[
+    public void initTableValues(ITMTmpCreatorTable _tmpShipCreatorTable,
+                                   DateStatus _dateStatus,
+                                   InventTransType _inventTransType,
+                                   InventTransRefId _inventTransRefId,
+                                   InventSiteId _inventSiteId,
+                                   InventLocationId _inventLocationId)
+    {
+        _tmpShipCreatorTable.DateStatus = _dateStatus;
+        _tmpShipCreatorTable.InventTransType = _inventTransType;
+        _tmpShipCreatorTable.InventTransRefId = _inventTransRefId;
+        _tmpShipCreatorTable.InventSiteId = _inventSiteId;
+        _tmpShipCreatorTable.InventLocationId = _inventLocationId;
+    
+        switch (_inventTransType)
+        {
+            case InventTransType::Sales:
+
+                SalesTable salesTable = this.parmInventTransRefBuffer();
+                if (!salesTable)
+                {
+                    salesTable = this.parmInventTransRefBuffer(salesTable::find(_inventTransRefId));
+                }
+    
+                CustTable custTable = salesTable.custTable_InvoiceAccount();
+                _tmpShipCreatorTable.CustVendAC = salesTable.CustAccount;
+                _tmpShipCreatorTable.Name = custTable.name();
+                _tmpShipCreatorTable.DlvModeId = salesTable.DlvMode;
+                _tmpShipCreatorTable.VendRef = salesTable.CustomerRef;
+    
+                SalesLine salesLine;
+
+                select count(RecId) from salesLine where salesLine.SalesId == _inventTransRefId;
+    
+                _tmpShipCreatorTable.NoOfLines    = any2int(salesLine.RecId);
+                _tmpShipCreatorTable.ShipDataArea = salesTable.dataAreaId;
+
+                break;
+    
+            case InventTransType::TransferOrderShip:
+                InventTransferTable inventTransferTable = this.parmInventTransRefBuffer();
+                if (!inventTransferTable)
+                {
+                    inventTransferTable = this.parmInventTransRefBuffer(InventTransferTable::find(_inventTransRefId));
+                }
+    
+                _tmpShipCreatorTable.Name = inventTransferTable.InventLocationIdFrom;
+                _tmpShipCreatorTable.DlvModeId = inventTransferTable.DlvModeId;
+    
+                InventTransferLine inventTransferLine;
+
+                select count(RecId) from inventTransferLine
+                    where inventTransferLine.TransferId == inventTransferTable.TransferId   
+                    && inventTransferLine.ShipDate == _dateStatus;
+    
+                _tmpShipCreatorTable.NoOfLines = any2int(inventTransferLine.RecId);
+                _tmpShipCreatorTable.ShipDataArea = inventTransferTable.dataAreaId;
+
+                break;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmInventTransRefBuffer</Name>
+				<Source><![CDATA[
+    public Common parmInventTransRefBuffer(Common _inventTransRefBuffer = inventTransRefBuffer)
+    {
+        inventTransRefBuffer = _inventTransRefBuffer;
+        return inventTransRefBuffer;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmShipCreatorOptions</Name>
+				<Source><![CDATA[
+    public ITMCreatorOptions parmShipCreatorOptions(ITMCreatorOptions _shipCreatorOptions = shipCreatorOptions)
+    {
+        shipCreatorOptions = _shipCreatorOptions;
+        return shipCreatorOptions;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmTmpShipCreatorLine</Name>
+				<Source><![CDATA[
+    public ITMTmpCreatorLine parmTmpShipCreatorLine(ITMTmpCreatorLine _tmpShipCreatorLine = tmpShipCreatorLine)
+    {
+        if (!prmisDefault(_tmpShipCreatorLine))
+        {
+            tmpShipCreatorLine.setTmpData(_tmpShipCreatorLine);
+        }
+        return tmpShipCreatorLine;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmTmpShipCreatorTable</Name>
+				<Source><![CDATA[
+    public ITMTmpCreatorTable parmTmpShipCreatorTable(ITMTmpCreatorTable _tmpShipCreatorTable = tmpShipCreatorTable)
+    {
+        if (!prmisDefault(_tmpShipCreatorTable))
+        {
+            tmpShipCreatorTable.setTmpData(_tmpShipCreatorTable);
+        }
+
+        return tmpShipCreatorTable;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmTmpShipCreatorTableETG</Name>
+				<Source><![CDATA[
+    public ITMTmpCreatorTable parmTmpShipCreatorTableETG(ITMTmpCreatorTable _tmpShipCreatorTable = tmpShipCreatorTableETG)
+    {
+        if (!prmisDefault(_tmpShipCreatorTable))
+        {
+            tmpShipCreatorTableETG.setTmpData(_tmpShipCreatorTable);
+        }
+
+        return tmpShipCreatorTableETG;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateBucket</Name>
+				<Source><![CDATA[
+    public void updateBucket()
+    {
+        ITMTmpCreatorLine tmpShipCreatorLineLocal, tmpShipCreatorLineBucket;
+
+        tmpShipCreatorLineLocal.setTmpData(tmpShipCreatorLine);
+
+        SetIterator recordsIterator = new SetIterator(Set::create(records.pack()));
+        while (recordsIterator.more())
+        {
+            tmpShipCreatorLineBucket.data(recordsIterator.value());
+
+            ttsbegin;
+            select forupdate tmpShipCreatorLineLocal
+                where tmpShipCreatorLineLocal.InventTransId == tmpShipCreatorLineBucket.InventTransId
+                && tmpShipCreatorLineLocal.InventTransRefId == tmpShipCreatorLineBucket.InventTransRefId
+                && tmpShipCreatorLineLocal.InventTransType == tmpShipCreatorLineBucket.InventTransType
+                && tmpShipCreatorLineLocal.ShipDataArea == tmpShipCreatorLineBucket.ShipDataArea;
+
+            if (tmpShipCreatorLineLocal.RecId)
+            {
+                tmpShipCreatorLineLocal.Selected = tmpShipCreatorLineBucket.Selected;
+                tmpShipCreatorLineLocal.AddedToBucket = NoYes::Yes;
+                tmpShipCreatorLineLocal.TransferQty = 0;
+
+                if (tmpShipCreatorLineLocal.TransferQty < tmpShipCreatorLineLocal.PurchQty)
+                {
+                    this.createPartialLine(tmpShipCreatorLineLocal);
+
+                    tmpShipCreatorLineLocal.PurchQty = tmpShipCreatorLineLocal.TransferQty;
+
+                    if (ETGOTMAddToBucketUnitConversionFlight::instance().isEnabled())
+                    {
+                        tmpShipCreatorLineLocal.InventQty = tmpShipCreatorLineLocal.calcTransferInventQty();
+                    }
+                    else
+                    {
+                        tmpShipCreatorLineLocal.InventQty = tmpShipCreatorLineLocal.TransferQty;
+                    }
+                }
+
+                tmpShipCreatorLineLocal.update();
+
+            }
+            else
+            {
+                tmpShipCreatorLineLocal.data(recordsIterator.value());
+                tmpShipCreatorLineLocal.insert();
+            }
+            ttscommit;
+
+            recordsIterator.next();
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateOverviewInformation</Name>
+				<Source><![CDATA[
+    public void updateOverviewInformation()
+    {
+        ITMTmpCreatorTable tmpShipCreatorTableLocal;
+        ITMTmpCreatorLine tmpShipCreatorLineLocal;
+        int lineCount;
+
+        tmpShipCreatorTableLocal.setTmpData(tmpShipCreatorTable);
+        tmpShipCreatorLineLocal.setTmpData(tmpShipCreatorLine);
+    
+        while select forUpdate tmpShipCreatorTableLocal
+        {
+            tmpShipCreatorTableLocal.InventQty = 0;
+            tmpShipCreatorTableLocal.Volume = 0;
+            tmpShipCreatorTableLocal.Weight = 0;
+            lineCount = this.updateOverviewInformationLocal(tmpShipCreatorLineLocal, tmpShipCreatorTableLocal)      ;
+            tmpShipCreatorTableLocal.NoOfLines = lineCount;
+            tmpShipCreatorTableLocal.update();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateOverviewInformationLocal</Name>
+				<Source><![CDATA[
+    protected int updateOverviewInformationLocal(ITMTmpCreatorLine _tmpShipCreatorLineLocal, 
+                                               ITMTmpCreatorTable _tmpShipCreatorTableLocal)
+    {
+        InventTable inventTable;
+        int lineCount = 0;
+
+        while select _tmpShipCreatorLineLocal
+                where _tmpShipCreatorLineLocal.DateStatus == _tmpShipCreatorTableLocal.DateStatus        
+                    && _tmpShipCreatorLineLocal.InventTransType == _tmpShipCreatorTableLocal.InventTransType   
+                    && _tmpShipCreatorLineLocal.InventTransRefId == _tmpShipCreatorTableLocal.InventTransRefId  
+                    && _tmpShipCreatorLineLocal.ShipDataArea == _tmpShipCreatorTableLocal.ShipDataArea
+                    && _tmpShipCreatorLineLocal.AddedToBucket == NoYes::No
+        {
+            changeCompany (_tmpShipCreatorLineLocal.ShipDataArea)
+            {
+                lineCount++;
+                inventTable = InventTable::find(_tmpShipCreatorLineLocal.ItemId);
+                _tmpShipCreatorTableLocal.InventQty+= abs(_tmpShipCreatorLineLocal.InventQty);
+
+                if (ETGOTMCreatorHeaderVolumeWeightSumFromLinesFlight::instance().isEnabled())
+                {
+                    _tmpShipCreatorTableLocal.Volume += _tmpShipCreatorLineLocal.Volume;
+                    _tmpShipCreatorTableLocal.Weight += _tmpShipCreatorLineLocal.Weight;
+                }
+                else
+                {
+                    _tmpShipCreatorTableLocal.Volume += abs(_tmpShipCreatorLineLocal.InventQty) * inventTable.UnitVolume;
+                    _tmpShipCreatorTableLocal.Weight += abs(_tmpShipCreatorLineLocal.InventQty) * inventTable.grossWeight();
+                }
+            }
+        }
+
+        return lineCount;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static ETGITMCreatorTableGeneration construct()
+    {
+        if (ETGITMCreatorTableGenerationV2Flight::instance().isEnabled())
+        {
+            return new ETGITMCreatorTableGenerationV2();
+        }
+        else
+        {
+            return new ETGITMCreatorTableGeneration();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>generateFromForm</Name>
+				<Source><![CDATA[
+    public static void generateFromForm(
+        ITMTmpCreatorTable _tmpShipCreatorTable,
+        ITMTmpCreatorLine _tmpShipCreatorLine,
+        container _packedOptions)
+    {
+        ETGITMCreatorTableGeneration  shipCreatorTableGeneration = ETGITMCreatorTableGeneration::construct();
+
+        shipCreatorTableGeneration.parmTmpShipCreatorTable(_tmpShipCreatorTable);
+        shipCreatorTableGeneration.parmTmpShipCreatorLine(_tmpShipCreatorLine);
+        shipCreatorTableGeneration.parmShipCreatorOptions(ITMCreatorOptions::newFromPacked(_packedOptions));
+        shipCreatorTableGeneration.fillTables();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>generateFromFormETG</Name>
+				<Source><![CDATA[
+    public static void generateFromFormETG(
+        ITMTmpCreatorTable _tmpShipCreatorTable,
+        ITMTmpCreatorLine _tmpShipCreatorLine,
+        container _packedOptions)
+    {
+        ETGITMCreatorTableGeneration  shipCreatorTableGeneration = ETGITMCreatorTableGeneration::construct();
+
+        shipCreatorTableGeneration.parmTmpShipCreatorTableETG(_tmpShipCreatorTable);
+        shipCreatorTableGeneration.parmTmpShipCreatorLine(_tmpShipCreatorLine);
+        shipCreatorTableGeneration.parmShipCreatorOptions(ITMCreatorOptions::newFromPacked(_packedOptions));
+        shipCreatorTableGeneration.fillTables();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>generateData</Name>
+				<Source><![CDATA[
+    public static container generateData(container _packedOptions)
+    {
+        ETGITMCreatorTableGeneration  shipCreatorTableGeneration = ETGITMCreatorTableGeneration::construct();
+    
+        shipCreatorTableGeneration.parmShipCreatorOptions(ITMCreatorOptions::newFromPacked(_packedOptions));
+        shipCreatorTableGeneration.fillTables();
+
+        ITMTmpCreatorTable tmpShipCreatorTableRet;
+        tmpShipCreatorTableRet.setTmpData(shipCreatorTableGeneration.parmTmpShipCreatorTable());
+
+        ITMTmpCreatorLine tmpShipCreatorLineRet;
+        tmpShipCreatorLineRet.setTmpData(shipCreatorTableGeneration.parmTmpShipCreatorLine());
+
+        Set tableSet = new Set(Types::Record);
+        Set lineSet  = new Set(Types::Record);
+
+        while select tmpShipCreatorTableRet
+        {
+            tableSet.add(tmpShipCreatorTableRet);
+        }
+
+        while select tmpShipCreatorLineRet
+        {
+            lineSet.add(tmpShipCreatorLineRet);
+        }
+
+        return [tableSet.pack(), lineSet.pack()];
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addToBucketFromForm</Name>
+				<Source><![CDATA[
+    public static void addToBucketFromForm(
+       ITMTmpCreatorTable _tmpShipCreatorTable,
+        ITMTmpCreatorLine _tmpShipCreatorLine)
+    {
+        ETGITMCreatorTableGeneration  shipCreatorTableGeneration = ETGITMCreatorTableGeneration::construct();
+    
+        shipCreatorTableGeneration.parmTmpShipCreatorTable(_tmpShipCreatorTable);
+        shipCreatorTableGeneration.parmTmpShipCreatorLine(_tmpShipCreatorLine);
+        shipCreatorTableGeneration.addToBucket();
+        shipCreatorTableGeneration.updateOverviewInformation();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>removeFromBucketFromForm</Name>
+				<Source><![CDATA[
+    public static void removeFromBucketFromForm(
+        ITMTmpCreatorTable _tmpShipCreatorTable,
+        ITMTmpCreatorLine _tmpShipCreatorLine)
+    {
+        ETGITMCreatorTableGeneration  shipCreatorTableGeneration = ETGITMCreatorTableGeneration::construct();
+    
+        shipCreatorTableGeneration.parmTmpShipCreatorTable(_tmpShipCreatorTable);
+        shipCreatorTableGeneration.parmTmpShipCreatorLine(_tmpShipCreatorLine);
+        shipCreatorTableGeneration.removeFromBucket();
+        shipCreatorTableGeneration.updateOverviewInformation();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>removeFromBucket</Name>
+				<Source><![CDATA[
+    public void removeFromBucket()
+    {
+        int i;
+    
+        ttsbegin;
+        while select forupdate tmpShipCreatorLine
+            where tmpShipCreatorLine.Selected == NoYes::Yes && tmpShipCreatorLine.AddedToBucket == NoYes::Yes
+        {
+            i++;
+            tmpShipCreatorLine.Selected = NoYes::No;
+            tmpShipCreatorLine.AddedToBucket = NoYes::No;
+            tmpShipCreatorLine.TransferQty = 0;
+            tmpShipCreatorLine.update();
+        }
+        ttscommit;
+
+        info(strfmt("@InboundTransportationManagement:RecordsRemovedFromBucket", i));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addToBucket</Name>
+				<Source><![CDATA[
+    protected void addToBucket()
+    {
+        int i;
+        ttsbegin;
+        while select forupdate tmpShipCreatorLine
+            where tmpShipCreatorLine.Selected == NoYes::Yes && tmpShipCreatorLine.AddedToBucket == NoYes::No
+        {
+            i++;
+
+            if (tmpShipCreatorLine.TransferQty < tmpShipCreatorLine.PurchQty)
+            {
+                this.createPartialLine(tmpShipCreatorLine);
+
+                tmpShipCreatorLine.PurchQty = tmpShipCreatorLine.TransferQty;
+                if (ETGOTMAddToBucketUnitConversionFlight::instance().isEnabled())
+                {
+                    tmpShipCreatorLine.InventQty = tmpShipCreatorLine.calcTransferInventQty();
+                }
+                else
+                {
+                    tmpShipCreatorLine.InventQty = tmpShipCreatorLine.TransferQty;
+                }
+            }
+
+            tmpShipCreatorLine.AddedToBucket = NoYes::Yes;
+            tmpShipCreatorLine.update();
+        }
+        ttscommit;
+
+        info(strFmt("@InboundTransportationManagement:RecordsAddedToBucket", i));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createPartialLine</Name>
+				<Source><![CDATA[
+    protected void createPartialLine(ITMTmpCreatorLine _tmpShipCreatorLineCreate)
+    {
+        ITMTmpCreatorLine tmpShipCreatorLineCreate;
+        tmpShipCreatorLineCreate.setTmpData(_tmpShipCreatorLineCreate);
+
+        tmpShipCreatorLineCreate.clear();
+        tmpShipCreatorLineCreate.data(_tmpShipCreatorLineCreate);
+        tmpShipCreatorLineCreate.Selected = NoYes::No;
+        tmpShipCreatorLineCreate.AddedToBucket = NoYes::No;
+        tmpShipCreatorLineCreate.PurchQty -= tmpShipCreatorLineCreate.TransferQty;
+        if (ETGOTMAddToBucketUnitConversionFlight::instance().isEnabled())
+        {
+            tmpShipCreatorLineCreate.InventQty -= tmpShipCreatorLineCreate.calcTransferInventQty();
+        }
+        else
+        {
+            tmpShipCreatorLineCreate.InventQty -= tmpShipCreatorLineCreate.TransferQty;
+        }
+        tmpShipCreatorLineCreate.TransferQty = 0;
+        tmpShipCreatorLineCreate.insert();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>selectedTotals</Name>
+				<Source><![CDATA[
+    public static server container selectedTotals(
+        ITMTmpCreatorLine _tmpShipCreatorLine,
+        ITMContainerTypeId _shipContainerTypeId)
+    {
+        ITMTmpCreatorLine tmpShipCreatorLine;
+        Weight weight = 0;
+        Volume volume = 0;
+        InventQty qty = 0;
+        NoYes volumeMissing, weightMissing;
+        ITMContainerTypeTable shipContainerTypeTable;
+        Weight maxWeight;
+        Volume maxVolume;
+        NoYes outsideWeightTolerance;
+        NoYes outsideVolumeTolerance;
+        ITMParameters shipParameters = ITMParameters::find();
+    
+        shipContainerTypeTable = ITMContainerTypeTable::find(_shipContainerTypeId);
+        maxWeight = shipContainerTypeTable.Weight;
+        maxVolume = shipContainerTypeTable.Volume;
+    
+        tmpShipCreatorLine.setTmpData(_tmpShipCreatorLine);
+    
+        while select ItemId, sum(TransferQty), sum(PurchQty), sum(Volume), sum(Weight), VolumeMissing,
+                     WeightMissing from tmpShipCreatorLine
+            group by ItemId, VolumeMissing, WeightMissing
+            where tmpShipCreatorLine.Selected == NoYes::Yes
+        {
+            qty += tmpShipCreatorLine.TransferQty;
+            if (tmpShipCreatorLine.PurchQty)
+            {
+                weight += tmpShipCreatorLine.Weight * tmpShipCreatorLine.TransferQty / tmpShipCreatorLine.PurchQty;
+                volume += tmpShipCreatorLine.Volume * tmpShipCreatorLine.TransferQty / tmpShipCreatorLine.PurchQty;
+            }
+    
+            if (tmpShipCreatorLine.VolumeMissing)
+            {
+                volumeMissing = NoYes::Yes;
+            }
+
+            if (tmpShipCreatorLine.WeightMissing)
+            {
+                weightMissing = NoYes::Yes;
+            }
+        }
+        if (ETGOTMVoyageCreatorAllowUnderVolumeWeightFlight::instance().isEnabled())
+        {
+            if (maxWeight && weight > maxWeight && (weight - maxWeight) / maxWeight > shipParameters.CreatorWeightTolerancePercent)
+            {
+                outsideWeightTolerance = NoYes::Yes;
+            }
+
+            if (maxVolume && volume > maxVolume && (volume - maxVolume) / maxVolume > shipParameters.CreatorVolumeTolerancePercent)
+            {
+                outsideVolumeTolerance = NoYes::Yes;
+            }
+        }
+        else
+        {
+            if (maxWeight && abs((weight - maxWeight) / maxWeight) > shipParameters.CreatorWeightTolerancePercent)
+            {
+                outsideWeightTolerance = NoYes::Yes;
+            }
+
+            if (maxVolume && abs((volume - maxVolume) / maxVolume) > shipParameters.CreatorVolumeTolerancePercent)
+            {
+                outsideVolumeTolerance = NoYes::Yes;
+            }
+        }
+    
+        return [weight, volume, qty, volumeMissing, weightMissing, maxWeight, maxVolume, outsideWeightTolerance, outsideVolumeTolerance];
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

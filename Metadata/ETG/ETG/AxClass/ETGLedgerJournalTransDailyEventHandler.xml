@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerJournalTransDailyEventHandler</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+internal final class ETGLedgerJournalTransDailyEventHandler
+{
+    
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>LedgerJournalTrans_ETGCostAllocationRuleId_OnLookup</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(LedgerJournalTransDaily, LedgerJournalTrans_ETGCostAllocationRuleId), FormControlEventType::Lookup)]
+    public static void LedgerJournalTrans_ETGCostAllocationRuleId_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        SysTableLookup        sysTableLookup;
+        QueryBuildDataSource  queryBuildDataSource;
+        QueryBuildRange       queryBuildRange1, queryBuildRange2, queryBuildRange3;
+        FormDataSource        ledgerJournalTransDS;
+        LedgerJournalTrans    ledgerJournalTrans;
+        MainAccountNum        ledgerMainAccountId, offsetMainAccountId;
+        Query                 query;
+
+        sysTableLookup       = SysTableLookup::newParameters(tablenum(ETGCostDistributionsHeader), sender);
+        query                = new Query();
+        queryBuildDataSource = query.addDataSource(tablenum(ETGCostDistributionsHeader));
+
+        ledgerJournalTransDS = sender.formRun().dataSource(formDataSourceStr(LedgerJournalTransDaily,LedgerJournalTrans));
+        ledgerJournalTrans   = ledgerJournalTransDS.cursor() as LedgerJournalTrans;
+
+        sysTableLookup.addLookupfield(fieldNum(ETGCostDistributionsHeader, ETGCostAllocationRuleId));
+        sysTableLookup.addLookupfield(fieldNum(ETGCostDistributionsHeader, ETGMainAccount));
+        sysTableLookup.addLookupfield(fieldNum(ETGCostDistributionsHeader, ETGDescription));
+
+        if(ledgerJournalTrans.LedgerDimension)
+        {
+            ledgerMainAccountId = LedgerDimensionFacade::getMainAccountFromLedgerDimension(ledgerJournalTrans.LedgerDimension).MainAccountId;
+            queryBuildRange1 = queryBuildDataSource.addRange(fieldNum(ETGCostDistributionsHeader,ETGMainAccount));
+            queryBuildRange1.value(ledgerMainAccountId);
+            queryBuildRange1.status(RangeStatus::Locked);
+        }
+        if(ledgerJournalTrans.OffsetLedgerDimension)
+        {
+            offsetMainAccountId = LedgerDimensionFacade::getMainAccountFromLedgerDimension(ledgerJournalTrans.OffsetLedgerDimension).MainAccountId;
+            queryBuildRange2 = queryBuildDataSource.addRange(fieldNum(ETGCostDistributionsHeader, ETGMainAccount));
+            queryBuildRange2.value(offsetMainAccountId);
+            queryBuildRange2.status(RangeStatus::Locked);
+        }
+
+        queryBuildRange3 = queryBuildDataSource.addRange(fieldNum(ETGCostDistributionsHeader, ETGIsDistributionConfirmed));
+        queryBuildRange3.value(queryValue(ETGDistributionStatus::Confirmed));
+        queryBuildRange3.status(RangeStatus::Locked);
+
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.performFormLookup();
+
+        FormControlCancelableSuperEventArgs ce = e as FormControlCancelableSuperEventArgs;
+        if (ce)
+        {
+            ce.CancelSuperCall();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>LedgerJournalTrans_ReverseDate_OnActivated</Name>
+				<Source><![CDATA[
+    [FormDataSourceEventHandler(formDataSourceStr(LedgerJournalTransDaily, LedgerJournalTrans), FormDataSourceEventType::Activated)]
+    public static void LedgerJournalTrans_ReverseDate_OnActivated(FormDataSource sender, FormDataSourceEventArgs e)
+    {
+        
+        FormDataObject reverseDateField = sender.object(fieldNum(LedgerJournalTrans, ReverseDate));
+
+        
+        if (reverseDateField)
+        {
+            
+            reverseDateField.mandatory(curExt() == 'y002');
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,1796 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxForm xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V6">
+	<Name>ETGElevatorReceiptForm</Name>
+	<SourceCode>
+		<Methods xmlns="">
+			<Method>
+				<Name>classDeclaration</Name>
+				<Source><![CDATA[
+[Form]
+public class ETGElevatorReceiptForm extends FormRun
+{
+}
+]]></Source>
+			</Method>
+		</Methods>
+		<DataSources xmlns="">
+			<DataSource>
+				<Name>ETGElevatorReceiptTable</Name>
+				<Methods>
+					<Method>
+						<Name>initValue</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// Abhinav - 14-1-26
+        /// </summary>
+        public void initValue()
+        {
+            ttsbegin;
+            NumberSequenceReference numberSequenceReference;
+            numberSequenceReference = NumberSeqReference::findReference(extendedTypeNum(ETGElevatorReceiptNumber));
+            if (numberSequenceReference)
+            {
+                ETGElevatorReceiptTable.ElevatorReceiptNumber = NumberSeq::newGetNum(numberSequenceReference).num();
+            }
+            ttscommit;
+            super();
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>active</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        /// <returns></returns>
+        public int active()
+        {
+            int ret;
+        
+            ret = super();
+
+            Confirm.enabled(ETGElevatorReceiptTable.ETGElevatorReceiptStatus == ETGElevatorReceiptStatus::Draft);
+            ChangeRequest.enabled(ETGElevatorReceiptTable.ETGElevatorReceiptStatus == ETGElevatorReceiptStatus::Confirmed);
+
+            CreateZeroValuePO.enabled(ETGElevatorReceiptTable.ETGElevatorReceiptStatus == ETGElevatorReceiptStatus::POCreated && ETGElevatorReceiptTable.PONumberInDefaultEntity && !ETGElevatorReceiptTable.ZeroValuePONumber);
+            AmmendmentOfPO.enabled(ETGElevatorReceiptTable.ETGElevatorReceiptStatus == ETGElevatorReceiptStatus::Confirmed && !ETGElevatorReceiptTable.PONumberInDefaultEntity);
+
+            if(ETGElevatorReceiptTable.ETGElevatorReceiptStatus == ETGElevatorReceiptStatus::Draft)
+            {
+                ETGElevatorReceiptTable_ds.allowEdit(true);
+            }
+            else
+            {
+                ETGElevatorReceiptTable_ds.allowEdit(false);
+            }
+            PrintReceipt.enabled(ETGElevatorReceiptTable.ETGElevatorReceiptStatus == ETGElevatorReceiptStatus::Confirmed || ETGElevatorReceiptTable.ETGElevatorReceiptStatus == ETGElevatorReceiptStatus::POCreated);
+            ETGElevatorReceiptTable_ds.allowDelete(ETGElevatorReceiptStatus::Draft);
+            
+            //CS - BIN Qty Status activation - Abhinav
+            PartList partList = new PartList(this.formRun());
+            FormPartControl formpartcontrol = partList.getPartControlByFormName(formStr(ETGBinVolumeAvailableChartForm));
+            formpartcontrol.visible(ETGCanadaParameters::find().EnableBinQtyStatus);
+
+            if(ETGCanadaParameters::find().EnableBinQtyStatus)
+            {
+                InventDim inventdim,inventdimnew;
+                ETGBinQtyVisualChartHelperClass::populateBinQtyChartData(inventdimnew,formpartcontrol);
+            }
+            //CE
+
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>executeQuery</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void executeQuery()
+        {
+            this.query().dataSourceTable(tableNum(ETGElevatorReceiptTable)).sortClear();
+            this.query().dataSourceTable(tableNum(ETGElevatorReceiptTable)).addSortField(fieldNum(ETGElevatorReceiptTable,ElevatorReceiptNumber),SortOrder::Descending);
+
+            super();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields />
+			</DataSource>
+		</DataSources>
+		<DataControls xmlns="">
+			<Control>
+				<Name>Confirm</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void clicked()
+        {
+            super();
+            
+            ETGElevatorReceiptGrainItemTable etgElevatorReceiptGrainItemTable;
+
+            select sum(GrainQty) from etgElevatorReceiptGrainItemTable
+                where etgElevatorReceiptGrainItemTable.ElevatorReceiptNumber == ETGElevatorReceiptTable.ElevatorReceiptNumber;
+
+            if(etgElevatorReceiptGrainItemTable.GrainQty != ETGElevatorReceiptTable.NetWeight)
+            {
+                throw error("@ETG_New:GrainQtySumValidation");
+            }
+
+            ETGElevatorReceiptTable.ETGElevatorReceiptStatus = ETGElevatorReceiptStatus::Confirmed;
+            ETGElevatorReceiptTable_ds.research(true);
+            ETGElevatorReceiptTable_ds.refresh();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ChangeRequest</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void clicked()
+        {
+            super();
+
+            ETGElevatorReceiptTable.ETGElevatorReceiptStatus = ETGElevatorReceiptStatus::Draft;
+            ETGElevatorReceiptTable_ds.research(true);
+            ETGElevatorReceiptTable_ds.refresh();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>CreateZeroValuePO</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void clicked()
+        {
+            super();
+            if(Box::okCancel('@ETG_New:CreateZeroValuePO',DialogButton::Cancel,'Confirm'))
+            {
+                NumberSeq                       numberSeq;
+                Purchtable                      Purchtable;
+                PurchLine                       PurchLine;
+                //PurchFormLetter                 purchFormLetter;
+                PurchFormLetter                 purchFormLetterCnf;
+                PurchFormLetter_Invoice         purchFormLetterInv;
+                PurchFormLetter_PackingSlip     purchFormLetterPsilp;
+                AgreementLine                   _agreementLine;
+                InventDim inventdimLoc;
+                ETGElevatorReceiptTable         etgElevatorReceipt = ETGElevatorReceiptTable_ds.cursor();
+                ETGScaleTicketTable             etgScaleTicketTable = ETGScaleTicketTable::findFromScaleTicketNumber(etgElevatorReceipt.scaleticketreferenceNumber);
+                PurchAgreementHeader            purchAgreementHeader = PurchAgreementHeader::findByAgreementId(etgScaleTicketTable.RefPurchAgreementNum,ETGCanadaParameters::find().DefaultEntityForDocuments);
+                VendTable                       vendTable = VendTable::findByDataAreaId(purchAgreementHeader.VendAccount,ETGCanadaParameters::find().DefaultEntityForDocuments);
+
+                ttsbegin;
+                ///Create purchTable
+                numberSeq = NumberSeq::newGetNum(PurchParameters::numRefPurchId());
+                //numberSeq.used();
+                Purchtable.PurchId = numberSeq.num();
+                Purchtable.initValue();
+                purchTable.OrderAccount = purchAgreementHeader.VendAccount;
+                purchTable.initFromVendTable(vendTable);
+                purchTable.PurchaseType = PurchaseType::Purch;
+                purchTable.ETGElevatorReceiptNumber       = etgElevatorReceipt.ElevatorReceiptNumber;
+                if (!Purchtable.validateWrite())
+                {
+                    throw Exception::Error;
+                }
+                Purchtable.DefaultDimension = purchAgreementHeader.DefaultDimension;
+                Purchtable.insert();
+
+                ///Create purchLine for grain received
+                changeCompany(ETGCanadaParameters::find().DefaultEntityForDocuments)
+                {
+                    select firstonly _agreementLine
+                        where _agreementLine.Agreement == purchAgreementHeader.RecId
+                        && _agreementLine.LineNumber == etgElevatorReceipt.AgreementLineNum;
+                }
+
+                ETGElevatorReceiptGrainItemTable etgElevatorReceiptGrainItemTable;
+
+                while select etgElevatorReceiptGrainItemTable
+                    where etgElevatorReceiptGrainItemTable.ElevatorReceiptNumber == etgElevatorReceipt.ElevatorReceiptNumber
+                {
+                    PurchLine.clear();
+                    PurchLine.PurchId = Purchtable.PurchId;
+                    PurchLine.ItemId = etgElevatorReceiptGrainItemTable.ItemId;
+                    PurchLine.initFromPurchTable(Purchtable);
+                    PurchLine.initFromInventTable(InventTable::find(PurchLine.ItemId));
+                    //purchLine.initFromAgreementLine(_agreementLine);
+                    PurchLine.PurchQty = etgElevatorReceiptGrainItemTable.GrainQty;
+                    PurchLine.PurchReceivedNow = PurchLine.PurchQty;
+
+                    InventTable InventTableItem;
+                    WMSLocation location;
+
+                    InventTableItem             = InventTable::find(etgElevatorReceiptGrainItemTable.ItemId);
+                    inventdimLoc.InventSizeId   = InventTableItem.StandardInventSizeId;
+                    inventdimLoc.InventColorId  = InventTableItem.StandardInventColorId;
+                    inventdimLoc.InventStyleId  = InventTableItem.StandardInventStyleId;
+                    inventdimLoc.configId       = InventTableItem.StandardConfigId;
+                    if(etgScaleTicketTable.PrimaryBIN)
+                    {
+                        //container binValues = str2con(etgScaleTicketTable.BIN,';');
+                        select firstonly location where location.wMSLocationId == etgScaleTicketTable.PrimaryBIN;
+                        InventLocation inventlocation   = InventLocation::find(location.inventLocationId);
+                        inventdimLoc.InventSiteId       = inventlocation.InventSiteId;
+                        inventdimLoc.InventLocationId   =  inventlocation.InventLocationId;
+                        inventdimLoc.wMSLocationId      = location.wMSLocationId;
+                    }
+                    else
+                    {
+                        inventdimLoc.InventSiteId       = ETGCanadaParameters::find().SiteForZeroValuePo;
+                        inventdimLoc.InventLocationId   =  ETGCanadaParameters::find().WareHouseForZeroValuePo;
+                        select firstonly location where location.inventLocationId == inventdimLoc.InventLocationId;
+                        inventdimLoc.wMSLocationId      = location.wMSLocationId;
+                    }
+                    InventDim inventdim = InventDim::findOrCreate(inventdimLoc);
+                    PurchLine.InventDimId = inventdim.inventDimId;
+                    PurchLine.PurchPrice = 0;
+                    PurchLine.QtyOrdered = PurchLine.PurchQty;
+                    PurchLine.DefaultDimension = _agreementLine.DefaultDimension;
+                    PurchLine.createLine(true, true, true, true, true, true);
+                }
+
+                ///Create dockage item purchline
+                if(etgElevatorReceipt.DockageGrain)
+                {
+                    this.createDockageItemLine(Purchtable,etgElevatorReceipt,etgScaleTicketTable,_agreementLine);
+                }
+
+                //create splits item purchLine
+                this.createSplitsItemLine(Purchtable,etgElevatorReceipt,etgScaleTicketTable,_agreementLine);
+                   
+                info(strfmt("@ETG_New:ZeroValuePOcreated",purchTable.PurchId));
+                numberSeq.used();
+                ttscommit;
+
+                if(purchtable.DefaultDimension)
+                {
+                    boolean                     isValid = true;
+                    boolean                     isValidLine;
+                    DimensionValidationStatus   dimensionValidationStatus;
+                    DimensionValidationStatus   dimensionValidationStatusLine;
+                    LedgerDimensionAccount      ledgerDimension;
+                    VendPostingProfile          postingprofile = purchtable.PostingProfile ? purchtable.PostingProfile : VendParameters::find().PostingProfile;
+                   
+                    ledgerDimension = LedgerDimensionFacade::serviceCreateLedgerDimension(VendLedgerAccounts::summaryLedgerDimension(purchtable.OrderAccount,postingprofile,true),purchtable.DefaultDimension);
+                    dimensionValidationStatus = LedgerDimensionValidationHelper::validateByTree(ledgerDimension, purchtable.DeliveryDate, true, true);
+
+                    if(dimensionValidationStatus == DimensionValidationStatus::Valid)
+                    {
+                        PurchLine purchLineLoc;
+
+                        while select purchLineLoc
+                            where purchLineLoc.PurchId == purchtable.PurchId
+                        {
+                            ledgerDimension = LedgerDimensionFacade::serviceCreateLedgerDimension(VendLedgerAccounts::summaryLedgerDimension(purchtable.OrderAccount,postingprofile,true),purchLineLoc.DefaultDimension);
+                            dimensionValidationStatusLine = LedgerDimensionValidationHelper::validateByTree(ledgerDimension, purchtable.DeliveryDate, true, true);
+
+                            if(dimensionValidationStatusLine == DimensionValidationStatus::Valid)
+                            {
+                                isValidLine = true;
+                            }
+                            else
+                            {
+                                isValidLine = false;
+                                break;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        isValid = false;
+                    }
+
+                    if(isValid && isValidLine)
+                    {
+                        //Confirm purchase order
+                        try
+                        {
+                            ttsbegin;
+                            purchFormLetterCnf = PurchFormLetter::construct(DocumentStatus::PurchaseOrder);
+
+                            purchFormLetterCnf.update(
+                                            purchTable,
+                                            strFmt('%1-%2', purchTable.PurchId, DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone())),
+                                            SystemDateGet(),
+                                            PurchUpdate::All,
+                                            AccountOrder::None,
+                                            NoYes::No,
+                                            NoYes::No
+                                        );
+                            ttscommit;
+                        }
+                        catch
+                        {
+                            warning(strFmt("@ETG_New:ErrorInConfirmingPO",purchTable.PurchId));
+                        }
+                        Purchtable.reread();
+
+                        try
+                        {
+                            ttsbegin;
+                            InventTrans                 inventTrans;
+                            InventTransWMS_Register     inventTransWMS_register;
+                            TmpInventTransWMS           tmpInventTransWMS;
+
+                            // Find the transaction and prepare registration
+                            inventTrans = InventTrans::findTransId(PurchLine.InventTransId);
+                            tmpInventTransWMS.initFromInventTrans(inventTrans);
+                            tmpInventTransWMS.InventQty = PurchLine.PurchQty;
+                            tmpInventTransWMS.insert();
+
+                            // Execute registration
+                            inventTransWMS_register = inventTransWMS_register::newStandard(tmpInventTransWMS);
+                            inventTransWMS_register.updateInvent(PurchLine);
+
+                            //POST GRN Purchase order
+                            if (Purchtable.DocumentState == VersioningDocumentState::Confirmed)
+                            {
+                                purchFormLetterPsilp = PurchFormLetter::construct(DocumentStatus::PackingSlip);
+ 
+                                purchFormLetterPsilp.update( Purchtable,
+                                                    strFmt("%1", Purchtable.PurchId),
+                                                    SystemDateGet(),
+                                                    PurchUpdate::All,
+                                                    AccountOrder::None,
+                                                    false,
+                                                    false);
+                            }
+                            ttscommit;
+                        }
+                        catch
+                        {
+                            warning(strFmt("@ETG_New:ErrorInGRNPosting",purchTable.PurchId));
+                        }
+
+                        Purchtable.reread();
+
+                        try
+                        {
+                            ttsbegin;
+                            //Invoice purchase order
+                            purchFormLetterInv = PurchFormLetter::construct(DocumentStatus::Invoice);
+                            purchFormLetterInv.update(Purchtable,
+                               "Inv-" + Purchtable.PurchId,
+                               SystemDateGet(),
+                        PurchUpdate::PackingSlip,
+                               AccountOrder::None,
+                               NoYes::No,
+                               NoYes::No);
+
+                            ttscommit;
+
+                            if (PurchTable::find(purchTable.PurchId).DocumentStatus == DocumentStatus::Invoice)
+                            {
+                                info(strfmt("@ETG_New:InvoiceJournalPosted",purchTable.PurchId));
+                            }
+                        }
+                        catch
+                        {
+                            warning(strFmt("@ETG_New:ErrorInInvoicingPO.",purchTable.PurchId));
+                        }
+                    }
+                    else
+                    {
+                        warning("Mandatory FD values are not available. Please update in PO and proceed with auto posting.");
+                    }
+                }
+                else
+                {
+                    warning("FD values are not available in vendor master.Please update and proceed with auto posting.");
+                }
+
+                ETGElevatorReceiptTable.ETGElevatorReceiptStatus = ETGElevatorReceiptStatus::POCreated;
+                ETGElevatorReceiptTable.ZeroValuePONumber = Purchtable.PurchId;
+            }
+            ETGElevatorReceiptTable_ds.research(true);
+            ETGElevatorReceiptTable_ds.refresh();
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>createDockageItemLine</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// Create purchline for dockage item
+        /// </summary>
+        /// <param name = "Purchtable"></param>
+        /// <param name = "_agreementLine"></param>
+        /// <param name = "etgElevatorReceipt"></param>
+        public void createDockageItemLine(PurchTable Purchtable,ETGElevatorReceiptTable etgElevatorReceipt,ETGScaleTicketTable etgScaleTicketTable,AgreementLine _agreementLine)
+        {
+            PurchLine PurchLine;
+            InventDim inventdimLoc;
+            PurchLine.PurchId = Purchtable.PurchId;
+            
+            PurchLine.initFromPurchTable(Purchtable);
+            //purchLine.initFromAgreementLine(_agreementLine);
+            PurchLine.ItemId    = etgElevatorReceipt.DockageGrain;
+            PurchLine.initFromInventTable(InventTable::find(PurchLine.ItemId));
+            PurchLine.PurchQty  = etgElevatorReceipt.DockageWeight;
+            PurchLine.PurchReceivedNow = PurchLine.PurchQty;
+
+            InventTable InventTableItem;
+            WMSLocation location;
+
+            InventTableItem = InventTable::find(etgElevatorReceipt.DockageGrain);
+            inventdimLoc.InventSizeId   = InventTableItem.StandardInventSizeId;
+            inventdimLoc.InventColorId  = InventTableItem.StandardInventColorId;
+            inventdimLoc.InventStyleId  = InventTableItem.StandardInventStyleId;
+            inventdimLoc.configId       = InventTableItem.StandardConfigId;
+            if(etgScaleTicketTable.PrimaryBIN)
+            {
+                //container binValues = str2con(etgScaleTicketTable.BIN,';');
+                select firstonly location where location.wMSLocationId == etgScaleTicketTable.PrimaryBIN;
+                InventLocation inventlocation   = InventLocation::find(location.inventLocationId);
+                inventdimLoc.InventSiteId       = inventlocation.InventSiteId;
+                inventdimLoc.InventLocationId   =  inventlocation.InventLocationId;
+                inventdimLoc.wMSLocationId      = location.wMSLocationId;
+            }
+            else
+            {
+                inventdimLoc.InventSiteId       = ETGCanadaParameters::find().SiteForZeroValuePo;
+                inventdimLoc.InventLocationId   =  ETGCanadaParameters::find().WareHouseForZeroValuePo;
+                select firstonly location where location.inventLocationId == inventdimLoc.InventLocationId;
+                inventdimLoc.wMSLocationId      = location.wMSLocationId;
+            }
+            
+            InventDim inventdim     = InventDim::findOrCreate(inventdimLoc);
+            PurchLine.InventDimId   = inventdim.inventDimId;
+            PurchLine.PurchPrice = 0;
+            PurchLine.QtyOrdered = PurchLine.PurchQty;
+            PurchLine.DefaultDimension = _agreementLine.DefaultDimension;
+            PurchLine.createLine(true, true, true, true, true, true);
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>createSplitsItemLine</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// Create purchline for splits item
+        /// </summary>
+        /// <param name = "Purchtable"></param>
+        /// <param name = "_agreementLine"></param>
+        /// <param name = "etgElevatorReceipt"></param>
+        public void createSplitsItemLine(PurchTable Purchtable,ETGElevatorReceiptTable etgElevatorReceipt, ETGScaleTicketTable etgScaleTicketTable,AgreementLine _agreementLine)
+        {
+            ETGElevatorReceiptSplitsItemTable etgElevatorReceiptSplitsItemTable;
+
+            while select etgElevatorReceiptSplitsItemTable
+                where etgElevatorReceiptSplitsItemTable.ElevatorReceiptNumber == etgElevatorReceipt.ElevatorReceiptNumber
+            {
+                PurchLine PurchLine;
+                InventDim inventdimLoc;
+                PurchLine.PurchId = Purchtable.PurchId;
+                
+                PurchLine.initFromPurchTable(Purchtable);
+                //purchLine.initFromAgreementLine(_agreementLine);
+                PurchLine.ItemId    = etgElevatorReceiptSplitsItemTable.ItemId;
+                PurchLine.initFromInventTable(InventTable::find(PurchLine.ItemId));
+                PurchLine.PurchQty  =  (etgElevatorReceipt.GrainUnloadedWeight * etgElevatorReceiptSplitsItemTable.SplitsPercentage ) / 100;
+                PurchLine.PurchReceivedNow = PurchLine.PurchQty;
+
+                InventTable InventTableItem;
+                WMSLocation location;
+
+                InventTableItem = InventTable::find(etgElevatorReceiptSplitsItemTable.ItemId);
+                inventdimLoc.InventSizeId   = InventTableItem.StandardInventSizeId;
+                inventdimLoc.InventColorId  = InventTableItem.StandardInventColorId;
+                inventdimLoc.InventStyleId  = InventTableItem.StandardInventStyleId;
+                inventdimLoc.configId   = InventTableItem.StandardConfigId;
+
+                if(etgScaleTicketTable.PrimaryBIN)
+                {
+                    //container binValues = str2con(etgScaleTicketTable.BIN,';');
+
+                    select firstonly location where location.wMSLocationId == etgScaleTicketTable.PrimaryBIN;
+                    InventLocation inventlocation   = InventLocation::find(location.inventLocationId);
+                    inventdimLoc.InventSiteId       = inventlocation.InventSiteId;
+                    inventdimLoc.InventLocationId   =  inventlocation.InventLocationId;
+                    inventdimLoc.wMSLocationId      = location.wMSLocationId;
+                }
+                else
+                {
+                    inventdimLoc.InventSiteId       = ETGCanadaParameters::find().SiteForZeroValuePo;
+                    inventdimLoc.InventLocationId   =  ETGCanadaParameters::find().WareHouseForZeroValuePo;
+                    select firstonly location where location.inventLocationId == inventdimLoc.InventLocationId;
+                    inventdimLoc.wMSLocationId      = location.wMSLocationId;
+                }
+
+                InventDim inventdim = InventDim::findOrCreate(inventdimLoc);
+                PurchLine.InventDimId = inventdim.inventDimId;
+                PurchLine.PurchPrice = 0;
+                PurchLine.QtyOrdered = PurchLine.PurchQty;
+                PurchLine.DefaultDimension = _agreementLine.DefaultDimension;
+                PurchLine.createLine(true, true, true, true, true, true);
+            }
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>AmmendmentOfPO</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// Ammendment of PO in default entity 
+        /// </summary>
+        public void clicked()
+        {
+            super();
+
+            if(Box::okCancel('@ETG_New:AmendmentOfPO',DialogButton::Cancel,'Confirm'))
+            {
+                NumberSeq               numberSeq;
+                Purchtable              Purchtable;
+                PurchLine               PurchLine;
+                PurchFormLetter         purchFormLetter;
+                AgreementLine           _agreementLine;
+                ETGElevatorReceiptTable etgElevatorReceipt = ETGElevatorReceiptTable_ds.cursor();
+                ETGScaleTicketTable     etgScaleTicketTable = ETGScaleTicketTable::findFromScaleTicketNumber(etgElevatorReceipt.scaleticketreferenceNumber);
+                InventDim               inventdimLoc;
+                DataAreaId              CurrentCompany = curExt();
+
+                changeCompany(ETGCanadaParameters::find().DefaultEntityForDocuments)
+                {
+                    PurchAgreementHeaderHistory     agreementHeaderHistory;
+                    ETG_PurchaseAgreementHeader     purchAgreementHeaderTrade;
+                    SalesAgreementHeader            salesAgreementHeader;
+                    SalesTable                      salesTable;
+                    PurchAgreementHeader            purchAgreementHeader = PurchAgreementHeader::findByAgreementId(etgScaleTicketTable.RefPurchAgreementNum);
+                    VendTable                       vendTable               = VendTable::find(purchAgreementHeader.VendAccount);
+
+                    select firstonly _agreementLine
+                        where _agreementLine.Agreement == purchAgreementHeader.RecId
+                        && _agreementLine.LineNumber == etgElevatorReceipt.AgreementLineNum;
+
+                    inventdimLoc = InventDim::find(_agreementLine.InventDimId);
+            
+                    if(_agreementLine.RecId)
+                    {
+                        if(_agreementLine.quantityRemainingRelease() < etgElevatorReceipt.GrainUnloadedWeight)
+                        {
+                            throw Error(strFmt("@ETG_New:PurchaseAgreementQtyValidation",_agreementLine.quantityRemainingRelease(),_agreementLine.ItemId));
+                        }
+
+                        ttsbegin;
+                        ///Create purchTable
+                        numberSeq = NumberSeq::newGetNum(PurchParameters::numRefPurchId());
+                        numberSeq.used();
+                        Purchtable.PurchId = numberSeq.num();
+                        Purchtable.initValue();
+                        purchTable.OrderAccount = purchAgreementHeader.VendAccount;
+                        purchTable.initFromVendTable(vendTable);
+                        purchTable.initFromPurchAgreementHeader(purchAgreementHeader,true,true);
+                        purchTable.ETGElevatorReceiptNumber       = etgElevatorReceipt.ElevatorReceiptNumber;
+                        purchTable.ETGERNEntity = CurrentCompany;
+
+                        select firstonly ConfirmationNumber,PurchNumberSequence from agreementHeaderHistory
+                            order by agreementHeaderHistory.ConfirmationNumber desc
+                                where agreementHeaderHistory.PurchNumberSequence == purchAgreementHeader.PurchNumberSequence
+                        join purchAgreementHeaderTrade
+                            where purchAgreementHeaderTrade.PurchAgreementId == agreementHeaderHistory.PurchNumberSequence;
+
+                        ETG_ReleaseOrder::createPurchTrade(purchTable.PurchId, purchAgreementHeaderTrade);
+
+                        purchTable.ETG_AgreementConfirmationVersion = purchAgreementHeader.PurchNumberSequence + "-" + agreementHeaderHistory.ConfirmationNumber;
+                        //purchTable.MatchingAgreement = purchAgreementHeader.RecId;
+                        purchTable.DefaultDimension = purchAgreementHeader.DefaultDimension;
+                        if (!Purchtable.validateWrite())
+                        {
+                            throw Exception::Error;
+                        }
+                        Purchtable.insert();
+
+                        ///Create purchLine for grain received
+                        PurchLine.PurchId = Purchtable.PurchId;
+                        PurchLine.ItemId = _agreementLine.ItemId;
+                        PurchLine.initFromPurchTable(Purchtable);
+
+                        purchLine.initFromAgreementLine(_agreementLine);
+                        PurchLine.PurchQty      = etgElevatorReceipt.GrainUnloadedWeight;
+                        PurchLine.LineAmount    = PurchLine.calcLineAmount(PurchLine.PurchQty);
+                        purchLine.initFromInventTable(InventTable::find(PurchLine.ItemId));
+
+                        //CS, DLT, SB, updating Agreement Header & creating SO for release
+                        if(purchAgreementHeader)
+                        {
+                            AgreementLineQuantityCommitment     AgreementLineDerived = _agreementLine as AgreementLineQuantityCommitment;
+                            ttsbegin;
+                            purchAgreementHeader.selectForUpdate(true);
+                            if(AgreementLineDerived.CommitedQuantity == purchLine.PurchQty)
+                            {
+                                purchAgreementHeader.ETG_TradingStatusPurch = ETG_TradingStatus::Released;
+                            }
+                            else
+                            {
+                                purchAgreementHeader.ETG_TradingStatusPurch = ETG_TradingStatus::PartiallyReleased;
+                            }
+
+                            purchAgreementHeader.ETG_DocumentStatusPurch = ETG_DocumentStatus::Order;
+                            purchAgreementHeader.doUpdate();       
+                            ttscommit;
+                        }
+                        if(purchAgreementHeader.ETG_SalesAgreementIdTP && !purchTable.ETG_TPSalesId)
+                        {
+                            ttsbegin;
+                            select firstonly * from salesAgreementHeader
+                                where salesAgreementHeader.SalesNumberSequence == purchAgreementHeader.ETG_SalesAgreementIdTP;
+
+                            if(salesAgreementHeader)
+                            {
+                                salesTable = ETG_ReleaseOrder::createSalesTable(salesAgreementHeader,purchTable.PurchId);
+
+                                salesAgreementHeader.selectForUpdate(true);
+                                salesAgreementHeader.ETG_TradingStatusSales  = purchAgreementHeader.ETG_TradingStatusPurch;
+                                salesAgreementHeader.ETG_DocumentStatusSales = purchAgreementHeader.ETG_DocumentStatusPurch;
+                                salesAgreementHeader.doUpdate();
+                            }
+
+                            if( salesTable.SalesId)
+                            {
+                                purchTable.selectForUpdate(true);
+                                purchTable.ETG_TPSalesId         = salesTable.SalesId;
+                                purchTable.ETG_IsThirdParty      = NoYes::Yes;
+                                Purchtable.doUpdate();
+                            }
+                            ttscommit;
+                        }
+                        //CE, DLT, SB
+
+                        PurchLine.createLine(true, true, true, true, true, false);
+
+                        //Rate card line for agreement line item
+                        ETGRateCardMaster etgRateCardMaster;
+
+                        Select firstonly etgRateCardMaster
+                            where etgRateCardMaster.ItemId == _agreementLine.ItemId
+                            && etgRateCardMaster.RefRecId == _agreementLine.RecId;
+
+                        if(!etgRateCardMaster)
+                        {
+                            this.createRatecardLines(etgElevatorReceipt,purchAgreementHeader,inventdimLoc,_agreementLine);
+                        }
+
+                        ttscommit;
+
+                        //Auto apply rate card
+                        try
+                        {
+                            ttsbegin;
+                            ETGElevatorReceiptRateCardApplyHelper::autoApplyRateCardOnPurchOrder(PurchLine,_agreementLine);
+
+                            purchFormLetter = PurchFormLetter::construct(DocumentStatus::PurchaseOrder);
+                            PurchaseOrderId purchOrderDocNum = strFmt('%1-%2', Purchtable.PurchId, VendPurchOrderJour::numberOfPurchaseOrderVersions(Purchtable)+1);
+                            purchFormLetter.update(Purchtable, purchOrderDocNum);
+                            ttscommit;
+                        }
+                        catch(Exception::Error)
+                        {
+                            ttsabort;
+                            warning("Auto rate card apply failed.");
+                        }
+
+                        info(strFmt('@ETG_New:PurchaseOrderCreatedDefaultEntity',Purchtable.PurchId,Purchtable.DataAreaId));
+                        changecompany(CurrentCompany)
+                        {
+                            ttsbegin;
+                            etgElevatorReceipt.selectForUpdate();
+                            etgElevatorReceipt.ETGElevatorReceiptStatus = ETGElevatorReceiptStatus::POCreated;
+                            etgElevatorReceipt.PONumberInDefaultEntity = Purchtable.PurchId;
+                            etgElevatorReceipt.update();
+                            ttscommit;
+                        }
+                    }
+                }
+            }
+            ETGElevatorReceiptTable_ds.research(true);
+            ETGElevatorReceiptTable_ds.refresh();
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>createRatecardLines</Name>
+						<Source><![CDATA[
+        public void createRatecardLines(ETGElevatorReceiptTable etgElevatorReceipt,PurchAgreementHeader purchAgreementHeader,InventDim InventDimLoc,AgreementLine _agreementLine)
+        {
+            ETGRateCardMaster rateCardMaster;
+            InventTable inventTable;
+            AgreementLineQuantityCommitment lineQtyCommittment;
+
+            inventTable = InventTable::find(_agreementLine.ItemId);
+            lineQtyCommittment = AgreementLineQuantityCommitment::find(_agreementLine.RecId);
+
+            rateCardMaster.clear();
+            rateCardMaster.RateCardId = NumberSeq::newGetNum(PurchParameters::numRefRateCardId()).num();
+            rateCardMaster.ItemId = inventTable.ItemId;
+            rateCardMaster.SubCommodity = inventTable.ETGSubCommodity;
+            rateCardMaster.ProductName = inventTable.itemName();
+            rateCardMaster.ModuleSalesPurch = ModuleSalesPurch::Purch;
+            rateCardMaster.VendAccount = purchAgreementHeader.VendAccount;
+            rateCardMaster.VendName = purchAgreementHeader.vendName();
+            rateCardMaster.Qty      = lineQtyCommittment.CommitedQuantity;
+            rateCardMaster.Price    = lineQtyCommittment.PricePerUnit;
+            rateCardMaster.LineNumber = _agreementLine.LineNumber;
+            rateCardMaster.configId = inventTable.StandardConfigId;
+            rateCardMaster.InventSizeId = inventTable.StandardInventSizeId;
+            rateCardMaster.InventColorId = inventTable.StandardInventColorId;
+            rateCardMaster.InventStyleId = inventTable.StandardInventStyleId;
+            rateCardMaster.RefRecId        = _agreementLine.RecId;
+            rateCardMaster.insert();
+            
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ETGElevatorReceiptTable_ScaleTicketReferenceNumber</Name>
+				<Type>String</Type>
+				<Methods>
+					<Method>
+						<Name>lookup</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void lookup()
+        {
+            //super();
+            ETGElevatorReceiptTable elevatorReceiptTable = ETGElevatorReceiptTable_ds.cursor();
+            if(!elevatorReceiptTable.ReceiptDate)
+            {
+                warning("@ETG_New:ScaleTicketMessage");
+                return;
+            }
+                
+            Query query = new Query();
+            QueryBuildDataSource queryBuildDataSource;
+            QueryBuildRange queryBuildRange;
+            SysTableLookup sysTableLookup = SysTableLookup::newParameters(tableNum(ETGScaleTicketTable), this);
+
+            sysTableLookup.addLookupField(fieldNum(ETGScaleTicketTable,ScaleTicketNumber));
+            queryBuildDataSource = query.addDataSource(tableNum(ETGScaleTicketTable));
+            
+            if(elevatorReceiptTable.ReceiptDate)
+            {
+                queryBuildRange = queryBuildDataSource.addRange(fieldNum(ETGScaleTicketTable, ScaleDate));
+                queryBuildRange.value(queryValue(elevatorReceiptTable.ReceiptDate));
+
+            }
+            
+            sysTableLookup.parmQuery(query);
+            sysTableLookup.performFormLookup();
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>modified</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        /// <returns></returns>
+        public boolean modified()
+        {
+            boolean ret;
+           
+            ret = super();
+
+            if(ret)
+            {
+                ETGElevatorReceiptTable etgElevatorreceiptTableLocal;
+
+                select firstonly etgElevatorreceiptTableLocal
+                where etgElevatorreceiptTableLocal.ScaleTicketReferenceNumber == ETGElevatorReceiptTable.ScaleTicketReferenceNumber;
+
+                if(etgElevatorreceiptTableLocal)
+                {
+                    throw error("@ETG_New:OneScaleTicketOnlyOnce");
+                    ret = false;
+                }
+
+                ETGScaleTicketTable etgScaleTicketTable = ETGScaleTicketTable::findFromScaleTicketNumber(ETGElevatorReceiptTable.ScaleTicketReferenceNumber);
+
+                if(etgScaleTicketTable)
+                {
+                    ETGElevatorReceiptTable.GrossWeight = etgScaleTicketTable.Gross;
+                    ETGElevatorReceiptTable.VehicleWeight = etgScaleTicketTable.Tare;
+                    ETGElevatorReceiptTable.GrainUnloadedWeight = etgScaleTicketTable.Net;
+                    ETGElevatorReceiptTable.NetWeight = etgScaleTicketTable.Net;
+                    PurchAgreementHeader purchAgreementHeader = PurchAgreementHeader::findByAgreementId(etgScaleTicketTable.RefPurchAgreementNum,ETGCanadaParameters::find().DefaultEntityForDocuments);
+                    ETGElevatorReceiptTable.ReceiptReference = purchAgreementHeader.VendAccount + " : " + purchAgreementHeader.vendName();
+                }
+            }
+        
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ETGElevatorReceiptTable_AgreementLineNum</Name>
+				<Type>Integer</Type>
+				<Methods>
+					<Method>
+						<Name>lookup</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void lookup()
+        {
+            //super();
+            Query query = new Query();
+            QueryBuildDataSource queryBuildDataSource;
+            QueryBuildRange queryBuildRange;
+            SysTableLookup sysTableLookup = SysTableLookup::newParameters(tableNum(AgreementLine), this);
+
+            
+            queryBuildDataSource = query.addDataSource(tableNum(AgreementLine));
+
+            query.allowCrossCompany(true);
+            query.addCompanyRange(ETGCanadaParameters::find().DefaultEntityForDocuments);
+            queryBuildDataSource.addSelectionField(fieldNum(AgreementLine, Agreement));
+            queryBuildDataSource.addSelectionField(fieldNum(AgreementLine,InventDimId));
+            queryBuildDataSource.addSelectionField(fieldNum(AgreementLine,InventDimDataAreaId));
+
+            ETGScaleTicketTable etgScaleTicketTable = ETGScaleTicketTable::findFromScaleTicketNumber(ETGElevatorReceiptTable.ScaleTicketReferenceNumber);
+            PurchAgreementHeader purchAgreementHeader = PurchAgreementHeader::findByAgreementId(etgScaleTicketTable.RefPurchAgreementNum,ETGCanadaParameters::find().DefaultEntityForDocuments);
+            
+            queryBuildDataSource.addRange(fieldNum(AgreementLine,Agreement)).value(queryValue(purchAgreementHeader.RecId));
+            
+            sysTableLookup.addLookupField(fieldNum(AgreementLine,LineNumber));
+            sysTableLookup.addLookupField(fieldNum(AgreementLine,ItemId));
+            sysTableLookup.addLookupMethod(tableMethodStr(AgreementLine, quantityRemainingRelease));
+
+            sysTableLookup.parmQuery(query);
+            sysTableLookup.performFormLookup();
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>modified</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        /// <returns></returns>
+        public boolean modified()
+        {
+            boolean ret;
+        
+            ret = super();
+            ETGElevatorReceiptTable ETGElevatorReceiptTableLoc = ETGElevatorReceiptTable_ds.cursor();
+            ETGScaleTicketTable etgScaleTicketTable = ETGScaleTicketTable::findFromScaleTicketNumber(ETGElevatorReceiptTableLoc.ScaleTicketReferenceNumber);
+
+            AgreementLine _agreementLine = AgreementLine::findByPurchaseNumberAndLineNumber(CompanyInfo::findDataArea(ETGCanadaParameters::find().DefaultEntityForDocuments).RecId,etgScaleTicketTable.RefPurchAgreementNum,ETGElevatorReceiptTable.AgreementLineNum);
+
+            ETGElevatorReceiptTable.AgreementLineItemId = _agreementLine.ItemId;
+
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ETGElevatorReceiptTable_Grain</Name>
+				<Type>String</Type>
+				<Methods>
+					<Method>
+						<Name>lookup</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void lookup()
+        {
+            //super();
+            Query query = new Query();
+            QueryBuildDataSource queryBuildDataSource,qbds2;
+            QueryBuildRange queryBuildRange;
+            SysTableLookup sysTableLookup =
+            SysTableLookup::newParameters(tableNum(ETGRateCardMaster), this);
+
+            sysTableLookup.addLookupField(fieldNum(ETGRateCardMaster,ItemId));
+            sysTableLookup.addLookupField(fieldNum(ETGRateCardMaster,ProductName));
+
+            queryBuildDataSource = query.addDataSource(tableNum(ETGRateCardMaster));
+            queryBuildDataSource.company(ETGCanadaParameters::find().DefaultEntityForDocuments);
+            ETGScaleTicketTable etgScaleTicketTable = ETGScaleTicketTable::findFromScaleTicketNumber(ETGElevatorReceiptTable.ScaleTicketReferenceNumber);
+            PurchAgreementHeader purchAgreementHeader = PurchAgreementHeader::findByAgreementId(etgScaleTicketTable.RefPurchAgreementNum,ETGCanadaParameters::find().DefaultEntityForDocuments);
+            AgreementLine _agreementLine;
+            InventTable inventTable;
+            changecompany(ETGCanadaParameters::find().DefaultEntityForDocuments)
+            {
+                select firstonly _agreementLine
+                    where _agreementLine.Agreement == purchAgreementHeader.RecId;
+                inventTable = InventTable::find(_agreementLine.ItemId);
+            }
+            queryBuildDataSource.addRange(fieldNum(ETGRateCardMaster,SubCommodity)).value(queryValue(inventTable.ETGSubCommodity));
+
+
+            sysTableLookup.parmQuery(query);
+            sysTableLookup.performFormLookup();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ETGElevatorReceiptTable_GrainSecond</Name>
+				<Type>String</Type>
+				<Methods>
+					<Method>
+						<Name>lookup</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void lookup()
+        {
+            //super();
+            Query query = new Query();
+            QueryBuildDataSource queryBuildDataSource;
+            QueryBuildRange queryBuildRange;
+            SysTableLookup sysTableLookup =
+            SysTableLookup::newParameters(tableNum(ETGRateCardMaster), this);
+
+            sysTableLookup.addLookupField(fieldNum(ETGRateCardMaster,ItemId));
+            sysTableLookup.addLookupField(fieldNum(ETGRateCardMaster,ProductName));
+
+            queryBuildDataSource = query.addDataSource(tableNum(ETGRateCardMaster));
+
+            query.allowCrossCompany(true);
+            query.addCompanyRange(ETGCanadaParameters::find().DefaultEntityForDocuments);
+
+            ETGScaleTicketTable etgScaleTicketTable = ETGScaleTicketTable::findFromScaleTicketNumber(ETGElevatorReceiptTable.ScaleTicketReferenceNumber);
+            PurchAgreementHeader purchAgreementHeader = PurchAgreementHeader::findByAgreementId(etgScaleTicketTable.RefPurchAgreementNum,ETGCanadaParameters::find().DefaultEntityForDocuments);
+            AgreementLine _agreementLine;
+            InventTable inventTable;
+            changecompany(ETGCanadaParameters::find().DefaultEntityForDocuments)
+            {
+                select firstonly _agreementLine
+                    where _agreementLine.Agreement == purchAgreementHeader.RecId;
+
+                inventTable = InventTable::find(_agreementLine.ItemId);
+            }
+            queryBuildDataSource.addRange(fieldNum(ETGRateCardMaster,SubCommodity)).value(queryValue(inventTable.ETGSubCommodity));
+            queryBuildDataSource.addRange(fieldNum(ETGRateCardMaster,RefRecId)).value(queryValue(_agreementLine.RecId));
+            queryBuildDataSource.orderMode(OrderMode::GroupBy);
+            queryBuildDataSource.addGroupByField(fieldNum(ETGRateCardMaster, ItemId));
+            queryBuildDataSource.addGroupByField(fieldNum(ETGRateCardMaster, ProductName));
+
+            sysTableLookup.parmQuery(query);
+            sysTableLookup.performFormLookup();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ETGElevatorReceiptTable_SplitsGrain</Name>
+				<Type>String</Type>
+				<Methods>
+					<Method>
+						<Name>lookup</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void lookup()
+        {
+            Query query = new Query();
+            QueryBuildDataSource queryBuildDataSource;
+            QueryBuildRange queryBuildRange;
+            SysTableLookup sysTableLookup =
+            SysTableLookup::newParameters(tableNum(EcoResStorageDimensionGroupItem), this);
+
+            sysTableLookup.addLookupField(fieldNum(EcoResStorageDimensionGroupItem,ItemId));
+            queryBuildDataSource = query.addDataSource(tableNum(EcoResProduct));
+
+            sysTableLookup.parmQuery(query);
+            sysTableLookup.performFormLookup();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ETGElevatorReceiptTable_DockagePercentage</Name>
+				<Type>Real</Type>
+				<Methods>
+					<Method>
+						<Name>modified</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        /// <returns></returns>
+        public boolean modified()
+        {
+            boolean ret;
+        
+            ret = super();
+
+            ETGElevatorReceiptTable.DockageWeight = ETGElevatorReceiptTable.GrainUnloadedWeight * ( ETGElevatorReceiptTable.DockagePercentage / 100);
+            ETGElevatorReceiptTable.NetWeight = ETGElevatorReceiptTable.GrainUnloadedWeight - ETGElevatorReceiptTable.DockageWeight - ETGElevatorReceiptTable.SplitsWeight;
+
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ETGElevatorReceiptTable_SplitsPercentage</Name>
+				<Type>Real</Type>
+				<Methods>
+					<Method>
+						<Name>modified</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        /// <returns></returns>
+        public boolean modified()
+        {
+            boolean ret;
+    
+            ret = super();
+
+            ETGElevatorReceiptTable.SplitsWeight = ETGElevatorReceiptTable.GrainUnloadedWeight * ( ETGElevatorReceiptTable.SplitsPercentage / 100);
+            ETGElevatorReceiptTable.NetWeight = ETGElevatorReceiptTable.GrainUnloadedWeight - ETGElevatorReceiptTable.DockageWeight - ETGElevatorReceiptTable.SplitsWeight;
+    
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ETGElevatorReceiptTable_PONumberInDefaultEntity</Name>
+				<Type>String</Type>
+				<Methods>
+					<Method>
+						<Name>jumpRef</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void jumpRef()
+        {
+            super();
+            PurchTable purchTable;
+            DataAreaId targetCompany;
+
+            select firstOnly crossCompany purchTable
+                where purchTable.PurchId == ETGElevatorReceiptTable.PONumberInDefaultEntity;
+
+            if (purchTable)
+            {
+                targetCompany = purchTable.DataAreaId;
+
+                changeCompany(targetCompany)
+                {
+                    Args args = new Args();
+                    args.record(purchTable);
+                    new MenuFunction(menuItemDisplayStr(PurchTable), MenuItemType::Display).run(args);
+                }
+            }
+            
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+		</DataControls>
+		<Members xmlns="" />
+	</SourceCode>
+	<DataSources>
+		<AxFormDataSource xmlns="">
+			<Name>ETGElevatorReceiptTable</Name>
+			<Table>ETGElevatorReceiptTable</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>AgreementLineItemId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>AgreementLineNum</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DockageGrain</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DockagePercentage</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<AllowEdit>No</AllowEdit>
+					<DataField>DockageWeight</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ElevatorReceiptNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGElevatorReceiptStatus</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGElevatorReceiptType</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Grade</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Grain</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<AllowEdit>No</AllowEdit>
+					<DataField>GrainUnloadedWeight</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<AllowEdit>No</AllowEdit>
+					<DataField>GrossWeight</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<AllowEdit>No</AllowEdit>
+					<DataField>NetWeight</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PONumberInDefaultEntity</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ReceiptDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<AllowEdit>No</AllowEdit>
+					<DataField>ReceiptReference</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ScaleTicketReferenceNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SplitsGrain</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SplitsPercentage</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<AllowEdit>No</AllowEdit>
+					<DataField>SplitsWeight</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>StationName</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>StationNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<AllowEdit>No</AllowEdit>
+					<DataField>VehicleWeight</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ZeroValuePONumber</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+	</DataSources>
+	<Design>
+		<Caption xmlns="">Combined primary elevator receipt</Caption>
+		<Pattern xmlns="">SimpleListDetails</Pattern>
+		<PatternVersion xmlns="">1.3</PatternVersion>
+		<Style xmlns="">SimpleListDetails</Style>
+		<Controls xmlns="">
+			<AxFormControl xmlns=""
+				i:type="AxFormActionPaneControl">
+				<Name>ActionPane</Name>
+				<Type>ActionPane</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormButtonGroupControl">
+						<Name>ButtonGroup</Name>
+						<Type>ButtonGroup</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormMenuFunctionButtonControl">
+								<Name>PrintReceipt</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<Type>MenuFunctionButton</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<MenuItemName>ETGElevatorReceiptReportController</MenuItemName>
+								<MenuItemType>Output</MenuItemType>
+								<Text>Print</Text>
+							</AxFormControl>
+						</Controls>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormActionPaneTabControl">
+						<Name>ConfirmEdit</Name>
+						<Type>ActionPaneTab</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonGroupControl">
+								<Name>ConfirmChangeRequest</Name>
+								<Type>ButtonGroup</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormButtonControl">
+										<Name>Confirm</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>Button</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<Text>Confirm</Text>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormButtonControl">
+										<Name>ChangeRequest</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>Button</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<Text>Change request</Text>
+									</AxFormControl>
+								</Controls>
+								<Caption>Confirm/Change request</Caption>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonGroupControl">
+								<Name>CreatePO</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<Type>ButtonGroup</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormButtonControl">
+										<Name>CreateZeroValuePO</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>Button</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<Text>Create zero value PO</Text>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormButtonControl">
+										<Name>AmmendmentOfPO</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>Button</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<Text>Amendment of PO</Text>
+									</AxFormControl>
+								</Controls>
+								<Caption>Create PO</Caption>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonGroupControl">
+								<Name>SplitsPercentages</Name>
+								<Type>ButtonGroup</Type>
+								<Visible>No</Visible>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormMenuFunctionButtonControl">
+										<Name>SelectSplitsPercentage</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>MenuFunctionButton</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<MenuItemName>ETGElevatorReceiptSplitsPercentageSelection</MenuItemName>
+									</AxFormControl>
+								</Controls>
+								<Caption>Splits item</Caption>
+							</AxFormControl>
+						</Controls>
+						<Caption>Confirm</Caption>
+					</AxFormControl>
+				</Controls>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGroupControl">
+				<Name>NavigationList</Name>
+				<HeightMode>SizeToAvailable</HeightMode>
+				<Type>Group</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl>
+						<Name>QuickFilter</Name>
+						<WidthMode>SizeToAvailable</WidthMode>
+						<FormControlExtension>
+							<Name>QuickFilterControl</Name>
+							<ExtensionComponents />
+							<ExtensionProperties>
+								<AxFormControlExtensionProperty>
+									<Name>targetControlName</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>placeholderText</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>defaultColumnName</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+							</ExtensionProperties>
+						</FormControlExtension>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormGridControl">
+						<Name>Grid</Name>
+						<AllowEdit>No</AllowEdit>
+						<Type>Grid</Type>
+						<WidthMode>SizeToContent</WidthMode>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>ETGElevatorReceiptTable_ElevatorReceiptNumber</Name>
+								<FilterDataSource>ETGElevatorReceiptTable</FilterDataSource>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>ElevatorReceiptNumber</DataField>
+								<DataSource>ETGElevatorReceiptTable</DataSource>
+							</AxFormControl>
+						</Controls>
+						<DataSource>ETGElevatorReceiptTable</DataSource>
+						<MultiSelect>No</MultiSelect>
+						<ShowRowLabels>No</ShowRowLabels>
+						<Style>List</Style>
+					</AxFormControl>
+				</Controls>
+				<DataSource>ETGElevatorReceiptTable</DataSource>
+				<FrameType>None</FrameType>
+				<Style>SidePanel</Style>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGroupControl">
+				<Name>DetailsHeader</Name>
+				<Pattern>FieldsFieldGroups</Pattern>
+				<PatternVersion>1.1</PatternVersion>
+				<Type>Group</Type>
+				<WidthMode>SizeToAvailable</WidthMode>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormGroupControl">
+						<Name>Fields</Name>
+						<Type>Group</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>ETGElevatorReceiptTable_ElevatorReceiptNumber1</Name>
+								<AllowEdit>No</AllowEdit>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>ElevatorReceiptNumber</DataField>
+								<DataSource>ETGElevatorReceiptTable</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormDateControl">
+								<Name>ETGElevatorReceiptTable_ReceiptDate</Name>
+								<Type>Date</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>ReceiptDate</DataField>
+								<DataSource>ETGElevatorReceiptTable</DataSource>
+								<Mandatory>Yes</Mandatory>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormComboBoxControl">
+								<Name>ETGElevatorReceiptTable_ETGElevatorReceiptType</Name>
+								<Type>ComboBox</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>ETGElevatorReceiptType</DataField>
+								<DataSource>ETGElevatorReceiptTable</DataSource>
+								<Items />
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormComboBoxControl">
+								<Name>ETGElevatorReceiptTable_ETGElevatorReceiptStatus</Name>
+								<AllowEdit>No</AllowEdit>
+								<Type>ComboBox</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>ETGElevatorReceiptStatus</DataField>
+								<DataSource>ETGElevatorReceiptTable</DataSource>
+								<Label>Status</Label>
+								<Items />
+							</AxFormControl>
+						</Controls>
+					</AxFormControl>
+				</Controls>
+				<ColumnsMode>Fill</ColumnsMode>
+				<FrameType>None</FrameType>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormTabControl">
+				<Name>Tab</Name>
+				<Type>Tab</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>TabPage</Name>
+						<Pattern>Custom</Pattern>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormGroupControl">
+								<Name>ScaleTicket</Name>
+								<Type>Group</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGElevatorReceiptTable_ScaleTicketReferenceNumber</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ScaleTicketReferenceNumber</DataField>
+										<DataSource>ETGElevatorReceiptTable</DataSource>
+										<Mandatory>Yes</Mandatory>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormIntegerControl">
+										<Name>ETGElevatorReceiptTable_AgreementLineNum</Name>
+										<Type>Integer</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>AgreementLineNum</DataField>
+										<DataSource>ETGElevatorReceiptTable</DataSource>
+										<Label>Line Number</Label>
+										<Mandatory>Yes</Mandatory>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGElevatorReceiptTable_AgreementLineItemId</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>AgreementLineItemId</DataField>
+										<DataSource>ETGElevatorReceiptTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGElevatorReceiptTable_StationName</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>StationName</DataField>
+										<DataSource>ETGElevatorReceiptTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormIntegerControl">
+										<Name>ETGElevatorReceiptTable_StationNumber</Name>
+										<Type>Integer</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>StationNumber</DataField>
+										<DataSource>ETGElevatorReceiptTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGElevatorReceiptTable_ReceiptReference</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ReceiptReference</DataField>
+										<DataSource>ETGElevatorReceiptTable</DataSource>
+									</AxFormControl>
+								</Controls>
+								<Breakable>No</Breakable>
+								<Caption>Scale ticket details</Caption>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormGroupControl">
+								<Name>DockageSplitPercentages</Name>
+								<Type>Group</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormMenuFunctionButtonControl">
+										<Name>ETGSelectGrainItem</Name>
+										<Type>MenuFunctionButton</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<ButtonDisplay>TextOnly</ButtonDisplay>
+										<MenuItemName>ETGElevatorReceiptSelectGrainItems</MenuItemName>
+										<Style>Link</Style>
+										<Text>Select Grain Item</Text>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormMenuFunctionButtonControl">
+										<Name>ETGSelectSplitsItem</Name>
+										<Type>MenuFunctionButton</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<MenuItemName>ETGElevatorReceiptSplitsPercentageSelection</MenuItemName>
+										<Style>Link</Style>
+										<Text>Select Splits Item</Text>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGElevatorReceiptTable_Grain</Name>
+										<Type>String</Type>
+										<Visible>No</Visible>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Grain</DataField>
+										<DataSource>ETGElevatorReceiptTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGElevatorReceiptTable_GrainSecond</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>DockageGrain</DataField>
+										<DataSource>ETGElevatorReceiptTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGElevatorReceiptTable_SplitsGrain</Name>
+										<Type>String</Type>
+										<Visible>No</Visible>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>SplitsGrain</DataField>
+										<DataSource>ETGElevatorReceiptTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGElevatorReceiptTable_Grade</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Grade</DataField>
+										<DataSource>ETGElevatorReceiptTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGElevatorReceiptTable_DockagePercentage</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>DockagePercentage</DataField>
+										<DataSource>ETGElevatorReceiptTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGElevatorReceiptTable_SplitsPercentage</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>SplitsPercentage</DataField>
+										<DataSource>ETGElevatorReceiptTable</DataSource>
+									</AxFormControl>
+								</Controls>
+								<Breakable>No</Breakable>
+								<Caption>Item details</Caption>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormGroupControl">
+								<Name>CalculatedWeights</Name>
+								<Type>Group</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGElevatorReceiptTable_GrossWeight</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>GrossWeight</DataField>
+										<DataSource>ETGElevatorReceiptTable</DataSource>
+										<NoOfDecimals>3</NoOfDecimals>
+										<NoOfDecimalsMode>Fixed</NoOfDecimalsMode>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGElevatorReceiptTable_VehicleWeight</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>VehicleWeight</DataField>
+										<DataSource>ETGElevatorReceiptTable</DataSource>
+										<NoOfDecimals>3</NoOfDecimals>
+										<NoOfDecimalsMode>Fixed</NoOfDecimalsMode>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGElevatorReceiptTable_GrainUnloadedWeight</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>GrainUnloadedWeight</DataField>
+										<DataSource>ETGElevatorReceiptTable</DataSource>
+										<NoOfDecimals>3</NoOfDecimals>
+										<NoOfDecimalsMode>Fixed</NoOfDecimalsMode>
+										<RealValue>3</RealValue>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGElevatorReceiptTable_DockageWeight</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>DockageWeight</DataField>
+										<DataSource>ETGElevatorReceiptTable</DataSource>
+										<NoOfDecimals>3</NoOfDecimals>
+										<NoOfDecimalsMode>Fixed</NoOfDecimalsMode>
+										<RealValue>3</RealValue>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGElevatorReceiptTable_SplitsWeight</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>SplitsWeight</DataField>
+										<DataSource>ETGElevatorReceiptTable</DataSource>
+										<NoOfDecimals>3</NoOfDecimals>
+										<NoOfDecimalsMode>Fixed</NoOfDecimalsMode>
+										<RealValue>3</RealValue>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGElevatorReceiptTable_NetWeight</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>NetWeight</DataField>
+										<DataSource>ETGElevatorReceiptTable</DataSource>
+										<NoOfDecimals>3</NoOfDecimals>
+										<NoOfDecimalsMode>Fixed</NoOfDecimalsMode>
+									</AxFormControl>
+								</Controls>
+								<Caption>Calculated weights</Caption>
+							</AxFormControl>
+						</Controls>
+						<ColumnsMode>Fill</ColumnsMode>
+						<Caption>Elevator receipt</Caption>
+						<FastTabExpanded>Always</FastTabExpanded>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>TabPagePODetails</Name>
+						<Pattern>FieldsFieldGroups</Pattern>
+						<PatternVersion>1.1</PatternVersion>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>ETGElevatorReceiptTable_ZeroValuePONumber</Name>
+								<AllowEdit>No</AllowEdit>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>ZeroValuePONumber</DataField>
+								<DataSource>ETGElevatorReceiptTable</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>ETGElevatorReceiptTable_PONumberInDefaultEntity</Name>
+								<AllowEdit>No</AllowEdit>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>PONumberInDefaultEntity</DataField>
+								<DataSource>ETGElevatorReceiptTable</DataSource>
+							</AxFormControl>
+						</Controls>
+						<ColumnsMode>Fill</ColumnsMode>
+						<Caption>PO Details</Caption>
+					</AxFormControl>
+				</Controls>
+				<Style>FastTabs</Style>
+			</AxFormControl>
+		</Controls>
+	</Design>
+	<Parts>
+		<AxFormPartReference xmlns="">
+			<Name>ETGBinQtyAvailable</Name>
+			<DataSource>ETGElevatorReceiptTable</DataSource>
+			<DataSourceRelation>SelfLink</DataSourceRelation>
+			<MenuItemName>ETGBinVolumeAvailableChartMenuItem</MenuItemName>
+		</AxFormPartReference>
+	</Parts>
+</AxForm>

@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_PurchaseOrderLineQualitySpecUploader</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+using System.IO;
+using OfficeOpenXml;
+using OfficeOpenXml.ExcelPackage;
+using OfficeOpenXml.ExcelRange;
+
+class ETG_PurchaseOrderLineQualitySpecUploader
+{
+    
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Runs the class with the specified arguments.
+    /// </summary>
+    /// <param name = "_args">The specified arguments.</param>
+    public static void main(Args _args)
+    {
+        System.IO.Stream		    stream;
+        ExcelSpreadsheetName	    sheeet;
+        FileUploadBuild			    fileUpload;
+        DialogGroup				    dlgUploadGroup;
+        FileUploadBuild			    fileUploadBuild;
+        FormBuildControl		    formBuildControl;
+
+        int                           counter,minrange,maxrange;
+        InventTable				      inventTable;       
+        PurchTable			          purchTable,purchTableUpd;
+        PurchLine		              purchline;
+        ItemId					      itemID;
+        PurchId                       purchId;
+        InventTransId                 inventTransId;
+        ETG_PurchLineQualityGrp       purchLineQualityGrp;
+        ETG_ProductReceiptQualityGrp  postPackingQualityGrp;
+        ETGQUALITYSPECIFICATIONGROUP  qualityspecgrp;
+        Name                          groupid,maxrangeUpd,minrangeUpd;
+        CalculationType               calculationType;
+        TradeLineNumber             lineNum;
+        
+        
+              
+        Dialog dialog = new Dialog("Import Purchase Order Line Quality Specifications");
+
+        dlgUploadGroup		= dialog.addGroup("Select Excel File to Upload.");
+        formBuildControl	= dialog.formBuildDesign().control(dlgUploadGroup.name());
+        fileUploadBuild		= formBuildControl.addControlEx(classstr(FileUpload), 'Upload');
+
+        fileUploadBuild.style(FileUploadStyle::MinimalWithFilename);
+        fileUploadBuild.fileTypesAccepted('.xlsx');
+
+    
+        if (dialog.run() && dialog.closedOk())
+        {
+            FileUpload fileUploadControl					  = dialog.formRun().control(dialog.formRun().controlId('Upload'));
+            FileUploadTemporaryStorageResult fileUploadResult = fileUploadControl.getFileUploadResult();
+
+            if (fileUploadResult != null && fileUploadResult.getUploadStatus())
+            {
+                stream = fileUploadResult.openResult();
+                using (ExcelPackage Package = new ExcelPackage(stream))
+                {
+                    int rowCount, i;
+
+                    Package.Load(stream);
+                    ExcelWorksheet worksheet		= package.get_Workbook().get_Worksheets().get_Item(1);
+                    OfficeOpenXml.ExcelRange range	= worksheet.Cells;
+                    rowCount = worksheet.Dimension.End.Row - worksheet.Dimension.Start.Row + 1;
+
+                    for (i = 2; i<= rowCount; i++)
+                    {
+                        
+                        purchId         = range.get_Item(i, 1).Value;
+                        lineNum         = str2Int64(range.get_Item(i, 2).Value);
+                        groupid         = range.get_Item(i, 3).Value;
+                        minrange        = str2Int(range.get_Item(i,7).Value);
+                        maxrange        = str2Int(range.get_Item(i,8).Value);
+
+                        qualityspecgrp  = ETGQUALITYSPECIFICATIONGROUP::find(groupid);
+                        select firstonly purchline
+                            where purchline.PurchId == purchId
+                            && purchline.LineNumber == lineNum;
+                        
+                        purchTable      = purchTable::find(purchId);
+                        select firstonly purchTableUpd
+                            where purchTableUpd.PurchId == purchline.PurchId;
+                        
+                        if(!purchTable)
+                        {
+                            error(strFmt('Purchase Order %1 does not Exist',purchId));
+                        }
+                                              
+                        if(minrange > maxrange)
+                        {
+                            error(strFmt('Max range should be greater than min range for purchase order line %1, %2', purchId, groupid ));
+                        }
+                        
+                        if(maxrange > minrange)
+                        {
+                            maxrangeUpd = 'Maximum value';
+                        }
+
+                        if(minrange > maxrange)
+                        {
+                            minrangeUpd = 'Minumun value';
+                        }
+
+                        if(purchTable && purchline && qualityspecgrp && maxrangeUpd)
+                        {
+                            purchLineQualityGrp.clear();
+                            postPackingQualityGrp.clear();
+                          
+                            try
+                            { 
+                                
+                                purchLineQualityGrp.InventTransId            = purchline.InventTransId;
+                                postPackingQualityGrp.InventTransId          = purchline.InventTransId;
+                                purchLineQualityGrp.GroupId                  = range.get_Item(i, 3).Value;
+                                postPackingQualityGrp.GroupID                = range.get_Item(i, 3).Value;
+                                postPackingQualityGrp.GroupDescription       = qualityspecgrp.GroupDescription;
+                                postPackingQualityGrp.SubGroupID             = range.get_Item(i,3).Value;
+                                postPackingQualityGrp.SubGroupDescription    = qualityspecgrp.GroupDescription;
+                                postPackingQualityGrp.MeasurementType        = str2Enum(calculationType,range.get_Item(i,4).Value);
+                                postPackingQualityGrp.Increment              = str2Int(range.get_Item(i,5).Value);
+                                postPackingQualityGrp.FixedValue             = str2Int(range.get_Item(i,6).Value);
+                                postPackingQualityGrp.MinRange               = str2Int(range.get_Item(i,7).Value);
+                                postPackingQualityGrp.MaxRange               = str2Int(range.get_Item(i,8).Value);
+
+                                
+                                maxrangeUpd = '';
+                                minrangeUpd = '';
+
+                                ttsbegin;
+                                if(purchLineQualityGrp.validateWrite())
+                                {
+                                    purchLineQualityGrp.insert();
+                                    postPackingQualityGrp.insert();
+                                }
+                                
+                                ttscommit;
+                                counter++;
+
+                            }
+                            catch(Exception::Error)
+                            {
+                                ttsabort;
+                            }
+                        }
+                        
+                    }
+                    info(strFmt('Purchase Order Lines Quality Specifications Uploaded Sucessfully. Total Lines %1 : ',counter));
+                }
+            }
+            else
+            {
+                error("Error During Upload. Please Contact System Admin. Item ID %1",itemID);
+            }
+
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

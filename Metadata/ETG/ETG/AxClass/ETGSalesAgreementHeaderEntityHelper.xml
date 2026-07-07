@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesAgreementHeaderEntityHelper</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+//SB, DLT, 10/04/2026
+/// <summary>
+/// Class Identifies linked parent purchase agreement header and links it with child sales agreement header
+/// </summary>
+internal final class ETGSalesAgreementHeaderEntityHelper
+{
+    private SalesAgreementHeader SalesAgreementHeader;
+    private str errorMsg;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static ETGSalesAgreementHeaderEntityHelper construct(SalesAgreementHeader _SalesAgreementHeader)
+    {
+        return new ETGSalesAgreementHeaderEntityHelper(_SalesAgreementHeader);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>new</Name>
+				<Source><![CDATA[
+    void new(SalesAgreementHeader _SalesAgreementHeader)
+    {
+        SalesAgreementHeader = _SalesAgreementHeader;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    public void run()
+    {
+        PurchAgreementHeader  PurchAgreementHeader;
+        if(SalesAgreementHeader.ETGDMSParentDealNumber)
+        {
+            PurchAgreementHeader = PurchAgreementHeader::ETG_findByParentDealNumber(SalesAgreementHeader.ETGDMSParentDealNumber);
+
+            if(PurchAgreementHeader.VendorDataAreaId == curExt())
+            {
+                this.B2BAgreementSync(PurchAgreementHeader, salesAgreementHeader);
+            }
+            else
+            {
+                this.intercompanyAgreementSync(purchAgreementHeader, salesAgreementHeader);
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>B2BAgreementSync</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method syncs Purch agreement header to Sales agreement header for Third Party (b2b)
+    /// </summary>
+    private void B2BAgreementSync(PurchAgreementHeader _PurchAgreementHeader,salesAgreementHeader _salesAgreementHeader)
+    {
+        ttsbegin;
+        _salesAgreementHeader.selectForUpdate(true);
+        _PurchAgreementHeader.selectForUpdate(true);
+
+        _PurchAgreementHeader.ETG_IsThirdParty       = NoYes::Yes;
+        _PurchAgreementHeader.ETG_SalesAgreementIdTP = _salesAgreementHeader.SalesNumberSequence;
+        _PurchAgreementHeader.doUpdate();
+
+        _salesAgreementHeader.InterCompanySkipUpdate = InterCompanySkipUpdate::InterCompany;
+        _salesAgreementHeader.ETG_IsThirdParty       = NoYes::Yes;
+        _salesAgreementHeader.ETG_PurchAgreementIdTP = _PurchAgreementHeader.PurchNumberSequence;
+        _salesAgreementHeader.doUpdate();
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>intercompanyAgreementSync</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method syncs Purch agreement header to Sales agreement header for Intercompany
+    /// </summary>
+    private void intercompanyAgreementSync(PurchAgreementHeader _PurchAgreementHeader,salesAgreementHeader _salesAgreementHeader)
+    {
+        ttsbegin;
+        AgreementReference::createRelationShip(_PurchAgreementHeader.RecId, _salesAgreementHeader.RecId);
+        TradeInterCompany::synchronizeDocuRef(_PurchAgreementHeader);
+        ttscommit;
+
+        ETG_PurchaseAgreementHeader         tradeDetailsHeaderDes;
+        ETG_SalesAgreementHeader            tradeDetailsHeaderSource;
+        CustTable                           custTable;
+        InterCompanyCompanyId               custTableInterCompanyTradingPartnerCompanyId;
+        AgreementHeaderDefault              agreementHeaderDefault;
+        ETG_PurchAgreementNotes             purchAgreementNotes;
+        ETG_SalesAgreementNotes             salesAgreementNotes;
+        ETG_PurchaseAgreementQualityGrp     PurchaseAgreementQualityGrp;
+        ETG_SalesAgreementQualityGrp        SalesAgreementQualityGrp;
+        DataAreaId                          srcLE;
+        CustBankAccount                     buyerBank;
+
+        ttsbegin;
+        _salesAgreementHeader.selectForUpdate(true);
+        _PurchAgreementHeader.selectForUpdate(true);
+      
+        if(!_salesAgreementHeader.ETG_PurchAgreementIdIC)
+        {
+            srcLE       = curext();
+            
+            _salesAgreementHeader.InterCompanySkipUpdate     = InterCompanySkipUpdate::InterCompany;
+            _salesAgreementHeader.ETG_PurchAgreementIdIC     = _PurchAgreementHeader.PurchNumberSequence;
+            _salesAgreementHeader.doUpdate();
+
+            _PurchAgreementHeader.ETG_SalesAgreementIdIC     = _salesAgreementHeader.SalesNumberSequence;
+            _PurchAgreementHeader.doUpdate();
+        }
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

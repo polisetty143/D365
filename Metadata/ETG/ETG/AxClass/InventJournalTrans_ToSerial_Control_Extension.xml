@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>InventJournalTrans_ToSerial_Control_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formDataSourceStr(InventJournalTransfer,InventDimReceipt))]
+final class InventJournalTrans_ToSerial_Control_Extension
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>selectionChanged</Name>
+				<Source><![CDATA[
+    public void selectionChanged()
+    {
+        next selectionChanged();
+       
+        //  Feature toggle check (AP → ETG Canada Parameters)
+        if (!ETGCanadaParametersHelper::isRailCarValidationEnabled())
+        {
+            return;
+        }
+
+        InventDim             inventDim1,inventDim;
+        InventJournalTrans   journalTrans;
+        InventSerial         inventSerial;
+        InventSum            inventSum;
+        ETGCanadaParameters  etgParams;
+        Qty                  physicalQty;
+        // . Serial number must exist
+        // Current TO inventory dimension
+        inventDim = this.cursor();
+        inventDim.reread();
+
+        if (!inventDim || !inventDim.InventSerialId)
+        {
+
+            return;
+        }
+
+        // journal line
+        journalTrans = this.formRun().dataSource(formDataSourceStr(InventJournalTransfer, InventJournalTrans)).cursor();
+            
+                
+                
+
+        if (!journalTrans
+            || journalTrans.JournalType != InventJournalType::Transfer)
+        {
+
+            return;
+        }
+
+        //  RailCar flag
+
+        if(inventDim.inventSerialId)
+        {
+
+            inventSerial = InventSerial::find(
+            inventDim.InventSerialId,
+            journalTrans.ItemId);
+
+
+            if (inventSerial && inventSerial.RailCar == NoYes::Yes)
+            {
+
+               
+
+                InventOnhand inventOnhand;
+                InventDimParm inventDimParm;
+                ItemId itemId;
+                InventQty availQty;
+
+                inventDimParm.initFromInventDim(inventDim);
+                inventOnhand=InventOnhand::newParameters(journalTrans.ItemId, inventDim,inventDimParm);
+
+
+                physicalQty = inventOnhand.availPhysical();
+
+                if (physicalQty != 0)
+                {
+                    throw error(strFmt("@ETG_New:PhysicalinventoryErrorMessage", physicalQty, inventDim.InventSerialId));
+
+
+                }
+            }
+
+
+
+        }
+       
+        
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

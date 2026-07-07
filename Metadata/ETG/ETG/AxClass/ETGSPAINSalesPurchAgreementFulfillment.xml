@@ -1,0 +1,356 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSPAINSalesPurchAgreementFulfillment</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Abstract class derived from <c>Runbase</c> to manage the <c>ETGSPAINPurchAgreementFulfillment</c> form
+/// within the ETGSPAIN model. It is used for tracking and managing agreements.
+/// </summary>
+abstract class ETGSPAINSalesPurchAgreementFulfillment extends RunBase
+{
+    ETGSPAINSalesPurchAgreementFollowUpTmp  etgSPAINSalesPurchAgreementFollowUpTmp;      
+    Query                                   query;
+    QueryRun                                queryRun;    
+    boolean                                 dummy;
+
+    #define.CurrentVersion(1)
+    #localMacro.CurrentList
+        dummy
+    #endmacro
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>pack</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Overridden <c>pack</c> method to include dialog and query in the container.
+    /// </summary>
+    /// <returns>container</returns>
+    public container pack()
+    {
+        return [#CurrentVersion,#CurrentList,queryrun.pack()];
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>unpack</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Overridden <c>unpack</c> method to restore dialog and query from the container.
+    /// </summary>
+    /// <param name="packedClass">container</param>
+    /// <returns>boolean</returns>
+    boolean unpack(container packedClass)
+    {
+        Integer     version = conPeek(packedClass,1);
+        container   packedQueryRun;
+ 
+        switch (version)
+        {
+            case #CurrentVersion:
+                [version, #CurrentList, packedQueryRun] = packedClass;
+                queryRun = new QueryRun(packedQueryRun);
+                break;
+            default:
+                return false;
+        }
+ 
+        return true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>enableDataSources</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Enables or disables the data source that is not used for selecting data.
+    /// </summary>
+    /// <param name="_enable">
+    /// Boolean value indicating whether the data source should be enabled.
+    /// </param>
+    protected void enableDataSources()
+    {                
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertIntoTmpTable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Inserts data into the <c>AgreementFollowUpTmp</c> table.
+    /// </summary>
+    protected void insertIntoTmpTable()
+    {                                
+        while (queryRun.next())
+        {
+            this.inizializeAgreementFollowUpTmp();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>inizializeAgreementFollowUpTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Initializes the <c>ETGSPAINPurchAgreementFollowUpTmp</c> table.
+    /// </summary>
+    protected void inizializeAgreementFollowUpTmp()
+    {        
+        AgreementClassification         agreementClassification;
+        AgreementLine                   agreementLine;
+        AgreementLineQuantityCommitment agreementLineQuantityCommitment;
+        AgreementLineVolumeCommitment   agreementLineVolumeCommitment;
+        InventDim                       inventDim;
+        AgreementHeader                 agreementHeader;
+        EcoResCategory                  ecoResCategory;
+        InventTable                     inventTable;
+        container                       remains;
+        boolean                         pdsCWEnabled = #PdsCatchWeightEnabled;
+
+        #AgreementsRemains
+
+        etgSPAINSalesPurchAgreementFollowUpTmp.clear();
+        etgSPAINSalesPurchAgreementFollowUpTmp.initValue();
+
+        agreementLine = queryRun.get(tablenum(AgreementLine));
+
+        if (agreementLine.AgreementLineType == CommitmentType::ProductQuantity
+            || agreementLine.AgreementLineType == CommitmentType::ProductVolume)
+        {
+            inventTable = queryRun.get(tablenum(InventTable));
+            if (inventTable.ItemId)
+            {
+                etgSPAINSalesPurchAgreementFollowUpTmp.ItemId = agreementLine.ItemId;
+                etgSPAINSalesPurchAgreementFollowUpTmp.ItemName = InventTable::name(agreementLine.ItemId, inventDim);
+            }
+            else
+            {
+                //InventTable was filtered out so we should skip the line
+                return;
+            }
+        }
+        else
+        {
+            ecoResCategory = queryRun.get(tablenum(EcoResCategory));
+            if (ecoResCategory.Name)
+            {
+                etgSPAINSalesPurchAgreementFollowUpTmp.Category         = ecoResCategory.Name;
+            }
+            else
+            {
+                //category was filtered out so we should skip the line
+                return;
+            }
+        }
+
+        agreementHeader = queryRun.get(tablenum(AgreementHeader));
+        agreementClassification = queryRun.get(tablenum(AgreementClassification));
+
+        etgSPAINSalesPurchAgreementFollowUpTmp.Currency = agreementHeader.Currency;
+        etgSPAINSalesPurchAgreementFollowUpTmp.DocumentTitle = agreementHeader.DocumentTitle;
+        etgSPAINSalesPurchAgreementFollowUpTmp.AgreementClassificationName = agreementClassification.Name;
+
+        /*
+        if (moduleSalesPurch == ModuleSalesPurch::Sales)
+        {
+            salesAgreementHeader = SalesAgreementHeader::find(agreementHeader.RecId);
+            ETGSPAINPurchAgreementFollowUpTmp.AgreementId = salesAgreementHeader.SalesNumberSequence;
+            ETGSPAINPurchAgreementFollowUpTmp.CustVendName = strfmt("%1 - %2", salesAgreementHeader.CustAccount, salesAgreementHeader.custName());
+        } 
+        */
+
+        etgSPAINSalesPurchAgreementFollowUpTmp = this.fillSalesPurchAgreementHeader(etgSPAINSalesPurchAgreementFollowUpTmp, agreementHeader);
+
+        etgSPAINSalesPurchAgreementFollowUpTmp.LineNumber = agreementLine.LineNumber;
+        etgSPAINSalesPurchAgreementFollowUpTmp.AgreementLineType = agreementLine.AgreementLineType;
+        etgSPAINSalesPurchAgreementFollowUpTmp.EffectiveDate = agreementLine.EffectiveDate;
+        etgSPAINSalesPurchAgreementFollowUpTmp.ExpirationDate = agreementLine.ExpirationDate;
+        
+        inventDim = queryRun.get(tablenum(InventDim));
+            
+        etgSPAINSalesPurchAgreementFollowUpTmp.InventSiteId      = inventDim.InventSiteId;
+        etgSPAINSalesPurchAgreementFollowUpTmp.InventLocationId  = inventDim.InventLocationId;
+
+        if (agreementLine is AgreementLineQuantityCommitment)
+        {
+            agreementLineQuantityCommitment = queryRun.get(tablenum(AgreementLineQuantityCommitment));
+
+            etgSPAINSalesPurchAgreementFollowUpTmp.CommitedQuantity = agreementLineQuantityCommitment.CommitedQuantity;
+            etgSPAINSalesPurchAgreementFollowUpTmp.ProductUnitOfMeasure = agreementLineQuantityCommitment.ProductUnitOfMeasure;
+            remains = agreementLineQuantityCommitment.calculateAgreementRemansOnServer();
+
+            if (pdsCWEnabled && agreementLineQuantityCommitment.PdsCWCommitedQuantity)
+            {
+                etgSPAINSalesPurchAgreementFollowUpTmp.pdsCWUnit            = PdsCatchWeight::cwUnitId(agreementLineQuantityCommitment.ItemId);
+                etgSPAINSalesPurchAgreementFollowUpTmp.PdsCWCommitedQuantity  = agreementLineQuantityCommitment.PdsCWCommitedQuantity;
+                etgSPAINSalesPurchAgreementFollowUpTmp.PdsCWRemainingQty      = conpeek(remains, #PdsCWRemainingIndex);
+                etgSPAINSalesPurchAgreementFollowUpTmp.PdsCWInvoicedQty       = conpeek(remains, #PdsCWInvoicedIndex);
+                etgSPAINSalesPurchAgreementFollowUpTmp.PdsCWReceivedQty       = conpeek(remains, #PdsCWReceivedNotInvoicedIndex);
+                etgSPAINSalesPurchAgreementFollowUpTmp.PdsCWOrderedQty        = conpeek(remains, #PdsCWReleasedNotInvoicedNorReceivedIndex);
+            }
+        }
+        else
+        {
+            agreementLineVolumeCommitment = queryRun.get(tablenum(AgreementLineVolumeCommitment));
+
+            etgSPAINSalesPurchAgreementFollowUpTmp.CommitedAmount = agreementLineVolumeCommitment.CommitedAmount;
+            remains = agreementLineVolumeCommitment.calculateAgreementRemansOnServer();
+        }
+
+        etgSPAINSalesPurchAgreementFollowUpTmp.RemainingQtyAmount = conpeek(remains, #RemainingIndex);
+        etgSPAINSalesPurchAgreementFollowUpTmp.InvoicedQtyAmount  = conpeek(remains, #InvoicedIndex);
+        etgSPAINSalesPurchAgreementFollowUpTmp.ReceivedQtyAmount  = conpeek(remains, #ReceivedNotInvoicedIndex);
+        etgSPAINSalesPurchAgreementFollowUpTmp.OrderedQtyAmount   = conpeek(remains, #ReleasedNotInvoicedNorReceivedIndex);
+
+        this.setSortingNumber();
+
+        etgSPAINSalesPurchAgreementFollowUpTmp.insert();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setSortingNumber</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Sets the value of the <c>LineTypeSortingNumber</c> field in the <c>AgreementFollowUpTmp</c> table.
+    /// </summary>
+    /// <remarks>
+    /// The line type groups will be sorted by the value of the <c>LineTypeSortingNumber</c> field on the report.
+    /// </remarks>
+    protected void setSortingNumber()
+    {
+        switch (etgSPAINSalesPurchAgreementFollowUpTmp.AgreementLineType)
+        {
+            case CommitmentType::ProductQuantity:
+                etgSPAINSalesPurchAgreementFollowUpTmp.LineTypeSortingNumber = 1;
+                break;
+            case CommitmentType::ProductCategory:
+                etgSPAINSalesPurchAgreementFollowUpTmp.LineTypeSortingNumber = 2;
+                break;
+            case CommitmentType::ProductVolume:
+                etgSPAINSalesPurchAgreementFollowUpTmp.LineTypeSortingNumber = 3;
+                break;
+            case CommitmentType::ProductRootCategory:
+                etgSPAINSalesPurchAgreementFollowUpTmp.LineTypeSortingNumber = 4;
+                break;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Overridden standard <c>run</c> method.
+    /// </summary>
+    public void run()
+    {                        
+        this.insertIntoTmpTable();                
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initQuery</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Initializes the query for retrieving agreement data.
+    /// </summary>
+    void initQuery()
+    {
+        query = new Query(queryStr(AgreementFollowUp));
+               
+        this.enableDataSources();
+
+        queryRun = new QueryRun(query);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initParmDefault</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Overridden standard <c>initParmDefault</c> method to initialize default parameters.
+    /// </summary>
+    public void initParmDefault()
+    {
+        super();
+
+        this.initQuery();        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>showQueryValues</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Overridden standard <c>showQueryValues</c> method to display query values.
+    /// </summary>
+    /// <returns>Boolean value indicating whether to show query values.</returns>
+    public boolean showQueryValues()
+    {
+        return true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>queryRun</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Overridden standard <c>queryRun</c> method.
+    /// </summary>
+    /// <returns><c>QueryRun</c> object for the current query.</returns>
+    public QueryRun queryRun()
+    {
+        return queryRun;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getETGSPAINSalesPurchAgreementFollowUpTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Returns the <c>ETGSPAINPurchAgreementFollowUpTmp</c> table.
+    /// </summary>
+    /// <returns>The <c>ETGSPAINPurchAgreementFollowUpTmp</c> table instance.</returns>
+    public ETGSPAINSalesPurchAgreementFollowUpTmp getETGSPAINSalesPurchAgreementFollowUpTmp()
+    {
+        select * from ETGSPAINSalesPurchAgreementFollowUpTmp;
+        return ETGSPAINSalesPurchAgreementFollowUpTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>fillSalesPurchAgreementHeader</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Abstract method to populate <c>ETGSPAINSalesPurchAgreementFollowUpTmp</c> based on the agreement header.
+    /// </summary>
+    /// <param name="_etgSPAINPurchAgreementFollowUpTmp">Temporary table for agreement follow-up data.</param>
+    /// <param name="_agreementHeader">The agreement header information.</param>
+    /// <returns><c>ETGSPAINSalesPurchAgreementFollowUpTmp</c> populated with relevant data.</returns>
+    abstract protected ETGSPAINSalesPurchAgreementFollowUpTmp fillSalesPurchAgreementHeader(ETGSPAINSalesPurchAgreementFollowUpTmp _etgSPAINPurchAgreementFollowUpTmp, AgreementHeader _agreementHeader)
+    {
+        
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

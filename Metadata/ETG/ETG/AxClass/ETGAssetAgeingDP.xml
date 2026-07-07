@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGAssetAgeingDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[
+    //SRSReportQueryAttribute(queryStr(ETGAssetAgeingTmpQuery)),
+    SrsReportParameterAttribute(classStr(ETGAssetAgeingContract))
+]
+public class ETGAssetAgeingDP extends SRSReportDataProviderBase
+{
+    ETGAssetAgeingTmp assetAgeingTmp;
+    AssetTable assetTable;
+    AssetBook assetBook;
+
+    str countryValue, entityValue, verticalValue, departmentValue;
+    str countryStr = "Country";
+    str entityStr = "Entity";
+    str verticalStr = "Vertical";
+    str departmentStr = "Department";
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGAssetAgeingTmp</Name>
+				<Source><![CDATA[
+    [SrsReportDataSetAttribute(tableStr(ETGAssetAgeingTmp))]
+    public ETGAssetAgeingTmp getETGAssetAgeingTmp()
+    {
+        select * from assetAgeingTmp;
+        return assetAgeingTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    [SysEntryPointAttribute(false)]
+    public void processReport()
+    {
+        ETGAssetAgeingContract contract = this.parmDataContract() as ETGAssetAgeingContract;
+        //HcmContactNameRecId contact = contract.parmContact();
+        //ETGPurchaseDate fromDate = contract.parmFromDate();
+        ETGPurchaseDate asOfDate = contract.parmAsOfDate();
+        //boolean disableDates = contract.parmNoYes();
+        date today = today();
+
+        //Query query = this.parmQuery();
+        //QueryRun queryRun = new QueryRun(query);
+
+        //while (queryRun.next())
+        //{
+        //    assetTableLoc = queryRun.get(tableNum(AssetTable));
+
+        //    if (assetTableLoc.ETGPurchaseDate >= asOfDate)
+
+        while select assetTable
+            where assetTable.ETGPurchaseDate <= asOfDate
+            && assetTable.ETGPurchaseDate != dateNull()
+            {
+                //date today = today();
+            date fromDate = assetTable.ETGPurchaseDate;
+            str fromDateStr, toDateStr;
+            date fromDateFormat, toDateFormat;
+
+            assetAgeingTmp.clear();
+            assetAgeingTmp.ETGFixedAssetNumber = assetTable.AssetId;
+            assetAgeingTmp.ETGAssetName = assetTable.Name;
+            assetAgeingTmp.ETGPresentUser = assetTable.ETGPresentUser;
+            assetAgeingTmp.ETGAssignedDate = assetTable.ETGAssignedDate;
+            assetAgeingTmp.ETGEmailId   = assetTable.ETGEmailId;
+            assetAgeingTmp.ETGDocuments = assetTable.Documents;
+            assetAgeingTmp.ETGSerialNumber = assetTable.SerialNum;
+            assetAgeingTmp.ETGModel = assetTable.Model;
+            assetAgeingTmp.ETGMake = assetTable.Make;
+            assetAgeingTmp.ETGPurchaseDate = assetTable.ETGPurchaseDate;
+            assetAgeingTmp.ETGContact = DirPartyTable::findRec(HcmWorker::find(assetTable.WorkerContactName).Person).Name;
+            assetAgeingTmp.ETGUserId = assetTable.ETGUserId;
+            assetAgeingTmp.ETGUserId1 = assetTable.ETGUserId1;
+            assetAgeingTmp.ETGUserId2 = assetTable.ETGUserId2;
+            assetAgeingTmp.ETGUserDate = assetTable.ETGUserDate;
+            assetAgeingTmp.ETGUserDate1 = assetTable.ETGUserDate1;
+            assetAgeingTmp.ETGUserDate2 = assetTable.ETGUserDate2;
+            assetAgeingTmp.ETGAssetTechInfo1 = assetTable.TechInfo1;
+            assetAgeingTmp.ETGAssetTechInfo2 = assetTable.TechInfo2;
+            assetAgeingTmp.ETGAssetTechInfo3 = assetTable.TechInfo3;
+            assetAgeingTmp.ETGAssetCondition = assetTable.Condition;
+            assetAgeingTmp.ETGCapexNumber = assetTable.ETGCapexNumber;
+
+            int totalDays = asOfDate - assetTable.ETGPurchaseDate; // total number of days
+            date startDate = mkDate(1, 1, 1900); // arbitrary start date
+            date endDate = startDate + totalDays; // add total days to start date
+ 
+            int years;
+            int months;
+            int days;
+ 
+            // Calculate difference
+            years = year(endDate) - year(startDate);
+            months = mthOfYr(endDate) - mthOfYr(startDate);
+            days = dayOfMth(endDate) - dayOfMth(startDate);
+ 
+            if (days < 0)
+            {
+                months--;
+                date prevMonth = endDate - dayOfMth(endDate);
+                days = dayOfMth(endDate) + dayOfMth(prevMonth) - dayOfMth(startDate);
+            }
+ 
+            if (months < 0)
+            {
+                years--;
+                months += 12;
+            }
+ 
+            assetAgeingTmp.ETGAssetsAging = strFmt("%1 Years, %2 Months, %3 Days", years, months, days);
+            
+
+            //fromDateStr = date2str(fromDate,213,DateMonth::Digits2,DateSeparator::Slash,DateDay::Digits2,DateSeparator::Slash,DateYear::Digits4);
+            //toDateStr = date2str(asOfDate,213,DateMonth::Digits2,DateSeparator::Slash,DateDay::Digits2,DateSeparator::Slash,DateYear::Digits4);
+            //fromDateFormat = str2Date(fromDateStr, 213);
+            //toDateFormat = str2Date(toDateStr, 213);
+            //assetAgeingTmp.ETGAssetsAging = strFmt("%1 Years, %2 Months, %3 Days",
+            //                                   intvNo(toDateFormat, fromDateFormat, intvScale::Year),
+            //                                   intvNo(toDateFormat, fromDateFormat, intvScale::Month),
+            //                                   intvNo(toDateFormat, fromDateFormat, intvScale::Day));
+
+            select firstonly * from assetBook
+            where assetBook.AssetId == assetTable.AssetId;
+
+            countryValue = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(assetBook.DefaultDimension, countryStr);
+            entityValue = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(assetBook.DefaultDimension, entityStr);
+            verticalValue = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(assetBook.DefaultDimension, verticalStr);
+            departmentValue = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(assetBook.DefaultDimension, departmentStr);
+
+            assetAgeingTmp.ETGCountry = countryValue;
+            assetAgeingTmp.ETGEntity = entityValue;
+            assetAgeingTmp.ETGVerticle = verticalValue;
+            assetAgeingTmp.ETGDepartment = departmentValue;
+
+            assetAgeingTmp.insert();
+            }
+       
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>create</Name>
+				<Source><![CDATA[
+    public void create()
+    {
+        //date today = today();
+        //date fromDate = assetTable.ETGPurchaseDate;
+        //str fromDateStr, toDateStr;
+        //date fromDateFormat, toDateFormat;
+
+        //assetAgeingTmp.clear();
+        //assetAgeingTmp.ETGFixedAssetNumber = assetTable.AssetId;
+        //assetAgeingTmp.ETGAssetName = assetTable.Name;
+        //assetAgeingTmp.ETGPresentUser = assetTable.ETGPresentUser;
+        //assetAgeingTmp.ETGAssignedDate = assetTable.ETGAssignedDate;
+        //assetAgeingTmp.ETGEmailId   = assetTable.ETGEmailId;
+        //assetAgeingTmp.ETGDocuments = assetTable.Documents;
+        //assetAgeingTmp.ETGSerialNumber = assetTable.SerialNum;
+        //assetAgeingTmp.ETGModel = assetTable.Model;
+        //assetAgeingTmp.ETGMake = assetTable.Make;
+        //assetAgeingTmp.ETGPurchaseDate = assetTable.ETGPurchaseDate;
+        //assetAgeingTmp.ETGContact = DirPartyTable::findRec(HcmWorker::find(assetTable.WorkerContactName).Person).Name;
+        //assetAgeingTmp.ETGUserId = assetTable.ETGUserId;
+        //assetAgeingTmp.ETGUserId1 = assetTable.ETGUserId1;
+        //assetAgeingTmp.ETGUserId2 = assetTable.ETGUserId2;
+        //assetAgeingTmp.ETGUserDate = assetTable.ETGUserDate;
+        //assetAgeingTmp.ETGUserDate1 = assetTable.ETGUserDate1;
+        //assetAgeingTmp.ETGUserDate2 = assetTable.ETGUserDate2;
+        //assetAgeingTmp.ETGAssetTechInfo1 = assetTable.TechInfo1;
+        //assetAgeingTmp.ETGAssetTechInfo2 = assetTable.TechInfo2;
+        //assetAgeingTmp.ETGAssetTechInfo3 = assetTable.TechInfo3;
+        //assetAgeingTmp.ETGAssetCondition = assetTable.Condition;
+        //assetAgeingTmp.ETGCapexNumber = assetTable.ETGCapexNumber;
+
+        //fromDateStr = date2str(fromDate,213,DateMonth::Digits2,DateSeparator::Slash,DateDay::Digits2,DateSeparator::Slash,DateYear::Digits4);
+        //toDateStr = date2str(today,213,DateMonth::Digits2,DateSeparator::Slash,DateDay::Digits2,DateSeparator::Slash,DateYear::Digits4);
+        //fromDateFormat = str2Date(fromDateStr, 213);
+        //toDateFormat = str2Date(toDateStr, 213);
+        //assetAgeingTmp.ETGAssetsAging = strFmt("%1 Years,%2 Months,%3 Days",
+        //                                       intvNo(toDateFormat, fromDateFormat, intvScale::Year),
+        //                                       intvNo(toDateFormat, fromDateFormat, intvScale::Month),
+        //                                       intvNo(toDateFormat, fromDateFormat, intvScale::Day));
+
+        //select firstonly * from assetBook
+        //    where assetBook.AssetId == assetTable.AssetId;
+
+        //countryValue = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(assetBook.DefaultDimension, countryStr);
+        //entityValue = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(assetBook.DefaultDimension, entityStr);
+        //verticalValue = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(assetBook.DefaultDimension, verticalStr);
+        //departmentValue = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(assetBook.DefaultDimension, departmentStr);
+
+        //assetAgeingTmp.ETGCountry = countryValue;
+        //assetAgeingTmp.ETGEntity = entityValue;
+        //assetAgeingTmp.ETGVerticle = verticalValue;
+        //assetAgeingTmp.ETGDepartment = departmentValue;
+
+        //assetAgeingTmp.insert();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

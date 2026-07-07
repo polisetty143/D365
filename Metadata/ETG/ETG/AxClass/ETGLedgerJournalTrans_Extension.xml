@@ -1,0 +1,266 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerJournalTrans_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This is an extension class for the table LedgerJournalTrans
+/// </summary>
+[ExtensionOf(tableStr(LedgerJournalTrans))]
+internal final class ETGLedgerJournalTrans_Extension
+{
+
+
+
+
+  }
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>validateField</Name>
+				<Source><![CDATA[
+    public boolean validateField(FieldId field)
+    {
+        boolean ret = next validateField(field);
+
+        if (ret)
+        {
+            if(ETGACFParameters::find().EnableProvisionalCharges)
+            {
+                switch (field)
+                {
+                    case fieldNum(LedgerJournalTrans, ETGCustVendInvJournalQty):
+                    case fieldNum(LedgerJournalTrans, ETGCustInvoiceTransRecId):
+                    case fieldNum(LedgerJournalTrans, ETGVendInvoiceTransRecId):
+                    case fieldNum(LedgerJournalTrans, ETGCustVendInvJournalChargeCode):
+                        ret = ret && this.checkReversalQty();
+                        break;
+                   
+                }
+            }
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>checkReversalQty</Name>
+				<Source><![CDATA[
+    public boolean checkReversalQty()
+    {
+        boolean isValid = true;
+        ETGCustVendInvJournalReversalTable custVendInvJournalReversalTable;
+
+        if(this.ETGCustVendInvJournalOrderType == ETGCustVendInvJournalOrderType::Purchase
+            && this.ETGVendInvoiceTransRecId
+            && this.ETGCustVendInvJournalChargeCode)
+        {
+            VendInvoiceTrans vendInvoiceTrans;
+            select sum(Qty) from vendInvoiceTrans where vendInvoiceTrans.RecId == this.ETGVendInvoiceTransRecId
+                && vendInvoiceTrans.DataAreaId == this.DataAreaId;
+
+            select sum(Qty) from custVendInvJournalReversalTable
+                where custVendInvJournalReversalTable.RefRecId == this.ETGVendInvoiceTransRecId
+                && custVendInvJournalReversalTable.RefTableId == tableNum(VendInvoiceTrans)
+                && custVendInvJournalReversalTable.ChargeCode == this.ETGCustVendInvJournalChargeCode;
+
+            if(abs(this.ETGCustVendInvJournalQty) > (abs(vendInvoiceTrans.Qty) - abs(custVendInvJournalReversalTable.Qty)))
+            {
+                isValid = checkFailed(strFmt("Insufficient quantity exists for reversal. Please enter the correct quantity. Available quantity for reversal %1",
+                    (abs(vendInvoiceTrans.Qty) - abs(custVendInvJournalReversalTable.Qty))));
+            }
+                    
+        }
+        if(this.ETGCustVendInvJournalOrderType == ETGCustVendInvJournalOrderType::Sales
+            && this.ETGCustInvoiceTransRecId
+            && this.ETGCustVendInvJournalChargeCode)
+        {
+            CustInvoiceTrans custInvoiceTrans;
+            select sum(Qty) from custInvoiceTrans where custInvoiceTrans.RecId == this.ETGCustInvoiceTransRecId
+                && custInvoiceTrans.DataAreaId == this.DataAreaId;
+
+            select sum(Qty) from custVendInvJournalReversalTable
+                where custVendInvJournalReversalTable.RefRecId == this.ETGCustInvoiceTransRecId
+                && custVendInvJournalReversalTable.RefTableId == tableNum(CustInvoiceTrans)
+                && custVendInvJournalReversalTable.ChargeCode == this.ETGCustVendInvJournalChargeCode;
+
+            if(abs(this.ETGCustVendInvJournalQty) > (abs(custInvoiceTrans.Qty) - abs(custVendInvJournalReversalTable.Qty)))
+            {
+                isValid = checkFailed(strFmt("Insufficient quantity exists for reversal. Please enter the correct quantity. Available quantity for reversal %1",
+                    (abs(custInvoiceTrans.Qty) - abs(custVendInvJournalReversalTable.Qty))));
+            }
+                    
+        }
+
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>modifiedField</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// When ledgerDimension field is modified, assiging the capexId from assetTable.
+    /// </summary>
+    /// <param name = "_fieldId">FieldId.</param>
+    public void modifiedField(FieldId _fieldId)
+    {
+        next modifiedField(_fieldId);
+
+        switch (_fieldId)
+        {
+            case fieldNum(LedgerJournalTrans, LedgerDimension):
+                if(AssetParameters::find().ETGCapexApprovalIdFeature == NoYes::Yes)
+                {
+                    this.ETGCapexApprovalId = AssetTable::find(LedgerDimensionFacade::getDisplayValueForLedgerDimension(this.LedgerDimension)).ETGCapexApprovalId;
+                }
+                break;
+
+            case fieldNum(LedgerJournalTrans, ETGTERMONumber):
+                this.ETGMotherTERMONumber = ETGTERMONumberTable::findFromTermoNumber(this.ETGTERMONumber).MotherTERMOReference;
+                break;
+
+            case fieldNum(LedgerJournalTrans, ETGCustInvoiceTransRecId):
+                this.ETGVendInvoiceTransRecId = 0;
+                this.totalChargesAllocated(this.ETGCustInvoiceTransRecId, tableNum(CustInvoiceTrans));
+                break;
+
+            case fieldNum(LedgerJournalTrans, ETGVendInvoiceTransRecId):
+                this.ETGCustInvoiceTransRecId = 0;
+                this.totalChargesAllocated(this.ETGVendInvoiceTransRecId, tableNum(VendInvoiceTrans));
+                break;
+            case fieldNum(LedgerJournalTrans, ETGCustVendInvJournalChargeCode):
+                 if(this.ETGCustVendInvJournalOrderType == ETGCustVendInvJournalOrderType::Purchase)
+                {
+                    this.totalChargesAllocated(this.ETGVendInvoiceTransRecId, tableNum(VendInvoiceTrans));
+                }
+                if(this.ETGCustVendInvJournalOrderType == ETGCustVendInvJournalOrderType::Sales)
+                {
+                    this.totalChargesAllocated(this.ETGCustInvoiceTransRecId, tableNum(CustInvoiceTrans));
+                }
+                break;
+            case fieldNum(LedgerJournalTrans, ETGCustVendInvJournalOrderType):
+                if(this.ETGCustVendInvJournalOrderType == ETGCustVendInvJournalOrderType::Purchase)
+                {
+                    this.ETGCustInvoiceTransRecId = 0;
+                }
+                if(this.ETGCustVendInvJournalOrderType == ETGCustVendInvJournalOrderType::Sales)
+                {
+                    this.ETGVendInvoiceTransRecId = 0;
+                }
+                if(this.ETGCustVendInvJournalOrderType == ETGCustVendInvJournalOrderType::None)
+                {
+                    this.ETGVendInvoiceTransRecId = 0;
+                    this.ETGCustInvoiceTransRecId = 0;
+                }
+                break;
+          
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>totalChargesAllocated</Name>
+				<Source><![CDATA[
+    public void totalChargesAllocated(RefRecId refRecId, TableId refTableId)
+    {
+        MarkupTrans markUpTrans;
+       ETGCustVendInvJournalReversalTable reversalTable;
+
+        select sum(CalculatedAmount) from markUpTrans
+                where markupTrans.TransRecId == refRecId
+                    && markupTrans.TransTableId == refTableId
+                    && markupTrans.MarkupCode == this.ETGCustVendInvJournalChargeCode;
+
+        this.ETGCustVendInvJournalTotalProvAmt = markUpTrans.CalculatedAmount;
+
+        select sum(ProvisionReversed) from reversalTable
+                 where reversalTable.RefRecId == refRecId
+                    && reversalTable.RefTableId == refTableId
+                    && reversalTable.ChargeCode == this.ETGCustVendInvJournalChargeCode;
+
+        this.ETGCustVendInvJournalRemainingProvAmt = abs(this.ETGCustVendInvJournalTotalProvAmt) - reversalTable.ProvisionReversed;
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateDelete</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Abhinav - Cost Distribution - 28-01-2025
+    /// </summary>
+    /// <returns></returns>
+    public boolean validateDelete()
+    {
+        int ret;
+        ret = next validateDelete();
+        
+        if(LedgerParameters::find().ETGEnableLedgerCostDistributions == NoYes::Yes && this.ETGCostRefRecID)
+        {
+            ret = false;
+        }
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>delete</Name>
+				<Source><![CDATA[
+    //To delete all the splitted records if parent record is deleted.
+    ///Abhinav - Cost Distribution - 28-01-2025
+    public void delete(boolean _skipValidation)
+    {
+        next delete();
+
+        if(LedgerParameters::find().ETGEnableLedgerCostDistributions == NoYes::Yes && this.ETGIsLineSplitted)
+        {
+            LedgerJournalTrans LedgerJournalTrans;
+            delete_from LedgerJournalTrans where LedgerJournalTrans.ETGCostRefRecID == this.RecId;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>removeAccruals</Name>
+				<Source><![CDATA[
+    public void removeAccruals(boolean _skipWarning)
+    {
+        next removeAccruals(_skipWarning);
+
+        if(ETGACFParameters::find().EnableAccrualSchemePostingMonthly)
+        {
+            ETGLedgerJournalTransAccrual        ledgerJournalTransAccrual;
+            ETGLedgerJournalTransAccrualTrans   ledgerJournalTransAccrualTrans;
+            ttsbegin;
+
+            ledgerJournalTransAccrual = ETGLedgerJournalTransAccrual::find(this.TableId, this.RecId, true);
+
+            if (ledgerJournalTransAccrual)
+            {
+                ledgerJournalTransAccrual.delete();
+                if (!_skipWarning)
+                {
+                    warning("@SYS78328");
+                }
+                delete_from ledgerJournalTransAccrualTrans
+                where ledgerJournalTransAccrualTrans.RefRecid == this.RecId
+                    && ledgerJournalTransAccrualTrans.RefTableid == this.TableId;
+            }
+            ttscommit;
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

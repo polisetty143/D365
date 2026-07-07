@@ -1,0 +1,1825 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxDataEntityView xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchLineEntity</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGPurchLineEntity extends common
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>postLoad</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    public void postLoad()
+    {
+        super();
+        this.VendName = VendTable::find(this.VendAccount).name();
+        Ledger          ledger;
+        DataArea        dataArea;
+        DirOrganization     dirorganization;
+        str                 countryRegionId,countryRegionIdname;
+
+        select firstonly RecId from dataArea where dataArea.id == curExt();
+
+        //..
+        select firstonly dirorganization
+            where dirorganization.RecId == VendTable::find(this.VendAccount).Party;
+
+        countryRegionId  = VendTable::find(this.VendAccount).countryRegionId();
+
+        countryRegionIdname  = LogisticsAddressCountryRegionTranslation::find(countryRegionId).ShortName;
+
+        this.VendorOrganizationNumber   =  dirorganization.OrgNumber;
+        this.VendorCountryRegionName    = countryRegionIdname;
+       
+        //addedd fileds
+        
+
+        ledger = Ledger::findByLegalEntity(dataArea.Recid);
+        
+        
+
+        ETG_purchTableTrade ETG_purchTableTrade;
+
+        select firstonly  ETG_purchTableTrade
+            where ETG_purchTableTrade.purchId == this.purchId;
+
+            
+        this.CommOrig       = InventDim::find(this.InventDimId).InventColorId;// ETG_purchTableTrade.CountryOfOriginOfGoods;
+        this.purchdestCountry = ETG_purchTableTrade.CountryOfFinalDestination;
+
+        ExchangeRateUnionView ExchangeRateUnionView, ExchangeRateUnionViewLoc;
+        select firstonly ExchangeRateUnionView
+            order by ExchangeRateUnionView.ValidFrom desc
+            where ExchangeRateUnionView.FromCurrencyCode == this.CurrencyCode && ExchangeRateUnionView.ToCurrencyCode == 'USD'
+            && ExchangeRateUnionView.ValidFrom <= DateTimeUtil::date(this.CreatedDateTime) &&  ExchangeRateUnionView.ValidTo >= DateTimeUtil::date(this.CreatedDateTime);
+        AmountMST AmtUSD;
+        if (this.CurrencyCode == 'USD')
+        {
+            this.AmountinUSD = 1*this.LineAmount;
+            AmtUSD = 1*this.LineAmount;
+            this.ExchInUSD = 1;
+        }
+        else
+        {
+            this.AmountinUSD = ExchangeRateUnionView.ExchangeRate*this.LineAmount;
+            AmtUSD =  ExchangeRateUnionView.ExchangeRate*this.LineAmount;
+            this.ExchInUSD = ExchangeRateUnionView.ExchangeRate/100.00;
+        }
+
+        
+
+        select firstonly  ExchangeRateUnionViewLoc
+            order by ExchangeRateUnionViewLoc.ValidFrom desc
+      where ExchangeRateUnionViewLoc.FromCurrencyCode == this.CurrencyCode && ExchangeRateUnionViewLoc.ToCurrencyCode == Ledger::accountingCurrency(CompanyInfo::current())
+      && ExchangeRateUnionViewLoc.ValidFrom <= DateTimeUtil::date(this.CreatedDateTime) &&  ExchangeRateUnionViewLoc.ValidTo >= DateTimeUtil::date(this.CreatedDateTime);
+
+       
+
+           
+
+        if (this.CurrencyCode == Ledger::accountingCurrency(CompanyInfo::current() ))
+        {
+            this.AmountinLC = 1*this.LineAmount;
+            this.ExchInLC   = 1;
+        }
+        else
+
+        {
+            this.AmountinLC = ExchangeRateUnionViewLoc.ExchangeRate*this.LineAmount;
+            this.ExchInLC = (ExchangeRateUnionViewLoc.ExchangeRate)/100.00;
+        }
+
+        this.CurrecyLC      = Ledger::accountingCurrency();
+
+        ETGACFParameters aCFParameters = ETGACFParameters::find();
+
+        this.Vertical     = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(this.DefaultDimension, aCFParameters.Vertical);
+        //this.SubVertical  = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(this.DefaultDimension, "BusinessUnit");
+
+
+        DefaultDimensionView DefaultDimensionView;
+        select * from DefaultDimensionView where DefaultDimensionView.DEFAULTDIMENSION == this.DefaultDimension
+            && DefaultDimensionView.Name == aCFParameters.SubVertical;
+
+        DimAttributeOMBusinessUnit dimAttributeOMBusinessUnit;
+
+        select * from dimAttributeOMBusinessUnit
+            where dimAttributeOMBusinessUnit.value == DefaultDimensionView.DisplayValue;
+        
+
+        if (dimAttributeOMBusinessUnit)
+        {
+            this.SubVertical            = dimAttributeOMBusinessUnit.Name;
+        }
+
+       
+        this.Commodity    = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(this.DefaultDimension, aCFParameters.MainCommodity);
+        this.SubCommodity = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(this.DefaultDimension, aCFParameters.SubCommodity);
+      //  this.ItemDIm        = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(this.DefaultDimension, aCFParameters.ItemId);
+
+        if (this.PurchQty == 0 )
+        {
+            this.PurchasePriceMT = 0;
+        }
+        else
+        {
+            this.PurchasePriceMT = AmtUSD/this.PurchQty;
+        }
+
+        select firstonly  Name from dataArea
+            where dataArea.id       == this.DataAreaId;
+
+        this.EntityName             = dataArea.name;
+
+        UnitOfMeasure FromunitOfMeasure = UnitOfMeasure::findBySymbol(this.purchUnit);
+        UnitOfMeasure TounitOfMeasure = UnitOfMeasure::findBySymbol('MT');
+
+        if (FromunitOfMeasure == TounitOfMeasure)
+        {
+            this.ExchMT = 1;
+        }
+        else
+        {
+            this.ExchMT = UnitOfMeasureConversion::findByConversion(FromunitOfMeasure.RecId,TounitOfMeasure.RecId ).Factor;
+        }
+
+
+        this.DlvHeader = PurchTable::find(this.PurchId).DlvTerm;
+        this.Invoicedate = VendInvoiceJour::findFromPurchId(this.PurchId).InvoiceDate;
+
+
+        LogisticsAddressCountryRegionId regid = CompanyInfo::find().postalAddress().CountryRegionId;
+
+        LanguageIdAll langid = currentUserLanguage();
+
+
+        LogisticsAddressCountryRegionTranslation logisticsAddressCountryRegionTranslation;
+
+
+        select * from logisticsAddressCountryRegionTranslation where logisticsAddressCountryRegionTranslation.CountryRegionId == regid && logisticsAddressCountryRegionTranslation.CountryRegionId == langid;
+
+        this.CompanyCountry = logisticsAddressCountryRegionTranslation.LongName;
+
+        DirPartyTable dirPartyTable;
+
+        VendTable vendtableLoc;
+
+        select firstonly Party from vendtableLoc where vendtableLoc.AccountNum == this.VendAccount;
+
+        select firstonly KnownAs from dirPartyTable where dirPartyTable.recid == vendtableLoc.Party;
+
+
+            
+
+        this.EntityStdName = dirPartyTable.KnownAs;
+        this.GroupCompName  = VendTable::find(this.VendAccount).organizationNumber();
+        this.CompanyCountry = VendTable::find(this.VendAccount).countryRegionName();
+        this.ItemDim = EcoResProductTranslation::findByProductLanguage(InventTable::find(this.ItemId).Product, SystemParameters::getSystemLanguageId()).Name;
+
+        this.ItemDim = EcoResProductTranslation::findByProductLanguage(InventTable::find(this.ItemId).Product, SystemParameters::getSystemLanguageId()).Name;
+        DimensionAttributeValue dimAttributeValue;
+        DefaultDimensionView dimensionView;
+        DimensionAttribute dimensionAttribute;
+        select firstOnly dimensionView
+            where dimensionView.DefaultDimension == this.DefaultDimension
+            join dimensionAttribute
+            where dimensionView.Name == aCFParameters.ItemId;
+
+        this.ItemDim = EcoResProductTranslation::findByProductLanguage(InventTable::find(dimensionView.DisplayValue).Product, SystemParameters::getSystemLanguageId()).Name;
+      
+
+
+       
+
+        this.ItemDesc = EcoResProductTranslation::findByProductLanguage(InventTable::find(this.ItemId).Product, SystemParameters::getSystemLanguageId()).Name;
+
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+	<ConfigurationKey>LogisticsBasic</ConfigurationKey>
+	<Label>ETG purchase order lines</Label>
+	<SubscriberAccessLevel>
+		<Read>Allow</Read>
+	</SubscriberAccessLevel>
+	<DataManagementEnabled>Yes</DataManagementEnabled>
+	<DataManagementStagingTable>ETGPurchLineStaging</DataManagementStagingTable>
+	<EntityCategory>Transaction</EntityCategory>
+	<IsPublic>Yes</IsPublic>
+	<PrimaryCompanyContext>DataAreaId</PrimaryCompanyContext>
+	<PrimaryKey>EntityKey</PrimaryKey>
+	<PublicCollectionName>ETGPurchLinesEntity</PublicCollectionName>
+	<PublicEntityName>ETGPurchLineEntity</PublicEntityName>
+	<DeleteActions />
+	<FieldGroups>
+		<AxTableFieldGroup>
+			<Name>AutoReport</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoLookup</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoIdentification</Name>
+			<AutoPopulate>Yes</AutoPopulate>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoSummary</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoBrowse</Name>
+			<Fields />
+		</AxTableFieldGroup>
+	</FieldGroups>
+	<Fields>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>AccountingDistributionTemplate</Name>
+			<DataField>AccountingDistributionTemplate</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ActivityNumber</Name>
+			<DataField>ActivityNumber</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>AddressRefRecId</Name>
+			<DataField>AddressRefRecId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>AddressRefTableId</Name>
+			<DataField>AddressRefTableId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>AgreementSkipAutoLink</Name>
+			<DataField>AgreementSkipAutoLink</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>AssetBookId</Name>
+			<DataField>AssetBookId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>AssetGroup</Name>
+			<DataField>AssetGroup</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>AssetId</Name>
+			<DataField>AssetId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>AssetTransTypePurch</Name>
+			<DataField>AssetTransTypePurch</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>BarCode</Name>
+			<DataField>BarCode</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>BarCodeType</Name>
+			<DataField>BarCodeType</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Blocked</Name>
+			<DataField>Blocked</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>BudgetReservationLine_PSN</Name>
+			<DataField>BudgetReservationLine_PSN</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>CFOPTable_BR</Name>
+			<DataField>CFOPTable_BR</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Complete</Name>
+			<DataField>Complete</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ConfirmedDlv</Name>
+			<DataField>ConfirmedDlv</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ConfirmedShipDate</Name>
+			<DataField>ConfirmedShipDate</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ConfirmedTaxAmount</Name>
+			<DataField>ConfirmedTaxAmount</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ConfirmedTaxWriteCode</Name>
+			<DataField>ConfirmedTaxWriteCode</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>CountyOrigDest</Name>
+			<DataField>CountyOrigDest</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>CovRef</Name>
+			<DataField>CovRef</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>CreatedDateTimeCopy1</Name>
+			<DataField>CreatedDateTime</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>CreateFixedAsset</Name>
+			<DataField>CreateFixedAsset</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>CreditedVendInvoiceTrans</Name>
+			<DataField>CreditedVendInvoiceTrans</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>CurrencyCode</Name>
+			<DataField>CurrencyCode</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>CustomerRef</Name>
+			<DataField>CustomerRef</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>CustPurchaseOrderFormNum</Name>
+			<DataField>CustPurchaseOrderFormNum</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>DataAreaIdCopy1</Name>
+			<DataField>DataAreaId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>DefaultDimension</Name>
+			<AccessModifier>Private</AccessModifier>
+			<DataField>DefaultDimension</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>DeliveryDate</Name>
+			<DataField>DeliveryDate</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>DeliveryName</Name>
+			<DataField>DeliveryName</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>DeliveryPostalAddress</Name>
+			<DataField>DeliveryPostalAddress</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>DeliveryType</Name>
+			<DataField>DeliveryType</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>DepreciationStartDate</Name>
+			<DataField>DepreciationStartDate</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>DiscAmount</Name>
+			<DataField>DiscAmount</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>DiscPercent</Name>
+			<DataField>DiscPercent</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>DlvMode</Name>
+			<DataField>DlvMode</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>DlvTerm</Name>
+			<DataField>DlvTerm</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>EditableInWorkflow</Name>
+			<DataField>EditableInWorkflow</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ETG_AgreementConfirmationId</Name>
+			<DataField>ETG_AgreementConfirmationId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ETG_IsGrossWeight</Name>
+			<DataField>ETG_IsGrossWeight</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ETG_IsThirdParty</Name>
+			<DataField>ETG_IsThirdParty</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ETG_ItemAlternativeName</Name>
+			<DataField>ETG_ItemAlternativeName</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ETG_ItemQuantityGroup</Name>
+			<DataField>ETG_ItemQuantityGroup</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ETG_TPInventTransId</Name>
+			<DataField>ETG_TPInventTransId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ETGActualPurchPrice</Name>
+			<DataField>ETGActualPurchPrice</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ETGCapexApprovalId</Name>
+			<DataField>ETGCapexApprovalId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ETGCrDrJrnAmt</Name>
+			<DataField>ETGCrDrJrnAmt</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ETGCrDrNoteCreated</Name>
+			<DataField>ETGCrDrNoteCreated</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ETGIsCrDeJournalPosted</Name>
+			<DataField>ETGIsCrDeJournalPosted</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ETGJournalNum</Name>
+			<DataField>ETGJournalNum</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ETGPriceTolerance</Name>
+			<DataField>ETGPriceTolerance</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ETGRateCardApplied</Name>
+			<DataField>ETGRateCardApplied</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ETGRateCardId</Name>
+			<DataField>ETGRateCardId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>EximPorts_IN</Name>
+			<DataField>EximPorts_IN</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>EximProductGroup_IN</Name>
+			<DataField>EximProductGroup_IN</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ExternalItemId</Name>
+			<DataField>ExternalItemId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>GSTHSTTaxType_CA</Name>
+			<DataField>GSTHSTTaxType_CA</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>InterCompanyInventTransId</Name>
+			<DataField>InterCompanyInventTransId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>InterCompanyOrigin</Name>
+			<DataField>InterCompanyOrigin</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>IntercompanyOSOSourcingInventLocationId</Name>
+			<DataField>IntercompanyOSOSourcingInventLocationId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>IntercompanyOSOSourcingInventSiteId</Name>
+			<DataField>IntercompanyOSOSourcingInventSiteId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>IntrastatCommodity</Name>
+			<DataField>IntrastatCommodity</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>IntrastatFulfillmentDate_HU</Name>
+			<DataField>IntrastatFulfillmentDate_HU</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>InventDimId</Name>
+			<DataField>InventDimId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>InventInvoiceNow</Name>
+			<DataField>InventInvoiceNow</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>InventReceivedNow</Name>
+			<DataField>InventReceivedNow</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>InventRefId</Name>
+			<DataField>InventRefId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>InventRefTransId</Name>
+			<DataField>InventRefTransId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>InventTransId</Name>
+			<DataField>InventTransId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>IsAddedByChannel</Name>
+			<DataField>IsAddedByChannel</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>IsDeleted</Name>
+			<DataField>IsDeleted</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>IsFinalized</Name>
+			<DataField>IsFinalized</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>IsIntegration</Name>
+			<DataField>IsIntegration</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>IsInvoiceMatched</Name>
+			<DataField>IsInvoiceMatched</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>IsModified</Name>
+			<DataField>IsModified</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>IsPwp</Name>
+			<DataField>IsPwp</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ItemBOMId</Name>
+			<DataField>ItemBOMId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ItemId</Name>
+			<DataField>ItemId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ItemRefType</Name>
+			<DataField>ItemRefType</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ItemRouteId</Name>
+			<DataField>ItemRouteId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ITMArrivalGroupId</Name>
+			<DataField>ITMArrivalGroupId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ITMCustomsDescId</Name>
+			<DataField>ITMCustomsDescId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ITMDataEventType</Name>
+			<DataField>ITMDataEventType</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ITMDate</Name>
+			<DataField>ITMDate</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ITMExFactoryDate</Name>
+			<DataField>ITMExFactoryDate</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ITMFreightResponsibility</Name>
+			<DataField>ITMFreightResponsibility</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ITMFromPort</Name>
+			<DataField>ITMFromPort</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ITMId</Name>
+			<DataField>ITMId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ITMIntoStoreDate</Name>
+			<DataField>ITMIntoStoreDate</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ITMOverUnder</Name>
+			<DataField>ITMOverUnder</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ITMOverUnderTransId</Name>
+			<DataField>ITMOverUnderTransId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ITMSkipUpdate</Name>
+			<DataField>ITMSkipUpdate</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ITMStatusId</Name>
+			<DataField>ITMStatusId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>LedgerDimension</Name>
+			<AccessModifier>Private</AccessModifier>
+			<DataField>LedgerDimension</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>LineAmount</Name>
+			<DataField>LineAmount</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>LineDeliveryType</Name>
+			<DataField>LineDeliveryType</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>LineDisc</Name>
+			<DataField>LineDisc</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>LineHeader</Name>
+			<DataField>LineHeader</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>LineNumber</Name>
+			<DataField>LineNumber</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>LinePercent</Name>
+			<DataField>LinePercent</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ManualEntryChangepolicy</Name>
+			<DataField>ManualEntryChangepolicy</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ManualModifiedField</Name>
+			<DataField>ManualModifiedField</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>MatchingAgreementLine</Name>
+			<DataField>MatchingAgreementLine</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>MatchingPolicy</Name>
+			<DataField>MatchingPolicy</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>MCRDropShipComment</Name>
+			<DataField>MCRDropShipComment</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>MCRDropShipment</Name>
+			<DataField>MCRDropShipment</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>MCRDropShipStatus</Name>
+			<DataField>MCRDropShipStatus</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>MCROrderLine2PriceHistoryRef</Name>
+			<DataField>MCROrderLine2PriceHistoryRef</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ModifiedDateTimeCopy1</Name>
+			<DataField>ModifiedDateTime</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>MultiLnDisc</Name>
+			<DataField>MultiLnDisc</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>MultiLnPercent</Name>
+			<DataField>MultiLnPercent</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Name</Name>
+			<DataField>Name</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>OperationType_MX</Name>
+			<DataField>OperationType_MX</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>OrigCountryRegionId</Name>
+			<DataField>OrigCountryRegionId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>OrigStateId</Name>
+			<DataField>OrigStateId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>OverDeliveryPct</Name>
+			<DataField>OverDeliveryPct</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>OverrideSalesTax</Name>
+			<DataField>OverrideSalesTax</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PackedExtensions</Name>
+			<DataField>PackedExtensions</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PackedWHSLine</Name>
+			<DataField>PackedWHSLine</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PartitionCopy1</Name>
+			<DataField>Partition</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PDSCalculationId</Name>
+			<DataField>PDSCalculationId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PdsCWInventReceivedNow</Name>
+			<DataField>PdsCWInventReceivedNow</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PdsCWQty</Name>
+			<DataField>PdsCWQty</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PdsCWRemainInventFinancial</Name>
+			<DataField>PdsCWRemainInventFinancial</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PdsCWRemainInventPhysical</Name>
+			<DataField>PdsCWRemainInventPhysical</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PlanningPriority</Name>
+			<DataField>PlanningPriority</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PlanReference</Name>
+			<DataField>PlanReference</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Port</Name>
+			<DataField>Port</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PriceUnit</Name>
+			<DataField>PriceUnit</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ProcurementCategory</Name>
+			<DataField>ProcurementCategory</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ProjCategoryId</Name>
+			<DataField>ProjCategoryId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ProjId</Name>
+			<DataField>ProjId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ProjLinePropertyId</Name>
+			<DataField>ProjLinePropertyId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ProjSalesCurrencyId</Name>
+			<DataField>ProjSalesCurrencyId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ProjSalesPrice</Name>
+			<DataField>ProjSalesPrice</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ProjSalesUnitId</Name>
+			<DataField>ProjSalesUnitId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ProjTaxGroupId</Name>
+			<DataField>ProjTaxGroupId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ProjTaxItemGroupId</Name>
+			<DataField>ProjTaxItemGroupId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ProjTransId</Name>
+			<DataField>ProjTransId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ProjWorker</Name>
+			<DataField>ProjWorker</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PSARetainScheduleId</Name>
+			<DataField>PSARetainScheduleId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PSATotalRetainAmount</Name>
+			<DataField>PSATotalRetainAmount</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PSNCalculateDeliveryDate</Name>
+			<DataField>PSNCalculateDeliveryDate</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PSNCalendarDays</Name>
+			<DataField>PSNCalendarDays</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PSNLeadTime</Name>
+			<DataField>PSNLeadTime</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PurchaseOrderLineCreationMethod</Name>
+			<DataField>PurchaseOrderLineCreationMethod</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PurchaseType</Name>
+			<DataField>PurchaseType</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PurchCommitmentLine_PSN</Name>
+			<DataField>PurchCommitmentLine_PSN</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PurchId</Name>
+			<DataField>PurchId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PurchMarkup</Name>
+			<DataField>PurchMarkup</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PurchPrice</Name>
+			<DataField>PurchPrice</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PurchQty</Name>
+			<DataField>PurchQty</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PurchReceivedNow</Name>
+			<DataField>PurchReceivedNow</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PurchReqId</Name>
+			<DataField>PurchReqId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PurchReqLineRefId</Name>
+			<DataField>PurchReqLineRefId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PurchStatus</Name>
+			<DataField>PurchStatus</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PurchSupplierAuxId</Name>
+			<DataField>PurchSupplierAuxId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PurchUnit</Name>
+			<DataField>PurchUnit</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>QtyOrdered</Name>
+			<DataField>QtyOrdered</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>RBOPackageLineNum</Name>
+			<DataField>RBOPackageLineNum</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>RecIdCopy1</Name>
+			<DataField>RecId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>RecVersionCopy1</Name>
+			<DataField>RecVersion</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Remainder</Name>
+			<DataField>Remainder</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>RemainInventFinancial</Name>
+			<DataField>RemainInventFinancial</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>RemainInventPhysical</Name>
+			<DataField>RemainInventPhysical</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>RemainPurchFinancial</Name>
+			<DataField>RemainPurchFinancial</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>RemainPurchPhysical</Name>
+			<DataField>RemainPurchPhysical</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ReqAttention</Name>
+			<DataField>ReqAttention</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ReqPlanIdSched</Name>
+			<DataField>ReqPlanIdSched</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ReqPOId</Name>
+			<DataField>ReqPOId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>RequestedShipDate</Name>
+			<DataField>RequestedShipDate</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Requester</Name>
+			<DataField>Requester</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>RetailLineNumEx1</Name>
+			<DataField>RetailLineNumEx1</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>RetailPackageId</Name>
+			<DataField>RetailPackageId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>RetailTempValueEx2</Name>
+			<DataField>RetailTempValueEx2</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ReturnActionId</Name>
+			<DataField>ReturnActionId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ReturnDispositionCodeId</Name>
+			<DataField>ReturnDispositionCodeId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ReturnStatus</Name>
+			<DataField>ReturnStatus</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Scrap</Name>
+			<DataField>Scrap</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ServiceAddress</Name>
+			<DataField>ServiceAddress</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ServiceDate</Name>
+			<DataField>ServiceDate</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ShipCalendarId</Name>
+			<DataField>ShipCalendarId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ShippingDateConfirmed</Name>
+			<DataField>ShippingDateConfirmed</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ShippingDateRequested</Name>
+			<DataField>ShippingDateRequested</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SkipCreateMarkup</Name>
+			<DataField>SkipCreateMarkup</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SkipDeliveryScheduleUpdate</Name>
+			<DataField>SkipDeliveryScheduleUpdate</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SkipDistributionUpdate</Name>
+			<DataField>SkipDistributionUpdate</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SkipPriceDiscCalc</Name>
+			<DataField>SkipPriceDiscCalc</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SkipShipReceiptDateCalculation</Name>
+			<DataField>SkipShipReceiptDateCalculation</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SkipUpdate</Name>
+			<DataField>SkipUpdate</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SourceDocumentLine</Name>
+			<DataField>SourceDocumentLine</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>StatisticValue_LT</Name>
+			<DataField>StatisticValue_LT</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>StatProcId</Name>
+			<DataField>StatProcId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>StatTriangularDeal</Name>
+			<DataField>StatTriangularDeal</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>StockedProduct</Name>
+			<DataField>StockedProduct</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SyncIntercompanySalesLine</Name>
+			<DataField>SyncIntercompanySalesLine</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SysRowVersionCopy1</Name>
+			<DataField>SysRowVersion</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SystemEntryChangePolicy</Name>
+			<DataField>SystemEntryChangePolicy</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SystemEntrySource</Name>
+			<DataField>SystemEntrySource</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>TAMItemVendRebateGroupId</Name>
+			<DataField>TAMItemVendRebateGroupId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Tax1099Amount</Name>
+			<DataField>Tax1099Amount</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Tax1099Fields</Name>
+			<DataField>Tax1099Fields</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Tax1099RecId</Name>
+			<DataField>Tax1099RecId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Tax1099State</Name>
+			<DataField>Tax1099State</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Tax1099StateAmount</Name>
+			<DataField>Tax1099StateAmount</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>TaxAutogenerated</Name>
+			<DataField>TaxAutogenerated</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>TaxGroup</Name>
+			<DataField>TaxGroup</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>TaxItemGroup</Name>
+			<DataField>TaxItemGroup</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>TaxServiceCode_BR</Name>
+			<DataField>TaxServiceCode_BR</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>TaxWithholdBaseCur_TH</Name>
+			<DataField>TaxWithholdBaseCur_TH</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>TaxWithholdGroup_TH</Name>
+			<DataField>TaxWithholdGroup_TH</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>TaxWithholdItemGroupHeading_TH</Name>
+			<DataField>TaxWithholdItemGroupHeading_TH</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>TransactionCode</Name>
+			<DataField>TransactionCode</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Transport</Name>
+			<DataField>Transport</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>UnderDeliveryPct</Name>
+			<DataField>UnderDeliveryPct</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>VariantId</Name>
+			<DataField>VariantId</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>VendAccount</Name>
+			<DataField>VendAccount</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>VendGroup</Name>
+			<DataField>VendGroup</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>WfDeliveryDueState</Name>
+			<DataField>WfDeliveryDueState</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>WfInvReceivedState</Name>
+			<DataField>WfInvReceivedState</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>WorkflowState</Name>
+			<DataField>WorkflowState</DataField>
+			<DataSource>PurchLine</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>VendName</Name>
+			<ExtendedDataType>Name</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>ExchangeInUSD</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>ExchangeInLC</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>CommOrig</Name>
+			<IsComputedField>No</IsComputedField>
+			<StringSize>20</StringSize>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>CustomerBillingCountry</Name>
+			<IsComputedField>No</IsComputedField>
+			<StringSize>20</StringSize>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>TradingPartner</Name>
+			<ExtendedDataType>AccountNum</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>PurchdestCountry</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>AmountinUSD</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>AmountinLC</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>CurrecyLC</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>ItemDIm</Name>
+			<ExtendedDataType>ItemId</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>SubCommodity</Name>
+			<ExtendedDataType>ETGSubCommodity</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>Commodity</Name>
+			<ExtendedDataType>ETGCommodity</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>Vertical</Name>
+			<ExtendedDataType>ETGSubVertical</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>SubVertical</Name>
+			<ExtendedDataType>ETGSubVertical</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>PurchasePriceMT</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>ExchInLC</Name>
+			<ExtendedDataType>CurrencyExchangeRate</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>ExchInUSD</Name>
+			<ExtendedDataType>CurrencyExchangeRate</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>EntityName</Name>
+			<ExtendedDataType>UserIdStr</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>ExchMT</Name>
+			<ExtendedDataType>UnitOfMeasureConversionFactor</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>DlvHeader</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldDate">
+			<Name>Invoicedate</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>CompanyCountry</Name>
+			<ExtendedDataType>LogisticsAddressCountyId</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>EntityStdName</Name>
+			<IsComputedField>No</IsComputedField>
+			<StringSize>60</StringSize>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>GroupCompName</Name>
+			<IsComputedField>No</IsComputedField>
+			<StringSize>60</StringSize>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>ItemDesc</Name>
+			<ExtendedDataType>Name</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>VendorOrganizationNumber</Name>
+			<ExtendedDataType>String255</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+			<StringSize>60</StringSize>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>VendorCountryRegionName</Name>
+			<ExtendedDataType>String255</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+	</Fields>
+	<Keys>
+		<AxDataEntityViewKey>
+			<Name>EntityKey</Name>
+			<Fields>
+				<AxDataEntityViewKeyField>
+					<DataField>InventTransId</DataField>
+				</AxDataEntityViewKeyField>
+			</Fields>
+		</AxDataEntityViewKey>
+	</Keys>
+	<Mappings />
+	<Ranges>
+		<AxDataEntityViewRange>
+			<Name>DataAreaId</Name>
+			<Field>DataAreaId</Field>
+			<Value>O001</Value>
+		</AxDataEntityViewRange>
+	</Ranges>
+	<Relations>
+		<AxDataEntityViewRelation xmlns=""
+			i:type="AxDataEntityViewRelationForeignKey">
+			<Name>DefaultDimensionDimensionSet</Name>
+			<Cardinality>ZeroMore</Cardinality>
+			<RelatedDataEntity>DimensionSetEntity</RelatedDataEntity>
+			<RelatedDataEntityCardinality>ZeroOne</RelatedDataEntityCardinality>
+			<RelationshipType>Association</RelationshipType>
+			<Constraints>
+				<AxDataEntityViewRelationConstraint xmlns=""
+					i:type="AxDataEntityViewRelationConstraintField">
+					<Name>DefaultDimension</Name>
+					<Field>DefaultDimension</Field>
+					<RelatedField>RecId</RelatedField>
+				</AxDataEntityViewRelationConstraint>
+			</Constraints>
+		</AxDataEntityViewRelation>
+		<AxDataEntityViewRelation xmlns=""
+			i:type="AxDataEntityViewRelationForeignKey">
+			<Name>LedgerDimensionCombination</Name>
+			<Cardinality>ZeroMore</Cardinality>
+			<RelatedDataEntity>DimensionCombinationEntity</RelatedDataEntity>
+			<RelatedDataEntityCardinality>ZeroOne</RelatedDataEntityCardinality>
+			<RelationshipType>Association</RelationshipType>
+			<Constraints>
+				<AxDataEntityViewRelationConstraint xmlns=""
+					i:type="AxDataEntityViewRelationConstraintField">
+					<Name>LedgerDimension</Name>
+					<Field>LedgerDimension</Field>
+					<RelatedField>RecId</RelatedField>
+				</AxDataEntityViewRelationConstraint>
+			</Constraints>
+		</AxDataEntityViewRelation>
+	</Relations>
+	<StateMachines />
+	<ViewMetadata>
+		<Name>Metadata</Name>
+		<SourceCode>
+			<Methods>
+				<Method>
+					<Name>classDeclaration</Name>
+					<Source><![CDATA[
+[Query]
+public class Metadata extends QueryRun
+{
+}
+]]></Source>
+				</Method>
+			</Methods>
+		</SourceCode>
+		<DataSources>
+			<AxQuerySimpleRootDataSource>
+				<Name>PurchLine</Name>
+				<ChangeTrackingEnabled>No</ChangeTrackingEnabled>
+				<DynamicFields>Yes</DynamicFields>
+				<Table>PurchLine</Table>
+				<DataSources />
+				<DerivedDataSources />
+				<Fields />
+				<Ranges />
+				<GroupBy />
+				<Having />
+				<OrderBy />
+			</AxQuerySimpleRootDataSource>
+		</DataSources>
+	</ViewMetadata>
+</AxDataEntityView>

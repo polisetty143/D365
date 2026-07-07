@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchPackingSlipJournalCreate_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This is an extension class for <c>PurchPackingSlipJournalCreate</c>
+/// </summary>
+[ExtensionOf(classStr(PurchPackingSlipJournalCreate))]
+internal final class ETGPurchPackingSlipJournalCreate_Extension
+{
+
+
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initHeader</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// In this method assigning the fields from parmTable.
+    /// </summary>
+    public void initHeader()
+    {
+        next initHeader();
+
+        vendPackingSlipJour.ETGDateofEntry = purchParmTable.ETGDateofEntry;
+        vendPackingSlipJour.ETGEntryNumber = purchParmTable.ETGEntryNumber;
+        vendPackingSlipJour.ETGPortofEntry = purchParmTable.ETGPortofEntry;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initJournalLine</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// In this method assiging the fields from parmLine.
+    /// </summary>
+    /// <param name = "_parmLine">ParmLine</param>
+    /// <returns>vendPackingSlipTrans</returns>
+    public Common initJournalLine(Common _parmLine)
+    {
+        VendPackingSlipTrans    vendPackingSlipTrans;
+        PurchParmLine           purchParmLine       = _parmLine as PurchParmLine;
+
+        vendPackingSlipTrans = next initJournalLine(purchParmLine);
+
+        vendPackingSlipTrans.ETGExciseDuty          = purchParmLine.ETGExciseDuty;
+        vendPackingSlipTrans.ETGAssessmentValue     = purchParmLine.ETGAssessmentValue;
+        vendPackingSlipTrans.ETGVATPercentage       = purchParmLine.ETGVATPercentage;
+
+        return vendPackingSlipTrans;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createJournalLine</Name>
+				<Source><![CDATA[
+    protected void createJournalLine(Common _purchParmLine)
+    {
+        next createJournalLine(_purchParmLine);
+
+        PurchParmLine purchParmLine = _purchParmLine as PurchParmLine;
+
+        if (!purchParmLine)
+        return;
+
+        if (ETGACFParameters::find().EnableDMSIntegration
+        && BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGDMSReverePurchAgreementIntegrationEventClass)))
+        {
+            PurchTable purchTable = PurchTable::find(purchParmLine.OrigPurchId);
+
+            if (purchTable.MatchingAgreement)
+            {
+                PurchAgreementHeader purchAgreementHeader = PurchAgreementHeader::find(purchTable.MatchingAgreement);
+
+                VendPackingSlipJour vendPackingSlipJour;
+                VendPackingSlipTrans vendPackingSlipTrans;
+                PurchLine            purchLine;
+                real currentReceiptQty;
+                real totalAfterThisReceipt;
+                boolean isPartial = false;
+
+                select firstOnly vendPackingSlipJour
+                order by vendPackingSlipJour.CreatedDateTime desc
+                where vendPackingSlipJour.PurchId == purchTable.PurchId;
+
+                str formattedDateTime = DateTimeUtil::toStr(vendPackingSlipJour.CreatedDateTime);
+
+                ETGDMSReverePurchAgreementIntegrationContract contract =
+                new ETGDMSReverePurchAgreementIntegrationContract();
+
+                contract.parmDealNumber(purchAgreementHeader.ETGDMSDealNumbers);
+                contract.parmDataAreaId(curExt());
+                contract.parmDocumentNumber(vendPackingSlipJour.PackingSlipId);
+                contract.parmDocumentDate(formattedDateTime);
+                contract.parmActivityOwner(vendPackingSlipJour.CreatedBy);
+
+                contract.parmOperationType("Product Receipt Posting - Received");
+                contract.parmActivityName("Purchase Agreement Receipt Posting");
+                contract.parmActivityRemarks(strFmt(
+                    "The purchase order %1 is received with product receipt %2",
+                    purchTable.PurchId, vendPackingSlipJour.PackingSlipId));
+
+    //            while select purchLine
+    //where purchLine.PurchId == purchTable.PurchId
+    //            {
+    //                currentReceiptQty = 0;
+
+    //                select sum(Qty) from vendPackingSlipTrans
+    //    where vendPackingSlipTrans.PurchId      == purchLine.PurchId
+    //       && vendPackingSlipTrans.InventTransId == purchLine.InventTransId
+    //       && vendPackingSlipTrans.PackingSlipId == vendPackingSlipJour.PackingSlipId;
+
+    //                totalAfterThisReceipt = purchLine.receivedInTotal() + currentReceiptQty;
+
+    //                if (totalAfterThisReceipt < purchLine.QtyOrdered)
+    //                {
+    //                    isPartial = true;
+    //                    break;
+    //                }
+    //            }
+
+    //            if (!isPartial)
+    //            {
+    //                contract.parmOperationType("Product Receipt Posting - Received");
+    //                contract.parmActivityName("Purchase Agreement Full Receipt Posting");
+    //                contract.parmActivityRemarks(strFmt(
+    //                "The purchase order %1 is fully received with product receipt %2",
+    //                purchTable.PurchId, vendPackingSlipJour.PackingSlipId));
+    //            }
+    //            else
+    //            {
+    //                contract.parmOperationType("Product Receipt Posting - Partially Received");
+    //                contract.parmActivityName("Purchase Agreement Partial Receipt Posting");
+    //                contract.parmActivityRemarks(strFmt(
+    //                "The purchase order %1 is partially received with product receipt %2",
+    //                purchTable.PurchId, vendPackingSlipJour.PackingSlipId));
+    //            }
+
+                ETGDMSReverePurchAgreementIntegrationEventClass eventClass =
+                ETGDMSReverePurchAgreementIntegrationEventClass::newFromContract(contract);
+
+                eventClass.send();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

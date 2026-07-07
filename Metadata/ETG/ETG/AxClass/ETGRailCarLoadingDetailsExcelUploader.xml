@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGRailCarLoadingDetailsExcelUploader</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+using System.IO;
+using OfficeOpenXml;
+using OfficeOpenXml.ExcelPackage;
+using OfficeOpenXml.ExcelRange;
+class ETGRailCarLoadingDetailsExcelUploader
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>processExcelFile</Name>
+				<Source><![CDATA[
+    public static void processExcelFile(FileUpload _fileUploadControl,ETGRailLoadingSerialNumber _serialNumber)
+
+    {
+        FileUploadTemporaryStorageResult result = _fileUploadControl.getFileUploadResult();
+        boolean hasError = false;
+
+        if (!result || !result.getUploadStatus())
+        {
+            warning("No file selected.");
+            return;
+        }
+
+        // Read file into stream
+        System.IO.Stream stream = result.openResult();
+
+        // EPPlus requires a MemoryStream
+        System.IO.MemoryStream ms = new System.IO.MemoryStream();
+        stream.CopyTo(ms);
+        ms.Position = 0;
+
+        // Load Excel
+        using (OfficeOpenXml.ExcelPackage package = new OfficeOpenXml.ExcelPackage(ms))
+        {
+            OfficeOpenXml.ExcelWorksheet sheet = package.get_Workbook().get_Worksheets().get_Item(1);
+
+            int row = 2; // Row 1 = header
+            while (sheet.get_Cells().get_Item(row, 1).get_Value()!= null)
+            {
+                ETGRailLoadingSerialNumber railCarLoading = any2Str(sheet.get_Cells().get_Item(row, 1).get_Value());
+                LineNum lineNum                           = any2Real(sheet.get_Cells().get_Item(row, 2).get_Value());
+                ETGRailLoadNumber railLoadNo              = any2Str(sheet.get_Cells().get_Item(row, 3).get_Value());
+                SalesOrderedQty  qty                      = any2Real(sheet.get_Cells().get_Item(row, 4).get_Value());
+                ETGBagscount     noOfBags                 = any2Real(sheet.get_Cells().get_Item(row, 5).get_Value());
+                ETGSealNumber    sealno                   = any2Str(sheet.get_Cells().get_Item(row, 6).get_Value());
+                str              railType                 = any2Str(sheet.get_Cells().get_Item(row, 7).get_Value());
+                ETGRailCarLoadingLineDetails details;
+
+                details.clear();
+
+                details.ETGRailLoadingSerialNumber = railCarLoading;
+                details.LineNum                    = lineNum;
+                details.ETGRailLoadNumber          = railLoadNo;
+                details.Qty                        = qty;
+                details.ETGNumberOfBags            = noOfBags;
+                details.ETGSealNumber              = sealno;
+                details.ETGRailType                = railType;
+
+
+                ttsbegin;
+                if (!ETGRailCarLoadingDetailsExcelUploader::validateRecord(details, _serialNumber))
+                {
+                    hasError = true;
+                    error(strFmt("Row %1 failed validation.", row));
+                }
+                else
+                {
+                    details.insert();
+                }
+                ttscommit;
+
+                row++;
+            }
+
+        }
+
+        if (hasError)
+        {
+            warning("Upload completed with errors.");
+        }
+        else
+        {
+            info("Upload completed successfully.");
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateRecord</Name>
+				<Source><![CDATA[
+    public static boolean validateRecord(ETGRailCarLoadingLineDetails _details,ETGRailLoadingSerialNumber _currentSerialNumber)
+    {
+        boolean ret = true;
+        ETGRailCarLoadingLineDetails existingDetails;
+
+
+        if (_details.ETGRailLoadingSerialNumber !=
+            _currentSerialNumber)
+        {
+            error(strFmt(
+                "@ETG_New:RailCarExcelUploadMessage",
+                _details.ETGRailLoadingSerialNumber,
+                _currentSerialNumber));
+
+            return false;
+        }
+        ETGRailCarLoadingLineTable line =
+                ETGRailCarLoadingLineTable::find(_details.ETGRailLoadingSerialNumber, _details.LineNum);
+
+        if (!line.RecId)
+        {
+            
+            error(strFmt(
+                  "@ETG_New:RailCarExcelUploadMessage1",
+                  _details.ETGRailLoadingSerialNumber,
+                  _details.LineNum));
+
+            return false;
+           
+        }
+        //return ret;
+
+       
+        ETGCanadaParameters                     CanadaParameters    = ETGCanadaParameters::find();
+        InventTableModule     inventTableModule;
+
+        if (CanadaParameters.DefaultEntityForDocuments)
+        {
+            // Read InventDim from the source company
+            changecompany(CanadaParameters.DefaultEntityForDocuments)
+            {
+
+                // Fetch item for over-delivery %
+                inventTableModule = InventTableModule::find(line.ItemId,ModuleInventPurchSales::sales);
+            }
+        }
+
+        // Open qty = ordered - delivered
+        real openQty = line.SalesQty;
+
+        // Over-delivery %
+
+        real overPct;
+        if (inventTableModule.recid)
+        {
+            overPct = inventTableModule.OverDeliveryPct;
+        }
+
+        // Allowed qty
+        real allowedQty = openQty + (openQty * overPct / 100);
+
+        // SUM all loaded qty for this SAME sales line across ALL rail loads
+        ETGRailCarLoadingLineDetails details;
+        real totalLoaded = 0;
+
+        select sum(Qty) from details
+        where details.ETGRailLoadingSerialNumber == line.ETGRailLoadingSerialNumber
+            && details.LineNum == line.LineNum;
+          //&& details.RecId != ETGRailCarLoadingLineDetails.RecId;   // exclude current line
+
+        totalLoaded = details.Qty; // SUM result is stored in the field buffer
+
+        // Add current line qty
+        real newTotal = totalLoaded + _details.Qty;
+
+        // Validate
+        if (newTotal > allowedQty)
+        {
+             error(strFmt(
+            "Total loaded quantity %1 exceeds allowed quantity %2 for Sales Line %3 ",
+            newTotal,
+            allowedQty,
+            line.LineNum));
+
+            ret = false;
+        }
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

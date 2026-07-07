@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSPAINUnsoldJournalImportLogUIBuilder</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// UI Builder class for handling the import log interface of the Unsold Journal in the ETGSPAIN model.
+/// This class provides custom logic for uploading Excel files and managing dialog interactions.
+/// </summary>
+class ETGSPAINUnsoldJournalImportLogUIBuilder extends SysOperationUIBuilder
+{
+    private const str OkButtonName   = 'CommandButton';
+    private const str FileUploadName = 'FileUpload';
+    private const str AvailFileType  = '.xlsx';
+
+    private DialogField dlgInventLocation;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>build</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Builds the dialog by adding fields for warehouse location and file upload functionality.
+    /// </summary>
+    public void build()
+    {
+        super();
+
+        Dialog                  dlg              = dialog as Dialog;
+        FormBuildControl        formBuildControl = dlg.curFormGroup(dlg.mainFormGroup());
+        FileUploadBuild         dialogFileUpload;
+
+        // Añadimos campo de Almacén
+        dlgInventLocation = dlg.addField(extendedTypeStr(InventLocationId), "@ETGSPAINLabels:InventLocationOutput");
+
+        // Añadimos el campo de importación de fichero
+        dialogFileUpload = formBuildControl.addControlEx(classstr(FileUpload), FileUploadName);
+        dialogFileUpload.style(FileUploadStyle::MinimalWithFilename);
+        dialogFileUpload.baseFileUploadStrategyClassName(classstr(FileUploadTemporaryStorageStrategy));
+        dialogFileUpload.fileNameLabel("@ETGSPAINLabels:UploadExceImportlFileData");
+        dialogFileUpload.fileTypesAccepted(AvailFileType);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postRun</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Overridden <c>postRun</c> method to subscribe to dialog events and disable the OK button initially.
+    /// </summary>
+    public void postRun()
+    {
+        super();
+        FormRun     formRun = this.dialog().dialogForm().formRun();
+
+        this.dialogEventsSubscribe(formRun);
+        this.setDialogOkButtonEnabled(formRun, false);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getFromDialog</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Retrieves values from the dialog, such as the warehouse location.
+    /// </summary>
+    public void getFromDialog()
+    {
+        super();
+
+        FormRun                 formRun = this.dialog().dialogForm().formRun();
+
+        this.dataContractObject().parmInventLocationId(dlgInventLocation.value());
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>uploadCompleted</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Enables the OK button after the file upload is successfully completed.
+    /// </summary>
+    protected void uploadCompleted()
+    {
+        var         formRun = this.dialog().dialogForm().formRun();
+        FileUpload  fileUpload = formRun.control(formRun.controlId(FileUploadName));
+
+        using (System.IO.Stream stream = fileUpload.getUploadedFile(true))
+        {
+            if (stream)
+            {
+                System.IO.MemoryStream copiedStream = new System.IO.MemoryStream();
+                stream.CopyTo(copiedStream);
+                this.dataContractObject().parmInputDataStream(copiedStream);
+            }
+        }
+
+        this.setDialogOkButtonEnabled(formRun, this.dataContractObject().parmInputDataStream() != null);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setDialogOkButtonEnabled</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Enables or disables the OK button based on the given parameter.
+    /// </summary>
+    /// <param name="_formRun">The <c>FormRun</c> object representing the dialog form.</param>
+    /// <param name="_isEnabled">Indicates whether the OK button should be enabled or disabled.</param>
+    protected void setDialogOkButtonEnabled(FormRun _formRun, boolean _isEnabled)
+    {
+        FormControl okButtonControl = _formRun.control(_formRun.controlId(OkButtonName));
+        if (okButtonControl)
+        {
+            okButtonControl.enabled(_isEnabled);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dialogClosing</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Unsubscribes from dialog events when the dialog is closing.
+    /// </summary>
+    /// <param name="sender">The <c>xFormRun</c> object representing the dialog form.</param>
+    /// <param name="e">The <c>FormEventArgs</c> object for event arguments.</param>
+    [SuppressBPWarningAttribute('BPParameterNotUsed', 'This is event parameter not required to use')]
+    private void dialogClosing(xFormRun sender, FormEventArgs e)
+    {
+        this.dialogEventsUnsubscribe(sender as FormRun);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dialogEventsSubscribe</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Subscribes to the relevant dialog events such as file upload completion and dialog closing.
+    /// </summary>
+    /// <param name="_formRun">The <c>FormRun</c> object representing the dialog form.</param>
+    private void dialogEventsSubscribe(FormRun _formRun)
+    {
+        FileUpload      fileUpload = _formRun.control(_formRun.controlId(FileUploadName));
+
+        fileUpload.notifyUploadCompleted += eventhandler(this.uploadCompleted);
+        fileUpload.notifyUploadAttemptStarted += eventhandler(this.uploadStarted);
+
+        _formRun.onClosing += eventhandler(this.dialogClosing);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dialogEventsUnsubscribe</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Unsubscribes from dialog events such as file upload completion and dialog closing.
+    /// </summary>
+    /// <param name="_formRun">The <c>FormRun</c> object representing the dialog form.</param>
+    private void dialogEventsUnsubscribe(FormRun _formRun)
+    {
+        FileUpload      fileUpload = _formRun.control(_formRun.controlId(FileUploadName));
+
+        fileUpload.notifyUploadCompleted -= eventhandler(this.uploadCompleted);
+        fileUpload.notifyUploadAttemptStarted -= eventhandler(this.uploadStarted);
+
+        _formRun.onClosing -= eventhandler(this.dialogClosing);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>uploadStarted</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Disables the OK button when the file upload starts.
+    /// </summary>
+    private void uploadStarted()
+    {
+        var formRun = this.dialog().dialogForm().formRun();
+        this.setDialogOkButtonEnabled(formRun, false);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

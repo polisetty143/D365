@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGFixedAssetRevaluationService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+internal final class ETGFixedAssetRevaluationService extends SysOperationServiceBase
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>process</Name>
+				<Source><![CDATA[
+    public void process(ETGFixedAssetRevaluationContract  _contract)
+    {
+        LedgerJournalTable          ledgerJournalTable;
+        LedgerJournalTrans          ledgerJournalTrans;
+        LedgerJournalTrans_Asset    ledgerJournalTrans_Asset;
+        Assettable                  assetTable,assetTableloc;
+        AssetBook                   assetBook;
+        AssetBookTable              assetBookTable;
+        numberSequenceTable         numberSequenceTable;
+
+        container       con = str2con(_contract.parmAssetId(),";",false);
+
+        try
+        {
+            ledgerJournalTable.initValue();
+            ledgerJournalTable.JournalNum   = JournalTableData::newTable(ledgerJournalTable).nextJournalId();
+            ledgerJournalTable.JournalName  = _contract.parmLedgerJournalNameId();
+            ledgerJournalTable.JournalType  = LedgerJournalType::Assets;
+            ledgerJournalTable.initFromLedgerJournalName(ledgerJournalTable.JournalName);
+            ledgerJournalTable.insert();
+
+            if(conpeek(con,1) == "" && _contract.parmAssetGroupId())
+            {
+                while select assetTableloc
+                    where assetTableloc.AssetGroup == _contract.parmAssetGroupId()
+                {
+                    con += assetTableloc.AssetId;
+                }
+                con = conDel(con,1,1);
+            }
+
+            for(int i =1;i<=conLen(con);i++)
+            {
+                NumberSeq numberseq;
+
+                assetTable = AssetTable::find(conPeek(con,i));
+
+                select assetBook
+                    join assetBookTable
+                    where  assetBookTable.BookId           == assetBook.BookId
+                    && assetBook.AssetId                   == assetTable.AssetId
+                    && assetBookTable.CurrentOperationsTax == _contract.parmPostingLayer();
+
+                if(assetBook)
+                {
+                    select NumberSequence from numberSequenceTable
+                                where NumberSequenceTable.RecId == ledgerJournalName::find(ledgerJournalTable.JournalName).NumberSequenceTable;
+
+                    numberseq = NumberSeq::NewGetVoucherFromCode(numberSequenceTable.NumberSequence);
+                
+                    ledgerJournalTrans.clear();
+                    ledgerJournalTrans.initValue();
+                    ledgerJournalTrans.Voucher               =  numberseq.voucher();
+                    ledgerJournalTrans.JournalNum            = ledgerJournalTable.JournalNum;
+                    ledgerJournalTrans.AccountType           = LedgerJournalACType::FixedAssets;
+                    ledgerJournalTrans.TransactionType       = LedgerTransType::FixedAssets;
+                    ledgerJournalTrans.TransDate             = today();
+                    ledgerJournalTrans.Company               = curExt();
+                    ledgerJournalTrans.AmountCurDebit        = AssetBook::find(assetTable.AssetId,assetBook.BookId).ETG_RevaluationPrice;
+                    ledgerJournalTrans.OffsetAccountType     = LedgerJournalACType::Ledger;
+                    ledgerJournalTrans.LedgerDimension       =  LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(assetBook.AssetId,LedgerJournalACType::FixedAssets);
+                    ledgerJournalTrans.OffsetLedgerDimension = ledgerJournalTrans.getOffsetLedgerDimensionForLedgerType(AssetLedgerAccounts::assetOffsetLedgerDimension(assetBook.AssetId,assetBook.BookId, AssetTransType::Revaluation),curExt());
+                    ledgerJournalTrans.insert();
+
+                    ledgerJournalTrans_Asset.initValue();
+                    ledgerJournalTrans_Asset.RefRecId                         = ledgerJournalTrans.RecId;
+                    ledgerJournalTrans_Asset.AmountCreditReportingCurrency    = 0;
+                    ledgerJournalTrans_Asset.AmountDebitReportingCurrency     = 0;
+                    ledgerJournalTrans_Asset.AssetId                          = assetBook.assetId;
+                    ledgerJournalTrans_Asset.TransType                        = AssetTransTypeJournal::Revaluation;
+                    ledgerJournalTrans_Asset.BookId                           = assetBook.BookId;
+                    ledgerJournalTrans_Asset.insert();
+
+                    ttsbegin;
+                    ledgerJournalTable.selectForUpdate(true);
+                    ledgerJournalTable.numOfLines = LedgerJournalTable.numOfLines();
+                    ledgerJournalTable.update();
+                    ttscommit;
+                }
+            }
+            Info(strFmt("@ETG:JournalCreated" +"%1",ledgerJournalTable.JournalNum));
+        }
+        catch(Exception::Error)
+        {
+            return;
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

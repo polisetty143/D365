@@ -1,0 +1,562 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGAgreementTrackingReportDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(ETGAgreementTrackingReportContract))]
+internal final class ETGAgreementTrackingReportDP extends SRSReportDataProviderBase
+{
+    ETGAgreementTrackingReportTemp agreementTrackingTemp;
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGAgreementTrackingReportTemp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETGAgreementTrackingReportTemp))]
+    public ETGAgreementTrackingReportTemp getETGAgreementTrackingReportTemp()
+    {
+        return agreementTrackingTemp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETGAgreementTrackingReportContract contract = this.parmDataContract() as ETGAgreementTrackingReportContract;
+        ToDate   toDate   = contract.parmPerDate();
+        FromDate fromDate = contract.parmFromDate();
+        ETGVertical etgVertical = contract.parmETGVertical();
+        ETGSubVertical etgSubVertical = contract.parmETGSubVertical();
+        ETGCommodity etgCommodity = contract.parmETGCommodity();
+        ETGSubCommodity etgSubCommodity = contract.parmETGSubCommodity();
+      
+
+        if(contract.parmQty() == NoYes::Yes)
+        {
+            this.processReportQualityGroup(fromDate, toDate, etgVertical, etgSubVertical, etgCommodity, etgSubCommodity);
+        }
+        else
+        {
+            this.processReportMain(fromDate, toDate, etgVertical, etgSubVertical, etgCommodity, etgSubCommodity);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReportMain</Name>
+				<Source><![CDATA[
+    public void processReportMain(FromDate fromDate,ToDate toDate, ETGVertical etgVertical, ETGSubVertical etgSubVertical,ETGCommodity etgCommodity, ETGSubCommodity etgSubCommodity)
+    {
+        ETG_SalesAgreementHeader            etg_SalesAgreementHeader;
+        AgreementHeaderDefault              agreementHeaderDef;
+        SalesAgreementHeader                salesAgreementHeader;
+        SalesAgreementHeaderDefault         salesAgreementHeaderDef;
+        AgreementLine                       agreementLine;
+        InventDim                           inventDim;
+        AgreementLineQuantityCommitment     aLineQtyComm;
+        SalesTable                          salesTable;
+        AgreementHeader                     agreementHeader;
+        CustInvoiceJour                     custInvoiceJour;
+        CustInvoiceTrans                    custInvoiceTrans;
+        CustTable                           custTable;
+        InventTrans                         inventTrans;
+        SalesLine                           salesLineLocal;
+        CustBankAccount                     buyerBank;
+        CustPackingSlipTrans                custPackingSlipTrans;
+        CustPackingSlipJour                 custPackingSlipJour, custPackingSlipJourLocal;
+        ETG_BillOfLading                    etgBillOfLading;
+        CustTrans                           custTrans;
+        str                                 mainCommodity;
+        Qty                                 totalInvoicedQty;
+        Qty                                 totalInvoicedQtyLocal;
+        str allBOLNos = "";
+        boolean isFirst = true;
+
+        ETGACFParameters acfParameters = ETGACFParameters::find();
+
+        while select agreementHeader
+           where (fromDate == dateNull() || agreementHeader.DefaultAgreementLineEffectiveDate >= fromDate)
+          &&  agreementHeader.DefaultAgreementLineEffectiveDate <= toDate
+          && fromDate <= toDate
+        join agreementHeaderDef
+            where agreementHeaderDef.AgreementHeader == agreementHeader.RecId
+        join salesAgreementHeader
+            where salesAgreementHeader.RecId == agreementHeader.RecId
+        join etg_SalesAgreementHeader
+            where etg_SalesAgreementHeader.SalesAgreementId == salesAgreementHeader.SalesNumberSequence
+        join agreementLine
+            where agreementLine.Agreement == agreementHeader.RecId
+        join aLineQtyComm
+            where aLineQtyComm.RecId == agreementLine.RecId
+        join inventDim
+            where inventDim.inventDimId == agreementLine.InventDimId
+            && inventDim.DataAreaId == agreementLine.InventDimDataAreaId
+        {
+            agreementTrackingTemp.ETGCommodity     = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(agreementLine.DefaultDimension,acfParameters.MainCommodity);
+            agreementTrackingTemp.ETGSubCommodity  = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(agreementLine.DefaultDimension,acfParameters.SubCommodity);
+            agreementTrackingTemp.ETGVertical     = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(agreementLine.DefaultDimension,acfParameters.Vertical);
+            agreementTrackingTemp.ETGSubVertical  = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(agreementLine.DefaultDimension,acfParameters.BusinessUnit);
+
+            if ((etgCommodity     && etgCommodity     != agreementTrackingTemp.ETGCommodity)
+             || (etgSubCommodity  && etgSubCommodity  != agreementTrackingTemp.ETGSubCommodity)
+             || (etgVertical      && etgVertical      != agreementTrackingTemp.ETGVertical)
+             || (etgSubVertical   && etgSubVertical   != agreementTrackingTemp.ETGSubVertical))
+            {
+                continue;
+            }
+            mainCommodity = agreementTrackingTemp.ETGCommodity;
+            
+            totalInvoicedQty = 0;
+            while select salesLineLocal 
+            where salesLineLocal.MatchingAgreementLine == agreementLine.RecId
+            {
+                totalInvoicedQtyLocal = 0;
+
+                while select custInvoiceJour
+                where custInvoiceJour.SalesId == salesLineLocal.SalesId
+                join custInvoiceTrans
+                    where custInvoiceTrans.InvoiceId == custInvoiceJour.InvoiceId
+                {
+                    totalInvoicedQtyLocal += custInvoiceTrans.Qty;
+                }
+                totalInvoicedQty += totalInvoicedQtyLocal;
+            }
+          
+            boolean hasSalesLine = false;
+
+            while select salesLineLocal
+            where salesLineLocal.MatchingAgreementLine == agreementLine.RecId
+            {
+                hasSalesLine = true;
+                
+                salesTable = SalesTable::find(salesLineLocal.SalesId);
+
+                boolean hasInvoice = false;
+
+                while select custInvoiceJour
+                where custInvoiceJour.SalesId == salesLineLocal.SalesId
+                join custInvoiceTrans
+                    where custInvoiceTrans.InvoiceId == custInvoiceJour.InvoiceId
+                {
+                    hasInvoice = true;
+                   
+                    custTable = CustTable::find(custInvoiceJour.InvoiceAccount);
+
+                    select firstonly custTrans
+                    where custTrans.Invoice == custInvoiceJour.InvoiceId
+                    && custTrans.AccountNum == custInvoiceJour.InvoiceAccount
+                    && custTrans.TransDate == custInvoiceJour.InvoiceDate
+                    && custTrans.Voucher == custInvoiceJour.LedgerVoucher;
+
+                    select firstonly custPackingSlipJour
+                    where custPackingSlipJour.SalesId == salesLineLocal.SalesId;
+
+                    select firstonly custPackingSlipTrans
+                    where custPackingSlipTrans.SalesId == custPackingSlipJour.SalesId
+                    && custPackingSlipTrans.PackingSlipId == custPackingSlipJour.PackingSlipId
+                    && custPackingSlipTrans.DeliveryDate == custPackingSlipJour.DeliveryDate;
+
+                    select firstonly etgBillOfLading
+                    where etgBillOfLading.SalesId == custPackingSlipTrans.SalesId
+                    && etgBillOfLading.PackingSlipId == custPackingSlipTrans.PackingSlipId
+                    && etgBillOfLading.DeliveryDate == custPackingSlipTrans.DeliveryDate;
+
+                    select firstonly inventTrans
+                    where inventTrans.InvoiceId == custInvoiceTrans.InvoiceId
+                    && inventTrans.ItemId == custInvoiceTrans.ItemId;
+                
+                    this.insertTempLine(etgCommodity, agreementHeader, agreementLine, salesLineLocal, custInvoiceJour, custInvoiceTrans, salesTable,
+                               custTrans, custPackingSlipJour, custPackingSlipTrans, etgBillOfLading, aLineQtyComm,
+                               custTable, salesAgreementHeader, etg_SalesAgreementHeader, inventDim, agreementHeaderDef, toDate, mainCommodity, totalInvoicedQty, hasSalesLine, hasInvoice);
+                }
+                
+
+                if (!hasInvoice)
+                {
+                    // Inserting line per Sales Line if no Invoice
+                    this.insertTempLine(etgCommodity, agreementHeader, agreementLine, salesLineLocal, null, null, salesTable,
+                               null, null, null, null, aLineQtyComm,
+                               custTable, salesAgreementHeader, etg_SalesAgreementHeader, inventDim, agreementHeaderDef, toDate, mainCommodity, totalInvoicedQty, hasSalesLine, hasInvoice);
+                }
+            }
+
+            if (!hasSalesLine)
+            {
+                boolean hasInvoiceLocal = false;
+                // Inserting only Agreement data if no Sales Line
+                this.insertTempLine(etgCommodity, agreementHeader, agreementLine, null, null, null, null,
+                           null, null, null, null, aLineQtyComm,
+                           custTable, salesAgreementHeader, etg_SalesAgreementHeader, inventDim, agreementHeaderDef, toDate, mainCommodity, totalInvoicedQty, hasSalesLine, hasInvoiceLocal);
+            }
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertTempLine</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Inserts data line into temp table for report main
+    /// </summary>
+    /// <param name = "etgCommodity"></param>
+    /// <param name = "agreementHeader"></param>
+    /// <param name = "agreementLine"></param>
+    /// <param name = "salesLineLocal"></param>
+    /// <param name = "custInvoiceJour"></param>
+    /// <param name = "custInvoiceTrans"></param>
+    /// <param name = "salesTable"></param>
+    /// <param name = "custTrans"></param>
+    /// <param name = "custPackingSlipJour"></param>
+    /// <param name = "custPackingSlipTrans"></param>
+    /// <param name = "etgBillOfLading"></param>
+    /// <param name = "aLineQtyComm"></param>
+    /// <param name = "custTable"></param>
+    /// <param name = "salesAgreementHeader"></param>
+    /// <param name = "etg_SalesAgreementHeader"></param>
+    /// <param name = "inventDim"></param>
+    /// <param name = "agreementHeaderDef"></param>
+    /// <param name = "toDate"></param>
+    /// <param name = "mainCommodity"></param>
+    /// <param name = "totalInvoicedQty"></param>
+    /// <param name = "hasSalesLine"></param>
+    /// <param name = "hasInvoice"></param>
+    private void insertTempLine(ETGCommodity etgCommodity, AgreementHeader agreementHeader, AgreementLine agreementLine, SalesLine salesLineLocal, CustInvoiceJour custInvoiceJour, CustInvoiceTrans custInvoiceTrans, SalesTable salesTable, CustTrans custTrans,
+                          CustPackingSlipJour custPackingSlipJour, CustPackingSlipTrans custPackingSlipTrans, ETG_BillOfLading etgBillOfLading, AgreementLineQuantityCommitment aLineQtyComm, CustTable custTable,
+                          SalesAgreementHeader salesAgreementHeader,ETG_SalesAgreementHeader etg_SalesAgreementHeader, InventDim inventDim, AgreementHeaderDefault agreementHeaderDef, ToDate toDate, Str mainCommodity,
+                           Qty totalInvoicedQty, boolean hasSalesLine, boolean hasInvoice)
+    {
+        ETG_PackingGroup                        packingGroup;
+        DlvMode                 dlvMode;
+        DlvTerm                 dlvTerms;
+        PaymTerm paymTerm;
+        ETG_PlaceOfLoading etg_placeOfLoading;
+        ETG_PlaceOfDischarge etg_placeOfDischarge;
+        date today = systemDateGet();
+        Qty actualCommited;
+        CustInvoiceId previousRecInvoiceId;
+        RecId previousAgreementLine;
+
+        agreementTrackingTemp.clear();
+
+        agreementTrackingTemp.ETGCommodity = mainCommodity;
+        agreementTrackingTemp.DefaultAgreementLineEffectiveDate = agreementHeader.DefaultAgreementLineEffectiveDate;
+        agreementTrackingTemp.DocumentExternalReference = agreementHeader.DocumentExternalReference;
+        agreementTrackingTemp.SalesNumberSequence = salesAgreementHeader.SalesNumberSequence;
+        agreementTrackingTemp.SalesId = salesTable.SalesId;
+        agreementTrackingTemp.Through = etg_SalesAgreementHeader.Through;
+        agreementTrackingTemp.BrokerName = VendTable::find(etg_SalesAgreementHeader.Through).name();
+        agreementTrackingTemp.ItemId = agreementLine.ItemId;
+        agreementTrackingTemp.ItemDesc = agreementLine.name();
+                    
+        if(etg_SalesAgreementHeader.PackingGroup)
+        {
+            select Description from packingGroup
+                            where packingGroup.PackingGroup == etg_SalesAgreementHeader.PackingGroup;
+
+            agreementTrackingTemp.PackingGroup     = packingGroup.Description;
+        }
+
+        agreementTrackingTemp.InventColorId  = inventDim.InventColorId;
+        agreementTrackingTemp.CurrencyCode    = agreementHeader.Currency;
+
+
+        if(agreementHeaderDef.DeliveryMode)
+        {
+            select Txt from dlvMode
+                            where dlvMode.Code == agreementHeaderDef.DeliveryMode
+                            &&  dlvMode.DataAreaId == agreementHeaderDef.DeliveryModeDataAreaId;
+            agreementTrackingTemp.DeliveryMode   =  dlvMode.Txt;
+        }
+
+        if(agreementHeaderDef.DeliveryTerm)
+        {
+            select Txt from dlvTerms
+                            where dlvTerms.Code == agreementHeaderDef.DeliveryTerm
+                             &&  dlvTerms.DataAreaId == agreementHeaderDef.DeliveryTermDataAreaId;
+            agreementTrackingTemp.DeliveryTerm   =  dlvTerms.Txt;
+        }
+
+        agreementTrackingTemp.ExternalReference = agreementHeaderDef.ExternalReference;
+        agreementTrackingTemp.CustAccount    = salesAgreementHeader.CustAccount;
+        agreementTrackingTemp.BuyerName         = etg_SalesAgreementHeader.buyerName();
+        agreementTrackingTemp.CommitedQuantity  = aLineQtyComm.CommitedQuantity;
+        agreementTrackingTemp.PricePerUnit  = aLineQtyComm.PricePerUnit;
+        agreementTrackingTemp.ProductUnitOfMeasure  = aLineQtyComm.ProductUnitOfMeasure;
+        agreementTrackingTemp.NetWeight  = custPackingSlipTrans.ETGNetQty;
+        agreementTrackingTemp.GrossWeight  = custPackingSlipTrans.ETGGrossQty;
+        agreementTrackingTemp.TransactionalCurrency = custTrans.CurrencyCode;
+        if(agreementHeaderDef.PaymentTerms)
+        {
+            select firstonly Description from paymTerm
+                            where paymTerm.PaymTermId == agreementHeaderDef.PaymentTerms;
+            agreementTrackingTemp.TermPaymDescription   =  paymTerm.Description;
+        }
+        agreementTrackingTemp.ShipmentText   = etg_SalesAgreementHeader.DeliveryDescription;
+        agreementTrackingTemp.FromDatePort   = etg_SalesAgreementHeader.FromDatePort;
+        agreementTrackingTemp.ToDatePort = etg_SalesAgreementHeader.ToDatePort;
+        if(etg_SalesAgreementHeader.PortOfLoading)
+        {
+            select firstonly Description from etg_placeOfLoading
+                            where etg_placeOfLoading.PlaceOfLoading == etg_SalesAgreementHeader.PortOfLoading;
+            agreementTrackingTemp.PortOfLoading   =  etg_placeOfLoading.Description;
+        }
+
+        if(etg_SalesAgreementHeader.PortOfDischarge)
+        {
+            select firstonly Description from etg_placeOfDischarge
+                            where etg_placeOfDischarge.PlaceOfDischarge == etg_SalesAgreementHeader.PortOfDischarge;
+            agreementTrackingTemp.PortOfDischarge   =  etg_placeOfDischarge.Description;
+        }
+
+        agreementTrackingTemp.BOLNo        = etgBillOfLading.BOLNo;
+
+        agreementTrackingTemp.PackingSlipId = custPackingSlipJour.PackingSlipId;
+        agreementTrackingTemp.InvoiceId = custInvoiceTrans.InvoiceId;
+        agreementTrackingTemp.LineAmountMST = custInvoiceTrans.Qty*custInvoiceTrans.SalesPrice;
+        agreementTrackingTemp.NumberOfBags = etgBillOfLading.NumberOfBags;
+
+        if(previousRecInvoiceId != agreementTrackingTemp.InvoiceId )
+        {
+            agreementTrackingTemp.PaymentOutstanding = custTrans.remainAmountCur();
+        }
+
+        if(etgBillOfLading.PackageAppearance == ETG_PackageAppearance::TwentyFT )
+        {
+            agreementTrackingTemp.NumberOfContainersFCLTwenty = etgBillOfLading.NumberOfContainers;
+        }
+        if(etgBillOfLading.PackageAppearance == ETG_PackageAppearance::FortyFT )
+        {
+            agreementTrackingTemp.NumberOfContainersFCLForty = etgBillOfLading.NumberOfContainers;
+        }
+                    
+
+        agreementTrackingTemp.VESSELSAILED = etgBillOfLading.CarrierId;
+        agreementTrackingTemp.QuantityConditions = etg_SalesAgreementHeader.QuantityConditions;
+
+        agreementTrackingTemp.VesselETD = etgBillOfLading.BOLDate;
+        agreementTrackingTemp.ShippingLine = etgBillOfLading.CarrierCode;
+          
+        if(previousAgreementLine != agreementLine.RecId)
+        {
+            actualCommited = agreementTrackingTemp.CommitedQuantity * (1.0 - (agreementLine.ETG_UnderDeliveryPct / 100.0));
+           
+
+            if(agreementHeader.AgreementState== AgreementState::ETGTerminated)
+            {
+                agreementTrackingTemp.ETGAgeingExecPendDef = ETGAgeingExecPendDef::Terminated;
+            }
+            else if((hasSalesLine && hasInvoice && totalInvoicedQty != 0 && totalInvoicedQty >= actualCommited) 
+                     ||
+                   (agreementHeader.AgreementState== AgreementState::ETGForceClosed && hasSalesLine && hasInvoice)) 
+            {
+                agreementTrackingTemp.ETGAgeingExecPendDef = ETGAgeingExecPendDef::Executed;
+            }
+           
+            else
+            {
+                if( agreementTrackingTemp.ToDatePort &&  toDate > agreementTrackingTemp.ToDatePort)
+                {
+                    agreementTrackingTemp.ETGAgeingExecPendDef = ETGAgeingExecPendDef::Default;
+                }
+                else
+                {
+                    agreementTrackingTemp.ETGAgeingExecPendDef = ETGAgeingExecPendDef::PendingToExecute;
+                }
+            }
+        }
+        
+        agreementTrackingTemp.insert();
+        previousRecInvoiceId = agreementTrackingTemp.InvoiceId;
+        previousAgreementLine = agreementLine.RecId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReportQualityGroup</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Inserts data line into temp table for report quality specifications
+    /// </summary>
+    /// <param name = "fromDate"></param>
+    /// <param name = "toDate"></param>
+    /// <param name = "etgVertical"></param>
+    /// <param name = "etgSubVertical"></param>
+    /// <param name = "etgCommodity"></param>
+    /// <param name = "etgSubCommodity"></param>
+    public void processReportQualityGroup(FromDate fromDate,ToDate toDate, ETGVertical etgVertical, ETGSubVertical etgSubVertical,ETGCommodity etgCommodity, ETGSubCommodity etgSubCommodity)
+    {
+        
+        ETG_SalesAgreementHeader            etg_SalesAgreementHeader;
+        AgreementHeaderDefault              agreementHeaderDef;
+        SalesAgreementHeader                salesAgreementHeader;
+        InventDim                           inventDim;
+        AgreementLineQuantityCommitment     aLineQtyComm;
+        AgreementHeader                     agreementHeader;
+        CustTable                           custTable;
+        AgreementLine                       agreementLine;
+        Qty                                 actualCommited;
+        
+        RecId                               previousAgreementLine, previousALineQG;
+        ETG_AgreementLineQualityGrp         aLineQualityGroup;
+        SalesLine                           salesLineLocal;
+        str                                 mainCommodity;
+        SalesTable                          salesTable;
+        CustInvoiceJour                     custInvoiceJour;
+        CustInvoiceTrans                    custInvoiceTrans;
+        Qty                                 totalInvoicedQty;
+        Qty                                 totalInvoicedQtyLocal;
+        boolean                             hasSalesLine, hasInvoice, hasQualityGroup;
+        ETGAgeingExecPendDef                execStatus;
+
+        ETGACFParameters acfParameters = ETGACFParameters::find();
+
+        while select agreementHeader
+        where (fromDate == dateNull() || agreementHeader.DefaultAgreementLineEffectiveDate >= fromDate)
+          &&  agreementHeader.DefaultAgreementLineEffectiveDate <= toDate
+          && fromDate <= toDate
+        join agreementHeaderDef
+            where agreementHeaderDef.AgreementHeader == agreementHeader.RecId
+        join salesAgreementHeader
+            where salesAgreementHeader.RecId == agreementHeader.RecId
+        join etg_SalesAgreementHeader
+            where etg_SalesAgreementHeader.SalesAgreementId == salesAgreementHeader.SalesNumberSequence
+        join agreementLine
+            where agreementLine.Agreement == agreementHeader.RecId
+        join aLineQtyComm
+            where aLineQtyComm.RecId == agreementLine.RecId
+        join inventDim
+            where inventDim.inventDimId == agreementLine.InventDimId
+            && inventDim.DataAreaId == agreementLine.InventDimDataAreaId
+        {
+            agreementTrackingTemp.ETGCommodity     = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(agreementLine.DefaultDimension,acfParameters.MainCommodity);
+            agreementTrackingTemp.ETGSubCommodity  = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(agreementLine.DefaultDimension,acfParameters.SubCommodity);
+            agreementTrackingTemp.ETGVertical     = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(agreementLine.DefaultDimension,acfParameters.Vertical);
+            agreementTrackingTemp.ETGSubVertical  = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(agreementLine.DefaultDimension,acfParameters.BusinessUnit);
+
+            if ((etgCommodity     && etgCommodity     != agreementTrackingTemp.ETGCommodity)
+             || (etgSubCommodity  && etgSubCommodity  != agreementTrackingTemp.ETGSubCommodity)
+             || (etgVertical      && etgVertical      != agreementTrackingTemp.ETGVertical)
+             || (etgSubVertical   && etgSubVertical   != agreementTrackingTemp.ETGSubVertical))
+            {
+                continue;
+            }
+            mainCommodity = agreementTrackingTemp.ETGCommodity;
+
+            hasSalesLine = false;
+            totalInvoicedQty = 0;
+            while select salesLineLocal
+            where salesLineLocal.MatchingAgreementLine == agreementLine.RecId
+            {
+                hasSalesLine = true;
+
+                totalInvoicedQtyLocal = 0;
+                salesTable = SalesTable::find(salesLineLocal.SalesId);
+
+                hasInvoice = false;
+                while select custInvoiceJour
+                where custInvoiceJour.SalesId == salesLineLocal.SalesId
+                join custInvoiceTrans
+                where custInvoiceTrans.InvoiceId == custInvoiceJour.InvoiceId
+                {
+                    hasInvoice = true;
+                    totalInvoicedQtyLocal += custInvoiceTrans.Qty;
+                }
+                totalInvoicedQty += totalInvoicedQtyLocal;
+            }
+
+            if(previousAgreementLine != agreementLine.RecId) 
+            {
+                actualCommited = agreementTrackingTemp.CommitedQuantity * (1.0 - (agreementLine.ETG_UnderDeliveryPct / 100.0));
+               
+                if(agreementHeader.AgreementState== AgreementState::ETGTerminated)
+                {
+                    execStatus= ETGAgeingExecPendDef::Terminated;
+                }
+                else if((hasSalesLine && hasInvoice && totalInvoicedQty != 0 && totalInvoicedQty >= actualCommited)
+                     ||
+                   (agreementHeader.AgreementState== AgreementState::ETGForceClosed && hasSalesLine && hasInvoice))
+                {
+                    execStatus = ETGAgeingExecPendDef::Executed;
+                }
+                else
+                {
+                    if( agreementTrackingTemp.ToDatePort &&  toDate > agreementTrackingTemp.ToDatePort)
+                    {
+                        execStatus= ETGAgeingExecPendDef::Default;
+                    }
+                    else
+                    {
+                        execStatus= ETGAgeingExecPendDef::PendingToExecute;
+                    }
+                }
+                previousAgreementLine = agreementLine.RecId;
+            }
+
+            hasQualityGroup = false;
+            while select aLineQualityGroup
+            where agreementLine.RecId == aLineQualityGroup.AgreementLine
+            {
+                hasQualityGroup = true;
+
+                this.insertTmpQualitySpecsLine(agreementHeader, agreementLine, salesLineLocal, salesTable, aLineQtyComm, custTable, salesAgreementHeader, etg_SalesAgreementHeader,
+                    inventDim, agreementHeaderDef, mainCommodity, execStatus,  aLineQualityGroup);
+            }
+
+           if(!hasQualityGroup)
+           {
+               this.insertTmpQualitySpecsLine(agreementHeader, agreementLine, salesLineLocal, salesTable, aLineQtyComm, custTable, salesAgreementHeader, etg_SalesAgreementHeader, 
+                    inventDim, agreementHeaderDef, mainCommodity, execStatus, null);
+           }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertTmpQualitySpecsLine</Name>
+				<Source><![CDATA[
+    private void insertTmpQualitySpecsLine(AgreementHeader agreementHeader, AgreementLine agreementLine, SalesLine salesLineLocal, SalesTable salesTable, AgreementLineQuantityCommitment aLineQtyComm, 
+        CustTable custTable, SalesAgreementHeader salesAgreementHeader,ETG_SalesAgreementHeader etg_SalesAgreementHeader, InventDim inventDim, AgreementHeaderDefault agreementHeaderDef, Str mainCommodity, 
+        ETGAgeingExecPendDef execStatus, ETG_AgreementLineQualityGrp aLineQualityGroup)
+    {
+        agreementTrackingTemp.clear();
+        agreementTrackingTemp.ETGCommodity = mainCommodity;
+        agreementTrackingTemp.DefaultAgreementLineEffectiveDate = agreementHeader.DefaultAgreementLineEffectiveDate;
+        agreementTrackingTemp.DocumentExternalReference = agreementHeader.DocumentExternalReference;
+        agreementTrackingTemp.SalesNumberSequence = salesAgreementHeader.SalesNumberSequence;
+
+        agreementTrackingTemp.Through = etg_SalesAgreementHeader.Through;
+        agreementTrackingTemp.BrokerName = VendTable::find(etg_SalesAgreementHeader.Through).name();
+        agreementTrackingTemp.ItemId = agreementLine.ItemId;
+        agreementTrackingTemp.ItemDesc = agreementLine.name();
+
+        agreementTrackingTemp.InventColorId  = inventDim.InventColorId;
+        agreementTrackingTemp.CustAccount    = salesAgreementHeader.CustAccount;
+
+        agreementTrackingTemp.BuyerName         = etg_SalesAgreementHeader.buyerName();
+        
+        agreementTrackingTemp.PricePerUnit  = aLineQtyComm.PricePerUnit;
+
+        agreementTrackingTemp.GroupId     =  aLineQualityGroup.GroupId;
+        agreementTrackingTemp.GroupDescription = aLineQualityGroup.groupDescription();
+        agreementTrackingTemp.Value = aLineQualityGroup.Value;
+        
+        agreementTrackingTemp.CommitedQuantity  = aLineQtyComm.CommitedQuantity;
+        agreementTrackingTemp.ETGAgeingExecPendDef = execStatus;
+        agreementTrackingTemp.insert();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

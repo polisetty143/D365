@@ -1,0 +1,1151 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxForm xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V6">
+	<Name>ETGSalesEditLines</Name>
+	<SourceCode>
+		<Methods xmlns="">
+			<Method>
+				<Name>classDeclaration</Name>
+				<Source><![CDATA[
+[Form]
+public class ETGSalesEditLines extends FormRun
+{
+    Common      tableRecord; //Added by Rajat Dubey 09/05/2025
+}
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createJournal</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Abhinav - 30-01-2025
+    /// </summary>
+    public Void createJournal(ETGSalesEditLines _ETGSalesEditLines)
+    {
+        #OCCRetryCount
+        Ledgerjournalname                          ledgerjournalname;
+        LedgerjournalTable                         LedgerjournalTable;
+        LedgerjournalTrans                         LedgerjournalTrans;
+        NumberSeq                                  numberSeq;
+        DimensionAttribute                         dimBusinessUnitAttribute , dimProfitCenterAttribute ;
+        DimensionAttributeValue                    dimAttributeBusinessUnitValue;
+        DimensionDefault                           defaultDimension;
+        DimensionAttributeValueSetItem             dimensionAttributeValueSetItem;
+        DimensionDynamicAccount                    ledgerDim;
+        Currency                                   currencydet;
+        DimensionAttributeValueSetStorage          dimStorage = new DimensionAttributeValueSetStorage();
+        SalesTable                                 salestable = SalesTable::find(_ETGSalesEditLines.SalesId);
+        //SalesParameters                            salesparameters = SalesParameters::find();
+
+        ETGACFParameters                           ETGACFParameters = ETGACFParameters::find();
+        
+        
+
+        if(ETGACFParameters.CreditJournalNameSales == '' || ETGACFParameters.DebitJournalNameSales == '')
+        {
+            throw error(strFmt('@ETG_New:ETGJournalNameNotInParameter'));
+        }
+
+        if(ETGACFParameters::find().MainAccountForCrDeJournalCreation == '')
+        {
+            throw error('@ETG_New:ETGMainAccountNotAvailable');
+        }
+
+        if( _ETGSalesEditLines.IsCrDeJournalCreated == NoYes::Yes)
+        {
+            throw error(strFmt('@ETG_New:ETGCrDeJournalAvailable',_ETGSalesEditLines.CrDeJournalNum));
+        }
+              
+        try
+        {
+          
+            if(_ETGSalesEditLines.RecId && ETGACFParameters::find().EnablePTBFContractsSales == NoYes::Yes)
+            {
+
+                SalesLine SalesLineupd;
+                    
+                select SalesLineupd where SalesLineupd.SalesId == _ETGSalesEditLines.SalesId
+                        && SalesLineupd.DefaultDimension == _ETGSalesEditLines.ETGRefDefaultDimension;
+
+                if(_ETGSalesEditLines.ActualUnitPrice > SalesLineupd.SalesPrice)
+                {
+                    select ledgerjournalname where ledgerjournalname.JournalName ==  ETGACFParameters.DebitJournalNameSales;
+                }
+                else
+                {
+                    select ledgerjournalname where ledgerjournalname.JournalName ==  ETGACFParameters.CreditJournalNameSales;
+                }
+              
+                //select ledgerjournalname where ledgerjournalname.JournalName ==  salesparameters.ETGJournalName;
+
+                ttsBegin;
+                LedgerjournalTable.clear();
+                LedgerjournalTable.initValue();
+                LedgerjournalTable.JournalName =  ledgerjournalname.JournalName;
+                LedgerjournalTable.initFromLedgerJournalName();
+                LedgerjournalTable.JournalNum  =  JournalTableData::newTable(LedgerjournalTable).nextJournalId();
+                LedgerjournalTable.Name = 'Journal for '+_ETGSalesEditLines.SalesId;
+                LedgerjournalTable.JournalType = LedgerJournalType::Daily;
+                LedgerjournalTable.ETGIsCrDeJournal = NoYes::Yes;
+                LedgerjournalTable.insert();
+         
+                if(ledgerjournalname)
+                {
+
+                    numberSeq =  NumberSeq::newGetVoucherFromId((ledgerjournalname.NumberSequenceTable));
+                    LedgerjournalTrans.clear();
+                    LedgerjournalTrans.initValue();
+                    LedgerjournalTrans.Voucher      =   numberSeq.voucher();
+                    LedgerjournalTrans.JournalNum   =   LedgerjournalTable.JournalNum;
+                    LedgerjournalTrans.AccountType  =   LedgerJournalACType::Cust;
+                    LedgerjournalTrans.Company      =   curext();
+                    
+
+                    LedgerjournalTrans.parmAccount(salestable.InvoiceAccount,LedgerjournalTrans.AccountType);
+                    LedgerjournalTrans.CurrencyCode =  salestable::find(salestable.SalesId).CurrencyCode;//VendTable::find(salestable.InvoiceAccount).Currency;
+                    LedgerjournalTrans.TransDate    =  systemDateGet();
+                    LedgerjournalTrans.initForCurrency( LedgerjournalTable);
+                    LedgerjournalTrans.Txt          =   LedgerjournalTable.Name;
+                    LedgerjournalTrans.DefaultDimension  = salestable.DefaultDimension;
+                    LedgerjournalTrans.TransactionType         =   LedgerTransType::GeneralJournal;
+                    
+                        
+                    LedgerjournalTrans.LedgerDimension          = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber
+                        (salestable.InvoiceAccount,LedgerJournalACType::Cust);
+
+
+                      
+                    LedgerjournalTrans.OffsetAccountType  =  LedgerJournalACType::Ledger;//ledgerjournalname.OffsetAccountType;//
+                    
+
+                    RecId ledgerDimension = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber
+                        (ETGACFParameters::find().MainAccountForCrDeJournalCreation,LedgerJournalACType::Ledger);
+
+                    LedgerjournalTrans.OffsetLedgerDimension = ledgerjournalname.OffsetLedgerDimension; //ETGJournalCreateService::getLedgerDimension(con, '');
+                    LedgerjournalTrans.OffsetLedgerDimension = LedgerDimensionFacade::ServiceCreateLedgerDimension(ledgerDimension, salestable.DefaultDimension);
+
+                    
+                    LedgerjournalTrans.OffsetDefaultDimension = salestable.DefaultDimension;
+                                                                                                                 
+                    LedgerjournalTrans.Approved                 = NoYes::Yes;
+                    LedgerjournalTrans.Approver                 = HcmWorker::userId2Worker(curuserid());
+                    LedgerjournalTrans.DocumentNum              = _ETGSalesEditLines.SalesId;
+                    LedgerjournalTrans.Invoice                  = 'I-'+ salestable.SalesId+'-';//+ salestable.ParmId;
+                    LedgerjournalTrans.DocumentDate             = LedgerjournalTrans.Transdate;
+   
+                    
+
+                    
+
+                    real Priceunit = SalesLineupd.salesprice ;
+
+                    if(SalesLineupd.LineDisc)
+                    {
+                        Priceunit = Priceunit - SalesLineupd.LineDisc;
+                    }
+                    
+                    Amount AmountInCrDeNote = ( _ETGSalesEditLines.ActualUnitPrice - Priceunit ) * SalesLineupd.salesqty;
+
+                    if(SalesLineupd.LinePercent)
+                    {
+                        AmountInCrDeNote = ( AmountInCrDeNote * (100 - SalesLineupd.LinePercent) ) / 100 ;
+                    }
+                    
+                    if(_ETGSalesEditLines.ActualUnitPrice > SalesLineupd.SalesPrice)
+                    {
+                        LedgerjournalTrans.AmountCurDebit = abs(AmountInCrDeNote);
+                    }
+                    else  if(_ETGSalesEditLines.ActualUnitPrice < SalesLineupd.SalesPrice )
+                    {
+                        LedgerjournalTrans.AmountCurCredit    =  abs(AmountInCrDeNote);
+                    }
+
+                    LedgerjournalTrans.insert();
+
+                    //if(salestable)
+                    //{
+                    //    salestable.selectForUpdate(true);
+                    //    salestable.IsCrDeJournalCreated = NoYes::Yes;
+                    //    salestable.CrDeJournalNum = LedgerjournalTable.JournalNum;
+                    //    salestable.CrDeJournalAmount = abs(AmountInCrDeNote);
+                    //    salestable.doUpdate();
+                    //}
+
+                    SalesLine saleslineloop;
+                    while select saleslineloop
+                        where saleslineloop.SalesId == salestable.SalesId
+                        && saleslineloop.DefaultDimension ==  _ETGSalesEditLines.ETGRefDefaultDimension
+                    {
+                        saleslineloop.selectForUpdate(true);
+                        saleslineloop.IsCrDeJournalCreated = NoYes::Yes;
+                        saleslineloop.CrDeJournalNum = LedgerjournalTable.JournalNum;
+                        saleslineloop.CrDeJournalAmount = abs(AmountInCrDeNote);
+                        saleslineloop.doUpdate();
+                    }
+                    
+
+                    _ETGSalesEditLines.selectForUpdate(true);
+                    _ETGSalesEditLines.IsCrDeJournalCreated = NoYes::Yes;
+                    _ETGSalesEditLines.CrDeJournalNum = LedgerjournalTable.JournalNum;
+                    _ETGSalesEditLines.CrDeJournalAmount =  abs(AmountInCrDeNote);
+                    _ETGSalesEditLines.doUpdate();
+
+                }
+
+                ttscommit;
+
+                info(strFmt('@ETG_New:ETGCrDeJournalCreated',LedgerjournalTable.JournalNum));
+
+            }
+         
+        }
+        catch(Exception::Error)
+        {
+            throw error('@ETG_New:ETGCrDeJournalCreationFailed');
+        }
+        catch(Exception::Deadlock)
+        {
+            retry;
+        }
+        catch(Exception::UpdateConflict)
+        {
+            if(appl.ttsLevel()==0)
+            {
+                if(xSession::currentRetryCount()>=#RetryNum)
+                {
+                    throw exception::UpdateConflictNotRecovered;
+                }
+                else
+                {
+                    retry;
+                }
+            }
+            else
+            {
+                throw exception::UpdateConflict;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>init</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// CS Rajat Dubey 09/05/2025
+    /// </summary>
+    public void init()
+    {
+        super();
+
+        tableRecord = this.args().record();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+		<DataSources xmlns="">
+			<DataSource>
+				<Name>ETGSalesEditLines</Name>
+				<Methods>
+					<Method>
+						<Name>active</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// Abhinav - 30-01-2025
+        /// </summary>
+        /// <returns></returns>
+        public int active()
+        {
+            int ret;
+        
+            ret = super();
+
+            if(ETGACFParameters::find().EnablePTBFContractsSales == NoYes::Yes)
+            {
+                ETGSalesEditLines saleseditlines = ETGSalesEditLines_ds.cursor();
+                FormRun formRun = ETGSalesEditLines_ds.formRun();
+
+                SalesLine salesLine;
+
+                select firstonly salesLine
+                    where salesLine.SalesId == saleseditlines.SalesId
+                    && salesLine.DefaultDimension == saleseditlines.ETGRefDefaultDimension;
+
+                if(saleseditlines.Remain == 0 && salesLine.ETGPriceTolerance != 0 && saleseditlines.IsCrDeJournalCreated == NoYes::No)
+                {
+                    formRun.design().controlName(formcontrolstr(ETGSalesEditLines,ETGSalesEditLines_ActualUnitPrice)).allowEdit(True);
+                }
+                else
+                {
+                    formRun.design().controlName(formcontrolstr(ETGSalesEditLines,ETGSalesEditLines_ActualUnitPrice)).allowEdit(false);
+                }
+
+                //if(saleseditlines.IsCrDeJournalCreated == NoYes::Yes)
+                //{
+                //    formRun.design().controlName(formcontrolstr(ETGSalesEditLines,ETGSalesEditLines_ActualUnitPrice)).allowEdit(false);
+                //}
+                //else
+                //{
+                //    formRun.design().controlName(formcontrolstr(ETGSalesEditLines,ETGSalesEditLines_ActualUnitPrice)).allowEdit(true);
+                //}
+            }
+                
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>displayAmountReceivable</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// Abhinav - 30-01-2025
+        /// </summary>
+        public display int displayAmountReceivable(ETGSalesEditLines _etgSaleseditlines)
+        {
+
+            if(ETGACFParameters::find().EnablePTBFContractsSales == NoYes::Yes && _etgSaleseditlines.InvoiceAmount)
+            {
+                if(_etgSaleseditlines.ActualUnitPrice < _etgSaleseditlines.SalesPrice)
+                {
+                    return _etgSaleseditlines.InvoiceAmount - _etgSaleseditlines.CrDeJournalAmount;
+                }
+                else
+                {
+                    return _etgSaleseditlines.InvoiceAmount + _etgSaleseditlines.CrDeJournalAmount;
+                }
+                
+            }
+
+            return 0;
+            
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>executeQuery</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// CS Rajat Dubey 09/05/2025
+        /// </summary>
+        public void executeQuery()
+        {
+            ETGSalesEditLines salesEditLinesLoc = ETGSalesEditLines::findRecId(tableRecord.RecId);
+            if(salesEditLinesLoc)
+            {
+                this.queryBuildDataSource().clearDynalinks();
+                this.queryBuildDataSource().clearLinks();
+                this.queryBuildDataSource().clearRanges();
+                this.queryBuildDataSource().addRange(fieldnum(ETGSalesEditLines,RecId)).value(queryValue(tableRecord.RecId));
+            }
+            super();
+        }
+        // CE Rajat Dubey 09/05/2025
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields />
+			</DataSource>
+			<DataSource>
+				<Name>ETGSalesEditLinesOverview</Name>
+				<Methods>
+					<Method>
+						<Name>displayCreditDebitAmount</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public display real displayCreditDebitAmount(ETGSalesEditLinesOverview _etgSalesEditLinesOverview)
+        {
+            ETGSalesEditLines etgSaleseditlineSum;
+            select sum(CrDeJournalAmount) from etgSaleseditlineSum
+                where etgSaleseditlineSum.PackingSlipId == _etgSalesEditLinesOverview.PackingSlipId;
+
+            return etgSaleseditlineSum.CrDeJournalAmount;
+
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>displayAmountReceivableOverview</Name>
+						<Source><![CDATA[
+        public display int displayAmountReceivableOverview(ETGSalesEditLinesOverview _etgSalesEditLinesOverview)
+        {
+            ETGSalesEditLines etgSaleseditlineSum;
+            select sum(CrDeJournalAmount) from etgSaleseditlineSum
+                where etgSaleseditlineSum.PackingSlipId == _etgSalesEditLinesOverview.PackingSlipId;
+
+            return _etgSalesEditLinesOverview.InvoiceAmount - etgSaleseditlineSum.CrDeJournalAmount;
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>executeQuery</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// CS Rajat Dubey 09/05/2025
+        /// </summary>
+        public void executeQuery()
+        {
+            ETGSalesEditLines salesEditLinesLoc = ETGSalesEditLines::findRecId(tableRecord.RecId);
+            if(salesEditLinesLoc)
+            {
+                this.queryBuildDataSource().clearDynalinks();
+                this.queryBuildDataSource().clearLinks();
+                this.queryBuildDataSource().clearRanges();
+                this.queryBuildDataSource().addRange(fieldnum(ETGSalesEditLinesOverview,PackingSlipId)).value(queryValue(salesEditLinesLoc.PackingSlipId));
+            }
+            super();
+        }
+        // CE Rajat Dubey 09/05/2025
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields />
+			</DataSource>
+		</DataSources>
+		<DataControls xmlns="">
+			<Control>
+				<Name>ETGCreateCreditDebitNote</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// Abhinav 30-01-2025
+        /// </summary>
+        public void clicked()
+        {
+            super();
+            
+            if(ETGACFParameters::find().EnablePTBFContractsSales == NoYes::Yes)
+            {
+                ETGSalesEditLines saleseditelines = ETGSalesEditLines_ds.cursor();
+
+                if(saleseditelines.ActualUnitPrice == saleseditelines.SalesPrice)
+                {
+                    throw Error("@ETG_New:ETGCrDeJournalUnitPriceSame");
+                }
+
+                if(saleseditelines.Remain != 0)
+                {
+                    throw Error("@ETG_New:ETGCrDeRemainingQtyZero");
+                }
+
+                if(saleseditelines.Remain == 0 && saleseditelines.ActualUnitPrice == 0)
+                {
+                    throw Error("@ETG_New:ETGCannotCreateCrDeJournal");
+                }
+
+            
+                element.createJournal(saleseditelines);
+            }
+            
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ETGSalesEditLines_ActualUnitPrice</Name>
+				<Type>Real</Type>
+				<Methods>
+					<Method>
+						<Name>modified</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// Abhinav - 30-01-2025
+        /// </summary>
+        /// <returns></returns>
+        public boolean modified()
+        {
+            boolean ret;
+        
+            ret = super();
+
+            if(ETGACFParameters::find().EnablePTBFContractsSales == NoYes::Yes)
+            {
+                if(str2Num(this.valueStr()) <= 0.00)
+                {
+                    throw error("@ETG_New:ETGCrDeActualUnitPriceZeroValue");
+                }
+
+                ETGSalesEditLines saleseditlines = ETGSalesEditLines_ds.cursor();
+                SalesLine salesLine;
+
+                select firstonly salesLine
+                    where salesLine.SalesId == saleseditlines.SalesId
+                    && salesLine.DefaultDimension == saleseditlines.ETGRefDefaultDimension;
+
+
+                if(salesLine)
+                {
+
+                    real checkPlus = 100 + salesLine.ETGPriceTolerance;
+                    real checkMinus = 100 - salesLine.ETGPriceTolerance;
+                    real ActualUnitprice = str2Num(this.valueStr());
+                
+
+                    real a = (salesLine.SalesPrice * checkPlus) / 100;
+                    real b = (salesLine.SalesPrice * checkMinus) / 100;
+
+                    if(ActualUnitprice < b || ActualUnitprice > a)
+                    {
+                        throw error("@ETG_New:ETGCrDeActualUnitPrice");
+                    }
+          
+                }
+            }
+          
+           
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+		</DataControls>
+		<Members xmlns="" />
+	</SourceCode>
+	<DataSources>
+		<AxFormDataSource xmlns="">
+			<Name>ETGSalesEditLines</Name>
+			<Table>ETGSalesEditLines</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>ActualUnitPrice</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>AmountReceivable</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>configId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CrDeJournalAmount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CrDeJournalNum</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CrDeJournalPosted</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGRefDefaultDimension</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>GrossQty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventColorId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventLocationId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventSiteId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventSizeId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventStyleId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InvoiceAmount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>IsCrDeJournalCreated</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ItemId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LineNum</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Name</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Ordered</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PackingSlipId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Qty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Quantity</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Remain</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SalesId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SalesPrice</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>WorkflowApprovalId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>WorkflowStatus</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<JoinSource>ETGSalesEditLinesOverview</JoinSource>
+			<AllowCreate>No</AllowCreate>
+			<AllowDelete>No</AllowDelete>
+			<InsertIfEmpty>No</InsertIfEmpty>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+		<AxFormDataSource xmlns="">
+			<Name>ETGSalesEditLinesOverview</Name>
+			<Table>ETGSalesEditLinesOverview</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>ActualUnitPrice</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>AmountReceivable</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>configId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CrDeJournalAmount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CrDeJournalNum</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CrDeJournalPosted</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGRefDefaultDimension</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>GrossQty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventColorId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventLocationId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventSiteId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventSizeId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventStyleId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InvoiceAmount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>IsCrDeJournalCreated</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ItemId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LineNum</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Name</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Ordered</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PackingSlipId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Qty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Quantity</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Remain</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SalesId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SalesPrice</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>WorkflowStatus</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<AllowCreate>No</AllowCreate>
+			<AllowDelete>No</AllowDelete>
+			<AllowEdit>No</AllowEdit>
+			<InsertIfEmpty>No</InsertIfEmpty>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+	</DataSources>
+	<Design>
+		<Caption xmlns="">Sales invoice workflow</Caption>
+		<DataSource xmlns="">ETGSalesEditLines</DataSource>
+		<Pattern xmlns="">Custom</Pattern>
+		<Style xmlns="">SimpleList</Style>
+		<WorkflowDataSource xmlns="">ETGSalesEditLines</WorkflowDataSource>
+		<WorkflowEnabled xmlns="">Yes</WorkflowEnabled>
+		<WorkflowType xmlns="">ETGSalesEditLinesWorkflowType</WorkflowType>
+		<Controls xmlns="">
+			<AxFormControl xmlns=""
+				i:type="AxFormActionPaneControl">
+				<Name>ActionPane</Name>
+				<Type>ActionPane</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormButtonGroupControl">
+						<Name>ETGButtonGroup</Name>
+						<Type>ButtonGroup</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonControl">
+								<Name>ETGCreateCreditDebitNote</Name>
+								<Type>Button</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Text>Create Credit/Debit note</Text>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormMenuFunctionButtonControl">
+								<Name>ETGDisplayTotalDialog</Name>
+								<Type>MenuFunctionButton</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<MenuItemName>ETGDisplayTotalsDialogActionMenuItem</MenuItemName>
+								<MenuItemType>Action</MenuItemType>
+								<Text>Totals</Text>
+							</AxFormControl>
+						</Controls>
+					</AxFormControl>
+				</Controls>
+				<DataSource>ETGSalesEditLines</DataSource>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGroupControl">
+				<Name>FormGroupControl1</Name>
+				<Pattern>CustomAndQuickFilters</Pattern>
+				<PatternVersion>1.1</PatternVersion>
+				<Type>Group</Type>
+				<WidthMode>SizeToAvailable</WidthMode>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl>
+						<Name>QuickFilterControl</Name>
+						<FormControlExtension>
+							<Name>QuickFilterControl</Name>
+							<ExtensionComponents />
+							<ExtensionProperties>
+								<AxFormControlExtensionProperty>
+									<Name>targetControlName</Name>
+									<Type>String</Type>
+									<Value>Grid</Value>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>placeholderText</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>defaultColumnName</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+							</ExtensionProperties>
+						</FormControlExtension>
+					</AxFormControl>
+				</Controls>
+				<ArrangeMethod>HorizontalLeft</ArrangeMethod>
+				<FrameType>None</FrameType>
+				<Style>CustomFilter</Style>
+				<ViewEditMode>Edit</ViewEditMode>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormTabControl">
+				<Name>ETGSalesEditLines</Name>
+				<Type>Tab</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>OverviewTab</Name>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormGridControl">
+								<Name>OverviewGrid</Name>
+								<Type>Grid</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSalesEditLinesOverview_SalesId</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>SalesId</DataField>
+										<DataSource>ETGSalesEditLinesOverview</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSalesEditLinesOverview_PackingSlipId</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>PackingSlipId</DataField>
+										<DataSource>ETGSalesEditLinesOverview</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormIntegerControl">
+										<Name>ETGSalesEditLinesOverview_InvoiceAmount</Name>
+										<Type>Integer</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>InvoiceAmount</DataField>
+										<DataSource>ETGSalesEditLinesOverview</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGSalesEditLinesOverview_CrDeJournalAmount</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataMethod>displayCreditDebitAmount</DataMethod>
+										<DataSource>ETGSalesEditLinesOverview</DataSource>
+										<Label>Cr/De Journal amount</Label>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormIntegerControl">
+										<Name>ETGSalesEditLinesOverview_AmountReceivable</Name>
+										<Type>Integer</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataMethod>displayAmountReceivableOverview</DataMethod>
+										<DataSource>ETGSalesEditLinesOverview</DataSource>
+										<Label>Amount receivable</Label>
+									</AxFormControl>
+								</Controls>
+								<DataSource>ETGSalesEditLinesOverview</DataSource>
+							</AxFormControl>
+						</Controls>
+						<Caption>Overview</Caption>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>LinesTab</Name>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormGridControl">
+								<Name>Grid</Name>
+								<Type>Grid</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSalesEditLines_WorkflowApprovalId</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>String</Type>
+										<Visible>No</Visible>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>WorkflowApprovalId</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormComboBoxControl">
+										<Name>ETGSalesEditLines_WorkflowStatus</Name>
+										<Type>ComboBox</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>WorkflowStatus</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+										<Items />
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSalesEditLines_SalesId</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>SalesId</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGSalesEditLines_LineNum</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>Real</Type>
+										<Visible>No</Visible>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>LineNum</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSalesEditLines_PackingSlipId</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>PackingSlipId</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSalesEditLines_ItemId</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ItemId</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSalesEditLines_Name</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Name</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+										<DisplayHeight>1</DisplayHeight>
+										<DisplayHeightMode>Fixed</DisplayHeightMode>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSalesEditLines_configId</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>configId</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSalesEditLines_InventSizeId</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>InventSizeId</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSalesEditLines_InventStyleId</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>InventStyleId</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSalesEditLines_InventColorId</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>InventColorId</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSalesEditLines_InventSiteId</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>InventSiteId</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSalesEditLines_InventLocationId</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>InventLocationId</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGSalesEditLines_Ordered</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Ordered</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGSalesEditLines_GrossQty</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>GrossQty</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+										<Label>Gross quantity</Label>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGSalesEditLines_Quantity</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Quantity</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGSalesEditLines_SalesPrice</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>SalesPrice</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGSalesEditLines_Remain</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Remain</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGSalesEditLines_ActualUnitPrice</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ActualUnitPrice</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormIntegerControl">
+										<Name>ETGSalesEditLines_InvoiceAmount</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>Integer</Type>
+										<Visible>No</Visible>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>InvoiceAmount</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormCheckBoxControl">
+										<Name>ETGSalesEditLines_IsCrDeJournalCreated</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>CheckBox</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>IsCrDeJournalCreated</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSalesEditLines_CrDeJournalNum</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>CrDeJournalNum</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormCheckBoxControl">
+										<Name>ETGSalesEditLines_CrDeJournalPosted</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>CheckBox</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>CrDeJournalPosted</DataField>
+										<DataSource>ETGSalesEditLines</DataSource>
+									</AxFormControl>
+								</Controls>
+								<DataSource>ETGSalesEditLines</DataSource>
+								<Style>Tabular</Style>
+							</AxFormControl>
+						</Controls>
+						<Caption>Lines</Caption>
+					</AxFormControl>
+				</Controls>
+			</AxFormControl>
+		</Controls>
+	</Design>
+	<Parts />
+</AxForm>

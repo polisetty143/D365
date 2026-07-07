@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGDistributeCostFromLines</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGDistributeCostFromLines
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Abhinav - Cost Distribution - 28-01-2025
+    /// </summary>
+    /// <param name = "_args"></param>
+    public static void main(Args _args)
+    {
+        DIMENSIONATTRIBUTEVALUECOMBINATION DIMENSIONATTRIBUTEVALUECOMBINATION, DIMENSIONATTRIBUTEVALUECOMBINATIONOssSet;
+        LedgerJournalTrans LedgerJournalTrans,ledgerjournaltransNew;
+        LedgerJournalTrans = _args.caller().datasource().cursor();
+        ETGCostDistributionsHeader costheader;
+        boolean recordsDistributed;
+        ETGCostDistributionsLines costLines,costLinesSum;
+        
+        LedgerParameters LedgerParameters;
+
+        select firstonly LedgerParameters
+            where LedgerParameters.DataAreaId == curExt();
+        
+        if(LedgerParameters.ETGEnableLedgerCostDistributions == NoYes::Yes 
+            && LedgerJournalTrans.ETGIsLineSplitted == NoYes::No)
+        {
+            if(LedgerJournalTrans.ETGCostAllocationRuleId == "")
+            {
+                warning(strFmt("@ETG_New:CostAllocationRuleBlankError", LedgerJournalTrans.JournalNum, LedgerJournalTrans.Voucher));
+                return;
+            }
+
+            select firstonly DIMENSIONATTRIBUTEVALUECOMBINATION
+            where DIMENSIONATTRIBUTEVALUECOMBINATION.RecId == LedgerJournalTrans.LedgerDimension;
+
+            select firstonly DIMENSIONATTRIBUTEVALUECOMBINATIONOssSet
+            where DIMENSIONATTRIBUTEVALUECOMBINATIONOssSet.RecId == LedgerJournalTrans.OffsetLedgerDimension;
+
+            select firstonly costheader
+            where costheader.ETGCostAllocationRuleId == LedgerJournalTrans.ETGCostAllocationRuleId;
+
+            if(!(costheader.ETGMainAccount == DIMENSIONATTRIBUTEVALUECOMBINATION.MainAccountValue || costheader.ETGMainAccount == DIMENSIONATTRIBUTEVALUECOMBINATIONOssSet.MainAccountValue))
+            {
+                throw Error("@ETG_New:MainAccountDifferentErrorCostAllocation");
+            }
+
+            if(costheader && Box::yesNo('@ETG_New:CostDistributionEnabledDialog',DialogButton::No)==DialogButton::Yes)
+            {
+                if(costheader.ETGIsDistributionConfirmed != ETGDistributionStatus::Confirmed)
+                {
+                    throw Error('@ETG_New:CostDistributionisNotconfirmed');
+                }
+                
+
+                while select costLines
+                where costLines.ETGRefRecId == costheader.RecId
+                    && costLines.ETGMainAccount == costheader.ETGMainAccount
+
+                {
+
+                    ledgerjournaltransNew.data(LedgerJournalTrans);
+
+                    if(LedgerJournalTrans.AmountCurCredit)
+                    {
+                        ledgerjournaltransNew.AmountCurCredit = (LedgerJournalTrans.AmountCurCredit * costLines.ETGLinePercentage) / 100;
+                        ledgerjournaltransNew.AmountCurDebit = 0;
+                    }
+                    
+                    if(LedgerJournalTrans.AmountCurDebit)
+                    {
+                        ledgerjournaltransNew.AmountCurDebit = (LedgerJournalTrans.AmountCurDebit * costLines.ETGLinePercentage) / 100;
+                        ledgerjournaltransNew.AmountCurCredit = 0;
+                    }
+
+                    DimensionDefault                    defaultDimension, defaultDimensionOffSet;
+                    DimensionAttributeValueSetStorage   dimStorage = new DimensionAttributeValueSetStorage();
+                    DimensionAttributeValueSetStorage   dimStorageOffset = new DimensionAttributeValueSetStorage();
+                    DimensionAttribute                  dimAttribute1, dimAttribute2, dimAttribute1Offset,dimAttribute2Offset;
+                    DimensionAttributeValue             dimAttributeValue1, dimAttributeValue2, dimAttributeValue1Offset,dimAttributeValue2Offset;
+
+                    if(LedgerJournalTrans.AccountType == LedgerJournalACType::Ledger)
+                    {
+                        defaultDimension = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(LedgerJournalTrans.LedgerDimension);
+                        dimStorage          = DimensionAttributeValueSetStorage::find(defaultDimension);
+
+                        if(costLines.ETGFDVertical)
+                        {
+                            dimAttribute1        = DimensionAttribute::findByName(LedgerParameters.ETGCostDistributionVerticalDimension);
+                            dimAttributeValue1   = DimensionAttributeValue::findByDimensionAttributeAndValue(dimAttribute1,costLines.ETGFDVertical, true, true);
+                            dimStorage.addItem(dimAttributeValue1);
+                        }
+
+                        if(costLines.ETGFDSubVertical)
+                        {
+                            dimAttribute2        = DimensionAttribute::findByName(LedgerParameters.ETGCostDistributionSubVerticalDimension);
+                            dimAttributeValue2   = DimensionAttributeValue::findByDimensionAttributeAndValue(dimAttribute2,costLines.ETGFDSubVertical, true, true);
+                            dimStorage.addItem(dimAttributeValue2);
+                        }
+
+                        defaultDimension = dimStorage.save();
+                        ledgerjournaltransNew.LedgerDimension = LedgerDimensionFacade::serviceCreateLedgerDimension(LedgerDefaultAccountHelper::getDefaultAccountFromMainAccountRecId(
+                                    MainAccount::findByMainAccountId(DIMENSIONATTRIBUTEVALUECOMBINATION.MainAccountValue).RecId), defaultDimension);
+                    }
+                    else
+                    {
+                        ledgerjournaltransNew.LedgerDimension  = LedgerJournalTrans.LedgerDimension;
+                        defaultDimension    = LedgerJournalTrans.DefaultDimension;
+                        dimStorage          = DimensionAttributeValueSetStorage::find(defaultDimension);
+
+                        if(costLines.ETGFDVertical)
+                        {
+                            dimAttribute1        = DimensionAttribute::findByName(LedgerParameters.ETGCostDistributionVerticalDimension);
+                            dimAttributeValue1   = DimensionAttributeValue::findByDimensionAttributeAndValue(dimAttribute1,costLines.ETGFDVertical, true, true);
+                            dimStorage.addItem(dimAttributeValue1);
+                        }
+
+                        if(costLines.ETGFDSubVertical)
+                        {
+                            dimAttribute2        = DimensionAttribute::findByName(LedgerParameters.ETGCostDistributionSubVerticalDimension);
+                            dimAttributeValue2   = DimensionAttributeValue::findByDimensionAttributeAndValue(dimAttribute2,costLines.ETGFDSubVertical, true, true);
+                            dimStorage.addItem(dimAttributeValue2);
+                        }
+
+                        defaultDimension = dimStorage.save();
+                        ledgerjournaltransNew.DefaultDimension = defaultDimension;
+                    }
+
+                    if(LedgerJournalTrans.OffsetAccountType == LedgerJournalACType::Ledger)
+                    {
+                        //NS, DLT, 14042025, Adding offset default dimension
+                        defaultDimensionOffSet = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(LedgerJournalTrans.OffsetLedgerDimension);
+                        dimStorageOffset        = DimensionAttributeValueSetStorage::find(defaultDimensionOffSet);
+
+                        if(costLines.ETGFDVertical)
+                        {
+                            dimAttribute1Offset        = DimensionAttribute::findByName(LedgerParameters.ETGCostDistributionVerticalDimension);
+                            dimAttributeValue1Offset   = DimensionAttributeValue::findByDimensionAttributeAndValue(dimAttribute1Offset,costLines.ETGFDVertical, true, true);
+                            dimStorageOffset.addItem(dimAttributeValue1Offset);
+                        }
+
+                        if(costLines.ETGFDSubVertical)
+                        {
+                            dimAttribute2Offset       = DimensionAttribute::findByName(LedgerParameters.ETGCostDistributionSubVerticalDimension);
+                            dimAttributeValue2Offset   = DimensionAttributeValue::findByDimensionAttributeAndValue(dimAttribute2Offset,costLines.ETGFDSubVertical, true, true);
+                            dimStorageOffset.addItem(dimAttributeValue2Offset);
+                        }
+
+                        defaultDimensionOffSet = dimStorageOffset.save();
+                        ledgerjournaltransNew.OffsetLedgerDimension = LedgerDimensionFacade::serviceCreateLedgerDimension(LedgerDefaultAccountHelper::getDefaultAccountFromMainAccountRecId(
+                                    MainAccount::findByMainAccountId(DIMENSIONATTRIBUTEVALUECOMBINATIONOssSet.MainAccountValue).RecId), defaultDimensionOffSet);
+                    }
+                    else
+                    {
+                        ledgerjournaltransNew.OffsetLedgerDimension  = LedgerJournalTrans.OffsetLedgerDimension;
+                        defaultDimensionOffSet = LedgerJournalTrans.OffsetDefaultDimension;
+                        dimStorageOffset        = DimensionAttributeValueSetStorage::find(defaultDimensionOffSet);
+
+                        if(costLines.ETGFDVertical)
+                        {
+                            dimAttribute1Offset        = DimensionAttribute::findByName(LedgerParameters.ETGCostDistributionVerticalDimension);
+                            dimAttributeValue1Offset   = DimensionAttributeValue::findByDimensionAttributeAndValue(dimAttribute1Offset,costLines.ETGFDVertical, true, true);
+                            dimStorageOffset.addItem(dimAttributeValue1Offset);
+                        }
+
+                        if(costLines.ETGFDSubVertical)
+                        {
+                            dimAttribute2Offset       = DimensionAttribute::findByName(LedgerParameters.ETGCostDistributionSubVerticalDimension);
+                            dimAttributeValue2Offset   = DimensionAttributeValue::findByDimensionAttributeAndValue(dimAttribute2Offset,costLines.ETGFDSubVertical, true, true);
+                            dimStorageOffset.addItem(dimAttributeValue2Offset);
+                        }
+
+                        defaultDimensionOffSet = dimStorageOffset.save();
+                        ledgerjournaltransNew.OffsetDefaultDimension = defaultDimensionOffSet;
+                    }
+                    //ledgerjournaltransNew.OffsetLedgerDimension = LedgerDimensionFacade::serviceCreateLedgerDimension(LedgerDefaultAccountHelper::getDefaultAccountFromMainAccountRecId(
+                    //                MainAccount::findByMainAccountId(DIMENSIONATTRIBUTEVALUECOMBINATIONOssSet.MainAccountValue).RecId), defaultDimensionOffSet);
+                   
+
+                    
+                    //NE, DLT, 14042025, Adding offset default dimension
+
+                    ledgerjournaltransNew.ETGCostRefRecID = LedgerJournalTrans.RecId;
+                    ledgerjournaltransNew.ETGIsLineSplitted = NoYes::Yes;
+                    ledgerjournaltransNew.insert();
+
+                    recordsDistributed = true;
+                }
+                ttsbegin;
+                if(recordsDistributed)
+                {
+                    LedgerJournalTrans.delete();
+                }
+                ttscommit;
+            }
+            FormDataSource callerDatasource = _args.caller().datasource();
+            callerDatasource.research();
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

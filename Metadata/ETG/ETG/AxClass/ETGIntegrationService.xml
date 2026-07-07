@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGIntegrationService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGIntegrationService
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>create</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Headers and lines are creating from integration based on request.
+    /// </summary>
+    /// <param name = "Request"></param>
+    /// <returns></returns>
+    public ETGIntegrationResponse create(ETGIntegrationRequest _request)
+    {
+        List lines;
+        ListIterator   literator;
+        ETGIntegrationContractLine integrationRequestLine;
+        int i;
+
+        var response = new ETGIntegrationResponse();
+        {
+         
+            changecompany(_request.parmDataAreaId())
+            {
+                try
+                {
+                    this.createHeader(_request.parmIntegrationHeaderClass());
+
+                    //Create lines
+                    lines = _request.parmIntegrationLineContractArray();
+                    if (lines)
+                    {
+                        literator = new ListIterator(lines);
+                        while (literator.more())
+                        {
+                            integrationRequestLine = literator.value();
+                            this.createLine(_request.parmIntegrationHeaderClass(), integrationRequestLine);
+                            literator.next();
+                        }
+                    }
+                   
+                    response.parmDebugMessage(_request.parmIntegrationHeaderClass().parmCONTRACTNUMBER());
+                    response.parmSuccess(true);
+                    Info(strFmt("%1 Response", response));
+                }
+
+                catch (Exception::CLRError)
+                {
+                    System.Exception interopException = CLRInterop::getLastException();
+
+                    response.parmSuccess(false);
+                    response.parmErrorMessage(interopException.ToString());
+                    Info(strFmt("%1 Response", response));
+                }
+                ETG_GeneralJournalIntegration integration = new ETG_GeneralJournalIntegration();
+                
+                ETGIntegrationReversal reversal = ETGIntegrationReversal::construct();
+                ETGIntegrationVendReversal vendReversal = ETGIntegrationVendReversal::construct();
+                /// Trigger the invoice post - Start
+                ETG_ARAP_MSGHEADER headerTrigger, headerReversal;
+
+                select * from headerTrigger where headerTrigger.ETGARAPREF == _request.parmIntegrationHeaderClass().parmARAPREF()
+                    && headerTrigger.ETGIntegrationsStatus == ETGIntegrationStatus::Unprocessed
+                    && headerTrigger.ETGTriggerCode == "POST";
+
+                if(headerTrigger)
+                {
+                    integration.updateErrorLog(headerTrigger.RecId);
+                }
+                /// Trigger the invoice post - End
+
+                /// Below code is for trigger the invoice reversal - Start
+                ttsbegin;
+                select forupdate headerReversal where headerReversal.ETGARAPREF == _request.parmIntegrationHeaderClass().parmARAPREF()
+                    && headerReversal.ETGIntegrationsStatus == ETGIntegrationStatus::Unprocessed
+                    && headerReversal.ETGTriggerCode == "UNPOST";
+               
+                if(headerReversal.ETGDocuType == "INV" || headerReversal.ETGDocuType == "ARCN" || headerReversal.ETGDocuType == "ARDN")
+                {
+                    reversal.postCustReversal(headerReversal.ETGARAPREF);
+                    ttsbegin;
+                    headerReversal.ETGIntegrationsStatus = ETGIntegrationStatus::Processed;
+                    headerReversal.update();
+                    ttscommit;
+                }
+                else if(headerReversal.ETGDocuType == "VCH" || headerReversal.ETGDocuType == "APCN" || headerReversal.ETGDocuType == "APDN")
+                {
+                    vendReversal.postVendReversal(headerReversal.ETGARAPREF);
+                    ttsbegin;
+                    headerReversal.ETGIntegrationsStatus = ETGIntegrationStatus::Processed;
+                    headerReversal.update();
+                    ttscommit;
+                }
+                /// Above code is for trigger the invoice reversal - End
+                ttscommit;
+                return response;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createHeader</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Headers data is creating from integration.
+    /// </summary>
+    /// <param name = "_requestHeader"></param>
+    public void createHeader(ETGIntegrationContractHeader _requestHeader)
+    {
+        ETG_ARAP_MSGHEADER header;
+        ;
+
+        ttsbegin;
+        header.clear();
+        header.ETGDocuType = _requestHeader.parmETGDocuType();
+        header.AXHeaderRecId = _requestHeader.parmIntegrationRecId();
+        header.ETGTriggerCode = _requestHeader.parmTriggerCode();
+        header.ETGLegalEntity = _requestHeader.parmLegalEntity();
+        header.ETGARAPREF = _requestHeader.parmARAPREF();
+        header.ETGCONTRACTNUMBER = _requestHeader.parmCONTRACTNUMBER();
+        header.AXApplyDate = _requestHeader.parmAPPLYDATE();
+        header.AXDocDate = _requestHeader.parmDOCDATE();
+        header.AXDueDate = _requestHeader.parmdUEDATE();
+        header.ETGApplyTo = _requestHeader.parmApplyTo();
+        header.ETGCOUNTERPARTY = _requestHeader.parmCOUNTERPARTY();
+        header.ETGCurrency = _requestHeader.parmCurrency();
+        
+        header.ETGDOCUMENTCAUSE = _requestHeader.parmDOCUMENTCAUSE();
+        header.AXExchRate = _requestHeader.parmExchRate();
+        header.ETGINTERCOMPANYREF = _requestHeader.parmINTERCOMPANYREF();
+        header.AXNetAmount = _requestHeader.parmNETAMOUNT();
+        header.ETGPAYMTERMS = _requestHeader.parmPAYMTERMS();
+        header.ETGPROFITCENTERGR = _requestHeader.parmPROFITCENTERGR();
+        header.ETGSTRINGREF = _requestHeader.parmSTRINGREF();
+        header.AXTaxAmount =_requestHeader.parmTAXAMOUNT();
+        header.AXTotalQty = _requestHeader.parmTOTALQTY();
+        header.ETGTRANSACTIONTYPE = _requestHeader.parmTRANSACTIONTYPE();
+       
+        header.ETGUSERNAME = _requestHeader.parmUSERNAME();
+        header.ETGIntegrationsStatus =  ETGIntegrationStatus::Unprocessed;
+        header.insert();
+        ttscommit;
+
+        info(strFmt("header created with contract number: %1", header.ETGCONTRACTNUMBER));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createLine</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Lines data is creating from integration
+    /// </summary>
+    /// <param name = "_requestHeader"></param>
+    /// <param name = "_requestLine"></param>
+    public void createLine(ETGIntegrationContractHeader _requestHeader, ETGIntegrationContractLine _requestLine)
+    {
+        ETG_ARAP_MSGLINES lines;
+        ETG_ARAP_MSGHEADER header;
+        ;
+        select header where header.ETGARAPREF == _requestHeader.parmARAPREF() &&
+            header.ETGIntegrationsStatus == ETGIntegrationStatus::Unprocessed;
+
+        ttsbegin;
+       
+        lines.clear();
+        lines.ETGLINETYPE = _requestLine.parmlINETYPE();
+        lines.ETGCOMMODITY = _requestLine.parmCOMMODITY();
+        lines.ETGCONTRACTNUMBER = _requestLine.parmCONTRACTNUMBER();
+        lines.AxAmount = _requestLine.parmAMOUNT();
+        lines.ETGCOSTCODE = _requestLine.parmCOSTCODE();
+        lines.ETGCURRENCY = _requestLine.parmCURRENCY();
+        lines.ETGDESCRIPTION = _requestLine.parmDESCRIPTION();
+        lines.ETGGLACCOUNT = _requestLine.parmGLACCOUNT();
+        lines.AxIntegrationHeaderRecId = header.AXHeaderRecId;
+        lines.D365HeaderRecId = header.RecId;
+        lines.ETGINCULDEDININVOICE = _requestLine.parmINCULDEDININVOICE();
+        lines.ETGINVENTORYLOCATION = _requestLine.parmINVENTORYLOCATION();
+       
+        lines.ETGLOADNUMBER = _requestLine.parmlOADNUMBER();
+        lines.AxPrice = _requestLine.parmPRICE();
+        lines.AxQuantity = _requestLine.parmQUANTITY();
+        lines.AxTaxAmount = _requestLine.parmTAXAMOUNT();
+        lines.ETGTAXCODE = _requestLine.parmTAXCODE();
+        lines.ETGTAXRATE = _requestLine.parmTAXRATE();
+        lines.insert();
+        ttscommit;
+
+        info(strFmt("line created with contract number: %1", lines.ETGCONTRACTNUMBER));
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,240 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>SalesLine_ETGSPAIN_Table_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the <c>SalesLine</c> table for the ETGSPAIN model.
+/// </summary>
+[ExtensionOf(tableStr(SalesLine))]
+final class SalesLine_ETGSPAIN_Table_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initFromAgreementLine</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>initFromAgreementLine</c> method of the <c>SalesLine</c> table.
+    /// </summary>
+    /// <param name="_agreementLine">AgreementLine.</param>
+    public void initFromAgreementLine(AgreementLine _agreementLine)
+    {
+        next initFromAgreementLine(_agreementLine);
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            if (_agreementLine.AgreementLineType == CommitmentType::ProductQuantity)
+            {
+                AgreementLineQuantityCommitment agreementLineQuantityCommitment = AgreementLineQuantityCommitment::find(_agreementLine.RecId);
+
+                this.OverDeliveryPct            = agreementLineQuantityCommitment.ETGSPAINOverDeliveryPct;
+                this.UnderDeliveryPct           = agreementLineQuantityCommitment.ETGSPAINUnderDeliveryPct;
+                this.ETGSPAINPurchLoadPortId         = agreementLineQuantityCommitment.ETGSPAINPurchLoadPortId;
+                this.ETGSPAINPurchUnloadPortId       = agreementLineQuantityCommitment.ETGSPAINPurchUnloadPortId;
+                this.ETGSPAINPurchExecutionFromDate  = agreementLineQuantityCommitment.ETGSPAINPurchExecutionFromDate;
+                this.ETGSPAINPurchExecutionDueDate   = agreementLineQuantityCommitment.ETGSPAINPurchExecutionDueDate;
+            }
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSPAINdisplayAppliedInventLocation</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Display method to show the applied warehouse.
+    /// </summary>
+    /// <returns>Applied warehouse.</returns>
+    [SysClientCacheDataMethod(true)]
+    public display InventLocationId ETGSPAINdisplayAppliedInventLocation()
+    {
+        ETGSPAINInventTransApplication   ETGSPAINInventTransApplication = ETGSPAINInventTransApplication::findTransId(this.InventTransId);
+
+       return InventDim::find(ETGSPAINInventTransApplication.inventDimId).InventLocationId;        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSPAINsetDimensionValue</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Generates the new Default Dimension with the specified attribute value.
+    /// </summary>
+    /// <param name="_dimAttrName">Name of the Financial Dimension.</param>
+    /// <param name="_newDimensionValue">New value to insert.</param>
+    /// <param name="_newDimensionDescription">Description of the new value to insert.</param>
+    public void ETGSPAINsetDimensionValue(Name _dimAttrName, DimensionValue _newDimensionValue, Description _newDimensionDescription)
+    {
+        DimensionAttribute                  dimensionAttribute = DimensionAttribute::findByName(_dimAttrName);
+        DimensionFinancialTag               dimensionFinancialTag;
+        DimensionFinancialTag               dimensionFinancialTagValue;
+        RecId                               dimFinancialCategoryRecid;
+        IFRDimensionDefaultDimensionBuilder ifrDimensionDefaultDimensionBuilder;
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+        if (dimensionAttribute)
+            {
+                dimFinancialCategoryRecid = dimensionAttribute.financialTagCategory();
+
+                // Comprobamos que exista el Valor en los valores de la Dimensión Financiera
+                select firstonly dimensionFinancialTag
+                where        dimensionFinancialTag.FinancialTagCategory == dimFinancialCategoryRecid
+                &&           dimensionFinancialTag.Value                == _newDimensionValue;
+
+                // Si no existe, lo generamos antes de asignarlo.
+                if(!dimensionFinancialTag.RecId)
+                {
+                    dimensionFinancialTagValue.clear();
+                    dimensionFinancialTagValue.initValue();
+                    dimensionFinancialTagValue.Value                = _newDimensionValue;
+                    dimensionFinancialTagValue.Description          = _newDimensionDescription;
+                    dimensionFinancialTagValue.FinancialTagCategory = dimFinancialCategoryRecid;
+                    dimensionFinancialTagValue.insert();
+                }
+            
+                ifrDimensionDefaultDimensionBuilder = IFRDimensionDefaultDimensionBuilder::construct(this.DefaultDimension);
+                this.DefaultDimension               = ifrDimensionDefaultDimensionBuilder.addDimensionValue(_dimAttrName, _newDimensionValue).getDefaultDimension();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateModifyInventDim</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>validateModifyInventDim</c> method.
+    /// </summary>
+    /// <param name="_inventDim">InventDim.</param>
+    /// <param name="_dimFieldId">FieldId.</param>
+    /// <returns>True if valid, otherwise False.</returns>
+    public boolean validateModifyInventDim(
+        InventDim           _inventDim,
+        FieldId             _dimFieldId)
+    {
+        boolean ret = next validateModifyInventDim(_inventDim, _dimFieldId);
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            if (_dimFieldId == fieldNum(InventDim,InventLocationId))
+            {
+                SalesTable      salesTable = this.salesTable();
+                AgreementHeader agreementHeader;
+                InventLocation  inventLocation;
+
+                // Validamos que el tipo de almacén sea el correcto.
+                if (salesTable.MatchingAgreement)
+                {
+                    agreementHeader = AgreementHeader::find(salesTable.MatchingAgreement);
+                    inventLocation  = _inventDim.inventLocation();
+
+                    if (agreementHeader && inventLocation)
+                    {
+                        switch (agreementHeader.ETGSPAINPurchInvoiceType)
+                        {
+                            case ETGSPAINPurchInvoiceType::Previous:
+
+                        if (inventLocation.ETGSPAINIsPrevInvoice == NoYes::No)
+                                {
+                                    return checkFailed("@ETGSPAINLabels:MustSelectPrevInvoiceWarehouse");
+                                }
+                                break;
+
+                            case ETGSPAINPurchInvoiceType::ByWithdrawal:
+
+                        if (inventLocation.ETGSPAINIsPrevInvoice == NoYes::Yes)
+                                {
+                                    return checkFailed("@ETGSPAINLabels:MustSelectNotPrevInvoiceWarehouse");
+                                }
+                                break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSPAINupdateFromETGSPAINSalesPackingSlipImport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Updates the fields related to the <c>ETGSPAINSalesPackingSlipImport</c> table.
+    /// </summary>
+    /// <param name="_etgspainSalesPackingSlipImport">ETGSPAINSalesPackingSlipImport.</param>
+    /// <param name="_refRecId">Reference Record ID.</param>
+    public static void ETGSPAINupdateFromETGSPAINSalesPackingSlipImport(ETGSPAINSalesPackingSlipImport _etgspainSalesPackingSlipImport,
+                                                                        RefRecId _refRecId)
+    {
+        SalesLine           salesLine;
+        InventTransOrigin   inventTransOrigin;
+        InventTrans         inventTrans;
+        InventDim           inventDim;
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            update_recordset salesLine
+            setting ETGSPAINCustSalesReference       = _etgspainSalesPackingSlipImport.ETGSPAINCustSalesReference,
+                ETGSPAINInventPackingSlipTransitId   = _etgspainSalesPackingSlipImport.ETGSPAINInventPackingSlipTransitId,
+                ETGSPAINSalesCustomerWithdrawalDate  = _etgspainSalesPackingSlipImport.ETGSPAINSalesCustomerWithdrawalDate,
+                ETGSPAINInventLicensePlate           = _etgspainSalesPackingSlipImport.ETGSPAINInventLicensePlate
+            where salesLine.RecId           == _refRecId
+                && salesLine.SalesStatus    != SalesStatus::Invoiced
+                && salesLine.SalesStatus    != SalesStatus::Canceled;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>delete</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>delete</c> method.
+    /// </summary>
+    /// <param name="_childBuffer">Child buffer.</param>
+    /// <param name="_updateOrderLineOfDeliverySchedule">Boolean indicating whether to update the order line of the delivery schedule.</param>
+    void delete(Common childBuffer, boolean updateOrderLineOfDeliverySchedule)
+    {
+        /*
+        InventTrans                 inventTrans;
+        InventTransOrigin           inventTransOrigin;
+        ETGSPAINUnsoldInventTrans   etgspainUnsoldInventTrans;        
+
+        CustInvoiceTrans            custInvoiceTrans        = CustInvoiceTrans::findInventTransid(this.InventTransId);
+        CustPackingSlipTrans        custPackingSlipTrans    = CustPackingSlipTrans::findInventTransId_RU(this.InventTransId);
+
+        if (!custInvoiceTrans && !custPackingSlipTrans)
+        {
+            update_recordset etgspainUnsoldInventTrans
+                setting UnsoldQty = 0
+                join inventTrans 
+                    where inventTrans.RecId                     == etgspainUnsoldInventTrans.RefRecId
+			        join inventTransOrigin
+                        where inventTransOrigin.RecId           == inventTrans.InventTransOrigin				    
+				            && inventTransOrigin.InventTransId  == this.InventTransId; 
+        }
+        */
+        next delete(childBuffer, updateOrderLineOfDeliverySchedule);
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            ETGSPAINUnsoldInventTrans::deleteFromCommon(this.orig());
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

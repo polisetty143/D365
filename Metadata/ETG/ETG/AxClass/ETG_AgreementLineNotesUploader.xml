@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_AgreementLineNotesUploader</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+using System.IO;
+using OfficeOpenXml;
+using OfficeOpenXml.ExcelPackage;
+using OfficeOpenXml.ExcelRange;
+
+class ETG_AgreementLineNotesUploader
+{
+    
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Runs the class with the specified arguments.
+    /// </summary>
+    /// <param name = "_args">The specified arguments.</param>
+    public static void main(Args _args)
+    {
+        System.IO.Stream		    stream;
+        ExcelSpreadsheetName	    sheeet;
+        FileUploadBuild			    fileUpload;
+        DialogGroup				    dlgUploadGroup;
+        FileUploadBuild			    fileUploadBuild;
+        FormBuildControl		    formBuildControl;
+
+        int                         counter;
+        InventTable				    inventTable;       
+        PurchAgreementHeader        purchAgreementHeader, purchAgreementHeaderUpd;
+        SalesAgreementHeader        salesAgreementHeader, salesAgreementHeaderUpd;
+        AgreementLine		        agreementLine,agreementlineUpd;
+        ItemId					    itemID;
+        PurchAgreementId            purchAgreementId;
+        SalesAgreementId            salesAgreementId;
+        AgreementHeaderRecId        agreementHeaderRecid;
+        ETG_AgreementLineNotes      agreementLineNotes;
+        ETGNote                     etgNote;
+        NoYesId                     noyes;
+        AgreementLineNum_PSN        lineNum;
+        
+              
+        Dialog dialog = new Dialog("Import Agreement Line Notes");
+
+        dlgUploadGroup		= dialog.addGroup("Select Excel File to Upload.");
+        formBuildControl	= dialog.formBuildDesign().control(dlgUploadGroup.name());
+        fileUploadBuild		= formBuildControl.addControlEx(classstr(FileUpload), 'Upload');
+
+        fileUploadBuild.style(FileUploadStyle::MinimalWithFilename);
+        fileUploadBuild.fileTypesAccepted('.xlsx');
+
+    
+        if (dialog.run() && dialog.closedOk())
+        {
+            FileUpload fileUploadControl					  = dialog.formRun().control(dialog.formRun().controlId('Upload'));
+            FileUploadTemporaryStorageResult fileUploadResult = fileUploadControl.getFileUploadResult();
+
+            if (fileUploadResult != null && fileUploadResult.getUploadStatus())
+            {
+                stream = fileUploadResult.openResult();
+                using (ExcelPackage Package = new ExcelPackage(stream))
+                {
+                    int rowCount, i;
+
+                    Package.Load(stream);
+                    ExcelWorksheet worksheet		= package.get_Workbook().get_Worksheets().get_Item(1);
+                    OfficeOpenXml.ExcelRange range	= worksheet.Cells;
+                    rowCount = worksheet.Dimension.End.Row - worksheet.Dimension.Start.Row + 1;
+
+                    for (i = 2; i<= rowCount; i++)
+                    {
+                        
+                        purchAgreementId         = range.get_Item(i, 1).Value;
+                        salesAgreementId         = range.get_Item(i, 2).Value;
+                        lineNum                  = str2Num(range.get_Item(i, 7).Value);
+
+                        itemID		    = range.get_Item(i, 3).Value;
+                        inventTable	    = InventTable::find(itemID,false);
+                        
+                        select firstonly purchAgreementHeader
+                            where purchAgreementHeader.PurchNumberSequence == purchAgreementId;
+
+                        select firstonly salesAgreementHeader
+                            where salesAgreementHeader.SalesNumberSequence == salesAgreementId;
+
+                        //agreementLine      = agreementLine::find(purchAgreementHeader.RecId);
+                        //agreementLineUpd   = agreementLine::find(salesAgreementHeader.RecId);
+
+                        select firstonly agreementLine
+                            where agreementLine.Agreement == purchAgreementHeader.RecId
+                            && agreementLine.LineNumber == lineNum;
+                        select firstonly agreementLineUpd
+                            where agreementLineUpd.Agreement == salesAgreementHeader.RecId
+                            && agreementlineUpd.LineNumber == lineNum;
+
+
+                        
+                        if(!purchAgreementHeader && !salesAgreementHeader)
+                        {
+                            error(strFmt('Purchase/Sales agreement %1 does not Exist', purchAgreementId, salesAgreementId));
+                        }
+                        if(!agreementLine && !agreementlineUpd)
+                        {
+                            error(strFmt('Agreement line does not Exist for Agreement number %1, %2', purchAgreementId,salesAgreementId ));
+                        }
+                        
+                       
+                        if((inventTable && purchAgreementHeader && !salesAgreementHeader && agreementLine && !agreementlineUpd) || (inventTable && salesAgreementHeader && !purchAgreementHeader && !agreementLine && agreementlineUpd))
+                        {
+                           agreementLineNotes.clear();
+                          
+                            try
+                            { 
+                                if(purchAgreementHeader)
+                                {
+                                    agreementLineNotes.AgreementLine            = agreementLine.RecId;
+                                }
+                                if(salesAgreementHeader)
+                                {
+                                    agreementLineNotes.AgreementLine            = agreementLineUpd.RecId;
+                                }
+                                agreementLineNotes.ItemId                   = range.get_Item(i, 3).Value;
+                                agreementLineNotes.EnumNotes                = str2Enum(etgNote, range.get_Item(i, 4).Value);
+                                agreementLineNotes.Description              = range.get_Item(i, 5).Value;
+                                agreementLineNotes.PrintNotesInContract     = str2Enum(noyes, range.get_Item(i, 6).Value);
+                                  
+                                ttsbegin;
+                                if(agreementLineNotes.validateWrite())
+                                {
+                                    agreementLineNotes.insert();
+                                }
+                                ttscommit;
+                                counter++;
+
+                            }
+                            catch(Exception::Error)
+                            {
+                                ttsabort;
+                            }
+                        }
+                        else
+                        {
+                            info(strFmt('Item ID %1 not exist in released product. Please released the item in current entity and process uploading.' ,itemID));
+                        }
+                    }
+                    info(strFmt('Purchase Agreement Lines Notes Uploaded Sucessfully. Total Lines %1 : ',counter));
+                }
+            }
+            else
+            {
+                error("Error During Upload. Please Contact System Admin. Item ID %1",itemID);
+            }
+
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

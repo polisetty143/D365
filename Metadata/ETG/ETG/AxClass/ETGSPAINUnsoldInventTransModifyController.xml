@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSPAINUnsoldInventTransModifyController</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Controller class for handling the unsold inventory transaction modifications in the ETGSPAIN model.
+/// </summary>
+class ETGSPAINUnsoldInventTransModifyController extends SysOperationServiceController
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>new</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Constructor method to initialize the controller with the associated service class.
+    /// </summary>
+    protected void new()
+    {
+        super(classStr(ETGSPAINUnsoldInventTransModifyService), methodStr(ETGSPAINUnsoldInventTransModifyService, process), SysOperationExecutionMode::Synchronous);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Constructs an instance of the controller class with specified arguments and execution mode.
+    /// </summary>
+    /// <param name="_args">Args object containing the necessary data.</param>
+    /// <param name="_executionMode">Execution mode for the operation (Synchronous by default).</param>
+    /// <returns>Returns an instance of the ETGSPAINUnsoldInventTransModifyController class.</returns>
+    public static ETGSPAINUnsoldInventTransModifyController construct(Args _args, SysOperationExecutionMode _executionMode = SysOperationExecutionMode::Synchronous)
+    {
+        ETGSPAINUnsoldInventTransModifyController controller = new ETGSPAINUnsoldInventTransModifyController();
+
+        controller.parmExecutionMode(_executionMode);
+        controller.parmArgs(_args);
+
+        return controller;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Main method that starts the controller's operation. Initializes the contract and sets parameters for the unsold inventory transaction.
+    /// </summary>
+    /// <param name="_args">Args object passed from the caller.</param>
+    public static void main(Args _args)
+    {
+        if (!_args)
+        {
+            throw error(Error::wrongUseOfFunction(funcName()));
+        }
+
+        if (!_args.record())
+        {
+            throw error(Error::wrongUseOfFunction(funcName()));
+        }
+                          
+        ETGSPAINUnsoldInventTransModifyController   controller  = ETGSPAINUnsoldInventTransModifyController::construct(_args);
+        ETGSPAINUnsoldInventTransModifyContract     contract    = controller.getDataContractObject();
+
+        controller.showBatchTab(false);
+        controller.parmLoadFromSysLastValue(false);
+        controller.parmShowDialog(true);
+
+        ETGSPAINUnsoldInventTrans   etgspainUnsoldInventTrans;
+        InventTransId               inventTransId;
+                 
+        switch (_args.record().TableId)
+        {
+            case (tableNum(SalesLine)):
+                SalesLine salesLine =  _args.record();
+                inventTransId = salesLine.InventTransId;
+                break;
+
+            case (tableNum(PurchLine)):
+                PurchLine purchLine =  _args.record();
+                inventTransId = purchLine.InventTransId;
+                break;
+
+            default:
+                throw error(strfmt("@SYS22828", funcName()));
+        }
+
+        etgspainUnsoldInventTrans = ETGSPAINUnsoldInventTrans::findByInventTransId(inventTransId, true, false);
+
+        if (!etgspainUnsoldInventTrans)
+        {
+            throw Error("@ETGSPAINLabels:ETGSPAINUnsoldInventTransFindOrCreateError");
+        }
+
+        contract.parmETGSPAINUnsoldQty(etgspainUnsoldInventTrans.UnsoldQty);
+        contract.parmETGSPAINMaxUnsoldQty(etgspainUnsoldInventTrans.MaxUnsoldQty);
+        contract.parmUpdateMaxUnsoldQty(true);
+        contract.parmRefRecId(etgspainUnsoldInventTrans.RefRecId);
+        
+        controller.startOperation();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateQty</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Updates the quantity of the unsold inventory transaction.
+    /// </summary>
+    /// <param name="_etgspainUnsoldInventTrans">The unsold inventory transaction to be updated.</param>
+    /// <param name="_qty">Quantity to be updated.</param>
+    /// <param name="_showDialog">Determines if the dialog should be shown (default is true).</param>
+    /// <param name="_updateMaxUnsoldQty">Specifies if the maximum unsold quantity should be updated.</param>
+    public static void updateQty(ETGSPAINUnsoldInventTrans _etgspainUnsoldInventTrans, Qty _qty, boolean _showDialog = true, boolean _updateMaxUnsoldQty = false)
+    {
+        if (!_etgspainUnsoldInventTrans)
+        {
+            throw Error("@ETGSPAINLabels:ETGSPAINUnsoldInventTransFindOrCreateError");
+        }
+                          
+        ETGSPAINUnsoldInventTransModifyController   controller  = ETGSPAINUnsoldInventTransModifyController::construct(new Args());
+        ETGSPAINUnsoldInventTransModifyContract     contract    = controller.getDataContractObject();
+
+        controller.parmShowDialog(false);
+                         
+        contract.parmETGSPAINUnsoldQty((_etgspainUnsoldInventTrans.UnsoldQty + _qty));
+        contract.parmRefRecId(_etgspainUnsoldInventTrans.RecId);
+        contract.parmUpdateMaxUnsoldQty(_updateMaxUnsoldQty);
+        
+        if (!_showDialog || ETGSPAINUnsoldInventTransModifyController::updateUnsoldQtyDialog())
+        {
+            controller.startOperation();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateUnsoldQtyDialog</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Displays a dialog asking the user whether to proceed with the unsold quantity update.
+    /// </summary>
+    /// <returns>Returns true if the user chooses to proceed, otherwise false.</returns>
+    public static boolean updateUnsoldQtyDialog()
+    {
+        return Box::yesNo("@ETGSPAINLabels:ETGSPAINUnsoldInventTransModifyControllerUpdateAuto", DialogButton::No) == DialogButton::Yes;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateOverloadUnsoldQtyDialog</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Displays a dialog asking the user whether to proceed with the update when the quantity exceeds the allowed limit.
+    /// </summary>
+    /// <returns>Returns true if the user chooses to proceed, otherwise false.</returns>
+    public static boolean updateOverloadUnsoldQtyDialog()
+    {
+        return Box::yesNo("@ETGSPAINLabels:ETGSPAINUnsoldInventTransModifyControllerUpdateAuto", DialogButton::No) == DialogButton::Yes;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

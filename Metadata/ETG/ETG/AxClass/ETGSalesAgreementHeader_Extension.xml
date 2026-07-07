@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesAgreementHeader_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tableStr(SalesAgreementHeader))]
+final class ETGSalesAgreementHeader_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>showTradeLimit</Name>
+				<Source><![CDATA[
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display AmountNoDecimals showTradeLimit(SalesAgreementHeader _this)
+    {
+        return CustTable::find(_this.CustAccount).ETGTradeLimitSalesReal;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>showRemainingTradeLimit</Name>
+				<Source><![CDATA[
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display AmountNoDecimals showRemainingTradeLimit(SalesAgreementHeader _this)
+    {
+        return CustTable::find(_this.CustAccount).ETGRemainingTradeLimitSalesReal;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>modifiedField</Name>
+				<Source><![CDATA[
+    public void modifiedField(FieldId _fieldId)
+    {
+        
+        next modifiedField(_fieldId);
+        switch (_fieldId)
+        {
+            case fieldNum(SalesAgreementHeader, AgreementState):
+                AgreementLineQuantityCommitment aLine;
+                LineAmount                      totalAgreementAmt;
+                CustTable                       custTable;
+                ETGACFParameters                _eTGACFParameters = ETGACFParameters::find();
+
+                if(_eTGACFParameters.EnableTradeLimit == NoYes::Yes)
+                {
+                    while select aLine where aLine.Agreement == this.RecId
+                    {
+                        totalAgreementAmt += aLine.lineAmount();
+                    }
+
+                    if(totalAgreementAmt != 0)
+                    {
+                        custTable = CustTable::find(this.CustAccount, true);
+
+                        if(custTable.ETGApplicableTradeLimit == NoYes::Yes)
+                        {
+                            if(totalAgreementAmt > custTable.ETGRemainingTradeLimitSalesReal)
+                            {
+                                throw Error(strFmt("@ETG:ErrorTradeLimit1", totalAgreementAmt, custTable.ETGRemainingTradeLimitSalesReal));
+                            }
+
+                            ttsbegin;
+                            custTable.ETGRemainingTradeLimitSalesReal = custTable.ETGRemainingTradeLimitSalesReal - totalAgreementAmt;
+                            custTable.doUpdate();
+                            ttscommit;
+                        }
+                    }
+                }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

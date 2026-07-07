@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_BankcurrencyrevalHelper</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_BankcurrencyrevalHelper
+{
+
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>BankCurrencyRevalTmp_onInserted</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [DataEventHandler(tableStr(BankCurrencyRevalTmp), DataEventType::Inserted)]
+    public static void BankCurrencyRevalTmp_onInserted(Common sender, DataEventArgs e)
+    {
+
+        ETG_BankCurrencyRevData     eTG_BankCurrencyRevData,eTG_BankCurrencyRevDataUpd;
+        BankAccountTable            bankAccountTable;
+        AmountMST                   accountingCurrencyNow;
+        AmountMSTSecondary          reportingCurrencyAdjustment;
+        CurrencyCode                accountingCurrencyCode = Ledger::accountingCurrency(CompanyInfo::current());
+        ExchangeRateEffectiveView   exchangeRates;
+        CurrencyCode                reportingCurrencyCode =  Ledger::reportingCurrency(CompanyInfo::current()) ;
+        CurrencyExchangeHelper      currencyExchangeHelper = CurrencyExchangeHelper::construct();
+        AmountMSTSecondary          reportingCurrencyNow;
+        ExchangeRateType            exchangeRateType,exchangeRateTypeRep;
+        Ledger                      ledger;
+        MainAccount                 mainAccount,mainAccountLoc;
+        str                         currentCompany = curExt();
+        companyInfo                 companyInfo ;
+        BankCurrencyRevalTmp        bankCurrencyRevalTmp = sender as BankCurrencyRevalTmp;
+
+        eTG_BankCurrencyRevData.LegalEntity       = bankCurrencyRevalTmp.LegalEntity;
+        eTG_BankCurrencyRevData.Name              = CompanyInfo::findRecId(bankCurrencyRevalTmp.LegalEntity).DataArea;
+        eTG_BankCurrencyRevData.BankAccountId     = bankCurrencyRevalTmp.BankAccountId;
+
+        select firstonly bankAccountTable 
+                   where bankAccountTable.AccountID == bankCurrencyRevalTmp.BankAccountId;
+        mainAccount =  MainAccount::findByLedgerDimension(bankAccountTable.LedgerDimension);
+        select firstonly  mainAccountLoc 
+                    where mainAccountLoc.RecId == mainAccount.RecId;
+        eTG_BankCurrencyRevData.MainAccountNum = mainAccount.MainAccountId;
+
+        select  firstonly exchangeRateType 
+                    where exchangeRateType.RecId   == mainAccountLoc.ExchangeAdjustmentRateType;
+        select firstonly ledger 
+                   where ledger.Name == currentCompany;
+        eTG_BankCurrencyRevData.ExchangeRateType                  = ledger.DefaultExchangeRateType;
+
+        eTG_BankCurrencyRevData.ReportingCurrencyExchangeRateType = ledger.ReportingCurrencyExchangeRateType;
+        eTG_BankCurrencyRevData.BankLedgerDimension               = bankCurrencyRevalTmp.BankLedgerDimension;
+        eTG_BankCurrencyRevData.DefaultDimension                  = bankCurrencyRevalTmp.DefaultDimension;
+        eTG_BankCurrencyRevData.BankLedgerDimension               = bankCurrencyRevalTmp.BankLedgerDimension;
+        companyInfo = companyInfo::findDataArea(currentCompany);
+        eTG_BankCurrencyRevData.ExchangeRateDate                  = bankCurrencyRevalTmp.ExchangeRateDate;
+        eTG_BankCurrencyRevData.TransDate                         = bankCurrencyRevalTmp.TransDate;
+        eTG_BankCurrencyRevData.AccountingCurrencyAmount          = bankCurrencyRevalTmp.AccountingCurrencyAmount;
+        eTG_BankCurrencyRevData.AccountingCurrencyCrossRate       = bankCurrencyRevalTmp.AccountingCurrencyCrossRate;
+        eTG_BankCurrencyRevData.BankCurrencyCode                  = bankAccountTable.CurrencyCode;
+        eTG_BankCurrencyRevData.BankCurrencyAmount                = bankCurrencyRevalTmp.BankCurrencyAmount;
+        eTG_BankCurrencyRevData.ReportingCurrencyAmount           = bankCurrencyRevalTmp.ReportingCurrencyAmount;
+        eTG_BankCurrencyRevData.ReportingCurrencyCrossRate        = bankCurrencyRevalTmp.ReportingCurrencyCrossRate;
+        if(!eTG_BankCurrencyRevData::find(eTG_BankCurrencyRevData.LegalEntity,
+                                            eTG_BankCurrencyRevData.BankAccountId,
+                                            eTG_BankCurrencyRevData.MainAccount,
+                                            eTG_BankCurrencyRevData.BankLedgerDimension,
+                                            eTG_BankCurrencyRevData.ExchangeRateType,
+                                            eTG_BankCurrencyRevData.ExchangeRateDate,
+                                            eTG_BankCurrencyRevData.TransDate,
+                                            eTG_BankCurrencyRevData.AccountingCurrencyAmount,
+                                            eTG_BankCurrencyRevData.AccountingCurrencyAdjustmentAmount,
+                                            eTG_BankCurrencyRevData.BankCurrencyCode,
+                                            eTG_BankCurrencyRevData.BankCurrencyAmount,
+                                            eTG_BankCurrencyRevData.ReportingCurrencyAdjustmentAmount) && 
+                                            eTG_BankCurrencyRevData.ReportingCurrencyAmount != 0 && 
+                                            eTG_BankCurrencyRevData.AccountingCurrencyAmount != 0 &&
+                                            eTG_BankCurrencyRevData.DefaultDimension == 0 &&
+                                            eTG_BankCurrencyRevData.BankCurrencyAmount != 0 &&
+                                            eTG_BankCurrencyRevData.BankCurrencyCode != Ledger::accountingCurrency(CompanyInfo::current()))
+                                            { 
+                                                eTG_BankCurrencyRevData.insert();
+                                            }
+
+
+        update_recordset eTG_BankCurrencyRevData
+            setting AccountingCurrencyCrossRate = exchangeRates.CrossRate
+                where eTG_BankCurrencyRevData.LegalEntity == CompanyInfo::current()
+            join CrossRate from exchangeRates
+                where exchangeRates.ExchangeRateType == eTG_BankCurrencyRevData.ExchangeRateType
+                    && exchangeRates.FromCurrencyCode == eTG_BankCurrencyRevData.BankCurrencyCode
+                    && exchangeRates.ToCurrencyCode == accountingCurrencyCode
+                    && exchangeRates.ValidFrom <= eTG_BankCurrencyRevData.ExchangeRateDate
+                    && exchangeRates.ValidTo >= eTG_BankCurrencyRevData.ExchangeRateDate;
+        if(reportingCurrencyCode != '')
+        {
+            update_recordset eTG_BankCurrencyRevData
+                setting ReportingCurrencyCrossRate = exchangeRates.CrossRate
+                    where eTG_BankCurrencyRevData.LegalEntity == CompanyInfo::current()
+                join CrossRate from exchangeRates
+                    where exchangeRates.ExchangeRateType == eTG_BankCurrencyRevData.ExchangeRateType
+                        && exchangeRates.FromCurrencyCode == eTG_BankCurrencyRevData.BankCurrencyCode
+                        && exchangeRates.ToCurrencyCode == Ledger::reportingCurrency(CompanyInfo::current())
+                        && exchangeRates.ValidFrom <= eTG_BankCurrencyRevData.ExchangeRateDate
+                        && exchangeRates.ValidTo >= eTG_BankCurrencyRevData.ExchangeRateDate;
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

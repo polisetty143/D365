@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGZRASmartInvoiceService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+internal final class ETGZRASmartInvoiceService extends SysOperationServiceBase
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>process</Name>
+				<Source><![CDATA[
+    public void process()
+    {
+        ETGItemStockPDTable             itemStockPDTable;
+        InventOnHandAIEntity            inventOnHandAIEntity;
+        InventTable                     inventTable;
+        InventTrans                     inventTrans;
+        PurchLine                       purchLine;
+        str                             lastPurchId;
+        real                            lastUnitPrice;
+        str                             itemTypeCode;
+        str                             fromUnit, toUnit;
+        InventTransOrigin               inventTransOrigin;
+        UnitOfMeasureConversion         unitOfMeasureConversion;
+        UnitOfMeasure                   fromUnitOfMeasure, toUnitOfMeasure;
+        VendTable                       vendTable;
+        LogisticsAddressCountryRegion   countryRegion;
+        DirPartyPostalAddressView       postalAddressView;
+
+
+        while select inventOnHandAIEntity
+        where inventOnHandAIEntity.AvailPhysical != 0
+             && inventOnHandAIEntity.DataAreaId == curExt()
+            //notexists join itemStockPDTable
+            //where itemStockPDTable.itemCode == InventOnHandAIEntity.ItemNumber
+            //   && itemStockPDTable.DataAreaId == InventOnHandAIEntity.DataAreaId
+        {
+            select firstOnly itemStockPDTable
+            where itemStockPDTable.itemCode == inventOnHandAIEntity.ItemNumber
+               && itemStockPDTable.DataAreaId == inventOnHandAIEntity.DataAreaId;
+
+            if(!itemStockPDTable)
+            {
+                lastPurchId = '';
+                lastUnitPrice = 0;
+
+                inventTable = InventTable::find(inventOnHandAIEntity.ItemNumber);
+
+                if(inventTable.ETGItemTypeCode == ETGItemTypeCode::RawMaterial)
+                {
+                    itemTypeCode = "1";
+                }
+                else if(inventTable.ETGItemTypeCode == ETGItemTypeCode::FinishedProduct)
+                {
+                    itemTypeCode = "2";
+                }
+                else
+                {
+                    itemTypeCode = "3";
+            
+                }
+
+                select firstOnly inventTrans
+                  order by inventTrans.DatePhysical desc,
+                           inventTrans.RecId desc
+                where inventTrans.ItemId == inventOnHandAIEntity.ItemNumber
+                   && inventTrans.StatusReceipt == StatusReceipt::Purchased
+                 join inventTransOrigin
+                  where inventTransOrigin.RecId == inventTrans.InventTransOrigin
+                    &&  inventTransOrigin.ReferenceCategory == InventTransType::Purch;
+
+                if(inventTrans)
+                {
+                    lastPurchId = inventTransOrigin.ReferenceId;
+
+                    select firstOnly purchLine
+                    where purchLine.PurchId == lastPurchId
+                        && purchLine.ItemId == inventOnHandAIEntity.ItemNumber;
+            
+                }
+
+                fromUnit              = purchLine.PurchUnit;
+                fromUnitOfMeasure     = UnitOfMeasure::findBySymbol(fromUnit);
+
+                select firstonly unitOfMeasureConversion
+                where unitOfMeasureConversion.FromUnitOfMeasure == fromUnitOfMeasure.RecId;
+
+                if (unitOfMeasureConversion.RecId)
+                {
+                    toUnitOfMeasure = UnitOfMeasure::find(unitOfMeasureConversion.ToUnitOfMeasure);
+                }
+
+                vendTable = VendTable::find(purchLine.VendAccount);
+                select firstOnly CountryRegionId from  postalAddressView
+                        where postalAddressView.Party == vendTable.Party
+                           && postalAddressView.IsPrimary == NoYes::Yes;
+
+
+                str dateFrmt = date2str(DateTimeUtil::date(datetimeutil::utcNow()),123,DateDay::Digits2,DateSeparator::None,DateMonth::Digits2,DateSeparator::None,DateYear::Digits4); 
+                str hourFrmt	= int2str(DateTimeUtil::hour(datetimeutil::utcNow()));
+                str minuteFrmt  = int2str(DateTimeUtil::minute(datetimeutil::utcNow()));
+                str secondFrmt  = int2str(DateTimeUtil::second(datetimeutil::utcNow()));
+                str timeFrmt	= hourFrmt+minuteFrmt+secondFrmt;
+ 
+                str formatted = dateFrmt+timeFrmt ;
+ 
+
+                //str formatted = System.String::Format(
+                //                            "{0:ddMMyyyyHHmmss}",
+                //                            DateTimeUtil::newDateTime(systemDateGet(), timeNow()));
+
+                itemStockPDTable.itemCode                = inventOnHandAIEntity.ItemNumber;
+                itemStockPDTable.description             = inventTable.NameAlias;
+                itemStockPDTable.itemClassificationCode  = inventTable.ETGHSCode;
+                itemStockPDTable.itemTypeCode            = itemTypeCode;
+                itemStockPDTable.quantityUnitCode        = purchLine.PurchUnit;
+                itemStockPDTable.packagingUnitCode       = toUnitOfMeasure.Symbol;
+                itemStockPDTable.originNationCode        = postalAddressView.CountryRegionId;
+                itemStockPDTable.quantity                = inventOnHandAIEntity.AvailPhysical;
+                itemStockPDTable.taxLabel                = purchLine.TaxItemGroup;
+                itemStockPDTable.DefaultPrice            = purchLine.PurchPrice;
+                itemStockPDTable.sdcId                   = "SDC0060000006";
+                itemStockPDTable.Status                  = ETGStatus::Processed;
+                itemStockPDTable.UniqueIdentifier        = formatted;
+
+                itemStockPDTable.insert();
+            }
+       }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

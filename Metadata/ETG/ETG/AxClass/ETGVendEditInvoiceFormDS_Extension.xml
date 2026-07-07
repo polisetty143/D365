@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGVendEditInvoiceFormDS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formDataSourceStr(VendEditInvoice, VendInvoiceInfoLine))]
+internal final class ETGVendEditInvoiceFormDS_Extension
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {
+        int ret = next active();
+
+        if(ETGACFParameters::find().EnablePTBFContractsPurch == NoYes::Yes)
+        {
+            FormDataSource      VendInvoiceInfoLine_ds            = this;
+            VendInvoiceInfoLine VendInvoiceInfoLineloc       = VendInvoiceInfoLine_ds.cursor();
+            VendInvoiceTrans    VendInvoiceTrans;
+            PurchLine  purchline;
+            boolean        enableactualprice = false;
+            Purchtable purchTableLoc; 
+
+            purchline = purchline::findInventTransId(VendInvoiceInfoLineloc.InventTransId);
+
+            Select sum(Qty) from  VendInvoiceTrans where VendInvoiceTrans.InventTransId == VendInvoiceInfoLineloc.InventTransId
+            && VendInvoiceTrans.PurchID == VendInvoiceInfoLineloc.OrigPurchId;
+
+            if(purchline.ETGCrDrNoteCreated ==NoYes::Yes)
+            {
+                enableactualprice = false;
+            }
+            else
+            {
+                enableactualprice =  (purchline.PurchQty == (VendInvoiceTrans.Qty + VendInvoiceInfoLineloc.ReceiveNow)) ? true :false;
+            }
+            
+            //CS, DLT, Abhinav 11-02-2025
+           
+            purchTableLoc = Purchtable::find(purchline.PurchId);
+
+            if(purchTableLoc.PurchStatus == PurchStatus::Received)
+            {
+                enableactualprice = true;
+            }
+            VendInvoiceInfoLine_ds.object(fieldNum(VendInvoiceInfoLine, ETGActualQuantity)).allowEdit(enableactualprice);
+            //CE, DLT, Abhinav
+
+            VendInvoiceInfoLine_ds.object(fieldNum(VendInvoiceInfoLine, ETGActualPurchPrice)).allowEdit(enableactualprice);
+            
+
+
+            FormControl         buttonParmTablePacking   = element.design(0).controlName("buttonParmTablePackingSlips");
+            FormControl         okpost   = element.design(0).controlName("OK");
+            FormControl         UpdateMatchStatus   = element.design(0).controlName("UpdateMatchStatus"); // Abhinav 11-02-2025
+
+            VendInvoiceInfoLine  VendInvoiceInfoLinesum;
+            VendInvoiceInfoTable    VendInvoiceInfoTableloc;
+
+            select VendInvoiceInfoTableloc where VendInvoiceInfoTableloc.ParmId == VendInvoiceInfoLineloc.ParmId
+            && VendInvoiceInfoTableloc.TableRefId == VendInvoiceInfoLineloc.TableRefId;
+              
+            select sum(ETGActualLineAmt),sum(LineAmount) from  VendInvoiceInfoLinesum
+                    where   VendInvoiceInfoLinesum.ParmId == VendInvoiceInfoTableloc.ParmId
+                    &&      VendInvoiceInfoLinesum.TableRefId == VendInvoiceInfoTableloc.TableRefId;
+
+            if(abs(VendInvoiceInfoLinesum.ETGActualLineAmt)  != 0 && VendInvoiceInfoTableloc.ETGCrDrNoteCreated == NoYes::No)
+            {
+                buttonParmTablePacking.enabled(false);
+                okpost.enabled(false);
+                UpdateMatchStatus.enabled(false);//Abhinav - 11-02-2025
+            }
+            else
+            {
+                buttonParmTablePacking.enabled(true);
+                okpost.enabled(true);
+                UpdateMatchStatus.enabled(true);//Abhinav - 11-02-2025
+            }
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>InventDimPurchAgreementETGSPAIN_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the <c>FormDataSource</c> <c>InventDim</c> for the <c>Form</c> <c>PurchAgreement</c> in the ETGSPAIN model.
+/// </summary>
+[ExtensionOf(formDataSourceStr(PurchAgreement, InventDim))]
+final class InventDimPurchAgreementETGSPAIN_Extension
+{       
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>write</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>write</c> method.
+    /// </summary>
+    public void write()
+    {
+        next write();
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+
+        InventDim               inventDim               = this.cursor();  
+        FormDataSource          inventDimDS             = inventDim.dataSource();       
+        FormDataSource          agreementLineDS         = formGetParentDatasource(inventDimDS);
+        AgreementLine           agreementLine           = agreementLineDS.cursor();
+        PurchAgreementHeader    purchAgreementHeader    = PurchAgreementHeader::find(agreementLine.Agreement);        
+        InventSerialId          inventSerialAgreement   = purchAgreementHeader.PurchNumberSequence;
+        AgreementHeader         agreementHeader         = AgreementHeader::find(purchAgreementHeader.RecId);
+               
+        
+            if (inventSerialAgreement)
+            {
+                InventSerial inventSerial;
+
+                if (purchAgreementHeader.ETGSPAINPurchHasAgreementQuotas)
+                {
+                    inventSerial = InventSerial::findOrCreate(agreementLine.ETGSPAINLineCode, agreementLine.ItemId);
+                }
+                else
+                {
+                    inventSerial = InventSerial::findOrCreate(inventSerialAgreement, agreementLine.ItemId);
+                }
+          
+                if (inventSerial)
+                {
+                    inventDim.inventSerialId = inventSerial.InventSerialId;
+                }
+            }
+
+            InventBatch inventBatch;
+
+            if (purchAgreementHeader.ETGSPAINAgreementOperationId)
+            {
+                inventBatch = InventBatch::findOrCreate(purchAgreementHeader.ETGSPAINAgreementOperationId,
+                                                        agreementLine.ItemId);
+
+                if (inventBatch)
+                {
+                    inventDim.inventBatchId = inventBatch.inventBatchId;
+                }
+            }
+
+            ETGSPAINPurchOperationTable ETGSPAINPurchOperationTable = agreementHeader.ETGSPAINPurchOperationTable();
+
+            if (ETGSPAINPurchOperationTable
+            && ETGSPAINPurchOperationTable.InventLocationId
+            && ETGSPAINPurchOperationTable.InventSiteId)
+            {
+                inventDim.InventSiteId      = ETGSPAINPurchOperationTable.InventSiteId;
+                inventDim.InventLocationId  = ETGSPAINPurchOperationTable.InventLocationId;
+            }
+
+            inventDim.data(InventDim::findOrCreate(inventDim));
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

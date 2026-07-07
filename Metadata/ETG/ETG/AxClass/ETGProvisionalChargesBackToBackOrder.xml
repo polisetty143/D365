@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGProvisionalChargesBackToBackOrder</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGProvisionalChargesBackToBackOrder
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>createChargesPurch</Name>
+				<Source><![CDATA[
+    public static void createChargesPurch(PurchTable purchTableCharges, PurchAgreementHeader purchAgreementHeader)
+    {
+        MarkupTrans                         markUpTrans;
+        ETG_ChargeCodes                     ChargeCodes,ChargeCodesloc;
+        PurchLine                           purchLineCharges;
+        AgreementLineQuantityCommitment     agreementLineQuantityCommitment,agreementLineQuantityCommitmentloc;
+
+        if(ETGACFParameters::find().EnableProvisionalCharges == NoYes::Yes)
+        {
+            try
+            {
+                select sum(ETGRemainingQuantity) from agreementLineQuantityCommitment
+                    where agreementLineQuantityCommitment.Agreement == purchAgreementHeader.RecId;
+
+                while  select ChargeCodes
+                where ChargeCodes.PurchNumberSequence == purchAgreementHeader.PurchNumberSequence
+                {
+                    LineAmount              lineAmount;
+                    markupTrans.initFromMarkupTable(MarkupTable::find(MarkupModuleType::Vend,  ChargeCodes.MarkupCode));
+                    markupTrans.initFromPurchTable(purchTableCharges);
+                    markupTrans.LineNum = MarkupTrans::lastLineNum(markupTrans.TransTableId, markupTrans.TransRecId) + 1;
+                    markupTrans.modifiedField(fieldNum(markupTrans ,Value ));
+                    markupTrans.MarkupCode = ChargeCodes.MarkupCode;
+                    markupTrans.Txt = ChargeCodes.TransTxt;
+                    if(ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Pcs)
+                    {
+                        markupTrans.MarkupCategory = MarkupCategory::Pcs;
+                    }
+                    else if(ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Fixed)
+                    {
+                        markupTrans.MarkupCategory = MarkupCategory::Fixed;
+                        while select  purchLineCharges
+                            where purchLineCharges.PurchId == purchTableCharges.PurchId
+                        {
+                            lineAmount += (ChargeCodes.RemainingValue/agreementLineQuantityCommitment.ETGRemainingQuantity) * purchLineCharges.PurchQty;
+
+                            select forupdate agreementLineQuantityCommitmentloc
+                                where agreementLineQuantityCommitmentloc.RecId == purchLineCharges.MatchingAgreementLine;
+                            if(agreementLineQuantityCommitmentloc)
+                            {
+                                ttsbegin;
+                                agreementLineQuantityCommitmentloc.ETGRemainingQuantity = agreementLineQuantityCommitmentloc.CommitedQuantity - purchLineCharges.PurchQty;
+                                agreementLineQuantityCommitmentloc.update();
+                                ttscommit;
+                            }
+                        }
+                    }
+                    else if(ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Percentage)
+                    {
+                        markupTrans.MarkupCategory = MarkupCategory::Percent;
+                        lineAmount                 =  ChargeCodes.Value;
+                    }
+
+                    markupTrans.Value                 = lineAmount;
+                    markupTrans.CurrencyCode          = ChargeCodes.CurrencyCode;
+                    markupTrans.ModuleType            = MarkupModuleType::Vend;
+                    markupTrans.ModuleCategory        = HeadingLine::Heading;
+                    markupTrans.ETGProvisionalCharges = NoYes::Yes;
+                    markupTrans.insert();
+
+                    select forupdate ChargeCodesloc where ChargeCodesloc.RecId == ChargeCodes.RecId;
+                    if(ChargeCodesloc)
+                    {
+                        ttsbegin;
+                        if(ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Fixed)
+                        {
+                            ChargeCodesloc.RemainingValue = ChargeCodes.Value - lineAmount;
+                        }
+                        ChargeCodesloc.IsProvisionalChargesCreated = NoYes::Yes;
+                        ChargeCodesloc.update();
+                        ttscommit;
+                    }
+                }
+
+            }
+            catch(Exception::Error)
+            {
+                return;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createChargesSales</Name>
+				<Source><![CDATA[
+    public static void createChargesSales(SalesTable salesTable, SalesAgreementHeader salesAgreementHeader)
+    {
+        MarkupTrans                         markUpTrans;
+        ETG_ChargeCodes                     ChargeCodes,ChargeCodesloc;
+        SalesLine                           salesLine,salesLineloc;
+        AgreementLineQuantityCommitment     agreementLineQuantityCommitment,agreementLineQuantityCommitmentloc;
+
+        try
+        {
+            if(ETGACFParameters::find().EnableProvisionalCharges == NoYes::No)
+            {
+                return;
+            }
+
+            if (salesAgreementHeader.ETG_PurchAgreementIdTP)
+            {
+                select sum(ETGRemainingQuantity) from agreementLineQuantityCommitment
+                    where agreementLineQuantityCommitment.Agreement == salesAgreementHeader.RecId;
+
+                while  select ChargeCodes
+                where ChargeCodes.PurchNumberSequence == salesAgreementHeader.SalesNumberSequence
+                {
+                    LineAmount              lineAmount;
+                    markupTrans.initFromMarkupTable(MarkupTable::find(MarkupModuleType::Cust,  ChargeCodes.MarkupCode));
+                    markupTrans.initFromSalesTable(salesTable);
+                    markupTrans.LineNum = MarkupTrans::lastLineNum(markupTrans.TransTableId, markupTrans.TransRecId)+1;
+                    markupTrans.modifiedField(fieldNum(markupTrans ,Value ));
+                    markupTrans.MarkupCode = ChargeCodes.MarkupCode;
+                    markupTrans.Txt = ChargeCodes.TransTxt;
+                    if(ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Pcs)
+                    {
+                        markupTrans.MarkupCategory = MarkupCategory::Pcs;
+                    }
+                    else if(ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Fixed)
+                    {
+                        markupTrans.MarkupCategory = MarkupCategory::Fixed;
+                        while select  salesLine
+                            where salesLine.SalesId == salesTable.SalesId
+                        {
+                            lineAmount += (ChargeCodes.RemainingValue/agreementLineQuantityCommitment.ETGRemainingQuantity) * salesLine.SalesQty;
+
+                            select forupdate agreementLineQuantityCommitmentloc
+                                where agreementLineQuantityCommitmentloc.RecId == salesLine.MatchingAgreementLine;
+                            if(agreementLineQuantityCommitmentloc)
+                            {
+                                ttsbegin;
+                                agreementLineQuantityCommitmentloc.ETGRemainingQuantity = agreementLineQuantityCommitmentloc.CommitedQuantity - salesLine.SalesQty;
+                                agreementLineQuantityCommitmentloc.update();
+                                ttscommit;
+                            }
+                        }
+                    }
+                    else if(ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Percentage)
+                    {
+                        markupTrans.MarkupCategory = MarkupCategory::Percent;
+                        lineAmount                 = ChargeCodes.Value;
+                    }
+
+                    
+                    markupTrans.Value                       = lineAmount;
+                    markupTrans.CurrencyCode                = ChargeCodes.CurrencyCode;
+                    markupTrans.ModuleType                  = MarkupModuleType::Cust;
+                    markupTrans.PreviousValue               = lineAmount;
+                    markupTrans.mcrMarkupTransCreatedBy     = MCRMarkupTransCreatedBy::User;
+                    markupTrans.MCROriginalMiscChargeValue  = lineAmount;
+                    markupTrans.ModuleCategory              = HeadingLine::Heading;
+                    markupTrans.ETGProvisionalCharges = NoYes::Yes;
+                    markupTrans.insert();
+
+                    select forupdate ChargeCodesloc
+                    where ChargeCodesloc.RecId == ChargeCodes.RecId;
+                    if(ChargeCodesloc)
+                    {
+                        ttsbegin;
+                        if(ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Fixed)
+                        {
+                            ChargeCodesloc.RemainingValue = ChargeCodes.Value - lineAmount;
+                        }
+                        ChargeCodesloc.update();
+                        ttscommit;
+                    }
+                }
+            }
+        }
+        catch(Exception::Error)
+        {
+            return;
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

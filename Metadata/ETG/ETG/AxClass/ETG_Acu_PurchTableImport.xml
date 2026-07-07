@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_Acu_PurchTableImport</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Purchase header import
+/// </summary>
+public class ETG_Acu_PurchTableImport extends ETG_Acu_DataImportBase
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args args)
+    {
+        ETG_Acu_PurchTableImport  purchTableimport;
+
+        purchTableimport = ETG_Acu_PurchTableImport::construct();
+
+        if (purchTableimport.prompt())
+        {
+            purchTableimport.runOperation();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static ETG_Acu_PurchTableImport construct()
+    {
+        return new ETG_Acu_PurchTableImport();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>canRunInNewSession</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Describes whether the class is designed for execution in a new session.
+    /// </summary>
+    /// <returns>
+    /// true if the class is designed for execution the operation in a new session; otherwise, false.
+    /// </returns>
+    protected boolean canRunInNewSession()
+    {
+        return false;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processData</Name>
+				<Source><![CDATA[
+    protected void processData(container _con)
+    {
+        PurchPurchaseOrderHeaderV2Entity        purchTable;
+        VendTable                               vendTable;
+        VendTable                               vendTableInvAcc;
+        DirPartyBaseEntity                      vendTableDirParty;
+        DirPartyBaseEntity                      vendTableInvAccDirParty;
+
+        purchTable.PurchaseOrderNumber                  = conpeek(_con, 1);
+        purchTable.AccountingDate                       = DateTimeUtil::date(DateTimeUtil::utcNow());
+        purchTable.BuyerGroupId                         = conpeek(_con, 3);
+        purchTable.ConfirmedDeliveryDate                = str2Date(conpeek(_con, 4), 123);
+        purchTable.CurrencyCode                         = conpeek(_con, 5);
+        //purchTable.DefaultLedgerDimensionDisplayValue   = conpeek(_con, 6);
+        purchTable.DefaultReceivingSiteId               = conpeek(_con, 7);
+        purchTable.DefaultReceivingWarehouseId          = conpeek(_con, 8);
+        /*purchTable.DeliveryAddressDescription           = conpeek(_con, 9);
+        purchTable.DeliveryAddressName                  = conpeek(_con, 10);
+        purchTable.DeliveryAddressStreet                = conpeek(_con, 11);*/
+        purchTable.DeliveryModeId                       = conpeek(_con, 12);
+        purchTable.DeliveryTermsId                      = conpeek(_con, 13);
+
+        select firstonly vendTable
+            exists join vendTableDirParty
+                where vendTableDirParty.PartyRecordId ==  vendTable.Party
+                    && vendTableDirParty.OrganizationNumber == conpeek(_con, 17);
+
+        select firstonly vendTableInvAcc
+            exists join vendTableInvAccDirParty
+                where vendTableInvAccDirParty.PartyRecordId == vendTableInvAcc.Party
+                    && vendTableInvAccDirParty.OrganizationNumber == conpeek(_con, 15);
+
+        purchTable.InvoiceVendorAccountNumber           = vendTableInvAcc.AccountNum;
+        purchTable.LanguageId                           = conpeek(_con, 16);
+        purchTable.OrderVendorAccountNumber             = vendTable.AccountNum;
+        purchTable.PaymentTermsName                     = conpeek(_con, 18);
+        purchTable.PurchaseOrderName                    = conpeek(_con, 19);
+        purchTable.TransportationModeId                 = conpeek(_con, 21);
+        purchTable.URL                                  = conpeek(_con, 22);
+        purchTable.VendorPaymentMethodName              = conpeek(_con, 23);
+        purchTable.VendorPostingProfileId               = conpeek(_con, 24);
+        purchTable.DeliveryAddressLocationId            = LogisticsLocation::find(vendTable.postalAddress().Location).LocationId;
+
+        // BusinessUnit (25)	Contract (26)	Department (27)	Intercompany (28)	Plant_Warehouse_Office (29)	Product_Service (30)	Trader_Employee (31)
+        // |Plant_Warehouse_Office|Department|Trader_Employee|Product_Service|BusinessUnit|Intercompany|Contract
+
+        purchTable.DefaultLedgerDimensionDisplayValue  = conPeek(_con, 29) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                    + conPeek(_con, 27) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                    + conPeek(_con, 31) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                    + conPeek(_con, 30) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                    + conPeek(_con, 25) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                    + conPeek(_con, 28) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                    + conPeek(_con, 26);
+        purchTable.AgreementConfirmationVersion         =   conPeek(_con,39);
+
+        purchTable.insert();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caption</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///Import inventory site
+    /// </summary>
+    /// <returns>Caption</returns>
+    public ClassDescription caption()
+    {
+        ClassDescription ret;
+    
+        ret = "@ETG_ENG_Labels:ImpOpenPurchHeader";
+    
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

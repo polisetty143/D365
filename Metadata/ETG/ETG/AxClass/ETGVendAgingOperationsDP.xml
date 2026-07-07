@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGVendAgingOperationsDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(ETGVendAgingOperationsContract))]
+class ETGVendAgingOperationsDP extends SrsReportDataProviderPreProcessTempDB
+{
+    ETGVendAgingOperations   etgVendAgingOperations;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGVendAgingOperations</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETGVendAgingOperations))]
+    public ETGVendAgingOperations getETGVendAgingOperations()
+    {
+        select * from etgVendAgingOperations;
+        return etgVendAgingOperations;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETGVendAgingOperationsContract contract = this.parmDataContract() as ETGVendAgingOperationsContract;
+        date asOfDate = contract.parmFromDate();
+        ETGAgingBasedOn agingBasedOn = contract.parmAgingBasedOn();
+
+        // Define dimension names
+        str Vertical            = "vertical";
+        str MAINCOMMODITY       = "MainCommodity";
+        str ContractDimName     = "Contract";
+        str COSTCENTER          = "CostCenter";
+        str DEPARTMENT          = "Department";
+        str INTERCOMPANY        = "InterCompany";
+        str LINE_OF_BUSINESSS   = "Line_Of_Business";
+        str SUBVERTICAL         = "SubVertical";
+        str TRADER_EMPLOYEE     = "Trader_Employee";
+        str BusinessUnit        = "businessUnit";
+        str Item                = "item";
+        str Plant_Warehouse_Office = "plant_Warehouse_Office";
+        str SubCommodity        = "SubCommodity";
+        str PRODUCT_SERVICE     = "pRODUCT_SERVICE";
+        
+        etgVendAgingOperations.setConnection(this.parmUserConnection());
+
+        Query query = this.parmQuery();
+        if (!query)
+        {
+            query = new Query();
+            query.addDataSource(tableNum(VendTrans));
+        }
+
+        QueryRun qr = new QueryRun(query);
+
+        VendTrans       vendTrans;
+        VendSettlement  vendSettlement;
+        VendTable       vendTable;
+        
+        real            balanceCur;
+        real            balanceMST;
+        real            settledCur;
+        real            settledMST;
+        int             daysPastDue;
+
+        while (qr.next())
+        {
+            if (qr.changed(tableNum(VendTrans)))
+            {
+                vendTrans = qr.get(tableNum(VendTrans));
+
+                if (vendTrans.TransDate > asOfDate)
+                {
+                    continue;
+                }
+                vendTable = VendTable::find(vendTrans.AccountNum);
+                
+                etgVendAgingOperations.clear();
+    
+                // ---------------------------------------------------------
+                // 1. BALANCE CALCULATION
+                // ---------------------------------------------------------
+                settledCur = 0;
+                settledMST = 0;
+
+                // Calculate settlements up to As Of Date
+                select sum(SettleAmountCur), sum(SettleAmountMST)
+                    from vendSettlement
+                    where vendSettlement.TransRecId == vendTrans.RecId
+                       && vendSettlement.TransDate  <= asOfDate;
+                
+                settledCur = vendSettlement.SettleAmountCur;
+                settledMST = vendSettlement.SettleAmountMST;
+
+                balanceCur = vendTrans.AmountCur - settledCur;
+                balanceMST = vendTrans.AmountMST - settledMST;
+
+                // Skip fully settled transactions
+                if (balanceCur == 0 && balanceMST == 0)
+                {
+                    continue;
+                }
+
+                // ---------------------------------------------------------
+                // 2. POPULATE COMMON FIELDS
+                // ---------------------------------------------------------
+                etgVendAgingOperations.CustAccount     = vendTrans.AccountNum;
+                etgVendAgingOperations.CustomerName      = vendTable.name();
+                etgVendAgingOperations.CustomerGroup     = vendTable.VendGroup;
+                etgVendAgingOperations.Voucher         = vendTrans.Voucher;
+                etgVendAgingOperations.TransactionDate = vendTrans.TransDate;
+                etgVendAgingOperations.CurrencyCode    = vendTrans.CurrencyCode;
+                etgVendAgingOperations.DueDate         = vendTrans.DueDate;
+                etgVendAgingOperations.PaymTermId      = vendTrans.PaymTermId;
+                etgVendAgingOperations.Invoice         = vendTrans.Invoice;
+                
+                etgVendAgingOperations.OutStandingLC   = balanceMST;
+                etgVendAgingOperations.OutStandingTC   = balanceCur;
+
+                // ---------------------------------------------------------
+                // 3. BUCKET LOGIC (Using TransDate)
+                // ---------------------------------------------------------
+                // Calculate days old based on Transaction Date vs As Of Date
+                if (agingBasedOn == ETGAgingBasedOn::DueDate)
+                {
+                    daysPastDue = asOfDate - vendTrans.DueDate;
+                }
+                else
+                {
+                    // Default to Transaction Date logic
+                    daysPastDue = asOfDate - vendTrans.TransDate;
+                }
+
+                // Bucket01  - 0-30Days
+                if (daysPastDue <= 30)
+                {
+                    etgVendAgingOperations.Bucket01     = balanceCur;
+                    etgVendAgingOperations.AgingBucket  = "0-30";
+                }
+                // Bucket02  - 31-60Days
+                else if (daysPastDue <= 60)
+                {
+                    etgVendAgingOperations.Bucket02     = balanceCur;
+                    etgVendAgingOperations.AgingBucket  = "31-60";
+                }
+                // Bucket03  - 61-90Days
+                else if (daysPastDue <= 90)
+                {
+                    etgVendAgingOperations.Bucket03     = balanceCur;
+                    etgVendAgingOperations.AgingBucket  = "61-90";
+                }
+                // Bucket04  - 91-120Days
+                else if (daysPastDue <= 120)
+                {
+                    etgVendAgingOperations.Bucket04     = balanceCur;
+                    etgVendAgingOperations.AgingBucket  = "91-120";
+                }
+                // Bucket05  - 121-150Days
+                else if (daysPastDue <= 150)
+                {
+                    etgVendAgingOperations.Bucket05     = balanceCur;
+                    etgVendAgingOperations.AgingBucket  = "121-150";
+                }
+                // Bucket06  - 151-180Days
+                else if (daysPastDue <= 180)
+                {
+                    etgVendAgingOperations.Bucket06     = balanceCur;
+                    etgVendAgingOperations.AgingBucket  = "151-180";
+                }
+                // Bucket07  - 181-360Days
+                else if (daysPastDue <= 360)
+                {
+                    etgVendAgingOperations.Bucket07     = balanceCur;
+                    etgVendAgingOperations.AgingBucket  = "181-360";
+                }
+                // Bucket08  - 361Days above
+                else
+                {
+                    etgVendAgingOperations.Bucket08     = balanceCur;
+                    etgVendAgingOperations.AgingBucket  = "361 Above";
+                }
+
+                // ---------------------------------------------------------
+                // 4. DIMENSIONS
+                // ---------------------------------------------------------
+                etgVendAgingOperations.BusinessUnit     = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, businessUnit);
+                //etgVendAgingOperations.ContractNumber   = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, Contract);
+                etgVendAgingOperations.CostCenter       = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, COSTCENTER);
+                etgVendAgingOperations.Department       = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, DEPARTMENT);
+                etgVendAgingOperations.InterCompany     = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, INTERCOMPANY);
+                etgVendAgingOperations.Item             = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, item);
+                etgVendAgingOperations.LineOfBusiness   = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(vendTrans.DefaultDimension, LINE_OF_BUSINESSS);
+                etgVendAgingOperations.Commodity        = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, MAINCOMMODITY);
+                etgVendAgingOperations.PlantWarehouseOffice = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, plant_Warehouse_Office);
+                etgVendAgingOperations.SubCommodity     = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(vendTrans.DefaultDimension, subCommodity);
+                etgVendAgingOperations.Trader           = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, TRADER_EMPLOYEE);
+                etgVendAgingOperations.Vertical         = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, vertical);
+                etgVendAgingOperations.Product_Service     = vendTrans::product_Service(vendTrans);
+                
+                etgVendAgingOperations.insert();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

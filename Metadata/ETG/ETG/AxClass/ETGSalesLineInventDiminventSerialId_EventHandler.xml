@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesLineInventDiminventSerialId_EventHandler</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+final class ETGSalesLineInventDiminventSerialId_EventHandler
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>inventSerialId_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// this method used to inventSerialId modified update the batchnumber.
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataFieldEventHandler(formDataFieldStr(SalesTable, InventDim, inventSerialId), FormDataFieldEventType::Modified)]
+    public static void inventSerialId_OnModified(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        if (ETGACFParameters::find().BLNumberAutomation)
+        {
+
+
+            FormDataSource inventDim_ds = sender.datasource();
+            InventDim      inventDim    = inventDim_ds.cursor();
+
+            FormRun  formrun = inventDim_ds.formRun();
+
+            FormDataSource salesline_ds = formrun.dataSource("SalesLine");
+            SalesLine      salesline = salesline_ds.cursor();
+
+            EcoResProduct     ecoResProduct = EcoResProduct::find(InventTable::find(salesline.ItemId).Product);
+
+            if(ecoResProduct.ProductType == EcoResProductType::Item)
+            {
+
+          
+                ETGBlNumber    eTGBlNumber,eTGBlNumber1;
+                int batchCount = 0;
+                Set         batchSet = new Set(Types::String);
+
+                select firstonly eTGBlNumber
+                where eTGBlNumber.SerialNumber == inventDim.inventSerialId;
+
+                if(eTGBlNumber.Qty == 0 && eTGBlNumber.SerialNumber )
+                {
+                    warning(strFmt("That serial number Qty is zero Please select difrent serialnumber"));
+            
+                }
+      
+                while select RecId,BatchNumber from eTGBlNumber group by BatchNumber
+                        where eTGBlNumber.SerialNumber == inventDim.inventSerialId
+
+                {
+                    batchCount++;
+                }
+                if (batchCount == 0)
+
+                {
+
+                    error("No batch numbers found for the selected serial number.");
+                    inventDim.inventBatchId = "";
+
+                    return;
+
+                }
+                //else if (batchCount > 1 && inventDim.inventSerialId )
+                //{
+                //      error("Multiple batch numbers found for the selected serial number. Please select manually.");
+                //      inventDim.inventBatchId = "";
+                //}
+                else
+                {
+                    select firstonly eTGBlNumber
+                               where eTGBlNumber.SerialNumber == inventDim.inventSerialId
+                                &&   eTGBlNumber.ItemNumber  == salesline.ItemId;
+
+                    inventDim.inventBatchId = eTGBlNumber.BatchNumber;
+                    inventDim = InventDim::findOrCreate(inventDim);
+
+                }
+            }
+            
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

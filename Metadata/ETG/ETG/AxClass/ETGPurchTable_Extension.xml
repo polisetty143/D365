@@ -1,0 +1,289 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchTable_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This class is an extension of form PurchTable
+/// </summary>
+[ExtensionOf(formStr(PurchTable))]
+internal final class ETGPurchTable_Extension
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>init</Name>
+				<Source><![CDATA[
+     /// <summary>
+    /// While opening the form, if the CapexId feature flag is enabled
+    /// then only the field Capexapprovalid is visible
+    /// </summary>
+    public void  init()
+    {
+        next init();
+        FormRun formRun = this as FormRun;
+        formRun.design().controlName(FormControlstr(PurchTable, PurchLine_ETGCapexApprovalId)).visible(AssetParameters::find().ETGCapexApprovalIdFeature);
+        formRun.design().controlName(FormControlstr(PurchTable, PurchLine_ETGCapexApprovalId1)).visible(AssetParameters::find().ETGCapexApprovalIdFeature);
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGAutoPostGRNAndinvoiceBtn_OnClicked</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(PurchTable, ETGAutoPostGRNAndinvoiceBtn), FormControlEventType::Clicked)]
+    public static void ETGAutoPostGRNAndinvoiceBtn_OnClicked(FormControl sender, FormControlEventArgs e)
+    {
+        PurchTable                      purchtable = sender.formRun().dataSource().cursor();
+        PurchFormLetter                 purchFormLetterCnf;
+        PurchFormLetter_Invoice         purchFormLetterInv;
+        PurchFormLetter_PackingSlip     purchFormLetterPsilp;
+
+        if(purchtable.InterCompanyOrder && purchtable.InterCompanySalesId)
+        {
+            SalesTable salesTableLoc ;
+
+            select crosscompany salesTableLoc
+                    where salesTableLoc.SalesId == purchtable.InterCompanySalesId;
+
+            changecompany(purchtable.InterCompanyCompanyId)
+            {
+                
+                SalesFormLetter_PackingSlip  salesFormLetterPackingSlip;
+                SalesFormLetter_Invoice  salesFormLetterInvoice;
+
+                if (salesTableLoc && SalesLine::exist(salesTableLoc.SalesId))
+                {
+                    try
+                    {
+                        if(salesTableLoc.SalesStatus == SalesStatus::Backorder)
+                        {
+                            ttsBegin;
+                            salesFormLetterPackingSlip = SalesFormLetter::construct(DocumentStatus::PackingSlip);
+            
+                            salesFormLetterPackingSlip.update(salesTableLoc,
+                                        DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()),
+                                        SalesUpdate::All,
+                                        AccountOrder::None,
+                                        NoYes::No,
+                                        NoYes::No );
+                            ttsCommit;
+                        }
+                    }
+                    catch
+                    {
+                        throw Error("@ETG_New:ErrorPackingSlipPosting");
+                    }
+
+                    try
+                    {
+                        if (salesTableLoc && salesTableLoc.SalesStatus != SalesStatus::Invoiced)
+                        {
+                            ttsBegin;
+                            salesFormLetterInvoice = SalesFormLetter::construct(DocumentStatus::Invoice);
+
+                            salesFormLetterInvoice.update(salesTableLoc,
+                                        DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()),
+                                        SalesUpdate::PackingSlip,
+                                        AccountOrder::None,
+                                        NoYes::No,
+                                        NoYes::No );
+
+                            ttsCommit;
+
+                        }
+                    }
+                    catch
+                    {
+                        throw Error("@ETG_New:ErrorInvoicePosting");
+                    }
+                }
+            }
+
+            salesTableLoc.reread();
+
+            if(salesTableLoc.SalesStatus == SalesStatus::Invoiced)
+            {
+                CustpackingSlipJour             custPackingSlipJour;
+                CustInvoiceJour                 custInvoiceJour;
+                PurchFormLetter_Invoice         purchFormLetter;
+
+                changecompany(purchtable.InterCompanyCompanyId)
+                {
+                    select firstOnly custPackingSlipJour
+                                order by DeliveryDate desc, PackingSlipId desc
+                            where custPackingSlipJour.SalesId == purchtable.InterCompanySalesId;
+
+                    select firstOnly custInvoiceJour
+                                order by InvoiceDate desc, CreatedDateTime desc
+                            where custInvoiceJour.SalesId == purchtable.InterCompanySalesId;
+                }
+
+                purchFormLetterCnf = PurchFormLetter::construct(DocumentStatus::PurchaseOrder);
+
+                purchFormLetterCnf.update(
+                                        purchTable,
+                                        strFmt('%1-%2', purchTable.PurchId, DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone())),
+                                        SystemDateGet(),
+                                        PurchUpdate::All,
+                                        AccountOrder::None,
+                                        NoYes::No,
+                                        NoYes::No
+                                    );
+
+                purchTable.reread();
+
+                ttsbegin;
+                if (purchTable.DocumentState == VersioningDocumentState::Confirmed)
+                {
+                    purchFormLetterPsilp = PurchFormLetter::construct(DocumentStatus::PackingSlip);
+ 
+                    purchFormLetterPsilp.update( purchTable,
+                                            custPackingSlipJour.PackingSlipId,
+                                            SystemDateGet(),
+                                            PurchUpdate::All,
+                                            AccountOrder::None,
+                                            false,
+                                            false);
+                }
+                ttscommit;
+
+                ttsbegin;
+                if (purchTable.DocumentStatus != DocumentStatus::Invoice)
+                {
+                    purchFormLetter = PurchFormLetter::construct(DocumentStatus::Invoice);
+
+                    purchFormLetter.update( purchTable,
+                                            custInvoiceJour.InvoiceId,
+                                            systemDateGet(),
+                                            PurchUpdate::PackingSlip,
+                                            AccountOrder::None,
+                                            false,
+                                            false
+                                            );
+                }
+                ttsCommit;
+            }
+
+        }
+        else
+        {
+            if(purchtable.PurchStatus == PurchStatus::Backorder)
+            {
+                try
+                {
+                    ttsbegin;
+                    purchFormLetterCnf = PurchFormLetter::construct(DocumentStatus::PurchaseOrder);
+
+                    purchFormLetterCnf.update(
+                                            purchTable,
+                                            strFmt('%1-%2', purchTable.PurchId, DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone())),
+                                            SystemDateGet(),
+                                            PurchUpdate::All,
+                                            AccountOrder::None,
+                                            NoYes::No,
+                                            NoYes::No
+                                        );
+                    ttscommit;
+                }
+                catch
+                {
+                    warning(strFmt("@ETG_New:ErrorInConfirmingPO",purchTable.PurchId));
+                }
+            }
+            Purchtable.reread();
+
+            if(purchtable.PurchStatus == PurchStatus::Backorder && Purchtable.DocumentState == VersioningDocumentState::Confirmed)
+            {
+                try
+                {
+                    ttsbegin;
+
+                    purchFormLetterPsilp = PurchFormLetter::construct(DocumentStatus::PackingSlip);
+ 
+                    purchFormLetterPsilp.update( Purchtable,
+                                                strFmt("%1", Purchtable.PurchId),
+                                                SystemDateGet(),
+                                                PurchUpdate::All,
+                                                AccountOrder::None,
+                                                false,
+                                                false);
+                    ttscommit;
+                }
+                catch
+                {
+                    warning(strFmt("@ETG_New:ErrorInGRNPosting",purchTable.PurchId));
+                }
+            }
+
+            purchtable.reread();
+
+            if(purchtable.PurchStatus == PurchStatus::Received)
+            {
+                try
+                {
+                    ttsbegin;
+                    //Invoice purchase order
+                    purchFormLetterInv = PurchFormLetter::construct(DocumentStatus::Invoice);
+                    purchFormLetterInv.update(purchtable,
+                               "Inv-" + purchtable.PurchId,
+                               SystemDateGet(),
+                        PurchUpdate::PackingSlip,
+                               AccountOrder::None,
+                               NoYes::No,
+                               NoYes::No);
+
+                    ttscommit;
+
+                    if (PurchTable::find(purchTable.PurchId).DocumentStatus == DocumentStatus::Invoice)
+                    {
+                        info(strfmt("@ETG_New:InvoiceJournalPosted",purchTable.PurchId));
+                    }
+                }
+                catch
+                {
+                    warning(strFmt("@ETG_New:ErrorInInvoicingPO",purchTable.PurchId));
+                }
+            }
+        }
+        sender.formRun().dataSource().refresh();
+        sender.formRun().dataSource().research(true);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>PurchTable_OnActive</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Enables/ disables Grain Receipt button based on PO status
+    /// </summary>
+    [FormDataSourceEventHandler(formDataSourceStr(PurchTable, PurchTable), FormDataSourceEventType::Activated)]
+    public static void PurchTable_OnActive(FormDataSource sender, FormDataSourceEventArgs e)
+    {
+        FormRun formRun = sender.formRun();
+        PurchTable purchTable = sender.cursor();
+
+        FormControl grnButton =
+        formRun.design().controlName(formControlStr(PurchTable, ETGGrainReceiptNoteGRN));
+
+        if (grnButton && purchTable)
+        {
+            grnButton.enabled(purchTable.DocumentState == VersioningDocumentState::Confirmed);
+            grnButton.visible(ETGCanadaParameters::find().EnableGrainReceiptNote == NoYes::Yes);
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGFinancialDimensionValueLegalEntityOverrideV2Entity_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tableStr(FinancialDimensionValueLegalEntityOverrideV2Entity))]
+    internal final class ETGFinancialDimensionValueLegalEntityOverrideV2Entity_Extension
+    {
+      
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>insertEntityDataSource</Name>
+				<Source><![CDATA[
+            public boolean insertEntityDataSource(DataEntityRuntimeContext _entityCtx, DataEntityDataSourceRuntimeContext _dataSourceCtx)
+        {
+            boolean ret = next insertEntityDataSource(_entityCtx, _dataSourceCtx);
+
+            if(ETGACFParameters::find().EnableDMSIntegration == NoYes::Yes)
+            {
+                if(ret)
+                {
+                    switch (_dataSourceCtx.name())
+                    {
+                        case dataEntityDataSourceStr(FinancialDimensionValueLegalEntityOverrideV2Entity, DimensionAttrValueLedgerOverride) :
+                            DimensionAttrValueLedgerOverride dimensionAttrValueLedgerOverride = _dataSourceCtx.getBuffer() as DimensionAttrValueLedgerOverride;
+  
+
+                            ttsbegin;
+                            FinancialDimensionValueLegalEntityOverrideV2Entity::updateSuspendFlag(
+                        dimensionAttrValueLedgerOverride.DimensionAttributeValue,
+                        dimensionAttrValueLedgerOverride.ETGLegalEntityActive);
+                            ttscommit;
+
+                            break;
+                    }
+                }
+            }
+
+            return ret;
+        }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateEntityDataSource</Name>
+				<Source><![CDATA[
+    public boolean updateEntityDataSource(DataEntityRuntimeContext _entityCtx, DataEntityDataSourceRuntimeContext _dataSourceCtx)
+    {
+        boolean ret = next updateEntityDataSource(_entityCtx, _dataSourceCtx);
+
+        if(ret)
+        {
+            if(ETGACFParameters::find().EnableDMSIntegration == NoYes::Yes)
+            {
+                switch (_dataSourceCtx.name())
+                {
+                    case dataEntityDataSourceStr(FinancialDimensionValueLegalEntityOverrideV2Entity, DimensionAttrValueLedgerOverride) :
+                        DimensionAttrValueLedgerOverride dimensionAttrValueLedgerOverride = _dataSourceCtx.getBuffer() as DimensionAttrValueLedgerOverride;
+
+                        ttsbegin;
+                        FinancialDimensionValueLegalEntityOverrideV2Entity::updateSuspendFlag(
+                    dimensionAttrValueLedgerOverride.DimensionAttributeValue,
+                    dimensionAttrValueLedgerOverride.ETGLegalEntityActive);
+                        ttscommit;
+
+                        break;
+                }
+            }
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateSuspendFlag</Name>
+				<Source><![CDATA[
+        public static void updateSuspendFlag(RecId dimensionAttributeValueRecId, Str1260 listOfLegalEntity)
+        {
+            DimensionAttrValueLedgerOverride overrideRec, overrideRecUpd;
+            DimensionAttributeValue          dimAttrVal;
+            DimensionAttribute               dimAttribute;
+            CompanyInfo                      companyInfo;
+            Ledger                           ledger;
+            RecId                            ledgerRecId;
+            boolean                          markSuspendNo;
+
+            while select companyInfo where companyInfo.DataArea != 'dat'
+            {
+                markSuspendNo = false;
+                select firstonly RecId from ledger where ledger.PrimaryForLegalEntity == companyInfo.RecId;
+
+                if (ledger.RecId)
+                {
+                    if(strScan(listOfLegalEntity, companyInfo.DataArea, 1, strLen(listOfLegalEntity)) > 0)
+                    {
+                        markSuspendNo = true;
+                    }
+
+                    select forUpdate overrideRec
+                    where overrideRec.DimensionAttributeValue == dimensionAttributeValueRecId
+                        && overrideRec.Ledger == ledger.RecId;
+
+                    if (overrideRec.RecId && overrideRec.IsSuspended && markSuspendNo)
+                    {
+                        overrideRec.IsSuspended = NoYes::No;
+                        overrideRec.update();
+                    }
+                    else if (overrideRec.RecId && overrideRec.IsSuspended == NoYes::No && !markSuspendNo)
+                    {
+                        overrideRec.IsSuspended = NoYes::Yes;
+                        overrideRec.update();
+                    }
+                    else if(!overrideRec.RecId && markSuspendNo)
+                    {
+                        overrideRec.clear();
+                        overrideRec.DimensionAttributeValue = dimensionAttributeValueRecId;
+                        overrideRec.Ledger                  = ledger.RecId;
+                        overrideRec.IsSuspended             = NoYes::No;
+                        overrideRec.insert();
+                    }
+                    else if(!overrideRec.RecId && !markSuspendNo)
+                    {
+                        overrideRec.clear();
+                        overrideRec.DimensionAttributeValue = dimensionAttributeValueRecId;
+                        overrideRec.Ledger                  = ledger.RecId;
+                        overrideRec.IsSuspended             = NoYes::Yes;
+                        overrideRec.insert();
+                    }
+                }
+            }
+        }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

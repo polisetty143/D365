@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGIntegrationVendReversal</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGIntegrationVendReversal extends TransactionReversal_Vend
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static ETGIntegrationVendReversal construct()
+    {
+        return new ETGIntegrationVendReversal();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>showDialog</Name>
+				<Source><![CDATA[
+    public boolean showDialog()
+    {
+        return false;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postVendReversal</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Below code is custmer reversal posting
+    /// </summary>
+    /// <param name = "_ARAPRef"></param>
+    public void postVendReversal(str _ARAPRef)
+    {
+        str _arAPRefVend = _ARAPRef;
+        ETG_ARAP_MSGHEADER headerMsg;
+        ReasonTable reasonTable;
+        ReasonCode reasonCodeOrg;
+        ReasonRefRecID reasonRefRecIDOrg;
+        VendTrans vendTransRev;
+        ETGIntegrationVendReversal vendReversal;
+        
+        select * from headerMsg where headerMsg.ETGARAPREF == _arAPRefVend;
+
+        changecompany(headerMsg.ETGLegalEntity)
+        {
+            select * from vendTransRev
+                where vendTransRev.Invoice == _arAPRefVend;
+
+            if(vendTransRev.RecId && !vendTransRev.LastSettleVoucher)
+            {
+                Args args = new Args();
+                args.record(vendTransRev);
+                vendReversal = ETGIntegrationVendReversal::construct();
+                vendReversal.parmReversalDate(str2Date(headerMsg.AXDocDate, 321));
+                vendReversal.reversal(args);
+            }
+            else
+            {
+                throw error("The invoice %1 already has been settled", vendTransRev.Invoice);
+            }
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

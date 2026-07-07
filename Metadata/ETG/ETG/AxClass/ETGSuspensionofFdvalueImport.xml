@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSuspensionofFdvalueImport</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+using System.IO;
+using OfficeOpenXml;
+using OfficeOpenXml.ExcelPackage;
+using OfficeOpenXml.ExcelRange;
+
+public final class ETGSuspensionofFdvalueImport
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>Main</Name>
+				<Source><![CDATA[
+    public static void Main(Args _args)
+    {
+        if (ETGACFParameters::find().EnableContractFDAutomation)
+        {
+            System.IO.Stream stream;
+            ExcelSpreadsheetName       sheeet;
+            FileUploadBuild            fileUpload;
+            DialogGroup                dlgUploadGroup;
+            FileUploadBuild            fileUploadBuild;
+            FormBuildControl           formBuildControl;
+            boolean                    ret = true;
+
+            Dialog dialog = new Dialog("Import File");
+
+            DimensionAttribute        dimensionAttribute;
+            DimensionAttributeValue   dimensionAttributeValue;
+            DimensionFinancialTag     dimensionFinancialTag;
+            DimensionValue            dimensionValue;
+            Description               description;
+            Name                      name;
+            NoYes                     noyes;
+            ETGACFParameters          acfParameters         = ETGACFParameters::find();
+
+
+            dlgUploadGroup           = dialog.addGroup('Select the file');
+            formBuildControl         = dialog.formBuildDesign().control(dlgUploadGroup.name());
+            fileUploadBuild          = formBuildControl.addControlEx(classstr(FileUpload), 'Upload');
+
+            fileUploadBuild.style(FileUploadStyle::MinimalWithFilename);
+            fileUploadBuild.fileTypesAccepted('.xlsx');
+
+            if (dialog.run() && dialog.closedOk())
+            {
+                FileUpload fileUploadControl = dialog.formRun().control(dialog.formRun().controlId('Upload'));
+                FileUploadTemporaryStorageResult fileUploadResult = fileUploadControl.getFileUploadResult();
+
+                if (fileUploadResult != null && fileUploadResult.getUploadStatus())
+                {
+                    stream = fileUploadResult.openResult();
+                    using (ExcelPackage package = new ExcelPackage(stream))
+                    {
+                        int rowCount, i;
+                        package.Load(stream);
+                        ExcelWorksheet worksheet = package.get_Workbook().get_Worksheets().get_Item(1);
+                        OfficeOpenXml.ExcelRange range = worksheet.Cells;
+                        rowCount = worksheet.Dimension.End.Row - worksheet.Dimension.Start.Row + 1;
+
+                        try
+                        {
+                            for (i = 2; i <= rowCount; i++)
+                            {
+                                dimensionValue = range.get_Item(i, 1).value;
+                                description = range.get_Item(i, 2).value;
+
+                                dimensionAttribute = DimensionAttribute::findByName(acfParameters.Contract);
+                               
+                                select firstonly forupdate dimensionAttributeValue
+                                where dimensionAttributeValue.DimensionAttribute == dimensionAttribute.RecId
+                            join RecId, Value from dimensionFinancialTag
+                                where dimensionFinancialTag.RecId == dimensionAttributeValue.EntityInstance &&
+                                      dimensionFinancialTag.Value == dimensionValue;
+
+                                if(dimensionFinancialTag)
+                                {
+                                    ttsbegin;
+                                    dimensionFinancialTag = DimensionFinancialTag::find(dimensionFinancialTag.RecId, true);
+                                    if (dimensionFinancialTag.RecId && dimensionAttributeValue.RecId)
+                                    {
+                                    
+                                        dimensionFinancialTag.selectForUpdate(true);
+                                        dimensionFinancialTag.Value = dimensionValue;
+                                        dimensionFinancialTag.Description = description;
+                                        dimensionFinancialTag.FinancialTagCategory = dimensionAttribute.financialTagCategory();
+                                        dimensionFinancialTag.update();
+                                    
+
+                                        dimensionAttributeValue.selectForUpdate(true);
+                                        dimensionAttributeValue.ActiveFrom = str2Date(range.get_Item(i, 3).Text.ToString(), 213);
+                                        dimensionAttributeValue.ActiveTo = str2Date(range.get_Item(i, 4).Text.ToString(), 213);
+                                        dimensionAttributeValue.IsSuspended = str2Enum(noyes, range.get_Item(i, 5).Text.ToString());
+                                        dimensionAttributeValue.update();
+                                    }
+                                    ttscommit;
+                                }
+                            }
+                            info("Import completed");
+                        }
+                        catch (Exception::UpdateConflict)
+                        {
+                            ttsabort;
+                            error("Record conflict detected. Please ensure no one else is modifying the data and try again.");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

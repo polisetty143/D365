@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCreditNoteDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// <summary>
+///    The <c>SRSReportDataProviderBase</c> class is used to implement an abstract implementation of the
+///    <c>SSRSReportDataProvider</c> interface class.
+/// </summary>
+/// this class is extends of SRSReportDataProviderBase for the new customization fields 
+/// <remarks>
+///    <c>SRSReportDataProvider</c> interface directly.
+/// </remarks>
+/// </summary>
+[SRSReportParameterAttribute(classStr(ETGCreditNoteContract))]
+class ETGCreditNoteDP extends SRSReportDataProviderBase
+{
+    ETGCreditNoteTmp    etgCreditNoteTmp;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>GetData</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETGCreditNoteTmp))]
+    public ETGCreditNoteTmp GetData()
+    {
+        select firstonly etgCreditNoteTmp;
+        return           etgCreditNoteTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETGCreditNoteContract contract      = this.parmDataContract() as ETGCreditNoteContract;
+        LedgerJournalId                       ledgerJournalID;
+        LedgerJournalTable                    ledgerJournalTable;
+        LedgerJournalTrans                    ledgerJournalTrans;
+        LedgerJournalEngine                   ledgerJournalEngine;
+        LogisticsElectronicAddress            electronicAddress;
+        CompanyInfo                           companyInfo = CompanyInfo::find();
+        Amount                                totalAmt;
+        DimensionAttributeValueCombination    dimensionAttributeValueCombination;
+        CustTable                             custTable;
+        VendTable                             vendTable;
+        BankAccountTable                      bankAccountTable;
+        Name                                  AmountinTxt;
+        real taxAmount;
+        real taxAmountSum = 0;
+        ledgerJournalEngine = new LedgerJournalEngine();
+        ledgerJournalID = contract.parmJournalNum();
+
+        electronicAddress = DirParty::primaryElectronicAddress(companyInfo.RecId, LogisticsElectronicAddressMethodType::Phone);
+        select firstOnly ledgerJournalTable 
+        where ledgerJournalTable.JournalNum     == ledgerJournalID; 
+
+        etgCreditNoteTmp.CompanyLogo             = FormLetter::companyLogo();
+        etgCreditNoteTmp.CompanyPhone            = electronicAddress.LocatorExtension + ' ' + electronicAddress.Locator;
+        electronicAddress                        = DirParty::primaryElectronicAddress(companyInfo.RecId, LogisticsElectronicAddressMethodType::Fax);
+        if(curExt() == "S004")
+        {
+            etgCreditNoteTmp.ETGTeleFax          = 'Tel : ' + CompanyInfo::find().phone();
+        }
+        else if(curExt() == "C003")
+        {
+            etgCreditNoteTmp.ETGTeleFax          = 'Tel : ' + CompanyInfo::find().phone();
+        }
+        else
+        {
+            etgCreditNoteTmp.ETGTeleFax              = strFmt('Tel : %1  Fax :%2',CompanyInfo::find().phone(),CompanyInfo::find().teleFax());
+        }
+        
+        if(curExt() == "C003" || curExt() == "S004")
+        {
+            etgCreditNoteTmp.CompanyAddress          = companyInfo.postalAddress().Street;
+            etgCreditNoteTmp.ETGCompanyBranchAddress = companyInfo.invoiceAddress().Street;
+        }
+        else
+        {
+            etgCreditNoteTmp.CompanyAddress          = companyInfo.postalAddress().Address;
+        
+            etgCreditNoteTmp.CompanyAddress          = strReplace(etgCreditNoteTmp.CompanyAddress,'\n',' ');
+        }
+        etgCreditNoteTmp.CompanyName             = companyInfo.Name;
+        etgCreditNoteTmp.CompanyEmail            = CompanyInfo::find().email();
+        
+        if(curExt() == "C003" || curExt() == "S004")
+        {
+            etgCreditNoteTmp.ETGNuitNumber = strFmt('NUIT : %1', companyInfo.ETGNuitNumber);
+        }
+        etgCreditNoteTmp.ETGCompanyCoRegNum      = strFmt('Reg No : %1   GST Reg No : %2',companyInfo.Giro,companyInfo.CoRegNum);
+        if(menuitemOutputStr(ETGCreditNoteReport)== contract.parmReportName())
+        {
+            etgCreditNoteTmp.IsCreditNote         = NoYes::Yes;
+            etgCreditNoteTmp.ReportName           = 'Credit Note';
+        }
+        else if(menuitemOutputStr(ETGDebitNoteReport) == contract.parmReportName())
+        {
+            etgCreditNoteTmp.IsCreditNote         = NoYes::No;
+            etgCreditNoteTmp.ReportName           = 'Debit Note';
+        }
+        while select ledgerJournalTrans
+            where ledgerJOurnalTrans.JournalNum ==  ledgerJournalTable.JournalNum
+        {
+            select firstonly DisplayValue from dimensionAttributeValueCombination
+                    where dimensionAttributeValueCombination.RecId == ledgerJournalTrans.LedgerDimension;
+
+            if(ledgerJournalTrans.AccountType == LedgerJournalACType::Cust)
+            {                
+                select firstonly custTable where custTable.AccountNum == dimensionAttributeValueCombination.DisplayValue;
+                etgCreditNoteTmp.InvoicingAddress                      = custTable.postalAddress().Address;
+                etgCreditNoteTmp.Name                                  = custTable.name();
+            }
+            else if(ledgerJournalTrans.AccountType == LedgerJournalACType::Vend)
+            {
+                select firstonly vendTable where vendTable.AccountNum == dimensionAttributeValueCombination.DisplayValue;
+                etgCreditNoteTmp.InvoicingAddress       = vendTable.postalAddress().Address;
+                etgCreditNoteTmp.Name                   =  vendTable.name();
+            }
+                etgCreditNoteTmp.CreditNoteNo           = ledgerJournalTrans.Voucher;
+                etgCreditNoteTmp.DocReference           = ledgerJournalTrans.DocumentNum;
+                etgCreditNoteTmp.Qty                    = ledgerJournalTrans.Qty;
+                etgCreditNoteTmp.Unit                   = ledgerJournalTrans.ETGUnit;
+                etgCreditNoteTmp.CurrencyCode           = ledgerJournalTrans.CurrencyCode;
+                etgCreditNoteTmp.TransDate              = ledgerJournalTrans.TransDate;
+                etgCreditNoteTmp.TransactionText        = ledgerJournalTrans.Txt;
+                etgCreditNoteTmp.Duedate                = ledgerJournalTrans.Due;
+                 taxAmount                = ledgerJournalEngine.correctedTaxAmount(ledgerJournalTrans);
+                  taxAmountSum += taxAmount;
+                
+            if(curExt() == "C003" || curExt() == "S004")
+            {
+                if(ledgerJournalTable.LedgerJournalInclTax == NoYes::Yes)
+                {
+                    etgCreditNoteTmp.Amount             = ledgerJournalTrans.AmountCurCredit?ledgerJournalTrans.AmountCurCredit - taxAmount:ledgerJournalTrans.AmountCurDebit - taxAmount;
+                }
+                else
+                {
+                    etgCreditNoteTmp.Amount                 = ledgerJournalTrans.AmountCurCredit?ledgerJournalTrans.AmountCurCredit:ledgerJournalTrans.AmountCurDebit;
+ 
+                }
+            }
+            else
+            {
+                etgCreditNoteTmp.Amount                 = ledgerJournalTrans.AmountCurCredit?ledgerJournalTrans.AmountCurCredit:ledgerJournalTrans.AmountCurDebit;
+            }
+                //etgCreditNoteTmp.Amount                 = ledgerJournalTrans.AmountCurCredit?ledgerJournalTrans.AmountCurCredit:ledgerJournalTrans.AmountCurDebit;
+                totalAmt                               += etgCreditNoteTmp.Amount;
+                bankAccountTable                        = BankAccountTable::find(ledgerJournalTrans.ETGBankAccountID);
+                etgCreditNoteTmp.AccountNum             = bankAccountTable.AccountNum;
+                etgCreditNoteTmp.SWIFTNo                = bankAccountTable.SWIFTNo;
+                etgCreditNoteTmp.IBAN                   = bankAccountTable.IBAN;
+                etgCreditNoteTmp.CorrespondentBank      = bankAccountTable.ETGCorrespondentBank;
+                etgCreditNoteTmp.BankName               = bankAccountTable.Name;
+                etgCreditNoteTmp.insert();
+            }
+            update_recordset etgCreditNoteTmp setting TaxAmount = taxAmountSum; 
+                AmountinTxt                             =  numeralsToTxt_EN(totalAmt + taxAmountSum);
+                AmountinTxt                             = strReplace(AmountinTxt,'***','');
+               // AmountinTxt                             = strReplace(AmountinTxt,'and 00/100','');
+                update_recordset etgCreditNoteTmp setting AmountInWords =  AmountinTxt;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

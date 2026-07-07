@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_PurchLine_DS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formdatasourcestr(PurchTable, PurchLine))]
+final class ETG_PurchLine_DS_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {
+        boolean             isAgreementOrder = false;
+        boolean             isInvoiced       = false;
+        int                 ret;
+        FormDataSource      PurchLine_ds        = any2Object(this) as FormDataSource;
+        formRun             formRun             = PurchLine_ds.formRun();
+        FormDataSource      PurchTable_DS       = formRun.dataSource(formDataSourceStr(PurchTable, PurchTable)) as FormDataSource;
+        PurchTable          purchTable          = PurchTable_ds.cursor();
+        ETG_Parameters      parameter           = ETG_Parameters::find();
+        FormDataSource      InventDim_DS     = formRun.dataSource(formDataSourceStr(PurchTable, InventDim)) as FormDataSource;
+
+
+        ret = next active();
+
+        if(parameter.ETG_FrozenValidations == NoYes::Yes
+            && parameter.ETG_FrozenValidationPurchaseOrder == NoYes::Yes
+            && purchTable.MatchingAgreement)
+        {
+            isAgreementOrder           = true;
+
+            if (purchTable.PurchStatus == PurchStatus::Invoiced)
+            {
+                isInvoiced  = true;
+            }
+        }
+
+        if(isInvoiced)
+        {
+            purchLine_DS.allowCreate(false);
+            purchLine_DS.allowDelete(false);
+            purchLine_DS.allowEdit(false);
+            InventDim_DS.allowEdit(false);
+        }
+
+        else if(isAgreementOrder)
+        {
+            purchLine_DS.allowCreate(false);
+            purchLine_DS.allowDelete(false);
+            allowEditFieldGroup(purchLine_DS, tableFieldGroupStr(purchLine_DS, AgreementFieldsEditable));
+            allowEditFieldGroup(InventDim_DS, tableFieldGroupStr(InventDim_DS, StorageDimensions));
+
+        }
+        else
+        {
+            purchLine_DS.allowCreate(true);
+            purchLine_DS.allowDelete(true);
+            purchLine_DS.allowEdit(true);
+            InventDim_DS.allowEdit(true);
+        }
+
+        //CS - Abhinav - Bin Qty Status
+        FormPartControl formpartcontrol = formRun.design().controlName("ETGBinQtyAvailable");
+        formpartcontrol.visible(ETGCanadaParameters::find().EnableBinQtyStatus);
+
+        if(ETGCanadaParameters::find().EnableBinQtyStatus)
+        {
+            InventDim inventdim = InventDim_DS.cursor();
+            ETGBinQtyVisualChartHelperClass::populateBinQtyChartData(inventdim,formpartcontrol);
+        }
+        //CE
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

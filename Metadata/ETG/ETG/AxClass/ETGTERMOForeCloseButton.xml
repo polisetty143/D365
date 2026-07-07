@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGTERMOForeCloseButton</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This class is for handling fore close functionality of TERMO numbers
+/// </summary>
+internal final class ETGTERMOForeCloseButton
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Class entry point. The system will call this method when a designated menu 
+    /// is selected or when execution starts and this class is set as the startup class.
+    /// </summary>
+    /// <param name = "_args">The specified arguments.</param>
+    public static void main(Args _args)
+    {
+        ETGTERMONumberTable            termoNumberTable;
+        ETGTERMONumberTable            termoNumberMother;
+        ETGTERMONumberTable            termoNumberChild;
+        ETGTermoNumberForeClosureTable termoNumberForeClosureTable;
+        FormRun                        formRun = _args.caller();
+        FormDataSource                 formDS  = formRun.dataSource(formDataSourceStr(ETGTermoNumberForeClosureTable, ETGTermoNumberForeClosureTable));
+        MultiSelectionHelper multiSelectionHelper = MultiSelectionHelper::construct();
+
+        multiSelectionHelper.parmDatasource(formDS);
+
+        Dialog                  dialog;
+        DialogField             fieldReasonCode;
+        ETGReasonId             reasonCode;
+ 
+        dialog = new Dialog("@ETG_New:SelectReasonCode");
+
+        fieldReasonCode = dialog.addField(extendedTypeStr(ETGTERMONumberReasonCode));
+        dialog.run();
+
+        if (dialog.closedOk())
+        {
+            reasonCode = fieldReasonCode.value();
+        }
+        else
+        {
+            return;
+        }
+
+        if(!reasonCode)
+        {
+            throw error("@ETG_New:ReasonCodeIsMandatory");
+        }
+
+        termoNumberForeClosureTable = multiSelectionHelper.getFirst() as ETGTermoNumberForeClosureTable;
+
+        ttsbegin;
+
+        while (termoNumberForeClosureTable)
+        {
+            if(termoNumberForeClosureTable.TypeOfTERMO == ETGTypeOfTERMO::Regular || termoNumberForeClosureTable.TypeOfTERMO == ETGTypeOfTERMO::Child)
+            {
+                termoNumberForeClosureTable.selectForUpdate(true);
+                termoNumberForeClosureTable.TERMONumberStatus = ETGTERMONumberStatus::Close;
+                termoNumberForeClosureTable.ClosedDate = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+                termoNumberForeClosureTable.CloseReasonId = reasonCode;
+                termoNumberForeClosureTable.doUpdate();
+
+                termoNumberTable = ETGTERMONumberTable::findFromTermoNumber(termoNumberForeClosureTable.TERMONumber, true);
+                termoNumberTable.TERMONumberStatus = ETGTERMONumberStatus::Close;
+                termoNumberTable.ClosedDate = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+                termoNumberTable.CloseReasonId = reasonCode;
+                termoNumberTable.doUpdate();
+                Info(strFmt("@ETG_New:TermoNumberForeclosed", termoNumberTable.TERMONumber));
+            }
+            
+            if(termoNumberForeClosureTable.TypeOfTERMO == ETGTypeOfTERMO::Mother)
+            {
+                select firstonly RecId, TERMONumber from termoNumberChild
+                    where termoNumberChild.MotherTERMOReference == termoNumberForeClosureTable.TERMONumber
+                        && termoNumberChild.TypeOfTERMO == ETGTypeOfTERMO::Child
+                        && (termoNumberChild.TERMONumberStatus == ETGTERMONumberStatus::Open
+                        || termoNumberChild.TERMONumberStatus == ETGTERMONumberStatus::Exhausted);
+
+                if(termoNumberChild.RecId)
+                {
+                    warning(strFmt("@ETG_New:MotherTermoForeCloseErrorForChild", termoNumberForeClosureTable.TERMONumber, termoNumberChild.TERMONumber));
+                }
+                else
+                {
+                    termoNumberMother = ETGTERMONumberTable::findFromTermoNumber(termoNumberForeClosureTable.TERMONumber, true);
+                    termoNumberMother.TERMONumberStatus = ETGTERMONumberStatus::Close;
+                    termoNumberMother.ClosedDate = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+                    termoNumberMother.CloseReasonId = reasonCode;
+                    termoNumberMother.doUpdate();
+                    Info(strFmt("@ETG_New:TermoNumberForeclosed", termoNumberForeClosureTable.TERMONumber));
+                }
+            }
+            
+            termoNumberForeClosureTable = multiSelectionHelper.getNext() as ETGTermoNumberForeClosureTable;
+        }
+
+        ttscommit;
+
+        formDS.research(true);
+        formDS.refresh();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

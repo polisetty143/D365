@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_ContractTrackingDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[
+SRSReportParameterAttribute(classStr(ETG_ContractTrackingContract))
+]
+public class ETG_ContractTrackingDP extends SRSReportDataProviderBase
+{
+    
+    Tbl_TmpContractStatusTmp     tbl_TmpContractStatusTmp;
+   
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getTbl_TmpContractStatusTmp</Name>
+				<Source><![CDATA[
+    [
+        SRSReportDataSetAttribute(tableStr(Tbl_TmpContractStatusTmp))
+    ]
+    public Tbl_TmpContractStatusTmp getTbl_TmpContractStatusTmp()
+    {
+        select * from tbl_TmpContractStatusTmp;
+        return tbl_TmpContractStatusTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETG_ContractTrackingContract            contract = this.parmDataContract() as ETG_ContractTrackingContract;
+        
+        TransDate                               fromDate, toDate;
+        AgreementHeader                         agreementHeader;
+        AgreementLineQuantityCommitment         agreementline;
+        SalesAgreementHeader                    salesAgreementHeader;
+        AGREEMENTHEADERDEFAULT                  agreementHeaderDefault;
+        ETG_SalesAgreementHeader                eTG_SalesAgreementHeader;
+        CustInvoiceJour                         custInvoiceJour;
+        ETG_BillOfLading                        eTG_BillOfLading;
+        SalesTable                              salesTable;
+        SalesLine                               salesLine;
+        CustPackingSlipJour                     custPackingSlipJour;
+        InventDim                               inventDim;
+        AgreementLine                           agreementLineBase; 
+
+        Qty                                     totalInvoicedQty;
+        Qty                                     remainingQty;
+        CustInvoiceTrans                        custInvoiceTransQty;
+        SalesLine                               salesLineForQty;
+       
+
+
+        str bussinessunit = "BusinessUnit";
+        str costcenter = "CostCenter";
+        str country = "Country";
+        str entity = "Entity";
+        str Item = "Item";
+        str Locations = "Locations";
+        str ProfitCenter = "ProfitCenter";
+        str SubRegion = "SubRegion";
+        str Vertical = "Vertical";
+        str SubCommodity = "SubCommodity";
+        str TRADER_EMPLOYEE = "TRADER_EMPLOYEE";
+
+      
+        
+        fromDate = contract.parmFromDate();
+        toDate = contract.parmToDate();
+
+        while select salesAgreementHeader
+            where salesAgreementHeader.CustomerDataAreaId == curExt()
+               && salesAgreementHeader.DefaultAgreementLineEffectiveDate >= fromDate
+               && salesAgreementHeader.DefaultAgreementLineEffectiveDate <= toDate
+        {
+            
+            tbl_TmpContractStatusTmp.clear();
+            
+            // Main contract data assignment
+            tbl_TmpContractStatusTmp.ContractNum    = salesAgreementHeader.SalesNumberSequence;
+            tbl_TmpContractStatusTmp.ContractDate   = salesAgreementHeader.DefaultAgreementLineEffectiveDate;
+            tbl_TmpContractStatusTmp.CurrencyCode   = salesAgreementHeader.Currency;
+            tbl_TmpContractStatusTmp.Contarctstatus = salesAgreementHeader.AgreementState;
+            tbl_TmpContractStatusTmp.Customer       = salesAgreementHeader.CustAccount;
+            tbl_TmpContractStatusTmp.Name           = salesAgreementHeader.custName();
+            
+            
+            select agreementHeaderDefault
+                where agreementHeaderDefault.AgreementHeader == salesAgreementHeader.RecId;
+            if (agreementHeaderDefault)
+            {
+                tbl_TmpContractStatusTmp.DlvModeId = agreementHeaderDefault.DeliveryMode;
+                tbl_TmpContractStatusTmp.DlvTermId = agreementHeaderDefault.DeliveryTerm;
+                tbl_TmpContractStatusTmp.PaymTermId = agreementHeaderDefault.PaymentTerms;
+            }
+            
+            
+            select eTG_SalesAgreementHeader
+                where eTG_SalesAgreementHeader.SalesAgreementId == salesAgreementHeader.SalesNumberSequence;
+            if (eTG_SalesAgreementHeader)
+            {
+                tbl_TmpContractStatusTmp.VesselName = eTG_SalesAgreementHeader.VESSELNAMEVOYAGE;
+                tbl_TmpContractStatusTmp.Tbl_portofDischarge = eTG_SalesAgreementHeader.PortOfDischargeDesc;
+                tbl_TmpContractStatusTmp.Tbl_PortofLoad = eTG_SalesAgreementHeader.PortOfLoadingDesc;
+                tbl_TmpContractStatusTmp.Through = eTG_SalesAgreementHeader.Through;
+                tbl_TmpContractStatusTmp.FromDate = eTG_SalesAgreementHeader.FromDatePort;
+                tbl_TmpContractStatusTmp.ToDate = eTG_SalesAgreementHeader.ToDatePort;
+            }
+            
+            
+            while select agreementline
+                where agreementline.Agreement == salesAgreementHeader.RecId
+            {
+                tbl_TmpContractStatusTmp.ItemId = agreementline.ItemId;
+
+                if (agreementline.InventDimId)
+                {
+                    inventDim = InventDim::find(agreementline.InventDimId);
+                    tbl_TmpContractStatusTmp.configId = inventDim.configId;
+                    tbl_TmpContractStatusTmp.InventColorId = inventDim.InventColorId;
+                }
+
+                
+
+                // ── QUANTITY BLOCK ──────────────────────────────────────────────────
+                
+                tbl_TmpContractStatusTmp.Qty = agreementline.CommitedQuantity;
+
+                // 2. Invoiced quantity: sum CustInvoiceTrans.Qty for all sales lines
+                //    that are fulfilled against this specific agreement line
+                totalInvoicedQty = 0;
+
+                while select salesLineForQty
+                    where salesLineForQty.MatchingAgreementLine == agreementline.RecId  // links sales line → agreement line
+                {
+                    // Sum invoice transaction quantities for this sales line
+                    while select custInvoiceTransQty
+                        where custInvoiceTransQty.SalesId   == salesLineForQty.SalesId
+                           && custInvoiceTransQty.LineNum   == salesLineForQty.LineNum
+                    {
+                        totalInvoicedQty += custInvoiceTransQty.Qty;
+                    }
+                }
+
+                // 3. Remaining quantity
+                remainingQty = agreementline.CommitedQuantity - totalInvoicedQty;
+
+                // Assign to temp table fields
+                // NOTE: Add these three fields to Tbl_TmpContractStatusTmp if not already present:
+                //   InvoicedQty  (Qty / real)
+                //   RemainingQty (Qty / real)
+                tbl_TmpContractStatusTmp.InvoicedQty    = totalInvoicedQty;
+                tbl_TmpContractStatusTmp.RemainingQty   = remainingQty;
+                // ── END QUANTITY BLOCK ──────────────────────────────────────────────
+
+                
+                
+                tbl_TmpContractStatusTmp.UnitId = agreementline.ProductUnitOfMeasure;
+                tbl_TmpContractStatusTmp.Price = agreementline.ETG_PriceType;
+                tbl_TmpContractStatusTmp.PremiumPrice = agreementline.PricePerUnit;
+                tbl_TmpContractStatusTmp.Futureprice = agreementline.ETGFuturePrice;
+                tbl_TmpContractStatusTmp.ETGUnitPrice = agreementline.PricePerUnit;
+                tbl_TmpContractStatusTmp.ETGFinalPlaceOfDelivery = agreementline.ETGFinalPlaceOfDelivery;
+                tbl_TmpContractStatusTmp.MainCommodity = agreementline.ETGMainCommodity;
+
+                select firstonly ETG_ItemAlternativeName from agreementLineBase
+                 where agreementLineBase.RecId == agreementline.RecId;
+        
+                tbl_TmpContractStatusTmp.ETG_ItemAlternativeName = agreementLineBase.ETG_ItemAlternativeName;
+
+                // Dimension assignments
+                tbl_TmpContractStatusTmp.BussinessUnit      = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension, bussinessunit);
+                tbl_TmpContractStatusTmp.CostCenter         = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension, costcenter);
+                tbl_TmpContractStatusTmp.Country            = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension, country);
+                tbl_TmpContractStatusTmp.Entity             = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension, entity);
+                tbl_TmpContractStatusTmp.Item               = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension, Item);
+                tbl_TmpContractStatusTmp.Location           = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension, Locations);
+                tbl_TmpContractStatusTmp.ProfitCenter       = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension, ProfitCenter);
+                tbl_TmpContractStatusTmp.SubRegion          = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension, SubRegion);
+                tbl_TmpContractStatusTmp.Vertical           = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension, Vertical);
+                tbl_TmpContractStatusTmp.SubCommodity       = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension,SubCommodity);
+               // tbl_TmpContractStatusTmp.TraderName         = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension,TRADER_EMPLOYEE);
+
+                
+                str personnelNumber = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension, TRADER_EMPLOYEE);
+
+              
+                personnelNumber = strLRTrim(personnelNumber);
+
+                if (personnelNumber)
+                {
+                    HcmWorker hcmWorker = HcmWorker::findByPersonnelNumber(personnelNumber);
+    
+                    if (hcmWorker.RecId)
+                    {
+                        tbl_TmpContractStatusTmp.TraderName = hcmWorker.name();
+                    }
+                    else
+                    {
+                       
+                        tbl_TmpContractStatusTmp.TraderName = DimensionAttributeValue::findByDimensionAttributeAndValue(
+                        DimensionAttribute::findByName(TRADER_EMPLOYEE),
+                         personnelNumber).getName();
+                    }
+                }
+            }
+
+            
+            select salesTable
+                where salesTable.MatchingAgreement == salesAgreementHeader.RecId;
+            if (salesTable)
+            {
+                tbl_TmpContractStatusTmp.InvoiceAccount = salesTable.InvoiceAccount;
+                
+                
+                select eTG_BillOfLading
+                    where eTG_BillOfLading.SalesId == salesTable.SalesId;
+                if (eTG_BillOfLading)
+                {
+                    tbl_TmpContractStatusTmp.ETGBags = eTG_BillOfLading.NumberOfBags;
+                    tbl_TmpContractStatusTmp.DueDate = eTG_BillOfLading.DueDate;
+                }
+
+               
+                select custPackingSlipJour
+                    where custPackingSlipJour.SalesId == salesTable.SalesId;
+                if (custPackingSlipJour)
+                {
+                    tbl_TmpContractStatusTmp.PackingSlipId = custPackingSlipJour.PackingSlipId;
+                }
+                
+                
+                while select salesLine
+                    where salesLine.SalesId == salesTable.SalesId
+                {
+                    select inventDim
+                        where inventDim.InventDimId == salesLine.inventDimId;
+                    if (inventDim)
+                    {
+                      //  tbl_TmpContractStatusTmp.configId = inventDim.configId;
+                        tbl_TmpContractStatusTmp.InventLocationId = inventDim.InventLocationId;
+                        tbl_TmpContractStatusTmp.InventSiteId = inventDim.InventSiteId;
+                        tbl_TmpContractStatusTmp.InventSizeId = inventDim.InventSizeId;
+                      //  tbl_TmpContractStatusTmp.InventColorId = inventDim.InventColorId;
+                        tbl_TmpContractStatusTmp.InventSerialId = inventDim.inventSerialId;
+                    }
+                    
+                    
+                    select custInvoiceJour
+                        where custInvoiceJour.SalesId == salesTable.SalesId;
+                    if (custInvoiceJour)
+                    {
+                        tbl_TmpContractStatusTmp.InvoiceId = custInvoiceJour.InvoiceId;
+                        tbl_TmpContractStatusTmp.InvocieDate = custInvoiceJour.InvoiceDate;
+                        tbl_TmpContractStatusTmp.INVAmount = custInvoiceJour.InvoiceAmount;
+                        tbl_TmpContractStatusTmp.BOLNum = custInvoiceJour.ETG_BLnumber;
+                        tbl_TmpContractStatusTmp.BOLDate = custInvoiceJour.ETG_BLDate;
+                        tbl_TmpContractStatusTmp.OrderId = custInvoiceJour.SalesId;
+                    }
+                }
+            }
+            
+            
+            tbl_TmpContractStatusTmp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

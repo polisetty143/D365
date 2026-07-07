@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGITMLine_Table_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// extension class for table <c>ITMLine</c>
+/// </summary>
+[ExtensionOf(tableStr(ITMLine))]
+internal final class ETGITMLine_Table_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>salesLineETG</Name>
+				<Source><![CDATA[
+    public SalesLine salesLineETG(boolean _forUpdate = false)
+    {
+        SalesLine salesLine;
+    
+        if (this.RefTableId == tableNum(SalesLine))
+        {
+            salesLine.selectForUpdate(_forUpdate);
+    
+            select firstOnly crossCompany salesLine
+                where salesLine.RecId == this.RefRecId
+                    && salesLine.dataAreaId == this.ShipDataArea;
+        }
+    
+        return salesLine;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>salesPriceETG</Name>
+				<Source><![CDATA[
+    [SysClientCacheDataMethod(true)]
+    public display SalesPrice salesPriceETG()
+    {
+        SalesPrice ret;
+    
+        if (this.RefTableId == tableNum(SalesLine))
+        {
+            ret = this.salesLineETG().SalesPrice;
+        }
+    
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateWriteOutboundETG</Name>
+				<Source><![CDATA[
+    public boolean validateWriteOutboundETG()
+    {
+        boolean ret = true;
+        ITMParameters itmParameters = ITMParameters::find();
+    
+        ret = ret && (itmParameters.MultipleFolioVendorTolerance == ErrorTolerance::Accept || this.checkShipFolioId());
+        ret = ret && (itmParameters.MultipleDlvModeTolerance == ErrorTolerance::Accept || this.checkDlvMode());
+        ret = ret && (itmParameters.MultipleWarehouseTolerance == ErrorTolerance::Accept || this.checkInventLocationId());
+        ret = ret && this.checkRental();
+        ret = ret && this.checkPending();
+        ret = ret && this.checkLocked();
+    
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>lineAmount</Name>
+				<Source><![CDATA[
+    [SysClientCacheDataMethod(true)]
+    public display Amount lineAmount()
+    {
+        Amount ret = next lineAmount();
+    
+        if (this.RefTableId == tableNum(SalesLine))
+        {
+            ret = this.salesLineETG().LineAmount;
+        }
+    
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initFromInventTransferLineShipmentETG</Name>
+				<Source><![CDATA[
+    public void initFromInventTransferLineShipmentETG(InventTransferLine _inventTransferLine)
+    {
+        InventTable inventTable = InventTable::find(_inventTransferLine.ItemId);
+
+        this.ShipItemId      = _inventTransferLine.ItemId;
+        this.RefRecId        = _inventTransferLine.RecId;
+        this.ShipDataArea    = _inventTransferLine.dataAreaId;
+        this.InventDimId     = _inventTransferLine.InventDimId;
+        this.CurrencyCode    = CompanyInfoHelper::standardCurrency();
+        this.UnitId          = _inventTransferLine.UnitId;
+        this.RefTableId      = _inventTransferLine.TableId;
+        this.TransType       = InventTransType::TransferOrderReceive;
+        this.ETGOUTTransType = InventTransType::TransferOrderShip;
+        this.InventTransId   = _inventTransferLine.InventTransId;
+        this.TransRefId      = _inventTransferLine.TransferId;
+
+        Qty qty = this.inventTransQty();
+
+        this.Weight = inventTable.grossWeight() * qty;
+        this.Volume = inventTable.grossVolume() * qty;
+        this.LineAmountMST = this.lineAmountMST_Transfer(qty);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>salesStatusETG</Name>
+				<Source><![CDATA[
+    display SalesStatus salesStatusETG()
+    {
+        if (this.TransType ==  InventTransType::Sales && this.TransRefId)
+        {
+            return SalesTable::find(this.TransRefId).SalesStatus;
+        }
+
+        return SalesStatus::None;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>lineStatus</Name>
+				<Source><![CDATA[
+    [SysClientCacheDataMethod(true)]
+    public display ITMLineStatus lineStatus()
+    {
+        ITMLineStatus shipLineStatus = next lineStatus();
+            
+        switch (this.RefTableId)
+        {
+            case tableNum(SalesLine):
+                shipLineStatus = enum2Str(SalesLine::findRecId(this.RefRecId).SalesStatus);
+                break;
+    
+            case tableNum(InventTransferLine):
+                shipLineStatus = this.lineStatusInventTransferLine();
+                break;
+        }
+    
+        return shipLineStatus;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>purchPrice</Name>
+				<Source><![CDATA[
+    [SysClientCacheDataMethod(true)]
+    public display Price purchPrice()
+    {
+        Price ret = next purchPrice();
+    
+        if (this.RefTableId == tableNum(SalesLine))
+        {
+            ret = this.salesLineETG().SalesPrice;
+        }
+    
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initFromSalesLine</Name>
+				<Source><![CDATA[
+    public void initFromSalesLine(SalesLine _salesLine)
+    {
+        InventTable inventTable = _salesLine.inventTable();
+             
+        this.ShipItemId    = _salesLine.ItemId;
+        this.RefRecId      = _salesLine.RecId;
+        this.ShipDataArea  = _salesLine.dataAreaId;
+        this.InventDimId   = _salesLine.InventDimId;
+        this.CurrencyCode  = _salesLine.CurrencyCode;
+        this.UnitId        = _salesLine.SalesUnit;
+        this.InventTransId = _salesLine.InventTransId;
+        this.TransType     = InventTransType::Sales;
+        this.TransRefId    = _salesLine.SalesId;
+        this.RefTableId    = _salesLine.TableId;
+        Qty qty            = _salesLine.ETGITMinventTransQty();
+        this.Weight        = inventTable.grossWeight() * qty;
+        this.Volume        = inventTable.grossVolume() * qty;
+        this.LineAmountMST = this.lineAmountMST(ITMParameters::find().UseShipRatePurch);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

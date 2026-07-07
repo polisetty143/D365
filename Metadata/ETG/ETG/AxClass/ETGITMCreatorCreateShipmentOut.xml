@@ -1,0 +1,1487 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGITMCreatorCreateShipmentOut</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// this class will create shipments for outbound orders
+/// </summary>
+public class ETGITMCreatorCreateShipmentOut implements SysPackable
+{
+    ITMTable shipTable;
+    ITMContainers shipContainers;
+    ITMFolioTable shipFolioTable;
+    boolean headersCreated;
+
+    NoYes createContainer;
+    NoYes createFolio;
+    NoYes findAutoCosts;
+
+    ITMTmpCreatorLine tmpShipCreatorLine;
+    ITMVesselId vesselId;
+    ITMFromPort fromPort;
+    ITMToPort toPort;
+    DlvModeId dlvModeId;
+    ITMVendAccount shipVendAccount;
+
+    ITMContainerId containerId;
+    ITMContainerTypeId containerTypeId;
+
+    ITMCustomsBroker customsBroker;
+    VendAccount vendAccount;
+
+    Map companyFolioMap;
+    ITMJourneyId journeyId;
+
+    ITMId pendingShipment;
+    ITMId pendingContainer;
+
+    ITMDescription shipDescription;
+    ITMId shipId;
+
+    NoYes addToExistingContainer;
+    NoYes addToExistingFolio;
+    ITMFolioId folioId;
+
+    ITMJourneyId containerJourneyId;
+    ITMVoyage voyage;
+    ITMDate shipDate;
+
+    container selectedLinesMap;
+
+    ITMJourneyLine shipJourneyLine;
+
+    ITMMAWB shipMAWB;
+    ITMHAWB shipHAWB;
+
+    ITMMeasurement containerMeasurement;
+    ITMMeasurementUnit containerMeasurementUnit;
+
+    ITMIdExternal shipIdExternal;
+    ITMFolioId manualFolioId;
+
+    boolean skipUserInteraction;
+
+    private const int CurrentVersion = 1;
+    #localmacro.CurrentList
+        createContainer,
+        createFolio,
+        findAutoCosts
+    #endmacro
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>checkExistingAutoCosts</Name>
+				<Source><![CDATA[
+    protected void checkExistingAutoCosts()
+    {
+        boolean doPrompt;
+    
+        shipTable = ITMTable::find(shipId);
+        
+        if (ITMCostTrans::existEstimatedOutETG(shipTable))
+        {
+            warning("@InboundTransportationManagement:UnreversedEstimatesExistTheReverseCostsFunctionShouldBeUsed");
+            throw error("@SYS18447");
+        }
+    
+        doPrompt = ITMCostTrans::existUninvoicedOutETG(shipTable);
+    
+        if (addToExistingContainer)
+        {
+            shipContainers = ITMContainers::find(shipId, containerId);
+            if (ITMCostTrans::existEstimatedOutETG(shipContainers))
+            {
+                warning("@InboundTransportationManagement:UnreversedEstimatesExistTheReverseCostsFunctionShouldBeUsed");
+                throw error("@SYS18447");
+            }
+    
+            doPrompt = ITMCostTrans::existUninvoicedOutETG(shipContainers) || doPrompt;
+        }
+    
+        if (addToExistingFolio)
+        {
+            shipFolioTable = ITMFolioTable::find(folioId);
+            if (ITMCostTrans::existEstimatedOutETG(shipFolioTable))
+            {
+                warning("@InboundTransportationManagement:UnreversedEstimatesExistTheReverseCostsFunctionShouldBeUsed");
+                throw error("@SYS18447");
+            }
+    
+            doPrompt = ITMCostTrans::existUninvoicedOutETG(shipFolioTable) || doPrompt;
+        }
+    
+        if (doPrompt)
+        {
+            findAutoCosts = ITMAutoCostSearch::promptInsertCheck(skipUserInteraction);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>copyLegs</Name>
+				<Source><![CDATA[
+    private void copyLegs()
+    {
+        while select shipJourneyLine
+            index LineIdx
+            where shipJourneyLine.JourneyId == (containerJourneyId ? containerJourneyId : journeyId)
+        {
+            this.createContainerLeg();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createContainerLeg</Name>
+				<Source><![CDATA[
+    private void createContainerLeg()
+    {
+        ITMContainerLegTable shipContainerLegTable;
+
+        shipContainerLegTable.clear();
+        shipContainerLegTable.initFromShipContainersOutETG(shipContainers);
+        shipContainerLegTable.initFromShipJourneyLineOutETG(shipJourneyLine);
+        shipContainerLegTable.insert();
+    
+        shipContainers.initFromShipJourneyLine(shipJourneyLine);
+    
+        ITMContainerLegTable::copyActivitiesOutETG(shipContainers, shipContainerLegTable);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createHeaders</Name>
+				<Source><![CDATA[
+    protected void createHeaders()
+    {
+        this.createShipTable();
+    
+        if (addToExistingContainer)
+        {
+            shipContainers = ITMContainers::find(shipId, containerId);
+        }
+        else if (createContainer)
+        {
+            this.createShipContainers();
+        }
+    
+        if (addToExistingFolio)
+        {
+            shipFolioTable = ITMFolioTable::find(folioId);
+        }
+    
+        headersCreated = true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createShipContainers</Name>
+				<Source><![CDATA[
+    protected void createShipContainers()
+    {
+        ITMContainers  shipContainersUpd;
+    
+        if (shipId && ITMContainers::exist(shipId, containerId))
+        {
+            throw error(strFmt("@InboundTransportationManagement:ContainerValueAlreadyExistsOnShipment", containerId, shipId));
+        }
+    
+        this.initShipContainer();
+    
+        if (shipContainers.validateWrite())
+        {
+            select firstOnly shipJourneyLine;
+            if (shipJourneyLine == null)
+            {
+                shipContainers.insert();
+            }
+            else
+            {
+                this.copyLegs();
+    
+                shipContainers.insert(false);
+            }
+        }
+        else
+        {
+            throw error("@SYS18447");
+        }
+    
+        shipContainersUpd = ITMContainers::findRecId(shipContainers.RecId, true);
+        if (shipContainersUpd)
+        {
+            shipContainersUpd.ShipDate = shipDate;
+            shipContainersUpd.update();
+            shipContainers = shipContainersUpd;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initShipContainer</Name>
+				<Source><![CDATA[
+    protected void initShipContainer()
+    {
+        shipContainers.clear();
+        shipContainers.initValue();
+        shipContainers.initFromShipTable(shipTable);
+        shipContainers.ShipId = shipTable.ShipId;
+        shipContainers.ShipContainerId = containerId;
+        shipContainers.ShipContainerTypeId = containerTypeId;
+        shipContainers.ShipHAWB = shipHAWB;
+        shipContainers.ShipMeasurement = containerMeasurement;
+        shipContainers.ShipMeasurementUnit = containerMeasurementUnit;
+
+        if (containerJourneyId)
+        {
+            shipContainers.ShipJourneyId = containerJourneyId;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createShipFolio</Name>
+				<Source><![CDATA[
+    protected void createShipFolio()
+    {
+        ITMTmpCreatorLine  tmpShipCreatorLineLocal;
+    
+        tmpShipCreatorLineLocal.setTmpData(tmpShipCreatorLine);
+        companyFolioMap = new Map(Types::String, Types::String);
+    
+        while select ShipDataArea from tmpShipCreatorLineLocal
+            group by ShipDataArea
+        {
+            shipFolioTable.clear();
+            shipFolioTable.initValue();
+            shipFolioTable.initFromShipTable(shipTable);
+            shipFolioTable.ShipId = shipTable.ShipId;
+            shipFolioTable.ShipFolioId = manualFolioId != '' ? manualFolioId : NumberSeq::newGetNum(ITMParameters::numRefShipFolioIdOutETG(), false).num();
+            shipFolioTable.ShipCustomsBroker = customsBroker;
+            shipFolioTable.VendAccount = vendAccount;
+            shipFolioTable.ShipDataArea = tmpShipCreatorLineLocal.ShipDataArea;
+    
+            companyFolioMap.insert(shipFolioTable.ShipDataArea, shipFolioTable.ShipFolioId);
+    
+            if (shipFolioTable.validateWrite())
+            {
+                shipFolioTable.insert();
+            }
+            else
+            {
+                throw error("@SYS18447");
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createShipLine</Name>
+				<Source><![CDATA[
+    protected int createShipLine(ITMTmpCreatorLine _tmpShipCreatorLine)
+    {
+        ITMFolioId shipFolioId;
+    
+        if (addToExistingFolio)
+        {
+            shipFolioId = shipFolioTable.ShipFolioId;
+        }
+        else
+        {
+            shipFolioId = this.findOrCreateFolio(_tmpShipCreatorLine.InventTransType, _tmpShipCreatorLine.InventTransId);
+        }
+    
+        ITMLineCreate::newCreateLine(
+            shipTable.ShipId,
+            shipContainers.ShipContainerId,
+            shipFolioId,
+            _tmpShipCreatorLine.InventTransId,
+            _tmpShipCreatorLine.InventTransType,
+            _tmpShipCreatorLine.TransferQty,
+            _tmpShipCreatorLine.Close);
+    
+        return 1;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createShipTable</Name>
+				<Source><![CDATA[
+    protected void createShipTable()
+    {
+        if (shipId)
+        {
+            shipTable = ITMTable::find(shipId);
+            if (!shipTable)
+            {
+                throw error(strFmt("@InboundTransportationManagement:ShipmentValueDoesNotExistDot", shipId));
+            }
+            return;
+        }
+    
+        this.initShipTable();
+    
+        if (shipTable.validateWrite())
+        {
+            shipTable.insert();
+        }
+        else
+        {
+            throw error("@SYS18447");
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initShipTable</Name>
+				<Source><![CDATA[
+    protected void initShipTable()
+    {
+        shipTable.clear();
+        shipTable.initValue();
+        shipTable.ShipId = this.getShipId();
+        shipTable.ShipVesselId = vesselId;
+        shipTable.ShipVoyage = voyage;
+        shipTable.ShipFromPort = fromPort;
+        shipTable.ShipToPort = toPort;
+        shipTable.DlvModeId = dlvModeId;
+        shipTable.ShipVendAccount = shipVendAccount;
+        shipTable.ShipJourneyId = journeyId;
+        shipTable.ShipDescription = shipDescription;
+        shipTable.ShipMAWB = shipMAWB;
+        shipTable.ShipIdExternal = shipIdExternal;
+        shipTable.ETGLandedCostType = ETGLandedCostType::Outbound;
+        if (journeyId)
+        {
+            shipTable.initPortsFromJourney();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getShipId</Name>
+				<Source><![CDATA[
+    public ITMId getShipId()
+    {
+        return NumberSeq::newGetNum(ITMParameters::numRefShipId(), false).num();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>findAutoCosts</Name>
+				<Source><![CDATA[
+    protected void findAutoCosts()
+    {
+        MapEnumerator   mE = companyFolioMap.getEnumerator();
+
+        shipTable.createShipCostTrans(true, true);
+    
+        if (createContainer || addToExistingContainer)
+        {
+            shipContainers.createShipCostTrans(true, true);
+        }
+        if (createFolio && !addToExistingFolio)
+        {
+            while (mE.moveNext())
+            {
+                shipFolioTable = ITMFolioTable::find(mE.currentValue());
+                shipFolioTable.createShipCostTrans(true, true);
+            }
+        }
+        else if (addToExistingFolio)
+        {
+            shipFolioTable.createShipCostTrans(true, true);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>findOrCreateFolio</Name>
+				<Source><![CDATA[
+    protected ITMFolioId findOrCreateFolio(
+        InventTransType _transType,
+        InventTransId _inventTransId
+        )
+    {
+        ITMCreatorSetupTable shipCreatorSetupTable;
+        SalesTable salesTable;
+        InventDim inventDim;
+        str keyStr;
+        container mapKey;
+        SalesLine salesLine;
+        InventTransferLine inventTransferLine;
+        InventTransferTable inventTransferTable;
+        DataAreaId dataAreaId;
+        ITMFolioId shipFolioId;
+    
+        Query query;
+        QueryBuildDataSource qbds;
+        QueryRun queryRun;
+    
+        if (createFolio)
+        {
+            select firstonly RecId from shipCreatorSetupTable;
+
+            if (shipCreatorSetupTable.RecId)
+            {
+                query = new Query();
+                qbds = query.addDataSource(tableNum(ITMCreatorSetupTable));
+                qbds.fields().addField(fieldNum(ITMCreatorSetupTable, TableNum));
+                qbds.fields().addField(fieldNum(ITMCreatorSetupTable, FieldNum));
+    
+                switch (_transType)
+                {
+                    case InventTransType::Sales:
+                        salesLine = SalesLine::findInventTransId(_inventTransId);
+                        dataAreaId = salesLine.dataAreaId;
+                        keyStr = salesLine.dataAreaId;
+    
+                        qbds.addRange(fieldNum(ITMCreatorSetupTable, tableNum)).value(queryValue(tableNum(SalesTable)));
+                        qbds.addRange(fieldNum(ITMCreatorSetupTable, tableNum)).value(queryValue(tableNum(SalesLine)));
+                        qbds.addRange(fieldNum(ITMCreatorSetupTable, tableNum)).value(queryValue(tableNum(InventDim)));
+    
+                        queryRun = new QueryRun(query);
+    
+                        while (queryRun.next())
+                        {
+                            shipCreatorSetupTable = queryRun.get(tableNum(ITMCreatorSetupTable));
+    
+                            switch (shipCreatorSetupTable.TableNum)
+                            {
+                                case tableNum(SalesTable):
+                                    if (!salesTable)
+                                    {
+                                        salesTable = salesLine.salesTable();
+                                    }
+                                    keyStr += salesTable.(shipCreatorSetupTable.FieldNum);
+                                    break;
+    
+                                case tableNum(SalesLine):
+                                    keyStr += salesLine.(shipCreatorSetupTable.FieldNum);
+                                    break;
+    
+                                case tableNum(InventDim):
+                                    if (!inventDim)
+                                    {
+                                        inventDim = salesLine.inventDim();
+                                    }
+                                    keyStr += inventDim.(shipCreatorSetupTable.FieldNum);
+                                    break;
+                            }
+                        }
+                        break;
+    
+                    case InventTransType::TransferOrderShip:
+                        inventTransferLine = InventTransferLine::findTransIdShip(_inventTransId);
+                        dataAreaId = inventTransferLine.dataAreaId;
+                        keyStr = inventTransferLine.dataAreaId;
+    
+                        qbds.addRange(fieldNum(ITMCreatorSetupTable, tableNum)).value(queryValue(tableNum(InventTransferTable)));
+                        qbds.addRange(fieldNum(ITMCreatorSetupTable, tableNum)).value(queryValue(tableNum(InventTransferLine)));
+                        qbds.addRange(fieldNum(ITMCreatorSetupTable, tableNum)).value(queryValue(tableNum(InventDim)));
+    
+                        queryRun = new QueryRun(query);
+    
+                        while (queryRun.next())
+                        {
+                            shipCreatorSetupTable = queryRun.get(tableNum(ITMCreatorSetupTable));
+    
+                            switch (shipCreatorSetupTable.TableNum)
+                            {
+                                case tableNum(InventTransferTable):
+                                    if (!inventTransferTable)
+                                    {
+                                        inventTransferTable = inventTransferLine.inventTransferTable();
+                                    }
+                                    keyStr += inventTransferTable.(shipCreatorSetupTable.FieldNum);
+                                    break;
+    
+                                case tableNum(InventTransferLine):
+                                    keyStr += inventTransferLine.(shipCreatorSetupTable.FieldNum);
+                                    break;
+    
+                                case tableNum(InventDim):
+                                    if (!inventDim)
+                                    {
+                                        inventDim = inventTransferLine.inventDim();
+                                    }
+                                    keyStr += inventDim.(shipCreatorSetupTable.FieldNum);
+                                    break;
+                            }
+                        }
+                        break;
+                    }
+            }
+            else
+            {
+                dataAreaId = curExt();
+                keyStr = dataAreaId;
+            }
+    
+            mapKey = [_transType, keyStr];
+
+            if (companyFolioMap.exists(mapKey))
+            {
+                shipFolioId = companyFolioMap.lookup(mapKey);
+            }
+            else
+            {
+                shipFolioTable.clear();
+                shipFolioTable.initValue();
+                shipFolioTable.initFromShipTable(shipTable);
+                shipFolioTable.ShipId = shipTable.ShipId;
+                shipFolioTable.ShipFolioId = manualFolioId != '' ? manualFolioId : NumberSeq::newGetNum(ITMParameters::numRefShipFolioIdOutETG(), false).num();
+                shipFolioTable.ShipCustomsBroker = customsBroker;
+                shipFolioTable.VendAccount = vendAccount;
+                shipFolioTable.ShipDataArea = dataAreaId;
+                shipFolioId = shipFolioTable.ShipFolioId;
+
+                companyFolioMap.insert(mapKey, shipFolioId);
+    
+                if (shipFolioTable.validateWrite())
+                {
+                    shipFolioTable.insert();
+                }
+                else
+                {
+                    throw error("@SYS18447");
+                }
+            }
+        }
+    
+        return shipFolioId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initFromParameters</Name>
+				<Source><![CDATA[
+    private void initFromParameters()
+    {
+        ITMParameters  shipParameters = ITMParameters::find();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initParmDefault</Name>
+				<Source><![CDATA[
+    public void initParmDefault()
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initTmpShipCreatorLine</Name>
+				<Source><![CDATA[
+    protected void initTmpShipCreatorLine()
+    {
+        MapEnumerator   mE = Map::create(selectedLinesMap).getEnumerator();
+        PurchLine       purchLine;
+    
+        while (mE.moveNext())
+        {
+            select firstOnly crossCompany dataAreaId, InventTransId from purchLine
+                where purchLine.RecId == mE.currentKey();
+    
+            tmpShipCreatorLine.clear();
+            tmpShipCreatorLine.ShipDataArea = purchLine.dataAreaId;
+            tmpShipCreatorLine.InventTransId = purchLine.InventTransId;
+            tmpShipCreatorLine.TransferQty = mE.currentValue();
+            tmpShipCreatorLine.Selected = NoYes::Yes;
+            tmpShipCreatorLine.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>lastValueDataAreaId</Name>
+				<Source><![CDATA[
+    public dataAreaId lastValueDataAreaId()
+    {
+        return curext();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>lastValueDesignName</Name>
+				<Source><![CDATA[
+    public IdentifierName lastValueDesignName()
+    {
+        return '';
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>lastValueElementName</Name>
+				<Source><![CDATA[
+    public IdentifierName lastValueElementName()
+    {
+        return classId2Name(classIdGet(this));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>lastValueType</Name>
+				<Source><![CDATA[
+    public UtilElementType lastValueType()
+    {
+        return UtilElementType::Class;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>lastValueUserId</Name>
+				<Source><![CDATA[
+    public userId lastValueUserId()
+    {
+        return curUserId();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>new</Name>
+				<Source><![CDATA[
+    protected void new()
+    {
+        //BP Deviation documented
+        shipJourneyLine.setTmp();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>pack</Name>
+				<Source><![CDATA[
+    public container pack()
+    {
+        return [CurrentVersion, #CurrentList];
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmAddToExistingContainer</Name>
+				<Source><![CDATA[
+    protected NoYes parmAddToExistingContainer(
+        NoYes _addToExistingContainer = addToExistingContainer
+        )
+    {
+        addToExistingContainer = _addToExistingContainer;
+        return addToExistingContainer;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmAddToExistingFolio</Name>
+				<Source><![CDATA[
+    protected NoYes parmAddToExistingFolio(
+        NoYes _addToExistingFolio = addToExistingFolio
+        )
+    {
+        addToExistingFolio = _addToExistingFolio;
+        return addToExistingFolio;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmContainerId</Name>
+				<Source><![CDATA[
+    protected ITMContainerId parmContainerId(ITMContainerId _containerId = containerId)
+    {
+        containerId = _containerId;
+        return containerId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmContainerJourneyId</Name>
+				<Source><![CDATA[
+    protected ITMJourneyId parmContainerJourneyId(ITMJourneyId _containerJourneyId = containerJourneyId)
+    {
+        containerJourneyId = _containerJourneyId;
+        return containerJourneyId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmManualFolioId</Name>
+				<Source><![CDATA[
+    protected ITMFolioId parmManualFolioId(ITMFolioId _manualFolioId = manualFolioId)
+    {
+        manualFolioId = _manualFolioId;
+        return manualFolioId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmContainerMeasurement</Name>
+				<Source><![CDATA[
+    protected ITMMeasurement parmContainerMeasurement(ITMMeasurement _containerMeasurement = containerMeasurement)
+    {
+        containerMeasurement = _containerMeasurement;
+        return containerMeasurement;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmContainerMeasurementUnit</Name>
+				<Source><![CDATA[
+    protected ITMMeasurementUnit parmContainerMeasurementUnit(ITMMeasurementUnit _containerMeasurementUnit = containerMeasurementUnit)
+    {
+        containerMeasurementUnit = _containerMeasurementUnit;
+        return containerMeasurementUnit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmContainerTypeId</Name>
+				<Source><![CDATA[
+    protected ITMContainerTypeId parmContainerTypeId(ITMContainerTypeId _containerTypeId = containerTypeId)
+    {
+        containerTypeId = _containerTypeId;
+        return containerTypeId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmCustomsBroker</Name>
+				<Source><![CDATA[
+    protected ITMCustomsBroker parmCustomsBroker(ITMCustomsBroker _customsBroker = customsBroker)
+    {
+        customsBroker = _customsBroker;
+        return customsBroker;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmDlvModeId</Name>
+				<Source><![CDATA[
+    protected DlvModeId parmDlvModeId(DlvModeId _dlvModeId = dlvModeId)
+    {
+        dlvModeId = _dlvModeId;
+        return dlvModeId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmFolioId</Name>
+				<Source><![CDATA[
+    protected ITMFolioId parmFolioId(ITMFolioId _folioId = folioId)
+    {
+        folioId = _folioId;
+        return folioId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmFromPort</Name>
+				<Source><![CDATA[
+    protected ITMFromPort parmFromPort(ITMFromPort _fromPort = fromPort)
+    {
+        fromPort = _fromPort;
+        return fromPort;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmJourneyId</Name>
+				<Source><![CDATA[
+    protected ITMJourneyId parmJourneyId(ITMJourneyId _journeyId = journeyId)
+    {
+        journeyId = _journeyId;
+        return journeyId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmPendingContainer</Name>
+				<Source><![CDATA[
+    protected ITMContainerId parmPendingContainer(ITMContainerId _pendingContainer = pendingContainer)
+    {
+        pendingContainer = _pendingContainer;
+        return pendingContainer;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmPendingShipment</Name>
+				<Source><![CDATA[
+    protected ITMId parmPendingShipment(ITMId _pendingShipment = pendingShipment)
+    {
+        pendingShipment = _pendingShipment;
+        return pendingShipment;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmShipIdExternal</Name>
+				<Source><![CDATA[
+    protected ITMIdExternal parmShipIdExternal(ITMIdExternal _shipIdExternal = shipIdExternal)
+    {
+        shipIdExternal = _shipIdExternal;
+        return shipIdExternal;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmSelectedLinesMap</Name>
+				<Source><![CDATA[
+    private container parmSelectedLinesMap(container _selectedLinesMap = selectedLinesMap)
+    {
+        selectedLinesMap = _selectedLinesMap;
+        return selectedLinesMap;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmShipDate</Name>
+				<Source><![CDATA[
+    private ITMDate parmShipDate(ITMDate _shipDate = shipDate)
+    {
+        shipDate = _shipDate;
+        return shipDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmShipDescription</Name>
+				<Source><![CDATA[
+    protected ITMDescription parmShipDescription(ITMDescription _shipDescription = shipDescription)
+    {
+        shipDescription = _shipDescription;
+        return shipDescription;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmShipHAWB</Name>
+				<Source><![CDATA[
+    private ITMHAWB parmShipHAWB(ITMHAWB _shipHAWB = shipHAWB)
+    {
+        shipHAWB = _shipHAWB;
+        return shipHAWB;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmShipId</Name>
+				<Source><![CDATA[
+    protected ITMId parmShipId(ITMId _shipId = shipId)
+    {
+        shipId = _shipId;
+        return shipId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmShipJourneyLine</Name>
+				<Source><![CDATA[
+    protected ITMJourneyLine parmShipJourneyLine(ITMJourneyLine _shipJourneyLine = shipJourneyLine)
+    {
+        if (!prmisdefault(_shipJourneyLine))
+        {
+            shipJourneyLine.setTmpData(_shipJourneyLine);
+        }
+        return shipJourneyLine;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmShipMAWB</Name>
+				<Source><![CDATA[
+    private ITMMAWB parmShipMAWB(ITMMAWB _shipMAWB = shipMAWB)
+    {
+        shipMAWB = _shipMAWB;
+        return shipMAWB;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmShipVendAccount</Name>
+				<Source><![CDATA[
+    protected ITMVendAccount parmShipVendAccount(ITMVendAccount _shipVendAccount = shipVendAccount)
+    {
+        shipVendAccount = _shipVendAccount;
+        return shipVendAccount;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmTmpShipCreatorLine</Name>
+				<Source><![CDATA[
+    protected ITMTmpCreatorLine parmTmpShipCreatorLine(ITMTmpCreatorLine _tmpShipCreatorLine = tmpShipCreatorLine)
+    {
+        if (!prmisDefault(_tmpShipCreatorLine))
+        {
+            tmpShipCreatorLine.setTmpData(_tmpShipCreatorLine);
+        }
+        return tmpShipCreatorLine;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmToPort</Name>
+				<Source><![CDATA[
+    protected ITMToPort parmToPort(ITMToPort _toPort = toPort)
+    {
+        toPort = _toPort;
+        return toPort;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmVendAccount</Name>
+				<Source><![CDATA[
+    protected VendAccount parmVendAccount(VendAccount _vendAccount = vendAccount)
+    {
+        vendAccount = _vendAccount;
+        return vendAccount;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmVesselId</Name>
+				<Source><![CDATA[
+    protected ITMVesselId parmVesselId(ITMVesselId _vesselId = vesselId)
+    {
+        vesselId = _vesselId;
+        return vesselId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmVoyage</Name>
+				<Source><![CDATA[
+    private ITMVoyage parmVoyage(ITMVoyage _voyage = voyage)
+    {
+        voyage = _voyage;
+        return voyage;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmSkipUserInteraction</Name>
+				<Source><![CDATA[
+    protected boolean parmSkipUserInteraction(boolean _skipUserInteraction = skipUserInteraction)
+    {
+        skipUserInteraction = _skipUserInteraction;
+        return skipUserInteraction;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>prompt</Name>
+				<Source><![CDATA[
+    protected boolean prompt()
+    {
+        boolean         ret = false;
+    
+        if (this.validate(true))
+        {
+            boolean isITMEnabled = ITMFeatureManagementVisibilityManager::isEnabled();
+            createContainer = isITMEnabled && !addToExistingContainer;
+            createFolio = isITMEnabled && !addToExistingFolio;
+            findAutoCosts = NoYes::Yes;
+    
+            ret = true;
+        }
+    
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>preRunValidation</Name>
+				<Source><![CDATA[
+    protected void preRunValidation()
+    {
+        if (!this.validate())
+        {
+            throw error("@SYS18447");
+        }
+
+        if (findAutoCosts && shipId)
+        {
+            this.checkExistingAutoCosts();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>preRunOperation</Name>
+				<Source><![CDATA[
+    protected void preRunOperation()
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postShipLineCreation</Name>
+				<Source><![CDATA[
+    protected void postShipLineCreation()
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postRunOperation</Name>
+				<Source><![CDATA[
+    protected void postRunOperation()
+    {
+        if (pendingShipment && pendingContainer)
+        {
+            ITMContainers pendingShipContainers = ITMContainers::find(pendingShipment, pendingContainer, true);
+            pendingShipContainers.ShipPendingUsed = NoYes::Yes;
+            pendingShipContainers.update();
+        }
+
+        if (findAutoCosts)
+        {
+            this.findAutoCosts();
+        }
+
+        if (shipContainers && createContainer && !addToExistingContainer)
+        {
+            this.updateContainerShipDate();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postRunValidation</Name>
+				<Source><![CDATA[
+    protected boolean postRunValidation(int _numOfLines)
+    {
+        boolean ret;
+        if (!_numOfLines)
+        {
+            throw error("@InboundTransportationManagement:AShipmentHasNotBeenCreatedAsNoLinesCould");
+        }
+
+        if (shipId)
+        {
+            info(strFmt("@InboundTransportationManagement:RecordsAddedToShipmentValue", shipTable.ShipId), '', SysInfoAction_TableField::newBuffer(shipTable));
+            ret = true;
+        }
+        else if (shipTable.RecId)
+        {
+            info(strFmt("@InboundTransportationManagement:ShipmentValueCreatedDot", shipTable.ShipId), '', SysInfoAction_TableField::newBuffer(shipTable));
+            ret = true;
+        }
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    protected boolean run()
+    {
+        using (var activityContext = ITMInstrumentationLogger::newFromName(classStr(ETGITMCreatorCreateShipmentOut)).getActivities().getCreateShipment())
+        {
+            ITMTmpCreatorLine tmpShipCreatorLineLocal;
+            Counter numOfLines;
+            ITMContainers pendingShipContainers;
+            boolean ret;
+    
+            setPrefix("@InboundTransportationManagement:ShipmentCreator");
+    
+            this.preRunValidation();
+            this.preRunOperation();
+    
+            ttsBegin;
+    
+            tmpShipCreatorLineLocal.setTmpData(tmpShipCreatorLine);
+            companyFolioMap = new Map(Types::Container, Types::String);
+
+            ITMTTSTable::createTTSOutETG();
+    
+            while select sum(TransferQty), sum(InventQty), InventTransId, Close, ShipDataArea, InventTransType from tmpShipCreatorLineLocal
+                group by InventTransId, Close, ShipDataArea, InventTransType
+                where tmpShipCreatorLineLocal.Selected == NoYes::Yes
+                    && tmpShipCreatorLineLocal.AddedToBucket == NoYes::Yes
+                    && tmpShipCreatorLineLocal.TransferQty >  0
+            {
+                if (!headersCreated)
+                {
+                    this.createHeaders();
+                }
+    
+                changeCompany (tmpShipCreatorLineLocal.ShipDataArea)
+                {
+                    numOfLines += this.createShipLine(tmpShipCreatorLineLocal);
+                }
+            }
+
+            this.postShipLineCreation();
+
+            ITMTTSTable::deleteTTSOutETG();
+    
+            ret = this.postRunValidation(numOfLines);
+            this.postRunOperation();
+
+            ttsCommit;
+    
+            return ret;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>unpack</Name>
+				<Source><![CDATA[
+    public boolean unpack(container _packedClass)
+    {
+        Version version = RunBase::getVersion(_packedClass);
+        boolean ret;
+    
+        switch (version)
+        {
+            case CurrentVersion:
+                [version, #CurrentList] = _packedClass;
+                ret = true;
+                break;
+    
+            default:
+                ret = false;
+        }
+    
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateContainerShipDate</Name>
+				<Source><![CDATA[
+    private void updateContainerShipDate()
+    {
+        ITMContainers shipContainersLocal;
+    
+        shipContainersLocal = ITMContainers::findRecId(shipContainers.RecId, true);
+        shipContainersLocal.ShipDate = shipDate;
+        shipContainersLocal.update();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validate</Name>
+				<Source><![CDATA[
+    protected boolean validate(boolean _prePromptCheck = false)
+    {
+        boolean ret = true;
+    
+        if (!shipId && !vesselId)
+        {
+            ret = checkFailed("@InboundTransportationManagement:VesselMustBeSpecifiedDot");
+        }
+    
+        if (((createContainer && !_prePromptCheck) || addToExistingContainer) && !containerId)
+        {
+            ret = checkFailed("@InboundTransportationManagement:ContainerMustBeSpecifiedDot");
+        }
+    
+        if (addToExistingFolio && !folioId)
+        {
+            ret = checkFailed("@InboundTransportationManagement:FolioMustBeSpecifiedDot");
+        }
+
+        if (this.parmContainerTypeId())
+        {
+            Weight weight, maxWeight;
+            Volume volume, maxVolume;
+            InventQty qty;
+            NoYes volumeMissing, weightMissing;
+            NoYes outsideWeightTolerance, outsideVolumeTolerance;
+            ITMTmpCreatorLine tmpShipCreatorLineCheck;
+            tmpShipCreatorLineCheck.setTmpData(tmpShipCreatorLine);
+
+            [weight,
+             volume,
+             qty,
+             volumeMissing,
+             weightMissing,
+             maxWeight,
+             maxVolume,
+             outsideWeightTolerance,
+             outsideVolumeTolerance] = ETGITMCreatorTableGeneration::selectedTotals(tmpShipCreatorLineCheck, this.parmContainerTypeId());
+
+            if (outsideWeightTolerance)
+            {
+                ret = checkFailed(strFmt("@InboundTransportationManagement:OutOfWeightTolerance", this.parmContainerTypeId()));
+            }
+
+            if (outsideVolumeTolerance)
+            {
+                ret = checkFailed(strFmt("@InboundTransportationManagement:OutOfVolumeTolerance", this.parmContainerTypeId()));
+            }
+        }
+    
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initFromContract</Name>
+				<Source><![CDATA[
+    protected void initFromContract(ITMCreatorCreateShipmentContract _contract)
+    {
+        tmpShipCreatorLine.setTmpData(_contract.parmTmpShipCreatorLine());
+        shipJourneyLine.setTmpData(_contract.parmShipJourneyLine());
+
+        vesselId                    = _contract.parmVesselId();
+        fromPort                    = _contract.parmFromPort();
+        toPort                      = _contract.parmToPort();
+        dlvModeId                   = _contract.parmDlvModeId();
+        shipVendAccount             = _contract.parmShipVendAccount();
+        containerId                 = _contract.parmContainerId();
+        containerTypeId             = _contract.parmContainerTypeId();
+        customsBroker               = _contract.parmCustomsBroker();
+        vendAccount                 = _contract.parmVendAccount();
+        journeyId                   = _contract.parmJourneyId();
+        pendingShipment             = _contract.parmPendingShipment();
+        pendingContainer            = _contract.parmPendingContainer();
+        shipDescription             = _contract.parmShipDescription();
+        shipId                      = _contract.parmShipId();
+        voyage                      = _contract.parmVoyage();
+        containerJourneyId          = _contract.parmContainerJourneyId();
+        addToExistingContainer      = _contract.parmAddToExistingContainer();
+        addToExistingFolio          = _contract.parmAddToExistingFolio();
+        folioId                     = _contract.parmFolioId();
+        shipDate                    = _contract.parmShipDate();
+        shipMAWB                    = _contract.parmShipMAWB();
+        shipHAWB                    = _contract.parmShipHAWB();
+        containerMeasurement        = _contract.parmContainerMeasurement();
+        containerMeasurementUnit    = _contract.parmContainerMeasurementUnit();
+        shipIdExternal              = _contract.parmShipIdExternal();
+        manualFolioId               = _contract.parmManualFolioId();
+        selectedLinesMap            = _contract.parmSelectedLinesMap();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static ETGITMCreatorCreateShipmentOut construct()
+    {
+        if(FeatureStateProvider::isFeatureEnabled(ETGOTMCreateShipmentForSameCompanyFeature::instance()))
+        {
+            return new ETGITMCreatorCreateShipmentWithinSameCompanyOut();
+        }
+        else
+        {
+            return new ETGITMCreatorCreateShipmentOut();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createShipmentFromShipEditor</Name>
+				<Source><![CDATA[
+    public static boolean createShipmentFromShipEditor(
+        ITMTmpCreatorLine _tmpShipCreatorLine,
+        ITMTable _itmTable,
+        ITMContainers _itmContainers,
+        boolean _addToExistingContainer,
+        boolean _skipUserInteraction = false)
+
+    {
+        boolean ret;
+        ETGITMCreatorCreateShipmentOut shipCreatorCreateShipment = ETGITMCreatorCreateShipmentOut::construct();
+        shipCreatorCreateShipment.parmTmpShipCreatorLine(_tmpShipCreatorLine);
+        shipCreatorCreateShipment.parmVesselId(_itmTable.ShipVesselId);
+        shipCreatorCreateShipment.parmFromPort(_itmTable.ShipFromPort);
+        shipCreatorCreateShipment.parmToPort(_itmTable.ShipToPort);
+        shipCreatorCreateShipment.parmDlvModeId(_itmTable.DlvModeId);
+        shipCreatorCreateShipment.parmShipVendAccount(_itmTable.ShipVendAccount);
+        shipCreatorCreateShipment.parmContainerId(_itmContainers.ShipContainerId);
+        shipCreatorCreateShipment.parmContainerTypeId(_itmContainers.ShipContainerTypeId);
+        shipCreatorCreateShipment.parmVendAccount(_itmContainers.ShipLocalForwarder);
+        shipCreatorCreateShipment.parmJourneyId(_itmContainers.ShipJourneyId);
+        shipCreatorCreateShipment.parmShipDescription(_itmTable.ShipDescription);
+        shipCreatorCreateShipment.parmShipId(_itmTable.ShipId);
+        shipCreatorCreateShipment.parmVoyage(_itmTable.ShipVoyage);
+        shipCreatorCreateShipment.parmContainerJourneyId(_itmContainers.ShipJourneyId);
+        shipCreatorCreateShipment.parmAddToExistingContainer(_addToExistingContainer);
+        shipCreatorCreateShipment.parmShipDate(_itmContainers.ShipDate);
+        shipCreatorCreateShipment.parmShipHAWB(_itmContainers.ShipHAWB);
+        shipCreatorCreateShipment.parmContainerMeasurement(_itmContainers.ShipMeasurement);
+        shipCreatorCreateShipment.parmContainerMeasurementUnit(_itmContainers.ShipMeasurementUnit);
+        shipCreatorCreateShipment.parmSkipUserInteraction(_skipUserInteraction);
+
+        if (shipCreatorCreateShipment.prompt())
+        {
+            ret = shipCreatorCreateShipment.run();
+        }
+    
+        return ret;
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createShipment</Name>
+				<Source><![CDATA[
+    public static server boolean createShipment(
+        ITMTmpCreatorLine _tmpShipCreatorLine,
+        ITMVesselId _vesselId,
+        ITMFromPort _fromPort,
+        ITMToPort _toPort,
+        DlvModeId _dlvModeId,
+        ITMVendAccount _shipVendAccount,
+        ITMContainerId _containerId,
+        ITMContainerTypeId _containerTypeId,
+        ITMCustomsBroker _customsBroker,
+        VendAccount _vendAccount,
+        ITMJourneyId _journeyId,
+        ITMDescription _shipDescription,
+        ITMId _shipId,
+        ITMVoyage _voyage,
+        ITMDate _shipDate,
+        ITMId _pendingShipment = '',
+        ITMContainerId _pendingContainer = '',
+        NoYes _addToExistingContainer = NoYes::No,
+        NoYes _addToExistingFolio = NoYes::No,
+        ITMFolioId _folioId = '',
+        ITMJourneyId _containerJourneyId = '',
+        ITMJourneyLine _shipJourneyLine = null
+        , ITMMAWB _shipMAWB = ''
+        , ITMHAWB _shipHAWB = ''
+        , ITMMeasurement _containerMeasurement = 0
+        , ITMMeasurementUnit _containerMeasurementUnit = ITMMeasurementUnit::None
+        , ITMIdExternal _shipIdExternal = ''
+        , ITMFolioId _manualFolioId = ''
+        , boolean _skipUserInteraction = false
+        )
+    {
+        ETGITMCreatorCreateShipmentOut shipCreatorCreateShipment = ETGITMCreatorCreateShipmentOut::construct();
+        boolean ret;
+    
+        shipCreatorCreateShipment.parmTmpShipCreatorLine(_tmpShipCreatorLine);
+        shipCreatorCreateShipment.parmVesselId(_vesselId);
+        shipCreatorCreateShipment.parmFromPort(_fromPort);
+        shipCreatorCreateShipment.parmToPort(_toPort);
+        shipCreatorCreateShipment.parmDlvModeId(_dlvModeId);
+        shipCreatorCreateShipment.parmShipVendAccount(_shipVendAccount);
+        shipCreatorCreateShipment.parmContainerId(_containerId);
+        shipCreatorCreateShipment.parmContainerTypeId(_containerTypeId);
+        shipCreatorCreateShipment.parmCustomsBroker(_customsBroker);
+        shipCreatorCreateShipment.parmVendAccount(_vendAccount);
+        shipCreatorCreateShipment.parmJourneyId(_journeyId);
+        shipCreatorCreateShipment.parmPendingShipment(_pendingShipment);
+        shipCreatorCreateShipment.parmPendingContainer(_pendingContainer);
+        shipCreatorCreateShipment.parmShipDescription(_shipDescription);
+        shipCreatorCreateShipment.parmShipId(_shipId);
+        shipCreatorCreateShipment.parmVoyage(_voyage);
+        shipCreatorCreateShipment.parmContainerJourneyId(_containerJourneyId);
+        shipCreatorCreateShipment.parmAddToExistingContainer(_addToExistingContainer);
+        shipCreatorCreateShipment.parmAddToExistingFolio(_addToExistingFolio);
+        shipCreatorCreateShipment.parmFolioId(_folioId);
+        shipCreatorCreateShipment.parmShipDate(_shipDate);
+        shipCreatorCreateShipment.parmShipJourneyLine(_shipJourneyLine);
+        shipCreatorCreateShipment.parmShipMAWB(_shipMAWB);
+        shipCreatorCreateShipment.parmShipHAWB(_shipHAWB);
+        shipCreatorCreateShipment.parmContainerMeasurement(_containerMeasurement);
+        shipCreatorCreateShipment.parmContainerMeasurementUnit(_containerMeasurementUnit);
+        shipCreatorCreateShipment.parmShipIdExternal(_shipIdExternal);
+        shipCreatorCreateShipment.parmManualFolioId(_manualFolioId);
+        shipCreatorCreateShipment.parmSkipUserInteraction(_skipUserInteraction);
+
+        if (shipCreatorCreateShipment.prompt())
+        {
+            ret = shipCreatorCreateShipment.run();
+        }
+    
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createShipmentFromContract</Name>
+				<Source><![CDATA[
+    protected boolean createShipmentFromContract(ITMCreatorCreateShipmentContract _contract)
+    {
+        this.initFromContract(_contract);
+
+        boolean ret;
+
+        if (this.prompt())
+        {
+            ret = this.run();
+        }
+    
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

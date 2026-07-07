@@ -1,0 +1,1607 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxForm xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V6">
+	<Name>ETGGrainReceipt</Name>
+	<SourceCode>
+		<Methods xmlns="">
+			<Method>
+				<Name>classDeclaration</Name>
+				<Source><![CDATA[
+[Form]
+public class ETGGrainReceipt extends FormRun
+{
+}
+]]></Source>
+			</Method>
+			<Method>
+				<Name>init</Name>
+				<Source><![CDATA[
+    public void init()
+    {
+        super();
+
+        Args args = element.args();
+        PurchTable purchTableArg;
+        PurchTable purchTable;
+        VendTable  vendTable;
+        PurchAgreementHeader purchAHeader;
+        InventTable inventTable;
+        DimensionDefault     defaultDimRecId;
+        Currency currency;
+        ETGCanadaParameters canadaParameters = ETGCanadaParameters::find();
+
+        if (args && args.record() && args.record().TableId == tableNum(PurchTable))
+        {
+            purchTableArg = args.record();
+            purchTable    = PurchTable::find(purchTableArg.PurchId, true);
+
+            
+            ETGGrainReceiptNoteTable_ds.create(true);
+            ETGGrainReceiptNoteTable header = ETGGrainReceiptNoteTable_ds.cursor();
+
+            header.PurchId           = purchTable.PurchId;
+            header.VendAccount       = purchTable.OrderAccount;
+           
+            header.ElevatorReceiptId = purchTable.ETGElevatorReceiptNumber;
+
+            currency = Currency::find(purchTable.CurrencyCode);
+
+            header.CurrencyCode = currency.Symbol;
+
+            // Vendor info
+            vendTable = VendTable::find(purchTable.OrderAccount);
+            if (vendTable)
+            {
+                header.ProducerName    = vendTable.customerAccountName();
+                header.ProducerAddress = vendTable.postalAddress().Address;
+            }
+
+            purchAHeader = PurchAgreementHeader::find(purchTable.MatchingAgreement);
+            if (purchAHeader)
+            {
+                header.ContractNumber = purchAHeader.PurchNumberSequence;
+            }
+            
+            delete_from ETGGrainReceiptNoteLine
+            where ETGGrainReceiptNoteLine.GrainReceiptNoteId == header.GrainReceiptNoteId;
+
+            PurchLine purchLine, purchLineDim;
+            ETGGrainReceiptNoteLine grnLine;
+            int grnLineNo = 1;
+            real total = 0.00;
+            real chargesTotal = 0.0;
+            while select purchLine
+            where purchLine.PurchId == purchTable.PurchId
+               && purchLine.PurchStatus != PurchStatus::Canceled
+            {
+                grnLine.clear();
+                grnLine.initValue();
+
+                grnLine.GrainReceiptNoteId = header.GrainReceiptNoteId;
+                grnLine.LineNumber         = grnLineNo;
+                grnLine.ItemId             = purchLine.ItemId;
+                grnLine.Description        = purchLine.itemName();
+                grnLine.Qty                = purchLine.RemainPurchPhysical;  
+                grnLine.Price              = purchLine.PurchPrice;
+                grnLine.LineAmount         = grnLine.Qty * grnLine.Price;
+                total                     += grnLine.LineAmount;
+
+                grnLine.insert();
+                grnLineNo++;
+            }
+
+        
+            header.calculateTotals();
+            header.recalcNetAmountPayable();
+
+            ETGGrainReceiptNoteLine_ds.executeQuery();
+            ETGGrainReceiptNoteTable_ds.refresh();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+		<DataSources xmlns="">
+			<DataSource>
+				<Name>ETGGrainReceiptNoteTable</Name>
+				<Methods>
+					<Method>
+						<Name>active</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        /// <returns></returns>
+        public int active()
+        {
+            int ret;
+            ret = super();
+
+            ETGGrainReceiptNoteTable head = ETGGrainReceiptNoteTable;
+         
+            boolean isDraft     = head.GrainReceiptStatus == ETGGrainReceiptStatus::Draft;
+            boolean isConfirmed = head.GrainReceiptStatus == ETGGrainReceiptStatus::Confirmed;
+
+            ETGGrainReceiptNoteTable_ds.allowEdit(isDraft);
+            ETGGrainReceiptNoteLine_ds.allowEdit(isDraft);
+            ETGGrainReceiptCharges_ds.allowEdit(isDraft);
+            ETGGrainReceiptPaymentTable_ds.allowEdit(isDraft);
+            AddButton.enabled(isDraft);
+            Remove.enabled(isDraft);
+
+            SubmitButton.enabled(isDraft);
+            PrintGrainReceipt.enabled(isConfirmed);
+            
+            ChangeRequest.enabled(isConfirmed);
+
+            ETGGrainReceiptNoteTable header = this.cursor();
+            ETGElevatorReceiptTable elevatorReceipt;
+            InventTable inventTable;
+            ETGScaleTicketTable scaleTicket;
+            ETGElevatorReceiptGrainItemTable grainItem;
+            PurchTable purchTable = PurchTable::find(header.PurchId);
+            PurchLine purchLine;
+            ETGCanadaParameters canadaParameters = ETGCanadaParameters::find();
+
+            AutoPostGRN.enabled(isConfirmed && purchTable.PurchStatus == PurchStatus::Backorder);
+
+            select purchLine
+            where purchLine.PurchId == purchTable.PurchId
+                && purchLine.PurchStatus != PurchStatus::Canceled;
+
+            if (header && header.ElevatorReceiptId)
+            {
+                select firstonly crossCompany elevatorReceipt
+                where elevatorReceipt.ElevatorReceiptNumber == header.ElevatorReceiptId;
+
+                if (elevatorReceipt)
+                {
+                    header.ProductionEntity        = elevatorReceipt.DataAreaId;
+                    header.GrossWeight             = elevatorReceipt.GrossWeight;
+                    header.VehicleWeight           = elevatorReceipt.VehicleWeight;
+                    header.ProductUnloaded         = elevatorReceipt.GrainUnloadedWeight;
+                    header.ScaleTicketNumber       = elevatorReceipt.ScaleTicketReferenceNumber;
+                    header.StationName             = elevatorReceipt.StationName;
+                    header.DockagePercentage       = elevatorReceipt.DockagePercentage;
+                    header.SplitsPercentage        = elevatorReceipt.SplitsPercentage;
+                    header.DockageWeight           = elevatorReceipt.DockageWeight;
+                    header.SplitsWeight            = elevatorReceipt.SplitsWeight;
+                    header.FinalMainProductWeight  =  (header.ProductUnloaded - (header.DockageWeight +  header.SplitsWeight));
+                    header.NetWeight               = (elevatorReceipt.GrainUnloadedWeight - elevatorReceipt.DockageWeight - elevatorReceipt.SplitsWeight);
+                    header.FinalMainProductWeight  =  (elevatorReceipt.GrainUnloadedWeight - elevatorReceipt.DockageWeight - elevatorReceipt.SplitsWeight);
+                    header.CropYearCopy            =  ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(purchLine.DefaultDimension,canadaParameters.CropYear);
+
+                    
+                    if(header.ProductionEntity == 'p012')
+                    {
+                    header.ProductionEntity  =  "P012";
+                    }
+                    else if(header.ProductionEntity == 'p009')
+                    {
+                        header.ProductionEntity  =  "P009";
+                    }
+                    else
+                    {
+                        header.ProductionEntity  =  header.ProductionEntity;
+                    }
+
+                    select firstonly crossCompany grainItem
+                        where grainItem.ElevatorReceiptNumber == elevatorReceipt.ElevatorReceiptNumber;
+                    
+                    if(grainItem)
+                    {
+                        select firstonly crossCompany inventTable
+                        where inventTable.ItemId == grainItem.ItemId;
+
+                        if (inventTable)
+                        {
+                            header.Commodity = inventTable.ETGCommodity;
+                        }
+                    }
+
+                    if( header.ScaleTicketNumber)
+                    {
+                        select firstonly crossCompany scaleTicket
+                        where scaleTicket.ScaleTicketNumber == header.ScaleTicketNumber;
+
+                        if(scaleTicket)
+                        {
+                            header.ContractNumber = scaleTicket.RefPurchAgreementNum;
+                        }
+                    }
+
+                    ttsbegin;
+                    header.update();
+                    ttscommit;
+
+                    ETGGrainReceiptNoteTable_ds.reread();
+                    ETGGrainReceiptNoteTable_ds.refresh();
+                }
+            }
+
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>initValue</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// For number sequence
+        /// </summary>
+        public void initValue()
+        {
+            super();
+            ttsbegin;
+            ETGGrainReceiptNoteTable.GrainReceiptNoteId =
+            NumberSeq::newGetNum(NumberSeqReference::findReference(extendedTypeNum(ETGGrainReceiptNoteId))).num();
+            ttscommit;
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields />
+			</DataSource>
+		</DataSources>
+		<DataControls xmlns="">
+			<Control>
+				<Name>SubmitButton</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// This method is for Submit button clicked
+        /// </summary>
+        public void clicked()
+        {
+            ETGGrainReceiptNoteTable header = ETGGrainReceiptNoteTable_ds.cursor();
+
+            if (!header)
+            return;
+
+            ETGGrainReceiptPaymentTable pay;
+            real totalPct = 0.00;
+
+            while select pay
+            where pay.GrainReceiptNoteId == header.GrainReceiptNoteId
+            {
+                totalPct += pay.Percentage;
+            }
+
+            if (round(totalPct, 2) != 100)
+            {
+                throw error(strFmt(
+                "Total payment percentage must be 100. Current total is %1.",
+                totalPct));
+            }
+
+            ttsbegin;
+            header = ETGGrainReceiptNoteTable::findFromGrainReceiptNote(header.GrainReceiptNoteId,true);
+            ETGGrainReceiptNoteTable.GrainReceiptStatus = ETGGrainReceiptStatus::Confirmed;
+            ETGGrainReceiptNoteTable.update();
+            ttscommit;
+
+            ETGGrainReceiptNoteTable_ds.research(true);
+            ETGGrainReceiptNoteTable_ds.refresh();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ChangeRequest</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// Change request and allow edit
+        /// </summary>
+        public void clicked()
+        {
+            super();
+            ttsbegin;
+            ETGGrainReceiptNoteTable.GrainReceiptStatus = ETGGrainReceiptStatus::Draft;
+            ETGGrainReceiptNoteTable.update();
+            ttscommit;
+
+            ETGGrainReceiptNoteTable_ds.research(true);
+            ETGGrainReceiptNoteTable_ds.refresh();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>PrintGrainReceipt</Name>
+				<Type>MenuFunctionButton</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// This method is for capturing grain receipt number for print
+        /// </summary>
+        public void clicked()
+        {
+            Args args = new Args();
+            args.record(ETGGrainReceiptNoteTable);
+            args.menuItemName(menuItemOutputStr(ETGGrainReceiptPrint));
+
+            new MenuFunction(menuItemOutputStr(ETGGrainReceiptPrint), MenuItemType::Output).run(args);
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>AutoPostGRN</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        public void clicked()
+        {
+
+            ETGGrainReceiptNoteTable header = ETGGrainReceiptNoteTable_ds.cursor();
+            PurchTable purchTable;
+            PurchFormLetter_PackingSlip purchFormLetter;
+
+            if (!header)
+            return;
+
+            if (header.GrainReceiptStatus != ETGGrainReceiptStatus::Confirmed)
+            {
+                warning("GRN must be confirmed before posting.");
+                return;
+            }
+
+            if (header.IsPosted == NoYes::Yes)
+            {
+                warning("This GRN is already posted.");
+                return;
+            }
+
+            purchTable = PurchTable::find(header.PurchId, true);
+
+            if (!purchTable)
+            throw error("Purchase order not found.");
+
+            ttsbegin;
+
+            InventTransWMS_Register     inventTransWMS_register;
+            TmpInventTransWMS           tmpInventTransWMS;
+
+            PurchLine PurchLine;
+
+            while select PurchLine
+                where PurchLine.PurchId == purchTable.PurchId
+            {
+                InventDim               inventDim,inventBatchCheck,inventDimlocal;
+
+                InventTrans             inventTranslocal;
+
+                inventDim                           =  InventDim::find(PurchLine.InventDimId);
+
+                inventTranslocal = InventTrans::findTransId(PurchLine.InventTransId, true);
+                inventDimlocal   = inventTranslocal.inventDim();
+ 
+                inventDimlocal.inventBatchId    = inventDim.inventBatchId;
+                inventDimlocal.InventLocationId = inventDim.InventLocationId;
+                inventDimlocal.InventSiteId     = inventDim.inventSiteId;
+                inventDimlocal.inventSerialId   = inventDim.inventSerialId;
+                inventDimlocal.wMSLocationId    = inventDim.wMSLocationId;
+                inventDimlocal                  = InventDim::findOrCreate(inventDimlocal);
+                inventTransWMS_register         = inventTransWMS_register::newStandard(tmpInventTransWMS);
+
+                inventTranslocal.inventDimId    = inventDimlocal.inventDimId;
+    
+                tmpInventTransWMS.clear();
+                tmpInventTransWMS.initFromInventTrans(inventTranslocal);
+                tmpInventTransWMS.ItemId    = inventTranslocal.ItemId;
+                tmpInventTransWMS.InventQty = PurchLine.PurchQty;
+                tmpInventTransWMS.insert();
+
+                inventTransWMS_register.writeTmpInventTransWMS(tmpInventTransWMS, inventTranslocal, inventDimlocal);
+       
+                inventTransWMS_register.updateInvent(inventTranslocal);
+            }
+
+            VendPackingSlipJour VendPackingSlipJour;
+            Str1260 PackingSlipNumber;
+
+            select count(RecId) from VendPackingSlipJour
+                where VendPackingSlipJour.PurchId == purchTable.PurchId;
+
+            int counter = VendPackingSlipJour.RecId + 1;
+            PackingSlipNumber = header.GrainReceiptNoteId + ' - ' + int2Str(counter);
+
+            purchFormLetter = PurchFormLetter::construct(DocumentStatus::PackingSlip);
+
+            purchFormLetter.update(purchTable,
+                PackingSlipNumber,
+                systemDateGet(),
+                PurchUpdate::All,
+                AccountOrder::None,
+                false,
+                false);
+
+            ttscommit;
+            purchTable.reread();
+
+            if (purchTable.PurchStatus == PurchStatus::Received)
+            {
+                info("Product receipt posted successfully.");
+            }
+            else
+            {
+                warning("No quantity was posted.");
+            }
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>AddCharges</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// Add charges code
+        /// </summary>
+        public void clicked()
+        {
+            Args args = new Args();
+            args.record(ETGGrainReceiptNoteTable_ds.cursor());
+            args.caller(element);
+
+            new MenuFunction(menuItemDisplayStr(ETGGrainReceiptChargesDialog), MenuItemType::Display).run(args);
+            ETGGrainReceiptCharges_ds.executeQuery();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+		</DataControls>
+		<Members xmlns="" />
+	</SourceCode>
+	<DataSources>
+		<AxFormDataSource xmlns="">
+			<Name>ETGGrainReceiptNoteTable</Name>
+			<Table>ETGGrainReceiptNoteTable</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>BelowSizePercentage</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>BelowSizeTermsPercentage</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Commodity</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ContractNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CropYear</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CropYearCopy</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CurrencyCode</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DockagePercentage</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DockageTermsPercentage</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DockageWeight</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ElevatorReceiptId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>FinalMainProductWeight</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Grade</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>GrainReceiptNoteId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>GrainReceiptStatus</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>GrossWeight</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>IsPosted</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ItemClassification</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>MainPrice</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>NetAmountPayable</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>NetPurchAmt</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>NetWeight</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PaymentAmount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PaymentInstruction</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PaymentMode</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PaymentTo</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Percentage</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ProducerAddress</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ProducerName</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ProductionEntity</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ProductUnloaded</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PurchId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ReceiptDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ScaleTicketNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SettlementNum</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SettlementNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SplitsPercentage</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SplitsTermsPercentage</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SplitsWeight</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>StationAddress</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>StationName</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>VehicleWeight</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>VendAccount</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+		<AxFormDataSource xmlns="">
+			<Name>ETGGrainReceiptNoteLine</Name>
+			<Table>ETGGrainReceiptNoteLine</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>Classification</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Description</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>GrainReceiptNoteId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ItemId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LineAmount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LineNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Price</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Qty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<JoinSource>ETGGrainReceiptNoteTable</JoinSource>
+			<LinkType>Active</LinkType>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+		<AxFormDataSource xmlns="">
+			<Name>ETGGrainReceiptCharges</Name>
+			<Table>ETGGrainReceiptCharges</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>Amount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ChargeMarkupCode</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DeductionFlag</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Description</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>GrainReceiptNoteId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Handling</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Levy</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LevyChargesApplicable</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LineNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>OtherChargesDeductions</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>OtherChargesDeductionsReason</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<JoinSource>ETGGrainReceiptNoteTable</JoinSource>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+		<AxFormDataSource xmlns="">
+			<Name>ETGGrainReceiptPaymentTable</Name>
+			<Table>ETGGrainReceiptPaymentTable</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>GrainReceiptNoteId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LineNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PaymentAmount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PaymentMode</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PaymentTo</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Percentage</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<JoinSource>ETGGrainReceiptNoteTable</JoinSource>
+			<StartPosition>Last</StartPosition>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+	</DataSources>
+	<Design>
+		<Caption xmlns="">Grain Receipt Note</Caption>
+		<Pattern xmlns="">SimpleDetails-FastTabsContainer</Pattern>
+		<PatternVersion xmlns="">1.4</PatternVersion>
+		<Controls xmlns="">
+			<AxFormControl xmlns=""
+				i:type="AxFormActionPaneControl">
+				<Name>FormActionPaneControl1</Name>
+				<Type>ActionPane</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormActionPaneTabControl">
+						<Name>ConirmOrChangeReq</Name>
+						<Type>ActionPaneTab</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonGroupControl">
+								<Name>ConfirmChangeReq</Name>
+								<Type>ButtonGroup</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormButtonControl">
+										<Name>SubmitButton</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>Button</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<Text>Submit</Text>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormButtonControl">
+										<Name>ChangeRequest</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>Button</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<Text>Change request</Text>
+									</AxFormControl>
+								</Controls>
+							</AxFormControl>
+						</Controls>
+						<Caption>Confirm/ Change request</Caption>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormButtonGroupControl">
+						<Name>SubmitPrintGroup</Name>
+						<Type>ButtonGroup</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormMenuFunctionButtonControl">
+								<Name>PrintGrainReceipt</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<Type>MenuFunctionButton</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<MenuItemName>ETGGrainReceiptPrint</MenuItemName>
+								<MenuItemType>Output</MenuItemType>
+								<Text>Print</Text>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonControl">
+								<Name>AutoPostGRN</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<Type>Button</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Text>Auto post GRN</Text>
+							</AxFormControl>
+						</Controls>
+						<DataSource>ETGGrainReceiptNoteLine</DataSource>
+						<Style>DialogCommitContainer</Style>
+					</AxFormControl>
+				</Controls>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGroupControl">
+				<Name>DetailsHeader</Name>
+				<Pattern>FieldsFieldGroups</Pattern>
+				<PatternVersion>1.1</PatternVersion>
+				<Type>Group</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGGrainReceiptNoteTable_GrainReceiptNoteId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>GrainReceiptNoteId</DataField>
+						<DataSource>ETGGrainReceiptNoteTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGGrainReceiptNoteTable_ElevatorReceiptId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ElevatorReceiptId</DataField>
+						<DataSource>ETGGrainReceiptNoteTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormDateControl">
+						<Name>ETGGrainReceiptNoteTable_ReceiptDate</Name>
+						<Type>Date</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ReceiptDate</DataField>
+						<DataSource>ETGGrainReceiptNoteTable</DataSource>
+					</AxFormControl>
+				</Controls>
+				<ColumnsMode>Fill</ColumnsMode>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormTabControl">
+				<Name>Tab</Name>
+				<Type>Tab</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>GenTab</Name>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormGroupControl">
+								<Name>GenGroup</Name>
+								<Type>Group</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGGrainReceiptNoteTable_PurchId</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>PurchId</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGGrainReceiptNoteTable_ProductionEntity</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ProductionEntity</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGGrainReceiptNoteTable_ContractNumber</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ContractNumber</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormComboBoxControl">
+										<Name>ETGGrainReceiptNoteTable_GrainReceiptStatus</Name>
+										<Type>ComboBox</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>GrainReceiptStatus</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+										<Items />
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGGrainReceiptNoteTable_ScaleTicketNumber</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ScaleTicketNumber</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGGrainReceiptNoteTable_SettlementNum</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>SettlementNum</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+								</Controls>
+							</AxFormControl>
+						</Controls>
+						<Columns>3</Columns>
+						<ColumnsMode>Fill</ColumnsMode>
+						<Caption>General</Caption>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>VendTab</Name>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormGroupControl">
+								<Name>FormGroupControl1</Name>
+								<Type>Group</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGGrainReceiptNoteTable_VendAccount</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>VendAccount</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGGrainReceiptNoteTable_ProducerName</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ProducerName</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGGrainReceiptNoteTable_ProducerAddress</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ProducerAddress</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+								</Controls>
+							</AxFormControl>
+						</Controls>
+						<Columns>3</Columns>
+						<ColumnsMode>Fill</ColumnsMode>
+						<Caption>Vendor</Caption>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>ProdTab</Name>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormGroupControl">
+								<Name>CommodityGroup</Name>
+								<Type>Group</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGGrainReceiptNoteTable_Commodity</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Commodity</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGGrainReceiptNoteTable_CropYearCopy</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>CropYearCopy</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGGrainReceiptNoteTable_Grade</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Grade</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGGrainReceiptNoteTable_MainPrice</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>MainPrice</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGGrainReceiptNoteTable_DockagePercentage</Name>
+										<Type>Real</Type>
+										<Visible>No</Visible>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>DockagePercentage</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGGrainReceiptNoteTable_SplitsPercentage</Name>
+										<Type>Real</Type>
+										<Visible>No</Visible>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>SplitsPercentage</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+								</Controls>
+								<Caption>Commodity Details</Caption>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormGroupControl">
+								<Name>WeightsGroup</Name>
+								<Type>Group</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGGrainReceiptNoteTable_GrossWeight</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>GrossWeight</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGGrainReceiptNoteTable_VehicleWeight</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>VehicleWeight</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGGrainReceiptNoteTable_ProductUnloaded</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ProductUnloaded</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGGrainReceiptNoteTable_FinalMainProductWeight</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>FinalMainProductWeight</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+								</Controls>
+								<Caption>Weight (In MT)</Caption>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormGroupControl">
+								<Name>StationDetails</Name>
+								<Type>Group</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGGrainReceiptNoteTable_StationName</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>StationName</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGGrainReceiptNoteTable_StationAddress</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>StationAddress</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+								</Controls>
+								<Caption>Station Details</Caption>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormGroupControl">
+								<Name>Totals</Name>
+								<Type>Group</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGGrainReceiptNoteTable_NetPurchAmt</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataMethod>NetPurchAmtDisplay</DataMethod>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+										<Label>Net purchase amount</Label>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGGrainReceiptNoteTable_NetWeight</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>NetWeight</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGGrainReceiptNoteTable_NetAmountPayable</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataMethod>NetAmountPayableDisplay</DataMethod>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+										<Label>Net amount payable</Label>
+									</AxFormControl>
+								</Controls>
+								<Caption>Totals</Caption>
+							</AxFormControl>
+						</Controls>
+						<Columns>3</Columns>
+						<ColumnsMode>Fill</ColumnsMode>
+						<Caption>Product Details</Caption>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>LineDetails</Name>
+						<Pattern>Custom</Pattern>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonControl">
+								<Name>AddCharges</Name>
+								<Type>Button</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Text>View charges</Text>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormGridControl">
+								<Name>FormGridControl1</Name>
+								<AllowEdit>No</AllowEdit>
+								<Type>Grid</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormInt64Control">
+										<Name>ETGGrainReceiptNoteLine_LineNumber</Name>
+										<Type>Int64</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>LineNumber</DataField>
+										<DataSource>ETGGrainReceiptNoteLine</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGGrainReceiptNoteLine_ItemId</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ItemId</DataField>
+										<DataSource>ETGGrainReceiptNoteLine</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGGrainReceiptNoteLine_Description</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Description</DataField>
+										<DataSource>ETGGrainReceiptNoteLine</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGGrainReceiptNoteLine_Qty</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Qty</DataField>
+										<DataSource>ETGGrainReceiptNoteLine</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGGrainReceiptNoteLine_Price</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Price</DataField>
+										<DataSource>ETGGrainReceiptNoteLine</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGGrainReceiptNoteLine_LineAmount</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>LineAmount</DataField>
+										<DataSource>ETGGrainReceiptNoteLine</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGGrainReceiptNoteLine_Classification</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Classification</DataField>
+										<DataSource>ETGGrainReceiptNoteLine</DataSource>
+									</AxFormControl>
+								</Controls>
+								<DataSource>ETGGrainReceiptNoteLine</DataSource>
+							</AxFormControl>
+						</Controls>
+						<Caption>Product Line Details</Caption>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>ChargesTab</Name>
+						<Type>TabPage</Type>
+						<Visible>No</Visible>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormGridControl">
+								<Name>FormGridControl2</Name>
+								<AllowEdit>No</AllowEdit>
+								<Type>Grid</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormInt64Control">
+										<Name>ETGGrainReceiptCharges_LineNumber</Name>
+										<Type>Int64</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>LineNumber</DataField>
+										<DataSource>ETGGrainReceiptCharges</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGGrainReceiptCharges_ChargeMarkupCode</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ChargeMarkupCode</DataField>
+										<DataSource>ETGGrainReceiptCharges</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGGrainReceiptCharges_Description</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Description</DataField>
+										<DataSource>ETGGrainReceiptCharges</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGGrainReceiptCharges_Amount</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Amount</DataField>
+										<DataSource>ETGGrainReceiptCharges</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGGrainReceiptCharges_Levy</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Levy</DataField>
+										<DataSource>ETGGrainReceiptCharges</DataSource>
+									</AxFormControl>
+								</Controls>
+								<DataSource>ETGGrainReceiptCharges</DataSource>
+							</AxFormControl>
+						</Controls>
+						<Caption>Charges</Caption>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>PaymentTab</Name>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>ETGGrainReceiptNoteTable_PaymentInstruction</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>PaymentInstruction</DataField>
+								<DataSource>ETGGrainReceiptNoteTable</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonGroupControl">
+								<Name>ButtonGroupAddRemove</Name>
+								<Type>ButtonGroup</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormCommandButtonControl">
+										<Name>AddButton</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>CommandButton</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<Command>New</Command>
+										<Text>Add</Text>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormCommandButtonControl">
+										<Name>Remove</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>CommandButton</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<Command>DeleteRecord</Command>
+										<Text>Remove</Text>
+									</AxFormControl>
+								</Controls>
+								<ArrangeMethod>HorizontalWrap</ArrangeMethod>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormGridControl">
+								<Name>PaymentGrid</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<Type>Grid</Type>
+								<Visible>No</Visible>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGGrainReceiptNoteTable_PaymentTo</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>PaymentTo</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormComboBoxControl">
+										<Name>ETGGrainReceiptNoteTable_PaymentMode</Name>
+										<Type>ComboBox</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>PaymentMode</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+										<Items />
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGGrainReceiptNoteTable_Percentage</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Percentage</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGGrainReceiptNoteTable_PaymentAmount</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>PaymentAmount</DataField>
+										<DataSource>ETGGrainReceiptNoteTable</DataSource>
+									</AxFormControl>
+								</Controls>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormGridControl">
+								<Name>FormGridControl3</Name>
+								<Type>Grid</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormInt64Control">
+										<Name>ETGGrainReceiptPaymentTable_LineNumber</Name>
+										<Type>Int64</Type>
+										<Visible>No</Visible>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>LineNumber</DataField>
+										<DataSource>ETGGrainReceiptPaymentTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormComboBoxControl">
+										<Name>ETGGrainReceiptPaymentTable_PaymentMode</Name>
+										<Type>ComboBox</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>PaymentMode</DataField>
+										<DataSource>ETGGrainReceiptPaymentTable</DataSource>
+										<Items />
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGGrainReceiptPaymentTable_PaymentTo</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>PaymentTo</DataField>
+										<DataSource>ETGGrainReceiptPaymentTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGGrainReceiptPaymentTable_Percentage</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Percentage</DataField>
+										<DataSource>ETGGrainReceiptPaymentTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGGrainReceiptPaymentTable_PaymentAmount</Name>
+										<AllowEdit>No</AllowEdit>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>PaymentAmount</DataField>
+										<DataSource>ETGGrainReceiptPaymentTable</DataSource>
+									</AxFormControl>
+								</Controls>
+								<DataSource>ETGGrainReceiptPaymentTable</DataSource>
+							</AxFormControl>
+						</Controls>
+						<Caption>Payment</Caption>
+						<DataSource>ETGGrainReceiptPaymentTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>ActualAndTerm</Name>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormRealControl">
+								<Name>ETGGrainReceiptNoteTable_DockagePercentage1</Name>
+								<Type>Real</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>DockagePercentage</DataField>
+								<DataSource>ETGGrainReceiptNoteTable</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormRealControl">
+								<Name>ETGGrainReceiptNoteTable_SplitsPercentage1</Name>
+								<Type>Real</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>SplitsPercentage</DataField>
+								<DataSource>ETGGrainReceiptNoteTable</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormRealControl">
+								<Name>ETGGrainReceiptNoteTable_BelowSizePercentage</Name>
+								<Type>Real</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>BelowSizePercentage</DataField>
+								<DataSource>ETGGrainReceiptNoteTable</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormRealControl">
+								<Name>ETGGrainReceiptNoteTable_DockageTermsPercentage</Name>
+								<Type>Real</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>DockageTermsPercentage</DataField>
+								<DataSource>ETGGrainReceiptNoteTable</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormRealControl">
+								<Name>ETGGrainReceiptNoteTable_SplitsTermsPercentage</Name>
+								<Type>Real</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>SplitsTermsPercentage</DataField>
+								<DataSource>ETGGrainReceiptNoteTable</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormRealControl">
+								<Name>ETGGrainReceiptNoteTable_BelowSizeTermsPercentage</Name>
+								<Type>Real</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>BelowSizeTermsPercentage</DataField>
+								<DataSource>ETGGrainReceiptNoteTable</DataSource>
+							</AxFormControl>
+						</Controls>
+						<Columns>2</Columns>
+						<Caption>Actual and Term</Caption>
+					</AxFormControl>
+				</Controls>
+				<Style>FastTabs</Style>
+			</AxFormControl>
+		</Controls>
+	</Design>
+	<Parts />
+</AxForm>

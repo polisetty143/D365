@@ -1,0 +1,389 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGContractFDDerivedDimCreate</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///Once the agreement is confirmed Same FD value should appear automatically update DerivedDimCreate.
+/// </summary>
+class ETGContractFDDerivedDimCreate
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>validate</Name>
+				<Source><![CDATA[
+    public void validate(SalesAgreementHeader salesAgreementHeader)
+    {
+        AgreementLine agreementLine;
+        String20      contractDimName = ETGACFParameters::find().Contract;
+        String50 contractValue = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(salesAgreementHeader.DefaultDimension, contractDimName);
+        if(contractValue != "" && contractValue != salesAgreementHeader.SalesNumberSequence)
+        {
+            throw Error(strFmt("@ETG_New:FinDimContractHeaderError", salesAgreementHeader.SalesNumberSequence));
+        }
+        while select DefaultDimension, ItemId from agreementLine where agreementLine.Agreement == salesAgreementHeader.RecId
+        {
+            contractValue = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(agreementLine.DefaultDimension, contractDimName);
+            if(contractValue != "" && contractValue != salesAgreementHeader.SalesNumberSequence)
+            {
+                throw Error(strFmt("@ETG_New:FinDimContractLineError", salesAgreementHeader.SalesNumberSequence, agreementLine.ItemId));
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ContractFDDerivedDimCreate</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// salesAgreementHeader is confirmed Same FD value should appear automatically update DerivedDimCreate.
+    /// </summary>
+    /// <param name = "salesAgreementHeader"></param>
+    public void ContractFDDerivedDimCreate(SalesAgreementHeader salesAgreementHeader)
+    {
+        DimensionAttributeValueSetStorage    attributeValueStorage;
+        DimensionAttributeValueSetStorage    attrNewValueStorage;
+        DimensionAttribute                   dimensionAttribute;
+        DimensionAttributeValue              value;
+        DimensionAttributeValueDerivedDimensions derivedDimensions;
+        ETGACFParameters                         eTGACFParameters;
+        DimensionHierarchy                       dimensionHierarchy;
+        Map         dimensionMap;
+        MapIterator mapIterator;
+        RefRecId   contactreicd;
+        RefRecId   verticalrecid;
+        RefRecId   subverticalrecid;
+        RefRecId   dimAttributeRecId;
+        RefRecId   businessUnitDimRecId;
+        RefRecId   businessUnitRecid;
+        RefRecId   departmentRecid;
+        RefRecId   itemrecid;
+        RefRecId   lineOfBusinessRecid;
+        RefRecId   PlantWarehouseOfficerecid;
+        RefRecId   intercompanyrecid;
+        RefRecId   traderEmployeerecid;
+        RefRecId   mainCommodityrecid;
+        RefRecId   subcomodityrecid;
+        Counter    loop;
+
+        select firstonly eTGACFParameters;
+
+        Name               _name = "contract";
+        DimensionAttributeValueSet          DimensionAttributeValueSet;
+        DimensionAttributeValueSetItem      DimensionAttributeValueSetItem;
+        DimensionAttributeValue             DimensionAttributeValue;
+
+        dimensionMap            = new Map(Types::Integer, Types::Int64);
+        attrNewValueStorage     = new DimensionAttributeValueSetStorage();
+        attributeValueStorage   = DimensionAttributeValueSetStorage::find(salesAgreementHeader.DefaultDimension);
+        dimensionAttribute      = DimensionAttribute::findByName(_name);
+        dimensionHierarchy      = DimensionAttributeDerivedDimensions::findOrCreateDrivingDimension(dimensionAttribute);
+ 
+        for (loop = 1; loop <= DimensionDerivationsFormHelper::MaxDerivedSegments + 1; loop++)
+        {
+            DimensionHierarchyLevel dimHierarchyLevel = DimensionHierarchyLevel::findByDimensionHierarchyAndLevel(dimensionHierarchy.RecId, loop);
+ 
+            if (dimHierarchyLevel)
+            {
+                DimensionAttributeDerivedDimensions derivedDimension = DimensionAttributeDerivedDimensions::findByDimensionHierarchyLevel(dimHierarchyLevel);
+ 
+                if (derivedDimension)
+                {
+                    DimensionAttribute dimAttr = DimensionAttribute::find(dimHierarchyLevel.DimensionAttribute);
+ 
+                    dimensionMap.insert(derivedDimension.DerivedDimensionFieldNum, dimAttr.RecId);
+                }
+            }
+        }
+ 
+        while select RecId from DimensionAttributeValueSet
+                        where  DimensionAttributeValueSet.RecId == salesAgreementHeader.DefaultDimension
+                join RecId, DisplayValue from DimensionAttributeValueSetItem
+                        where DimensionAttributeValueSetItem.DimensionAttributeValueSet == DimensionAttributeValueSet.RecId
+                join RecId from DimensionAttributeValue
+                        where DimensionAttributeValue.RecId == DimensionAttributeValueSetItem.DimensionAttributeValue
+                join RecId, Name from DimensionAttribute
+                where DimensionAttribute.RecId == DimensionAttributeValue.DimensionAttribute
+                    && (DimensionAttribute.Name    == eTGACFParameters.Contract          || DimensionAttribute.Name  == eTGACFParameters.Vertical
+                        || DimensionAttribute.Name == eTGACFParameters.SubVertical       || DimensionAttribute.Name == eTGACFParameters.ItemId
+                        || DimensionAttribute.Name == eTGACFParameters.MainCommodity     || DimensionAttribute.Name ==eTGACFParameters.SubCommodity
+                        || DimensionAttribute.Name == eTGACFParameters.BusinessUnit      || DimensionAttribute.Name == eTGACFParameters.TraderEmployee
+                        || DimensionAttribute.Name == eTGACFParameters.Intercompany      || DimensionAttribute.Name == eTGACFParameters.Department
+                        || DimensionAttribute.Name == eTGACFParameters.LineofBusinesss   || DimensionAttribute.Name == eTGACFParameters.PlantWarehouseOffice)
+
+        {
+            if(dimensionAttribute.Name == eTGACFParameters.Contract )
+            {
+                dimAttributeRecId = dimensionAttribute.RecId;
+                contactreicd = DimensionAttributeValue.RecId;
+            }
+            if(dimensionAttribute.Name == eTGACFParameters.Vertical)
+            {
+                verticalrecid = DimensionAttributeValue.RecId;
+            }
+            if(dimensionAttribute.Name == eTGACFParameters.SubVertical)
+            {
+                subverticalrecid = DimensionAttributeValue.RecId;
+            }
+            if(dimensionAttribute.Name ==  eTGACFParameters.ItemId)
+            {
+                itemrecid = DimensionAttributeValue.RecId;
+            }
+            if(dimensionAttribute.Name == eTGACFParameters.MainCommodity)
+            {
+                mainCommodityrecid = DimensionAttributeValue.RecId;
+            }
+            if(DimensionAttribute.Name ==eTGACFParameters.SubCommodity )
+            {
+                subcomodityrecid = DimensionAttributeValue.RecId;
+            }
+            if(DimensionAttribute.Name == eTGACFParameters.BusinessUnit )
+            {
+                businessUnitRecid = DimensionAttributeValue.RecId;
+            }
+            if(DimensionAttribute.Name == eTGACFParameters.TraderEmployee )
+            {
+                traderEmployeerecid = DimensionAttributeValue.RecId;
+            }
+            if(DimensionAttribute.Name == eTGACFParameters.Intercompany)
+            {
+                intercompanyrecid = DimensionAttributeValue.RecId;
+            }
+            if(DimensionAttribute.Name == eTGACFParameters.Department)
+            {
+                departmentRecid = DimensionAttributeValue.RecId;
+            }
+            if(DimensionAttribute.Name == eTGACFParameters.LineofBusinesss)
+            {
+                lineOfBusinessRecid = DimensionAttributeValue.RecId;
+            }
+            if(DimensionAttribute.Name == eTGACFParameters.PlantWarehouseOffice)
+            {
+                PlantWarehouseOfficerecid = DimensionAttributeValue.RecId;
+            }
+
+        }
+
+        ttsbegin;
+        mapIterator = new MapIterator(dimensionMap);
+
+        select firstonly derivedDimensions where derivedDimensions.DimensionAttributeValue == contactreicd
+                                              && derivedDimensions.DimensionAttribute      ==  dimAttributeRecId;
+
+        derivedDimensions.DimensionAttribute        = dimAttributeRecId;
+        derivedDimensions.DimensionAttributeValue   =  contactreicd;
+    
+        while (mapIterator.more())
+        {
+            DimensionAttribute dimValueLocal = DimensionAttribute::find(mapIterator.value());
+
+            switch (dimValueLocal.Name)
+            {
+                case eTGACFParameters.Vertical :
+                    derivedDimensions.(mapIterator.key()) = verticalrecid;
+                    break;
+                case eTGACFParameters.SubVertical :
+                    derivedDimensions.(mapIterator.key()) = subverticalrecid;
+                    break;
+                case eTGACFParameters.ItemId :
+                    derivedDimensions.(mapIterator.key()) = itemrecid;
+                    break;
+                case eTGACFParameters.MainCommodity :
+                    derivedDimensions.(mapIterator.key()) = mainCommodityrecid;
+                    break;
+                case eTGACFParameters.SubCommodity :
+                    derivedDimensions.(mapIterator.key()) = subcomodityrecid;
+                    break;
+                case eTGACFParameters.BusinessUnit :
+                    derivedDimensions.(mapIterator.key()) = businessUnitRecid;
+                    break;
+                case eTGACFParameters.TraderEmployee :
+                    derivedDimensions.(mapIterator.key()) = traderEmployeerecid;
+                    break;
+                case eTGACFParameters.Intercompany :
+                    derivedDimensions.(mapIterator.key()) = intercompanyrecid;
+                    break;
+                case eTGACFParameters.Department :
+                    derivedDimensions.(mapIterator.key()) = departmentRecid;
+                    break;
+                case eTGACFParameters.LineofBusinesss :
+                    derivedDimensions.(mapIterator.key()) = lineOfBusinessRecid;
+                    break;
+                case eTGACFParameters.PlantWarehouseOffice :
+                    derivedDimensions.(mapIterator.key()) = PlantWarehouseOfficerecid;
+                    break;
+            }
+            mapIterator.next();
+        }
+        if(derivedDimensions.RecId)
+        {
+            
+            derivedDimensions.selectForUpdate(true);
+            derivedDimensions.update();
+           
+        }
+        else
+        {
+            derivedDimensions.insert();
+        }
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createCustomFinDimContract</Name>
+				<Source><![CDATA[
+    public void createCustomFinDimContract(SalesAgreementHeader salesAgreementHeader)
+    {
+        DimensionAttribute              dimensionAttribute;
+        DimensionAttributeValue         dimensionAttributeValue;
+        DimensionFinancialTag           dimensionFinancialTag;
+        DimensionValue                  dimensionValue;
+        Description                     description;
+        Name                            name;
+        RecId                           financialTagGategoryRecId;
+        companyInfo                     companyInfo;
+        mainAccountLegalEntity          mainAccountLegalEntity;
+        DimensionAttrValueLedgerOverride  dimensionAttrValueLedgerOverride;
+        AgreementLine                     agreementline;
+
+
+        DimensionValueContract _dimensionValueContract;
+        _dimensionValueContract = new DimensionValueContract();
+
+        //ttsBegin;
+
+      
+        name           = "Contract";
+        dimensionValue = salesAgreementHeader.SalesNumberSequence;
+        description    = strFmt("%1 : %2", salesAgreementHeader.CustAccount, salesAgreementHeader.custName());
+
+        dimensionAttribute = DimensionAttribute::findByName(name);
+        if(!dimensionAttribute)
+        {
+            return;
+        }
+
+        select firstonly DimensionAttribute, EntityInstance from dimensionAttributeValue
+            join RecId, Value from dimensionFinancialTag where
+                (dimensionAttributeValue.DimensionAttribute == dimensionAttribute.RecId) &&
+                (dimensionFinancialTag.RecId == dimensionAttributeValue.EntityInstance) &&
+                (dimensionFinancialTag.Value == dimensionValue);
+
+        if (!dimensionFinancialTag)
+        {
+            dimensionAttributeValue.clear();
+            ttsbegin;
+            dimensionFinancialTag.Value                = dimensionValue;
+            dimensionFinancialTag.Description          = description;
+            dimensionFinancialTag.FinancialTagCategory = dimensionAttribute.financialTagCategory();
+            dimensionFinancialTag.insert();
+
+            dimensionAttributeValue.EntityInstance = dimensionFinancialTag.RecId;
+            dimensionAttributeValue.DimensionAttribute = dimensionAttribute.RecId;
+            dimensionAttributeValue.ActiveFrom = salesAgreementHeader.DefaultAgreementLineEffectiveDate;
+            dimensionAttributeValue.ActiveTo = salesAgreementHeader.DefaultAgreementLineExpirationDate;
+            // dimensionAttributeValue.IsBlockedForManualEntry = _dimensionValueContract.parmIsBlockedForManualEntry();
+            //dimensionAttributeValue.IsSuspended = _dimensionValueContract.parmIsSuspended();
+            // dimensionAttributeValue.Owner = HcmWorker::findByPersonnelNumber(_dimensionValueContract.parmPersonnelNumber()).RecId;
+            dimensionAttributeValue.insert();
+            ttscommit;
+        }
+
+        select firstonly dimensionAttrValueLedgerOverride where DimensionAttrValueLedgerOverride.DimensionAttributeValue == dimensionAttributeValue.RecId;
+
+        
+        if (!dimensionAttrValueLedgerOverride)
+        {
+
+            while select companyInfo
+            {
+                dimensionAttrValueLedgerOverride.clear();
+                dimensionAttrValueLedgerOverride.DimensionAttributeValue = dimensionAttributeValue.RecId;
+                dimensionAttrValueLedgerOverride.Ledger = ledger::primaryLedger(companyInfo::current(companyInfo.DataArea));
+                dimensionAttrValueLedgerOverride.ActiveFrom = dimensionAttributeValue.ActiveFrom;
+                dimensionAttrValueLedgerOverride.ActiveTo = dimensionAttributeValue.ActiveTo;
+                if(companyInfo.DataArea == curExt())
+                {
+                    dimensionAttrValueLedgerOverride.IsSuspended =NoYes::No;
+                }
+                else
+                {
+                    dimensionAttrValueLedgerOverride.IsSuspended =NoYes::Yes;
+
+                }
+                dimensionAttrValueLedgerOverride.insert();
+                    
+                                
+            }
+
+        }
+        this.FinDimCreateforContractHeader(dimensionAttribute,salesAgreementHeader, salesAgreementHeader.DefaultDimension);
+        this.FinDimCreateforContractLines(dimensionAttribute, salesAgreementHeader);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>FinDimCreateforContractHeader</Name>
+				<Source><![CDATA[
+    public void FinDimCreateforContractHeader(DimensionAttribute dimensionattribute , SalesAgreementHeader salesAgreementHeader, LedgerDefaultDimensionValueSet defaultdimension)
+    {
+        AgreementLine                     agreementline;
+        DimensionAttribute                dimensionAttributeloc;
+        DimensionAttributeValue           dimensionAttributeValue,dimensionAttributeValueloc;
+        DIMENSIONATTRIBUTEVALUESETITEM    dimensionAttributeValueSetItem,dimensionAttributeValueSetItemloc;
+
+        container               conAttr = [ETGACFParameters::find().Contract];
+        container               conValue = [salesAgreementHeader.SalesNumberSequence];
+        DimensionDefault        defaultDimContract = ETGDefaultDimesnionHelper::createDefaultDimension(conAttr, conValue);
+
+        defaultDimContract  = DimensionDefaultFacade::serviceMergeDefaultDimensions(salesAgreementHeader.DefaultDimension, defaultDimContract);
+
+        if(salesAgreementHeader && defaultDimContract)
+        {
+            salesAgreementHeader.reread();
+            salesAgreementHeader.selectForUpdate(true);
+            salesAgreementHeader.DefaultDimension = defaultDimContract;
+            salesAgreementHeader.doUpdate();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>FinDimCreateforContractLines</Name>
+				<Source><![CDATA[
+    public void FinDimCreateforContractLines(DimensionAttribute dimensionattribute , SalesAgreementHeader salesAgreementHeader)
+    {
+        AgreementLine                     agreementline;
+        DimensionAttribute                dimensionAttributeloc;
+        DimensionAttributeValue           dimensionAttributeValue,dimensionAttributeValueloc;
+        DIMENSIONATTRIBUTEVALUESETITEM    dimensionAttributeValueSetItem,dimensionAttributeValueSetItemloc;
+
+        container               conAttr = [ETGACFParameters::find().Contract];
+        container               conValue = [salesAgreementHeader.SalesNumberSequence];
+        DimensionDefault        defaultDimContract = ETGDefaultDimesnionHelper::createDefaultDimension(conAttr, conValue);
+
+        while select forupdate agreementline where agreementline.Agreement == salesAgreementHeader.RecId
+        {
+            defaultDimContract  = DimensionDefaultFacade::serviceMergeDefaultDimensions(agreementline.DefaultDimension, defaultDimContract);
+
+            if(agreementline && defaultDimContract)
+            {
+                agreementline.reread();
+                agreementline.DefaultDimension = defaultDimContract;
+                agreementline.doUpdate();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

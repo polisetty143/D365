@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCustTransGroupingDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[
+SRSReportParameterAttribute(classStr(ETGCustTransGroupingContract))
+]
+class ETGCustTransGroupingDP extends SRSReportDataProviderBase
+{
+    ETGCustomerTransGroupTmp custTransGroupTmp;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGCustomerTransGroupTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETGCustomerTransGroupTmp))]
+    public ETGCustomerTransGroupTmp getETGCustomerTransGroupTmp()
+    {
+        select custTransGroupTmp;
+        return custTransGroupTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETGCustTransGroupingContract contract = this.parmDataContract() as ETGCustTransGroupingContract;
+
+        if (!contract || !contract.validate())
+        {
+            return;
+        }
+
+        this.clearTempTable();
+        this.createCustTransGroupData(contract.parmFromDate(), contract.parmToDate());
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>clearTempTable</Name>
+				<Source><![CDATA[
+    private void clearTempTable()
+    {
+        delete_from custTransGroupTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createCustTransGroupData</Name>
+				<Source><![CDATA[
+    private void createCustTransGroupData(TransDate _fromDate, TransDate _toDate)
+    {
+        CustTrans custTransLocal;
+        AmountCur openBal;
+
+        while select CurrencyCode, AccountNum from custTransLocal
+            group by custTransLocal.CurrencyCode, custTransLocal.AccountNum
+            where custTransLocal.DataAreaId == curext()
+                && custTransLocal.TransDate >= _fromDate
+                && custTransLocal.TransDate <= _toDate
+        {
+            custTransGroupTmp.clear();
+
+            custTransGroupTmp.AccountNum    = custTransLocal.AccountNum;
+            custTransGroupTmp.ETGCustName   = custTransLocal.custTableName();
+            custTransGroupTmp.CurrencyCode  = custTransLocal.CurrencyCode;
+
+            this.calculateCreditAmount(custTransLocal, _fromDate, _toDate);
+            this.calculateDebitAmount(custTransLocal, _fromDate, _toDate);
+            this.calculateOpeningBalance(custTransLocal, _fromDate);
+
+            openBal = custTransGroupTmp.AmountDebit - custTransGroupTmp.AmountCredit;
+            custTransGroupTmp.SumAmount = custTransGroupTmp.OpeningBalance + openBal;
+
+            custTransGroupTmp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateCreditAmount</Name>
+				<Source><![CDATA[
+    private void calculateCreditAmount(CustTrans _custTransLocal, TransDate _fromDate, TransDate _toDate)
+    {
+        CustTrans custTrans;
+
+        select sum(AmountCur) from custTrans
+            where custTrans.DataAreaId == curext()
+                && custTrans.AccountNum == _custTransLocal.AccountNum
+                && custTrans.CurrencyCode == _custTransLocal.CurrencyCode
+                && custTrans.AmountCur < 0.00
+                && custTrans.TransDate >= _fromDate
+                && custTrans.TransDate <= _toDate;
+
+        custTransGroupTmp.AmountCredit = abs(custTrans.AmountCur);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateDebitAmount</Name>
+				<Source><![CDATA[
+    private void calculateDebitAmount(CustTrans _custTransLocal, TransDate _fromDate, TransDate _toDate)
+    {
+        CustTrans custTransCredit;
+
+        select sum(AmountCur) from custTransCredit
+            where custTransCredit.DataAreaId == curext()
+                && custTransCredit.AccountNum == _custTransLocal.AccountNum
+                && custTransCredit.CurrencyCode == _custTransLocal.CurrencyCode
+                && custTransCredit.AmountCur > 0.00
+                && custTransCredit.TransDate >= _fromDate
+                && custTransCredit.TransDate <= _toDate;
+
+        custTransGroupTmp.AmountDebit = abs(custTransCredit.AmountCur);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateOpeningBalance</Name>
+				<Source><![CDATA[
+    private void calculateOpeningBalance(CustTrans _custTransLocal, TransDate _fromDate)
+    {
+        CustTrans custTransOpen;
+
+        select sum(AmountCur) from custTransOpen
+            where custTransOpen.DataAreaId == curext()
+                && custTransOpen.AccountNum == _custTransLocal.AccountNum
+                && custTransOpen.CurrencyCode == _custTransLocal.CurrencyCode
+                && custTransOpen.TransDate < _fromDate;
+
+        custTransGroupTmp.OpeningBalance = custTransOpen.AmountCur;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

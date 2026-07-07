@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGQualitySpecificationsUploaderService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+using System.IO;
+using OfficeOpenXml;
+using OfficeOpenXml.ExcelPackage;
+using OfficeOpenXml.ExcelRange;
+public final class ETGQualitySpecificationsUploaderService extends SysOperationServiceBase
+{
+    System.IO.Stream                 stream;
+    FileUploadTemporaryStorageResult fileUploadResult;
+    ExcelSpreadsheetName             sheeet;
+    Filename                         filename;
+    ETGBrokerageCommissionType       brokerageCommissionType;
+    DimensionParameters              dimensionParameters = DimensionParameters::find();
+
+    protected   CommaStreamIo importFile;
+    LegalEntityRecId legalEntitYRecId;
+    String255 valueDesc;
+
+    str                 itemId, groupId, description, module;
+    str                 agreementId;
+    LineNum             lineNumber;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>importQualitySpecsContracts</Name>
+				<Source><![CDATA[
+    public void importQualitySpecsContracts(ETGPurchAgreementUploaderContract  _contract)
+    {
+        #OCCRetryCount
+
+        try
+        {
+            if (_contract.parmStorageResult() != conNull())
+            {
+                FileUploadTemporaryStorageResult fileUploadResultLoc = new FileUploadTemporaryStorageResult();
+                fileUploadResultLoc.unpack(_contract.parmStorageResult());
+
+                if (fileUploadResultLoc != null && fileUploadResultLoc.getUploadStatus())
+                {
+                    stream = fileUploadResultLoc.openResult();
+
+                    using (ExcelPackage Package = new ExcelPackage(stream))
+                    {
+                        int                         rowCount, i,columncount,j;
+                        Package.Load(stream);
+                        ExcelWorksheet              worksheet   = package.get_Workbook().get_Worksheets().get_Item(1);
+                        OfficeOpenXml.ExcelRange    range       = worksheet.Cells;
+                        rowCount                                = (worksheet.Dimension.End.Row) - (worksheet.Dimension.Start.Row)  + 1;
+                        columncount                             = (worksheet.Dimension.End.Column);
+
+                        legalEntitYRecId = CompanyInfo::find().RecId;
+
+                        for (i = 2; i<= rowCount; i++)
+                        {
+                            try
+                            {
+                                this.initilizeHeader(range, i);
+                                this.createHeader();
+                            }
+                            catch
+                            {
+                                warning(ETGQualitySpecificationsUploaderService::getError());
+                                continue;
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    throw error(strfmt("@SYS62207",filename));
+                }
+            }
+        }
+        catch (Exception::Deadlock)
+        {
+            retry;
+        }
+        catch (Exception::UpdateConflict)
+        {
+            if (appl.ttsLevel() == 0)
+            {
+                if (xSession::currentRetryCount() >= #RetryNum)
+                {
+                    throw Exception::UpdateConflictNotRecovered;
+                }
+                else
+                {
+                    retry;
+                }
+            }
+            else
+            {
+                throw Exception::UpdateConflict;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initilizeHeader</Name>
+				<Source><![CDATA[
+    public void initilizeHeader(OfficeOpenXml.ExcelRange    range, int i)
+    {
+        agreementId                = range.get_Item(i, 1).value;
+        itemId                     = range.get_Item(i, 2).value;
+        lineNumber                 = range.get_Item(i, 3).value;
+        groupId                    = range.get_Item(i, 4).value;
+        module                     = range.get_Item(i, 5).value;
+        valueDesc                  = range.get_Item(i, 6).value;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getError</Name>
+				<Source><![CDATA[
+    public static str getError()
+    {
+        SysInfologEnumerator    sysInfologEnumerator;
+        SysInfologMessageStruct infoMessageStruct;
+        str                     logMessage;
+        str                           logString;
+        str                          ret;
+        int                          i;
+        #Define.NewLine('\n')
+        sysInfologEnumerator = SysInfologEnumerator::newData(infolog.infologData());
+        while (sysInfologEnumerator.moveNext())
+        {
+            i = 1;
+            if (logMessage)
+            {
+                logMessage += #Newline;
+            }
+            infoMessageStruct = SysInfologMessageStruct::construct(sysInfologEnumerator.currentMessage());
+            while (i <= infoMessageStruct.prefixDepth())
+            {
+                logString = logString + infoMessageStruct.preFixTextElement(i) + '. ';
+                i++;
+            }
+            logString = logString + infoMessageStruct.message();
+            logMessage = logMessage + infoMessageStruct.message();
+        }
+        infolog().clear();
+        return logMessage;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createHeader</Name>
+				<Source><![CDATA[
+    public void createHeader()
+    {
+        ETG_AgreementLineQualityGrp agreementLineQualityGrp;
+        ETG_AgreementLineNotes          agreementLineNotes;
+        PurchAgreementHeader            purchAgreementHeader;
+        SalesAgreementHeader            salesAgreementHeader;
+        AgreementLine                   agreementLine;
+
+        if(module == "Sales")
+        {
+            select firstonly RecId from agreementLine
+                exists join salesAgreementHeader
+                    where agreementLine.Agreement == salesAgreementHeader.RecId
+                        && salesAgreementHeader.SalesNumberSequence == agreementId
+                        && salesAgreementHeader.SellingLegalEntity == legalEntitYRecId
+                        && agreementLine.LineNumber == lineNumber
+                        && agreementLine.IsDeleted == NoYes::No;
+        }
+        else if(module == "Purchase")
+        {
+            select firstonly RecId from agreementLine
+                exists join purchAgreementHeader
+                    where agreementLine.Agreement == purchAgreementHeader.RecId
+                        && purchAgreementHeader.PurchNumberSequence == agreementId
+                        && purchAgreementHeader.BuyingLegalEntity == legalEntitYRecId
+                        && agreementLine.LineNumber == lineNumber
+                        && agreementLine.IsDeleted == NoYes::No;
+        }
+        if(agreementLine.RecId)
+        {
+            agreementLineQualityGrp.AgreementLine = agreementLine.RecId;
+            agreementLineQualityGrp.GroupId       = groupId;
+            agreementLineQualityGrp.Value         = valueDesc;
+            if(agreementLineQualityGrp.validateWrite())
+            {
+                agreementLineQualityGrp.insert();
+                info(strFmt("Quality group is created for agreement %1 item %2 line number %3",
+                agreementId, itemId, lineNumber));
+            }
+            else
+            {
+                info(strFmt("Error. Quality group is not created for agreement %1 item %2 line number %3",
+                agreementId, itemId, lineNumber));
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,576 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>EtgRegisterSalesReportDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The <c>EtgRegisterSalesReportDP</c> class is the report data provider class for Sales register report.
+/// Revised to generate separate report lines per packing slip (with qty, prorated amount, and BOL number)
+/// when an invoice line has multiple packing slips.
+/// </summary>
+[
+    SRSReportParameterAttribute(classStr(EtgRegisterSalesReportContract))
+]
+class EtgRegisterSalesReportDP extends SrsReportDataProviderPreProcessTempDB
+{
+    EtgRegisterSalesReportTemp     EtgRegisterSalesReportTemp;
+    EtgRegisterSalesReportContract contract;
+    FromDate                        fromDate;
+    ToDate                          toDate;
+    DimensionSetName                financialDimSet;
+    NoYes                           isDetailReport;
+    EcoResConfigurationFlag         viewConfigId;
+    EcoResSizeFlag                  viewInventSizeId;
+    EcoResColorFlag                 viewInventColorId;
+    EcoResStyleFlag                 viewInventStyleId;
+    InventSiteIdFlag                viewInventSiteId;
+    InventLocationIdFlag            viewInventLocationId;
+    WHSLicensePlateFlag             viewLicensePlate;
+    InventLocationIdFlag            viewWMSLocationId;
+    WHSInventStatusFlag             viewInventStatus;
+    InventBatchIdFlag               viewInventBatchId;
+    InventSerialIdFlag              viewInventSerialId;
+    InventOwnerIdFlag               viewInventOwnerId;
+    utcDateTime                     utcFromDate, utcToDate;
+    PurchId                         currentPurchId;
+    RefRecId                        currentPurchLine;
+    SalesTable                      salesTable;
+    PurchTable                      purchTable;
+    PurchLine                       purchLine;
+    InventDim                       inventDim;
+    SalesLine                       salesLine;
+    List                            custAccount = new List(Types::String);
+    ETGBusinessSegment              etgBusinessSegment;
+    ETGConnectionType               etgConnectionType;
+    List                            invoiceId   = new List(Types::String);
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getEtgRegisterSalesReportTemp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tablestr(EtgRegisterSalesReportTemp))]
+    public EtgRegisterSalesReportTemp getEtgRegisterSalesReportTemp()
+    {
+        select EtgRegisterSalesReportTemp;
+        return EtgRegisterSalesReportTemp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        this.initContract();
+        this.insertData();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initContract</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Parses the report parameters from the contract.
+    /// </summary>
+    public void initContract()
+    {
+        contract                = this.parmDataContract() as EtgRegisterSalesReportContract;
+        fromDate                = contract.parmFromDate();
+        toDate                  = contract.parmToDate();
+        financialDimSet         = contract.parmFinancialDimSet();
+        isDetailReport          = contract.parmIsDetailReport();
+        viewConfigId            = contract.parmViewConfigId();
+        viewInventSizeId        = contract.parmViewInventSizeId();
+        viewInventColorId       = contract.parmViewInventColorId();
+        viewInventStyleId       = contract.parmViewInventStyleId();
+        viewInventSiteId        = contract.parmViewInventSiteId();
+        viewInventLocationId    = contract.parmViewInventLocationId();
+        viewLicensePlate        = contract.parmViewLicensePlateId();
+        viewWMSLocationId       = contract.parmViewWMSLocationId();
+        viewInventStatus        = contract.parmViewInventStatus();
+        viewInventBatchId       = contract.parmViewInventBatchId();
+        viewInventSerialId      = contract.parmViewInventSerialId();
+        viewInventOwnerId       = contract.parmViewInventOwnerId_RU();
+        etgBusinessSegment      = contract.parmBusinessSegment();
+        etgConnectionType       = contract.parmConnectionType();
+        custAccount             = contract.parmCustAccount();
+        invoiceId               = contract.parmInvoiceId();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertData</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Inserts data into the temp table. For each invoice line, generates a separate
+    /// temp record per packing slip with prorated quantity and amounts. Falls back
+    /// to a single record when no packing slip is found.
+    /// </summary>
+    public void insertData()
+    {
+        QueryRun                            queryRun;
+        AgreementHeader                     agreementHeader;
+        AgreementLine                       agreementLine;
+        SalesAgreementHeader                salesAgreementHeader;
+        ETG_SalesTableTrade                 ETG_SalesTableTrade;
+        CustPackingSlipJour                 custPackingSlipJour;
+        CustPackingSlipTrans                custPackingSlipTrans;
+        CustInvoiceJour                     custInvoiceJour;
+        CustInvoiceTrans                    custInvoiceTrans;
+        InventTrans                         inventTrans;
+        ETG_SALESAGREEMENTHEADER            ETG_SALESAGREEMENTHEADER;
+        DimensionAttributeValueSetStorage   dimStorage;
+        QueryBuildDataSource                queryBuildDataSourceCustInvoiceJour, queryBuildDataSourceCustInvoiceTrans;
+        QueryBuildRange                     queryBuildRange;
+        ListEnumerator                      listEnumerator;
+        Query                               query;
+        TaxTrans                            taxTrans;
+        CompanyInfo                         companyInfo;
+        CustGroup                           custGroup;
+        ETG_BillOfLading                    eTG_BillOfLading, billOfLading;
+        RecId                               ledgerRecId;
+        CurrencyExchangeHelper              exchangeHelper;
+        AmountMST                           convertedAmount;
+        real                                effectiveRate;
+        CurrencyCode                        reportingCurrency = 'USD';
+
+        utcFromDate = DateTimeUtil::newDateTime(fromDate, 0);
+        utcToDate   = DateTimeUtil::newDateTime(toDate, 86400);
+
+        // ============================================================
+        // Build query: CustInvoiceJour inner join CustInvoiceTrans
+        // ============================================================
+        query = new Query();
+        queryBuildDataSourceCustInvoiceJour  = query.addDataSource(tableNum(CustInvoiceJour));
+        queryBuildDataSourceCustInvoiceTrans = queryBuildDataSourceCustInvoiceJour.addDataSource(tableNum(CustInvoiceTrans));
+        queryBuildDataSourceCustInvoiceTrans.joinMode(JoinMode::InnerJoin);
+        queryBuildDataSourceCustInvoiceTrans.relations(true);
+        queryBuildDataSourceCustInvoiceTrans.addLink(fieldNum(CustInvoiceJour, SalesId),     fieldNum(CustInvoiceTrans, SalesId));
+        queryBuildDataSourceCustInvoiceTrans.addLink(fieldNum(CustInvoiceJour, InvoiceId),   fieldNum(CustInvoiceTrans, InvoiceId));
+        queryBuildDataSourceCustInvoiceTrans.addLink(fieldNum(CustInvoiceJour, InvoiceDate), fieldNum(CustInvoiceTrans, InvoiceDate));
+
+        query.dataSourceTable(tableNum(CustInvoiceJour)).addRange(fieldNum(CustInvoiceJour, InvoiceDate)).value(queryRange(fromDate, toDate));
+        query.dataSourceTable(tableNum(CustInvoiceJour)).addRange(fieldNum(CustInvoiceJour, SalesType)).value(any2Str(SalesType::Sales));
+        queryBuildDataSourceCustInvoiceJour.addSortField(fieldNum(CustInvoiceJour, InvoiceId), SortOrder::Ascending);
+
+        if (custAccount != null)
+        {
+            listEnumerator = custAccount.getEnumerator();
+            while (listEnumerator.moveNext())
+            {
+                queryBuildDataSourceCustInvoiceJour.addRange(fieldNum(CustInvoiceJour, InvoiceAccount)).value(listEnumerator.current());
+            }
+        }
+
+        if (invoiceId != null)
+        {
+            listEnumerator = invoiceId.getEnumerator();
+            while (listEnumerator.moveNext())
+            {
+                queryBuildDataSourceCustInvoiceJour.addRange(fieldNum(CustInvoiceJour, InvoiceId)).value(listEnumerator.current());
+            }
+        }
+
+        if (etgBusinessSegment)
+        {
+            queryBuildRange = queryBuildDataSourceCustInvoiceJour.addRange(fieldNum(CustInvoiceJour, ETGBusinessSegment));
+            queryBuildRange.value(queryValue(etgBusinessSegment));
+        }
+        if (etgConnectionType)
+        {
+            queryBuildRange = queryBuildDataSourceCustInvoiceTrans.addRange(fieldNum(CustInvoiceTrans, ETGConnectionType));
+            queryBuildRange.value(queryValue(etgConnectionType));
+        }
+
+        queryRun = new QueryRun(query);
+
+        while (queryRun.next())
+        {
+            custInvoiceJour  = queryRun.get(tableNum(CustInvoiceJour));
+            custInvoiceTrans = queryRun.get(tableNum(CustInvoiceTrans));
+
+            EtgRegisterSalesReportTemp.clear();
+
+            // ============================================================
+            // Header / common fields (same for every split row)
+            // ============================================================
+            EtgRegisterSalesReportTemp.InvoiceNumber           = custInvoiceJour.InvoiceId;
+            EtgRegisterSalesReportTemp.TransDate               = DateTimeUtil::date(custInvoiceJour.InvoiceDate);
+            EtgRegisterSalesReportTemp.Quantity                = custInvoiceTrans.Qty;
+
+            select sum(SourceRegulateAmountCur) from taxTrans
+                where taxTrans.SourceRecId == custInvoiceTrans.RecId;
+
+            if (taxTrans)
+            {
+                EtgRegisterSalesReportTemp.TaxAmount = -taxTrans.SourceRegulateAmountCur;
+            }
+
+            EtgRegisterSalesReportTemp.Amount                      = custInvoiceJour.InvoiceAmount;
+            EtgRegisterSalesReportTemp.InvoiceAmountExcludeTax     = custInvoiceJour.InvoiceAmountMST;
+            EtgRegisterSalesReportTemp.AmountInTransactionCurrency = custInvoiceTrans.LineAmount;
+            EtgRegisterSalesReportTemp.AmountInAccountingCurrency  = custInvoiceTrans.LineAmountMST;
+
+            // --- Reporting currency conversion ---
+            effectiveRate = 1.0;
+            if (custInvoiceTrans.CurrencyCode == reportingCurrency)
+            {
+                EtgRegisterSalesReportTemp.ExchangeRate              = 1.0;
+                EtgRegisterSalesReportTemp.AmountInReportingCurrency = custInvoiceTrans.LineAmount;
+            }
+            else
+            {
+                ledgerRecId = Ledger::primaryLedger(
+                    CompanyInfo::findDataArea(custInvoiceTrans.dataAreaId).RecId);
+
+                exchangeHelper = CurrencyExchangeHelper::newExchangeDate(
+                    ledgerRecId,
+                    CustInvoiceJour::findRecId(custInvoiceTrans.ParentRecId).InvoiceDate);
+
+                convertedAmount = exchangeHelper.calculateCurrencyToCurrency(
+                    custInvoiceTrans.CurrencyCode,
+                    reportingCurrency,
+                    custInvoiceTrans.LineAmount,
+                    true);
+
+                effectiveRate = (custInvoiceTrans.LineAmount != 0)
+                    ? convertedAmount / custInvoiceTrans.LineAmount
+                    : 0;
+
+                EtgRegisterSalesReportTemp.ExchangeRate              = effectiveRate;
+                EtgRegisterSalesReportTemp.AmountInReportingCurrency = convertedAmount;
+            }
+
+            EtgRegisterSalesReportTemp.VendorCode = custInvoiceJour.InvoiceAccount;
+            EtgRegisterSalesReportTemp.VendorName = CustTable::find(custInvoiceJour.InvoiceAccount).name();
+            EtgRegisterSalesReportTemp.TaxGroup   = custInvoiceJour.TaxGroup;
+            EtgRegisterSalesReportTemp.PONumber   = custInvoiceJour.SalesId;
+            EtgRegisterSalesReportTemp.Currency   = custInvoiceJour.CurrencyCode;
+            EtgRegisterSalesReportTemp.IncoTerms  = custInvoiceJour.DlvTerm;
+            EtgRegisterSalesReportTemp.ETGVoucher = custInvoiceJour.LedgerVoucher;
+
+            select firstonly salesTable
+                where salesTable.SalesId == custInvoiceJour.SalesId;
+
+            EtgRegisterSalesReportTemp.CustomerGroupName = CustGroup::find(salesTable.CustGroup).Name;
+
+            select firstonly ETG_SalesTableTrade
+                where ETG_SalesTableTrade.SalesId == salesTable.SalesId;
+
+            EtgRegisterSalesReportTemp.Remarks         = ETG_SalesTableTrade.Remarks;
+            EtgRegisterSalesReportTemp.PortofLoading   = ETG_SalesTableTrade.PortOfLoadingDesc;
+            EtgRegisterSalesReportTemp.PortOfDischarge = ETG_SalesTableTrade.PortOfDischargeDesc;
+            EtgRegisterSalesReportTemp.Country         = ETG_SalesTableTrade.CountryOfOriginOfGoods;
+
+            // ACF requirement - 18/08/2025
+            if (curext() == "O001")
+            {
+                ETG_PlaceOfDischarge ETG_PlaceOfDischarge;
+                select * from ETG_PlaceOfDischarge
+                    where ETG_PlaceOfDischarge.Description == EtgRegisterSalesReportTemp.PortOfDischarge;
+
+                EtgRegisterSalesReportTemp.SalesDestination = ETG_PlaceOfDischarge.Country;
+            }
+            else
+            {
+                EtgRegisterSalesReportTemp.SalesDestination = ETG_SalesTableTrade.CountryOfFinalDestination;
+            }
+
+            EtgRegisterSalesReportTemp.BillOfLadingNumber = custInvoiceJour.ETG_BLnumber;
+
+            select firstonly ETG_SALESAGREEMENTHEADER
+                where ETG_SALESAGREEMENTHEADER.RecId == salesTable.MatchingAgreement;
+
+            EtgRegisterSalesReportTemp.PurchaseContractNumber = SalesAgreementHeader::find(salesTable.MatchingAgreement).SalesNumberSequence;
+            EtgRegisterSalesReportTemp.ContractOrderType      = ETG_SALESAGREEMENTHEADER.AgreementType;
+
+            select firstonly inventTrans
+                where inventTrans.InvoiceId == custInvoiceTrans.InvoiceId;
+
+            EtgRegisterSalesReportTemp.Commodity = custInvoiceTrans.ItemId;
+            EtgRegisterSalesReportTemp.UOM       = custInvoiceTrans.SalesUnit;
+            EtgRegisterSalesReportTemp.UnitPrice = custInvoiceTrans.SalesPrice;
+
+            select firstonly inventDim
+                where inventDim.inventDimId == custInvoiceTrans.InventDimId;
+
+            EtgRegisterSalesReportTemp.Brand        = inventDim.InventStyleId;
+            EtgRegisterSalesReportTemp.Grade        = inventDim.configId;
+            EtgRegisterSalesReportTemp.Site         = inventDim.InventSiteId;
+            EtgRegisterSalesReportTemp.Origin       = inventDim.InventColorId;
+            EtgRegisterSalesReportTemp.BatchNumber  = inventDim.inventBatchId;
+            EtgRegisterSalesReportTemp.Location     = inventDim.wMSLocationId;
+            EtgRegisterSalesReportTemp.WareHouse    = inventDim.InventLocationId;
+            EtgRegisterSalesReportTemp.SerialNumber = inventDim.inventSerialId;
+
+            dimStorage = DimensionAttributeValueSetStorage::find(custInvoiceJour.DefaultDimension);
+            EtgRegisterSalesReportTemp.Vertical     = dimStorage.getDisplayValueByDimensionAttribute(DimensionAttribute::findByName('Vertical').RecId);
+            EtgRegisterSalesReportTemp.SubVertical  = dimStorage.getDisplayValueByDimensionAttribute(DimensionAttribute::findByName('SubVertical').RecId);
+            EtgRegisterSalesReportTemp.ProfitCenter = dimStorage.getDisplayValueByDimensionAttribute(DimensionAttribute::findByName('ProfitCenter').RecId);
+            EtgRegisterSalesReportTemp.BusinessUnit = dimStorage.getDisplayValueByDimensionAttribute(DimensionAttribute::findByName('BusinessUnit').RecId);
+
+            EtgRegisterSalesReportTemp.ETGBusinessSegment = custInvoiceJour.ETGBusinessSegment;
+            EtgRegisterSalesReportTemp.ETGConnectionType  = custInvoiceTrans.ETGConnectionType;
+            EtgRegisterSalesReportTemp.ETGDepositAmount   = custInvoiceTrans.ETGDepositAmount;
+            EtgRegisterSalesReportTemp.ETGDepositRate     = custInvoiceTrans.ETGDepositRate;
+
+            InventTableModule inventTableModule = InventTableModule::find(custInvoiceTrans.ItemId, ModuleInventPurchSales::Sales);
+            EtgRegisterSalesReportTemp.ETGPackSize = inventTableModule.ETGPackSize;
+
+            UnitOfMeasureConversion unitOfMeasureConversion;
+            InventTable             inventTableLoc = InventTable::find(custInvoiceTrans.ItemId);
+            UnitOfMeasureRecId      fromUnitId     = UnitOfMeasure::unitOfMeasureIdBySymbol(inventTableLoc.inventUnitId());
+
+            select firstonly unitOfMeasureConversion
+                where unitOfMeasureConversion.Product           == inventTableLoc.Product
+                   && unitOfMeasureConversion.FromUnitOfMeasure == fromUnitId;
+
+            EtgRegisterSalesReportTemp.ETGAlternateUOM        = UnitOfMeasure::find(unitOfMeasureConversion.ToUnitOfMeasure).Symbol;
+            EtgRegisterSalesReportTemp.ETGQtywithalternateUOM = custInvoiceTrans.Qty * unitOfMeasureConversion.Factor;
+
+            select * from companyInfo where companyInfo.DataArea == curExt();
+
+            EtgRegisterSalesReportTemp.ETGCompanyName   = companyInfo.name();
+            EtgRegisterSalesReportTemp.ETGCompanyLogo   = FormLetter::companyLogo();
+            EtgRegisterSalesReportTemp.ETGMainCommodity = inventTableLoc.ETGCommodity;
+            EtgRegisterSalesReportTemp.ETGSubCommodity  = inventTableLoc.ETGSubCommodity;
+            EtgRegisterSalesReportTemp.ETGVesselName    = ETG_SalesTableTrade.VesselName;
+
+            int num = mthOfYr(EtgRegisterSalesReportTemp.TransDate);
+            EtgRegisterSalesReportTemp.ETGMonth = mthName(num);
+
+            ItemId itemID = custInvoiceTrans.ItemId;
+            EtgRegisterSalesReportTemp.ETGItemName = EcoResProductTranslation::findByProductLanguage(
+                InventTable::find(itemID).Product,
+                SystemParameters::getSystemLanguageId()).Name;
+
+            
+            // PACKING-SLIP SPLIT LOGIC
+           
+            CustPackingSlipTrans pslipTrans;
+            CustPackingSlipJour  pslipJour;
+            ETG_BillOfLading     bolForPslip;
+            Qty                  totalPSlipQty = 0;
+            int                  pslipCount    = 0;
+
+            // Count packing slips for this invoice line
+            select count(RecId) from pslipTrans
+                where pslipTrans.InventTransId == custInvoiceTrans.InventTransId
+                   && pslipTrans.SalesId       == custInvoiceTrans.SalesId;
+            pslipCount = any2Int(pslipTrans.RecId);
+
+            // Sum packing-slip quantity (used to prorate amounts)
+            select sum(Qty) from pslipTrans
+                where pslipTrans.InventTransId == custInvoiceTrans.InventTransId
+                   && pslipTrans.SalesId       == custInvoiceTrans.SalesId;
+            totalPSlipQty = pslipTrans.Qty;
+
+            if (pslipCount > 0 && totalPSlipQty != 0)
+            {
+                // Loop each packing slip => insert one temp row per slip
+                while select pslipTrans
+                    where pslipTrans.InventTransId == custInvoiceTrans.InventTransId
+                       && pslipTrans.SalesId       == custInvoiceTrans.SalesId
+                    join pslipJour
+                        where pslipJour.PackingSlipId == pslipTrans.PackingSlipId
+                           && pslipJour.SalesId       == pslipTrans.SalesId
+                           && pslipJour.DeliveryDate  == pslipTrans.DeliveryDate
+                {
+                    real      proportion  = totalPSlipQty != 0 ? pslipTrans.Qty / totalPSlipQty : 0;
+                    AmountCur splitAmtCur = custInvoiceTrans.LineAmount    * proportion;
+                    AmountMST splitAmtMST = custInvoiceTrans.LineAmountMST * proportion;
+
+                    // Override quantity & amount for this packing-slip row
+                    EtgRegisterSalesReportTemp.Quantity                    = -pslipTrans.Qty; // ship qty (positive)
+                    EtgRegisterSalesReportTemp.AmountInTransactionCurrency = splitAmtCur;
+                    EtgRegisterSalesReportTemp.AmountInAccountingCurrency  = splitAmtMST;
+
+                    if (custInvoiceTrans.CurrencyCode == reportingCurrency)
+                    {
+                        EtgRegisterSalesReportTemp.AmountInReportingCurrency = splitAmtCur;
+                    }
+                    else if (effectiveRate != 0)
+                    {
+                        EtgRegisterSalesReportTemp.AmountInReportingCurrency = splitAmtCur * effectiveRate;
+                    }
+
+                    // Packing slip + BOL specific to this row
+                    EtgRegisterSalesReportTemp.PackingSlipId = pslipJour.PackingSlipId;
+
+                    // Bill of Lading for this packing slip
+                    // NOTE: adjust the link field below to match your ETG_BillOfLading schema
+                    select firstonly bolForPslip
+                        where bolForPslip.SalesId       == pslipTrans.SalesId
+                           && bolForPslip.PackingSlipId == pslipJour.PackingSlipId;
+
+                    if (bolForPslip)
+                    {
+                        EtgRegisterSalesReportTemp.BillOfLadingNumber = bolForPslip.BOLNo; // adjust field name if different
+                        EtgRegisterSalesReportTemp.PickListNumber     = bolForPslip.PickListNumber;
+                        EtgRegisterSalesReportTemp.ETGDeliveryOrderNo = bolForPslip.ETGDeliveryOrderNo;
+                    }
+                    else
+                    {
+                        // No specific BOL - fall back to invoice header BOL
+                        EtgRegisterSalesReportTemp.BillOfLadingNumber = custInvoiceJour.ETG_BLnumber;
+                        EtgRegisterSalesReportTemp.PickListNumber     = '';
+                        EtgRegisterSalesReportTemp.ETGDeliveryOrderNo = '';
+                    }
+
+                    EtgRegisterSalesReportTemp.insert();
+                }
+            }
+            else
+            {
+                
+                // FALLBACK: no packing slip exists - keep original single row
+                select firstonly eTG_BillOfLading
+                    where eTG_BillOfLading.SalesId == salesTable.SalesId;
+                EtgRegisterSalesReportTemp.PickListNumber = eTG_BillOfLading.PickListNumber;
+
+                select firstonly billOfLading
+                    where billOfLading.SalesId == salesTable.SalesId;
+
+                if (billOfLading.ETGDeliveryOrderNo != "")
+                {
+                    EtgRegisterSalesReportTemp.ETGDeliveryOrderNo = billOfLading.ETGDeliveryOrderNo;
+                }
+                else if (!EtgRegisterSalesReportTemp.ETGDeliveryOrderNo)
+                {
+                    while select billOfLading
+                        where billOfLading.SalesId == salesTable.SalesId
+                    {
+                        EtgRegisterSalesReportTemp.ETGDeliveryOrderNo = billOfLading.ETGDeliveryOrderNo;
+                    }
+                }
+
+                EtgRegisterSalesReportTemp.BillOfLadingNumber = custInvoiceJour.ETG_BLnumber;
+                EtgRegisterSalesReportTemp.insert();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getFinDimValue</Name>
+				<Source><![CDATA[
+    public Description getFinDimValue(DimensionDefault _defaultDimension, Name _dimensionName)
+    {
+        DimensionAttributeValueSetStorage dimStorage;
+        DimensionAttribute                dimAttribute;
+        DimensionValue                    displayValue   = "";
+        Description                       dimDescription = "";
+        int                               i;
+
+        dimStorage = DimensionAttributeValueSetStorage::find(_defaultDimension);
+        for (i = 1; i <= dimStorage.elements(); i++)
+        {
+            dimAttribute = DimensionAttribute::find(dimStorage.getAttributeByIndex(i));
+
+            if (dimAttribute.Name == _dimensionName)
+            {
+                displayValue   = dimStorage.getDisplayValueByIndex(i);
+                dimDescription = DimensionFinancialTag::findByFinancialTagCategoryAndValue(dimAttribute.financialTagCategory(), displayValue).Description;
+                if (dimDescription == "")
+                {
+                    dimDescription = this.getFinDimValueDescription(dimAttribute.ViewName, displayValue);
+                }
+            }
+        }
+
+        return dimDescription;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getFinDimValueDescription</Name>
+				<Source><![CDATA[
+    public Description getFinDimValueDescription(TableNameShort _ViewName, DimensionValue _displayValue)
+    {
+        DimAttributeInventTable    inventTable;
+        DimAttributeHcmWorker      worker;
+        DimAttributeCustTable      custTable;
+        DimAttributeVendTable      dimVendTable;
+        DimAttributeAssetTable     assetTable;
+        DimAttributeOMBusinessUnit businessUnit;
+        DimAttributeOMCostCenter   costCenter;
+        DimAttributeOMDepartment   department;
+        Description                dimDescription = "";
+
+        switch (_ViewName)
+        {
+            case "DimAttributeInventTable":
+                select Name from inventTable where inventTable.value == _displayValue;
+                dimDescription = inventTable.Name;
+                break;
+            case "DimAttributeHcmWorker":
+                select Name from worker where worker.value == _displayValue;
+                dimDescription = worker.Name;
+                break;
+            case "DimAttributeCustTable":
+                select Name from custTable where custTable.value == _displayValue;
+                dimDescription = custTable.Name;
+                break;
+            case "DimAttributeVendTable":
+                select Name from dimVendTable where dimVendTable.value == _displayValue;
+                dimDescription = dimVendTable.Name;
+                break;
+            case "DimAttributeAssetTable":
+                select Name from assetTable where assetTable.value == _displayValue;
+                dimDescription = assetTable.Name;
+                break;
+            case "DimAttributeOMBusinessUnit":
+                select Name from businessUnit where businessUnit.value == _displayValue;
+                dimDescription = businessUnit.Name;
+                break;
+            case "DimAttributeOMCostCenter":
+                select Name from costCenter where costCenter.value == _displayValue;
+                dimDescription = costCenter.Name;
+                break;
+            case "DimAttributeOMDepartment":
+                select Name from department where department.value == _displayValue;
+                dimDescription = department.Name;
+                break;
+        }
+
+        return dimDescription;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>isDimensionIncludedInSet</Name>
+				<Source><![CDATA[
+    public boolean isDimensionIncludedInSet(Name _setName, Name _dimensionName)
+    {
+        FinancialDimensionSetEntity financialDimensionSetEntity;
+
+        select firstonly financialDimensionSetEntity
+            where financialDimensionSetEntity.Name == _setName
+               && (financialDimensionSetEntity.SegmentName01 == _dimensionName
+                || financialDimensionSetEntity.SegmentName02 == _dimensionName
+                || financialDimensionSetEntity.SegmentName03 == _dimensionName
+                || financialDimensionSetEntity.SegmentName04 == _dimensionName
+                || financialDimensionSetEntity.SegmentName05 == _dimensionName
+                || financialDimensionSetEntity.SegmentName06 == _dimensionName
+                || financialDimensionSetEntity.SegmentName07 == _dimensionName
+                || financialDimensionSetEntity.SegmentName08 == _dimensionName
+                || financialDimensionSetEntity.SegmentName09 == _dimensionName
+                || financialDimensionSetEntity.SegmentName10 == _dimensionName
+                || financialDimensionSetEntity.SegmentName11 == _dimensionName);
+
+        return financialDimensionSetEntity.RecId;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

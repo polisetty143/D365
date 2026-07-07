@@ -1,0 +1,729 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxForm xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V6">
+	<Name>ETGConversionToInventoryTable</Name>
+	<SourceCode>
+		<Methods xmlns="">
+			<Method>
+				<Name>classDeclaration</Name>
+				<Source><![CDATA[
+[Form]
+public class ETGConversionToInventoryTable extends FormRun
+{
+    Set assetTableList = new Set(Types::Record);
+
+}
+]]></Source>
+			</Method>
+			<Method>
+				<Name>lookupRetailVariantId</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Performing lookup method of product variant details field.
+    /// </summary>
+    /// <param name = "_ctrl">FormStringControl.</param>
+    /// <param name = "_itemIdFilter">ItemId.</param>
+    public void lookupRetailVariantId(FormStringControl _ctrl, ItemId _itemIdFilter)
+    {
+        FormRun formRun = classfactory.formRunClass(new Args(formStr(RetailVariantLookup)));
+        formRun.args().parm(_itemIdFilter);
+        formRun.args().caller(_ctrl);
+        formRun.init();
+        formRun.run();
+        _ctrl.performFormLookup(formRun);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>init</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///calling both methods when single and mutliple fixed asset numbers are selected
+    /// </summary>
+    public void init()
+    {
+        super();
+
+        FormName formName = element.args().callerName();
+        
+        if(element.args().record() && element.args().dataset() == tableNum(AssetTable))
+        {
+            if(formName == formStr(AssetTableNotAcquiredListPage))
+            {
+                FormRun formRunAssetTableAcquired = element.args().caller();
+                this.initializeAssetTableList(formRunAssetTableAcquired.dataSource());
+            }
+            if(formName == formStr(AssetTable))
+            {
+                this.initializeAssetTableSingle(element.args().record());
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initializeAssetTableList</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Initializing the AssetTable when multiple FixedAssetNumbers are selected
+    /// </summary>
+    /// <param name = "assetTableDS">FormDataSource assetTableDS</param>
+    public void initializeAssetTableList(FormDataSource assetTableDS)
+    {
+        AssetTable         assetTable;
+        InventJournalTrans inventJournalTarns;
+
+        assetTable = assetTableDS.getFirst(1);
+        while (assetTable)
+        {
+            select firstonly RecId, JournalId from inventJournalTarns where inventJournalTarns.ETGAssetId == assetTable.AssetId;
+            if(inventJournalTarns.RecId)
+            {
+                warning (strFmt("@ETG_New:FixedAssetValidation",
+                assetTable.AssetId,
+                inventJournalTarns.JournalId));
+            }
+            else
+            {
+                assetTableList.add(AssetTable::find(assetTable.AssetId));
+            }
+            assetTable = assetTableDS.getNext();
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initializeAssetTableSingle</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Intializing the AssetTable single fixed asset number is selected.
+    /// </summary>
+    /// <param name = "assetTable">AssetTable.</param>
+    public void initializeAssetTableSingle(AssetTable assetTable)
+    {
+        InventJournalTrans inventJournalTarns;
+
+        select firstonly RecId, JournalId from inventJournalTarns where inventJournalTarns.ETGAssetId == assetTable.AssetId;
+        if(inventJournalTarns.RecId)
+        {
+            warning (strFmt("@ETG_New:FixedAssetValidation",
+                assetTable.AssetId,
+                inventJournalTarns.JournalId));
+        }
+        else
+        {
+            assetTableList.add(assetTable);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///Assigning the values of Fixedasset, Quantity and Date fields.
+    /// </summary>
+    public void run()
+    {
+        super();
+
+        str assetIds;
+        Qty totalQty;
+        AssetTable assetTable;
+        SetEnumerator se = assetTableList.getEnumerator();
+        while (se.moveNext())
+        {
+            assetTable    = se.current();
+            if(!assetIds)
+            {
+                assetIds = assetTable.AssetId;
+            }
+            else
+            {
+                assetIds = assetIds + "@ETG_New:Assetid" + assetTable.AssetId;
+            }
+            
+            totalQty = totalQty + assetTable.Quantity;
+        }
+       
+        ETGConversionToInventoryTable.FixedAssetNumber = assetIds;
+        ETGConversionToInventoryTable.AssetQty         = totalQty;
+        ETGConversionToInventoryTable.TransDate        = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>checkActiveDimension</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Checking the dimensions are active/enabled/not
+    /// </summary>
+    private void checkActiveDimension()
+    {
+        InventTable inventTable;
+        EcoResTrackingDimensionGroupRecId inventTrackingDimGroupRecId;
+        EcoResStorageDimensionGroupRecId  inventStorageDimGroupRecId;
+        EcoResProductDimensionGroupRecId productDimGroupId;
+    
+        if(!ETGConversionToInventoryTable.ItemNumber)
+        {
+            return;
+        }
+
+        inventTable                 = InventTable::find(ETGConversionToInventoryTable.ItemNumber);
+        inventTrackingDimGroupRecId = inventTable.trackingDimensionGroup();
+        inventStorageDimGroupRecId  = inventTable.storageDimensionGroup();
+        productDimGroupId           = inventTable.productDimensionGroup();
+
+        //check batch is enabled or not
+        ETGConversionToInventoryTable_ds.object(fieldNum(ETGConversionToInventoryTable, InventSiteId)).allowEdit(
+            EcoResStorageDimensionGroupFldSetup::findByDimensionGroupFieldId(inventStorageDimGroupRecId,
+            fieldNum(InventDim, InventSiteId)).IsActive);
+
+        //check warehouse is enabled or not
+        ETGConversionToInventoryTable_ds.object(fieldNum(ETGConversionToInventoryTable, InventLocationId)).allowEdit(
+            EcoResStorageDimensionGroupFldSetup::findByDimensionGroupFieldId(inventStorageDimGroupRecId,
+            fieldNum(InventDim, InventLocationId)).IsActive);
+
+        //check location is enabled or not
+        ETGConversionToInventoryTable_ds.object(fieldNum(ETGConversionToInventoryTable, WMSLocationId)).allowEdit(
+            EcoResStorageDimensionGroupFldSetup::findByDimensionGroupFieldId(inventStorageDimGroupRecId,
+            fieldNum(InventDim, WMSLocationId)).IsActive);
+
+        //check batch is enabled or not
+        ETGConversionToInventoryTable_ds.object(fieldNum(ETGConversionToInventoryTable, InventBatchId)).allowEdit(
+            EcoResTrackingDimensionGroupFldSetup::findByDimensionGroupFieldId(inventTrackingDimGroupRecId,
+            fieldNum(InventDim, InventBatchId)).IsActive);
+
+        //check grade is enabled or not
+        ETGConversionToInventoryTable_ds.object(fieldNum(ETGConversionToInventoryTable, Grade)).allowEdit(
+            EcoResProductDimensionGroupFldSetup::findByDimensionGroupFieldId(productDimGroupId,
+            fieldNum(InventDim, configId)).IsActive);
+
+        // check size is enabled or not
+        ETGConversionToInventoryTable_ds.object(fieldNum(ETGConversionToInventoryTable, Size)).allowEdit(
+            EcoResProductDimensionGroupFldSetup::findByDimensionGroupFieldId(productDimGroupId,
+            fieldNum(InventDim, InventSizeId)).IsActive);
+
+        // check origin is enabled or not
+        ETGConversionToInventoryTable_ds.object(fieldNum(ETGConversionToInventoryTable, Origin)).allowEdit(
+            EcoResProductDimensionGroupFldSetup::findByDimensionGroupFieldId(productDimGroupId,
+            fieldNum(InventDim, InventColorId)).IsActive);
+
+        // check Brand is enabled or not
+        ETGConversionToInventoryTable_ds.object(fieldNum(ETGConversionToInventoryTable, Brand)).allowEdit(
+            EcoResProductDimensionGroupFldSetup::findByDimensionGroupFieldId(productDimGroupId,
+            fieldNum(InventDim, InventStyleId)).IsActive);
+      
+
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>resetDimFields</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Reseting the dimension fields when ItemNumber is modified or changed
+    /// </summary>
+    private void resetDimFields()
+    {
+        ETGConversionToInventoryTable.InventSiteId          = "";
+        ETGConversionToInventoryTable.InventLocationId      = "";
+        ETGConversionToInventoryTable.WMSLocationId         = "";
+        ETGConversionToInventoryTable.InventBatchId         = "";
+        ETGConversionToInventoryTable.Grade                 = "";
+        ETGConversionToInventoryTable.Size                  = "";
+        ETGConversionToInventoryTable.Origin                = "";
+        ETGConversionToInventoryTable.Brand                 = "";
+        ETGConversionToInventoryTable.ItemVariantDetails    = "";
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+		<DataSources xmlns="">
+			<DataSource>
+				<Name>ETGConversionToInventoryTable</Name>
+				<Methods />
+				<Fields>
+					<Field>
+						<DataField>Brand</DataField>
+						<Methods>
+							<Method>
+								<Name>lookup</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            /// <param name = "_formControl"></param>
+            /// <param name = "_filterStr"></param>
+            public void lookup(FormControl _formControl, str _filterStr)
+            {
+                ETGConversionToInventoryTable::lookupProductDimension(
+                    _formControl,
+                    ETGConversionToInventoryTable.ItemNumber,
+                    fieldNum(RetailProductVariantDimensionsView, InventStyleId));
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>Grade</DataField>
+						<Methods>
+							<Method>
+								<Name>lookup</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            /// <param name = "_formControl"></param>
+            /// <param name = "_filterStr"></param>
+            public void lookup(FormControl _formControl, str _filterStr)
+            {
+                ETGConversionToInventoryTable::lookupProductDimension(
+                    _formControl,
+                    ETGConversionToInventoryTable.ItemNumber,
+                    fieldNum(RetailProductVariantDimensionsView, InventConfigId));
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>InventBatchId</DataField>
+						<Methods>
+							<Method>
+								<Name>lookup</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            /// <param name = "_formControl"></param>
+            /// <param name = "_filterStr"></param>
+            public void lookup(FormControl _formControl, str _filterStr)
+            {
+                Query                   query = new Query();
+                QueryBuildRange        queryBuildRange;
+                QueryBuildDataSource    queryBuildDataSource  = query.addDataSource(tableNum(InventBatch));
+                SysTableLookup          tableLookup = SysTableLookup::newParameters(tablenum(InventBatch), _formControl);
+                tableLookup.addLookupfield(fieldnum(InventBatch, InventBatchId));
+                queryBuildDataSource.orderMode(OrderMode::GroupBy);
+                queryBuildDataSource.addGroupByField(fieldNum(InventBatch, InventBatchId));
+                queryBuildRange = queryBuildDataSource.addrange(fieldNum(InventBatch, ItemId));
+                queryBuildRange.value(ETGConversionToInventoryTable.ItemNumber);
+                tableLookup.parmQuery(query);
+                tableLookup.performFormLookup();
+
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>ItemNumber</DataField>
+						<Methods>
+							<Method>
+								<Name>modified</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///Resetting the dimension fields and checking the active dimensions when ItemNum is modified
+            /// </summary>
+            public void modified()
+            {
+                super();
+                element.resetDimFields();
+                element.checkActiveDimension();
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>ItemVariantDetails</DataField>
+						<Methods>
+							<Method>
+								<Name>lookup</Name>
+								<Source><![CDATA[
+            /// <summary>
+            /// Calling the Item Variant related data Lookup method.
+            /// </summary>
+            /// <param name = "_formControl">FormControl.</param>
+            /// <param name = "_filterStr">str.</param>
+            public void lookup(FormControl _formControl, str _filterStr)
+            {
+                element.lookupRetailVariantId(_formControl,ETGConversionToInventoryTable.ItemNumber);
+            }
+
+]]></Source>
+							</Method>
+							<Method>
+								<Name>modified</Name>
+								<Source><![CDATA[
+            /// <summary>
+            /// Assigning the Item variants when Item Number field is modified
+            /// </summary>
+            public void modified()
+            {
+                InventDim inventdimvariant;
+
+                super();
+                inventdimvariant                     = InventDimCombination::findVariantId(ETGConversionToInventoryTable.ItemVariantDetails).inventDim();
+                ETGConversionToInventoryTable.Brand  = inventdimvariant.InventStyleId;
+                ETGConversionToInventoryTable.Size   = inventdimvariant.InventSizeId;
+                ETGConversionToInventoryTable.Origin = inventdimvariant.InventColorId;
+                ETGConversionToInventoryTable.Grade  = inventdimvariant.configId;
+
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>Origin</DataField>
+						<Methods>
+							<Method>
+								<Name>lookup</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            /// <param name = "_formControl"></param>
+            /// <param name = "_filterStr"></param>
+            public void lookup(FormControl _formControl, str _filterStr)
+            {
+                ETGConversionToInventoryTable::lookupProductDimension(
+                    _formControl,
+                    ETGConversionToInventoryTable.ItemNumber,
+                    fieldNum(RetailProductVariantDimensionsView, InventColorId));
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>Size</DataField>
+						<Methods>
+							<Method>
+								<Name>lookup</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            /// <param name = "_formControl"></param>
+            /// <param name = "_filterStr"></param>
+            public void lookup(FormControl _formControl, str _filterStr)
+            {
+                ETGConversionToInventoryTable::lookupProductDimension(
+                    _formControl,
+                    ETGConversionToInventoryTable.ItemNumber,
+                    fieldNum(RetailProductVariantDimensionsView, InventSizeId));
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+				</Fields>
+			</DataSource>
+		</DataSources>
+		<DataControls xmlns="">
+			<Control>
+				<Name>OK</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///Performing the action of Creating Inventory adjustment Journal when clicked ok.
+        /// </summary>
+        public void clicked()
+        {
+            super();
+
+            if(assetTableList.elements() == 0)
+            {
+                throw Error("@ETG_New:FixedAssetRecordValidation");
+            }
+
+            MenuFunction menufunction;
+            Args args = new Args();
+            args.record(ETGConversionToInventoryTable);
+            args.parmObject(assetTableList);
+            menufunction = new MenuFunction(menuItemActionStr(ETGTrackingNumInventoryJournalCreate), MenuItemType::Action);
+            menufunction.run(args);
+
+            element.close();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+		</DataControls>
+		<Members xmlns="" />
+	</SourceCode>
+	<DataSources>
+		<AxFormDataSource xmlns="">
+			<Name>ETGConversionToInventoryTable</Name>
+			<Table>ETGConversionToInventoryTable</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>AssetQty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Brand</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostAmount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CostPrice</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>FixedAssetNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Grade</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventBatchId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventLocationId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventSiteId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ItemNumber</DataField>
+					<Mandatory>Yes</Mandatory>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ItemVariantDetails</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Origin</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Size</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>StorageDimension</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TrackingDimension</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TransDate</DataField>
+					<Mandatory>Yes</Mandatory>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>WMSLocationId</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<InsertAtEnd>No</InsertAtEnd>
+			<InsertIfEmpty>No</InsertIfEmpty>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+	</DataSources>
+	<Design>
+		<Caption xmlns="">@ETG_New:ReplicateToInventory</Caption>
+		<Pattern xmlns="">Dialog</Pattern>
+		<PatternVersion xmlns="">1.2</PatternVersion>
+		<Style xmlns="">Dialog</Style>
+		<Controls xmlns="">
+			<AxFormControl xmlns=""
+				i:type="AxFormGroupControl">
+				<Name>FormGroupControl</Name>
+				<HeightMode>SizeToAvailable</HeightMode>
+				<Pattern>FieldsFieldGroups</Pattern>
+				<PatternVersion>1.1</PatternVersion>
+				<Type>Group</Type>
+				<WidthMode>SizeToAvailable</WidthMode>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ItemNumber</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ItemNumber</DataField>
+						<DataSource>ETGConversionToInventoryTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ItemVariantDetails</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ItemVariantDetails</DataField>
+						<DataSource>ETGConversionToInventoryTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGConversionToInventoryTable_Grade</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Grade</DataField>
+						<DataSource>ETGConversionToInventoryTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGConversionToInventoryTable_Size</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Size</DataField>
+						<DataSource>ETGConversionToInventoryTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGConversionToInventoryTable_Origin</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Origin</DataField>
+						<DataSource>ETGConversionToInventoryTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGConversionToInventoryTable_Brand</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Brand</DataField>
+						<DataSource>ETGConversionToInventoryTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGConversionToInventoryTable_Site</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>InventSiteId</DataField>
+						<DataSource>ETGConversionToInventoryTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGConversionToInventoryTable_InventLocationId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>InventLocationId</DataField>
+						<DataSource>ETGConversionToInventoryTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGConversionToInventoryTable_WMSLocationId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>WMSLocationId</DataField>
+						<DataSource>ETGConversionToInventoryTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGConversionToInventoryTable_InventBatchId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>InventBatchId</DataField>
+						<DataSource>ETGConversionToInventoryTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormDateControl">
+						<Name>TransDate</Name>
+						<Type>Date</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>TransDate</DataField>
+						<DataSource>ETGConversionToInventoryTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>FixedAssetNumber</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>FixedAssetNumber</DataField>
+						<DataSource>ETGConversionToInventoryTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormRealControl">
+						<Name>AssetQty</Name>
+						<Type>Real</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>AssetQty</DataField>
+						<DataSource>ETGConversionToInventoryTable</DataSource>
+					</AxFormControl>
+				</Controls>
+				<ColumnsMode>Fill</ColumnsMode>
+				<Style>DialogContent</Style>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormButtonGroupControl">
+				<Name>FormButtonGroupControl</Name>
+				<Type>ButtonGroup</Type>
+				<WidthMode>SizeToAvailable</WidthMode>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormButtonControl">
+						<Name>OK</Name>
+						<Type>Button</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Text>OK</Text>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormCommandButtonControl">
+						<Name>Cancel</Name>
+						<Type>CommandButton</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Command>Cancel</Command>
+						<SaveRecord>No</SaveRecord>
+						<Text>Cancel</Text>
+					</AxFormControl>
+				</Controls>
+				<ArrangeMethod>HorizontalRight</ArrangeMethod>
+				<Style>DialogCommitContainer</Style>
+			</AxFormControl>
+		</Controls>
+	</Design>
+	<Parts />
+</AxForm>

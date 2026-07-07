@@ -1,0 +1,220 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchPurchaseOrderDP_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary> 
+/// This Dp class will fetch the details from PurchPurchaseOrderDP to the report by using logic.
+/// </summary>
+[ExtensionOf(classstr(PurchPurchaseOrderDP))]
+final class ETGPurchPurchaseOrderDP_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>insertOrderHeader</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Insert the order header.
+    /// </summary>
+    /// <param name = "_purchaseOrderHeader">
+    /// A <c>PurchPurchaseOrderHeader</c> record to insert.
+    /// </param>
+    protected void insertOrderHeader(PurchPurchaseOrderHeader _purchaseOrderHeader)
+    {
+        ETG_PurchTableTrade             ETG_PurchTableTrade;
+        PurchTable                      purchTable;
+        PurchLine                       purchLine;
+        PurchPurchaseOrderTmp           purchPurchaseOrderTmp;
+        Description1000                 AmountinTxt;
+        DirPartyTable                   dirPartyTable;
+        DirPartyLocation                dirPartyLocation;
+        TaxRegistration                 taxRegistration;
+        PurchTotalsSummary              PurchTotalsSummaryLoc;
+        VendPurchOrderJour              VendPurchOrderJourLoc;
+
+        select firstonly PurchTotalsSummaryLoc
+            where PurchTotalsSummaryLoc.PurchId     == _purchaseOrderHeader.PurchId &&
+                  PurchTotalsSummaryLoc.DataAreaId  == curExt();
+        select firstonly PortOfDischargeDesc,TermPaymDescription,PortOfLoadingDesc,OrderType from ETG_PurchTableTrade
+            where ETG_PurchTableTrade.PurchId       == _purchaseOrderHeader.PurchId
+            join DlvMode,DlvTerm,PurchaseType,payment from purchTable
+                where purchTable.PurchId == ETG_PurchTableTrade.PurchId;
+        select firstonly purchPurchaseOrderTmp
+            where purchPurchaseOrderTmp.PurchLineInventTransId  ==  purchLine.InventTransId;
+        select firstonly RegistrationNumber from  taxRegistration
+            exists join dirPartyLocation
+                where  dirPartyLocation.RecId == taxRegistration.DirPartyLocation
+            exists join dirPartyTable
+                where dirPartyTable.RecId == dirPartyLocation.Party;
+
+        _purchaseOrderHeader.ETGPortPlaceOfDischarge        =  ETG_PurchTableTrade.PortOfDischargeDesc;
+        _purchaseOrderHeader.ETG_TermsOfPayment             =  PurchTable.Payment;
+        _purchaseOrderHeader.ETGModeOfDelivery              =  purchTable.DlvMode;
+        _purchaseOrderHeader.ETG_DeliveryTerms              =  purchTable.DlvTerm;
+        _purchaseOrderHeader.ETGPortPlaceOfLoading          =  ETG_PurchTableTrade.PortOfLoadingDesc;
+        _purchaseOrderHeader.OrderType                      =  ETG_PurchTableTrade.OrderType;
+        _purchaseOrderHeader.SumMarkup                      =  PurchTotalsSummaryLoc.MiscCharges;
+        _purchaseOrderHeader.SumTax                         =  PurchTotalsSummaryLoc.SalesTax;
+        _purchaseOrderHeader.ETGCompanyTeleFax              =  strFmt('Tel : %1   Fax : %2',CompanyInfo::find().phone(),CompanyInfo::find().teleFax());
+        if(curExt() == "O051")
+        {
+            _purchaseOrderHeader.CompanyAddress                 =  CompanyInfo::find().postalAddress().Address;
+            _purchaseOrderHeader.CompanyAddress                 =  strReplace(_purchaseOrderHeader.CompanyAddress,'\n', ' ');
+        }
+        else
+        {
+            _purchaseOrderHeader.CompanyAddress                 =  CompanyInfo::find().postalAddress().Address;
+            _purchaseOrderHeader.CompanyAddress                 =  strReplace(_purchaseOrderHeader.CompanyAddress,'\n','');
+        }
+        _purchaseOrderHeader.CompanyName                    =  CompanyInfo::find().Name;
+        _purchaseOrderHeader.CompanyEmail                   =  strFmt('Email : %1  Web : %2',CompanyInfo::find().email(),CompanyInfo::find().url());
+        _purchaseOrderHeader.ETGEmailFrench                 =  strFmt("%1 : %2  %3 : %4",@strFmt("@ETGReport:EmailFr"),CompanyInfo::find().email(),strFmt("@ETGReport:WebFr"),CompanyInfo::find().url());
+        _purchaseOrderHeader.ETGEmailFrench                 =  strFmt("%1 : %2  %3 : %4",@strFmt("@ETGReport:EmailPl"),CompanyInfo::find().email(),strFmt("@ETGReport:WebPl"),CompanyInfo::find().url());
+        select firstonly VendPurchOrderJourLoc where VendPurchOrderJourLoc.RecId == _purchaseOrderHeader.JournalRecId;
+            Amount  TotalLineAmount1 = VendPurchOrderJourLoc.SalesOrderBalance;
+
+        if(curExt() == "O051")
+        {
+            AmountinTxt  = Global::numeralsToTxt_EN(VendPurchOrderJourLoc.Amount);
+        }
+        else
+        {
+            AmountinTxt  = Global::numeralsToTxt_EN(TotalLineAmount1 + PurchTotalsSummaryLoc.MiscCharges + PurchTotalsSummaryLoc.SalesTax);
+        }
+        AmountinTxt = strReplace(AmountinTxt,'***','');
+            //AmountinTxt = strReplace(AmountinTxt,'and 00/100','');
+        _purchaseOrderHeader.ETGAmountInWordsTest = AmountinTxt;
+        _purchaseOrderHeader.ETGTotalAmount = VendPurchOrderJourLoc.Amount;
+        next insertOrderHeader(_purchaseOrderHeader);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertOrderLine</Name>
+				<Source><![CDATA[
+    /// /// <summary>
+    /// Insert the order line.
+    /// </summary>
+    /// <param name = "_purchaseOrderTmp">
+    /// A <c>PurchPurchaseOrderTmp</c> order line record to insert.
+    /// </param>
+    protected void insertOrderLine(PurchPurchaseOrderTmp _purchaseOrderTmp)
+    {
+        PurchLine               purchLine   = PurchLine::findInventTransId(_purchaseOrderTmp.PurchLineInventTransId);
+
+
+        //condition for ifdockagesplit items
+
+        boolean skipLine = false;
+
+        ETGCanadaParameters params = ETGCanadaParameters::find();
+        // Condition  Do not print flag
+        if(params.EnableDockageSplitItems== NoYes::Yes)
+        {
+            if(purchLine)
+            {
+                // Condition  Quantity is zero
+                //if(curExt() == "")
+            if (purchLine.QtyOrdered == 0)
+                {
+                    skipLine = true;
+                }
+
+            
+
+                if (params && params.EnableDockageSplitItems== NoYes::Yes
+                && (purchLine.ETGIsDockageItem==NoYes::yes || purchLine.ETGIsSplitItem==NoYes::yes))
+
+                {
+                    skipLine = true;
+                }
+
+           
+            }
+        }
+
+       
+
+
+        MarkupTrans             markuptrans;
+        VendPurchOrderJour vendPurchOrderJour;
+        ITaxDocument taxDocument;
+        ITaxDocumentComponentLineEnumerator componentLineEnumerator;
+        ITaxDocumentComponentLine componentLineObject;
+        ITaxDocumentMeasureEnumerator measureEnumerator;
+        TaxAmount taxAmount,taxValue;
+        TaxComponent_IN taxComponent;
+        PurchTable purchTable;
+        PurchLine purchLineOrg;
+        Map taxDetailMap;
+        real igstRate, cgstRate, sgstRate;
+        const str IGST = 'IGST', CGST = 'CGST', SGST = 'SGST';
+
+        TransTaxInformation transTaxInformation;
+
+
+
+        select firstonly markuptrans
+            where markuptrans.TransRecId == purchLine.RecId;
+        _purchaseOrderTmp.ETGMarkupTrans    =         markuptrans.Value;
+        _purchaseOrderTmp.TaxCode           =         PurchLine::findInventTransId(_purchaseOrderTmp.PurchLineInventTransId).TaxGroup;
+
+        purchTable = PurchTable::find(purchLine.PurchId);
+
+        taxDetailMap = ETGPurchTableGSTDetails::getGSTDetail(purchTable);
+
+        if(taxDetailMap is Object)
+        {
+           if(taxDetailMap.exists([purchLine.TableId, purchLine.RecId, IGST]))
+           {
+              igstRate = conPeek(taxDetailMap.lookup([purchLine.TableId, purchLine.RecId, IGST]), 1);
+              _purchaseOrderTmp.IGSTRate = igstRate;
+              _purchaseOrderTmp.IGSTTaxAmount = conPeek(taxDetailMap.lookup([purchLine.TableId, purchLine.RecId, IGST]), 2);
+           }
+           if(taxDetailMap.exists([purchLine.TableId, purchLine.RecId, CGST]))
+           {
+              cgstRate = conPeek(taxDetailMap.lookup([purchLine.TableId, purchLine.RecId, CGST]), 1);
+              _purchaseOrderTmp.CGSTRate = cgstRate;
+              _purchaseOrderTmp.CGSTTaxAmount    = conPeek(taxDetailMap.lookup([purchLine.TableId, purchLine.RecId, CGST]), 2);
+           }
+           if(taxDetailMap.exists([purchLine.TableId, purchLine.RecId, SGST]))
+           {
+              sgstRate = conPeek(taxDetailMap.lookup([purchLine.TableId, purchLine.RecId, SGST]), 1);
+              _purchaseOrderTmp.SGSTRate = sgstRate;
+              _purchaseOrderTmp.SGSTTaxAmount    = conPeek(taxDetailMap.lookup([purchLine.TableId, purchLine.RecId, SGST]), 2);
+           }
+
+            
+            transTaxInformation = TransTaxInformationHelper::findOrCreateTransTaxInformation(tableNum(PurchLine), purchLine.RecId, true);
+
+            if(transTaxInformation.InclTax == NoYes::Yes)
+            {
+                _purchaseOrderTmp.LineAmount = purchLine.LineAmount;
+            }
+            else
+            {
+                _purchaseOrderTmp.LineAmount = _purchaseOrderTmp.LineAmount + _purchaseOrderTmp.IGSTTaxAmount + _purchaseOrderTmp.CGSTTaxAmount + _purchaseOrderTmp.SGSTTaxAmount;
+            }
+        }
+
+        next insertOrderLine(_purchaseOrderTmp);
+        
+        if(params.EnableDockageSplitItems== NoYes::Yes)
+        {
+            if (skipLine && purchLine)
+            {
+                delete_from _purchaseOrderTmp
+            where _purchaseOrderTmp.PurchLineInventTransId ==
+                 purchLine.InventTransId;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

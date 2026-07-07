@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesTableBatchNumberCreateEventHandlers</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGSalesTableBatchNumberCreateEventHandlers
+{
+    
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>InventoryDimensionsGrid_inventBatchId_OnLookup</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(SalesTable, InventoryDimensionsGrid_inventBatchId), FormControlEventType::Lookup)]
+    public static void InventoryDimensionsGrid_inventBatchId_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+       
+        if (ETGACFParameters::find().BLNumberAutomation)
+        {
+            SysTableLookup sysTableLookup = SysTableLookup::newParameters(tableNum(ETGBlNumber), sender);
+            Query q = new Query();
+            QueryBuildDataSource qbds;
+            QueryBuildRange      qbr,qbr1;
+            InventDim            inventDim;
+            SalesLine            salesline;
+
+            FormRun        formRun             = sender.formRun();
+            FormDataSource inventDimDataSource = formRun.dataSource(tableStr(InventDim));
+            inventDim                          = inventDimDataSource.cursor() as InventDim;
+
+            FormDataSource saleslineDataSource = formRun.dataSource(tableStr(SalesLine));
+            salesline                          = saleslineDataSource.cursor() as SalesLine;
+
+            EcoResProduct     ecoResProduct = EcoResProduct::find(InventTable::find(salesline.ItemId).Product);
+
+            if(ecoResProduct.ProductType == EcoResProductType::Item)
+            {
+
+                if(inventDim.inventSerialId =="")
+                {
+                    Error("@ETG_New:PleaseSelectSerialNumber");
+                    return;
+                }
+                else
+                {
+                    qbds = q.addDataSource(tableNum(ETGBlNumber));
+                    qbr= qbds.addRange(fieldNum(ETGBlNumber, SerialNumber));
+                    qbr1= qbds.addRange(fieldNum(ETGBlNumber,ItemNumber));
+                    qbr.value(SysQuery::value(inventDim.inventSerialId));
+                    qbr1.value(SysQuery::value(salesline.ItemId));
+                    qbr.status(RangeStatus::Locked);
+                    qbds.addGroupByField(fieldNum(ETGBlNumber, BatchNumber));
+                    sysTableLookup.parmQuery(q);
+                    sysTableLookup.addLookupfield(fieldNum(ETGBlNumber, BatchNumber), true);
+                    sysTableLookup.parmUseLookupValue(false);
+                    sysTableLookup.performFormLookup();
+                    FormControlCancelableSuperEventArgs ce = e as FormControlCancelableSuperEventArgs;
+                    ce.CancelSuperCall();
+                }
+            }
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

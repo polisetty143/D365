@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_LedgerJournalCheckPostUpdateJournal_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(LedgerJournalCheckPost))]
+Internal final class ETG_LedgerJournalCheckPostUpdateJournal_Extension
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>updateJournalForPosted</Name>
+				<Source><![CDATA[
+    protected void updateJournalForPosted()
+    {
+        next updateJournalForPosted();
+
+        if(ETGACFParameters::find().EnableIntercompanyTransactions == NoYes::Yes)
+        {
+            LedgerJournalTable LedgerJournalTableLoc = this.ledgerJournalTable;
+
+            if(LedgerJournalTableLoc.ETGSourceEntityJournalNum)
+            {
+                changecompany(LedgerJournalTableLoc.ETGICSourceEntity)
+                {
+                    LedgerJournalTable LedgerJournalTableLocal;
+
+                    select forupdate LedgerJournalTableLocal
+                        where LedgerJournalTableLocal.JournalNum == LedgerJournalTableLoc.ETGSourceEntityJournalNum;
+
+                    if(LedgerJournalTableLocal)
+                    {
+                        ttsbegin;
+                        LedgerJournalTableLocal.ETGICDestiJournalPosted = NoYes::Yes;
+                        LedgerJournalTableLocal.doUpdate();
+                        ttscommit;
+                    }
+                    
+                }
+            }
+            if(LedgerJournalTableLoc.ETGICSourceEntity)
+            {
+                changecompany(LedgerJournalTableLoc.ETGICSourceEntity)
+                {
+                    LedgerJournalTable ledgerJournalTableSource;
+
+                    select firstonly ledgerJournalTableSource
+                    where ledgerJournalTableSource.JournalNum == LedgerJournalTableLoc.ETGSourceEntityJournalNum;
+
+                    if(ledgerJournalTableSource)
+                    {
+                        try
+                        {
+                            SysEmailParameters _SysEmailParameters;
+
+                            var builder = new SysMailerMessageBuilder();
+                            select SMTPUserName from _SysEmailParameters;
+
+                            if(_SysEmailParameters.SMTPUserName)
+                            {
+                                LedgerJournalName ledgerjournalnameloc;
+
+                                select firstonly ledgerjournalnameloc
+                            where ledgerjournalnameloc.Journalname == LedgerJournalTableLoc.JournalName;
+
+                                UserInfo userinfo;
+                            
+                                select firstonly networkAlias from userinfo
+                                where userinfo.id == ledgerJournalTableSource.CreatedBy;
+
+                                if(userinfo)
+                                {
+                                    builder.setFrom(_SysEmailParameters.SMTPUserName);
+                                    builder.addTo(userinfo.networkAlias);
+
+                                    builder.setSubject(strFmt("@ETG_New:JournalApproved", ledgerJournalTableSource.JournalNum));
+
+                                    builder.setBody(strFmt("@ETG_New:JournalapprovedData", ledgerJournalTableSource.ETGICDestinationentity,LedgerJournalTableLoc.JournalNum,ledgerJournalTableSource.JournalName,ledgerJournalTableSource.DataAreaId));
+
+                                    var message = builder.getMessage();
+
+                                    SysMailerFactory::getNonInteractiveMailer().sendNonInteractive(message);
+
+                                    Info("@ETG_New:EmailSuccess");
+                                }
+                            
+                            }
+
+                        }
+                        catch
+                        {
+                            return;
+                        }
+                   
+                    }
+
+                }
+            }
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

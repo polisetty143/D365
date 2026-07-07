@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGITMSplitMarkingOut</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// this class will handle partial quantity scenario for outbound orders
+/// </summary>
+public final class ETGITMSplitMarkingOut
+{
+    SalesLine salesLineOrig;
+    SalesLine salesLineNew;
+    Set marking;
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>clearMarking</Name>
+				<Source><![CDATA[
+    internal void clearMarking(SalesLine _salesLineOrig)
+    {
+        InventTrans     inventTrans;
+        InventDim       inventDim;
+        InventDimParm   inventDimParm;
+        InventQty       qtyRemain;
+    
+        salesLineOrig = _salesLineOrig;
+    
+        while select inventTrans
+            where inventTrans.InventTransOrigin == InventTransOriginSalesLine::findInventTransOriginId(salesLineOrig.dataAreaId,
+            salesLineOrig.InventTransId) 
+            && inventTrans.StatusReceipt == StatusReceipt::Ordered 
+            && inventTrans.MarkingRefInventTransOrigin
+        {
+            inventDim = inventTrans.inventDim();
+
+            inventDimParm.initFromInventDim(inventDim);
+    
+            marking.add([inventTrans.MarkingRefInventTransOrigin, inventTrans.Qty, inventDim]);
+    
+            qtyRemain = inventTrans.Qty + InventTransOrigin::deleteMarking(inventTrans.InventTransOrigin, 
+                inventTrans.MarkingRefInventTransOrigin, inventTrans.Qty, true, inventDim, inventDimParm);
+
+            if (qtyRemain > 0)
+            {
+                InventTransOrigin::deleteMarking(inventTrans.InventTransOrigin, inventTrans.MarkingRefInventTransOrigin, 
+                    qtyRemain, true);
+            }
+    
+            qtyRemain = inventTrans.Qty - InventTransOrigin::deleteMarking(inventTrans.MarkingRefInventTransOrigin, 
+                inventTrans.InventTransOrigin, -inventTrans.Qty, true, inventDim, inventDimParm);
+
+            if (qtyRemain > 0)
+            {
+                InventTransOrigin::deleteMarking(inventTrans.MarkingRefInventTransOrigin, inventTrans.InventTransOrigin,
+                     -qtyRemain, true);
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>new</Name>
+				<Source><![CDATA[
+    private void new()
+    {
+        marking = new Set(Types::Container);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>reMark</Name>
+				<Source><![CDATA[
+    internal void reMark(SalesLine _salesLineNew)
+    {
+        SetEnumerator       sE = marking.getEnumerator();
+        InventTransOriginId inventTransOrigin, markingRefInventTransOrigin;
+        InventDim           inventDim;
+        InventDimParm       inventDimParm;
+    
+        InventQty           origQtyAvailable, newQtyAvailable;
+        InventQty           qty, qtyMarked, qtyMarkedRef;
+    
+        void updateMarking(SalesLine _salesLine, InventQty _qtyAvailable)
+        {
+            inventTransOrigin = InventTransOriginSalesLine::findInventTransOriginId(_salesLine.dataAreaId, _salesLine.InventTransId);
+            
+            qtyMarked = InventTransOrigin::updateMarking(inventTransOrigin, markingRefInventTransOrigin, _qtyAvailable, '', 
+                SortOrder::Ascending, false, inventDim, inventDimParm);
+            
+            if ((_qtyAvailable + qtyMarked) > 0)
+            {
+                qtyMarked += InventTransOrigin::updateMarking(inventTransOrigin, markingRefInventTransOrigin, 
+                    _qtyAvailable + qtyMarked);
+            }
+    
+            qtyMarkedRef = InventTransOrigin::updateMarking(markingRefInventTransOrigin, inventTransOrigin, -_qtyAvailable, '', 
+                SortOrder::Ascending, false, inventDim, inventDimParm);
+            
+            if ((_qtyAvailable - qtyMarkedRef) > 0)
+            {
+                InventTransOrigin::updateMarking(markingRefInventTransOrigin, inventTransOrigin, -(_qtyAvailable - qtyMarkedRef));
+            }
+        }
+    
+        salesLineNew = _salesLineNew;
+    
+        origQtyAvailable = salesLineOrig.RemainInventPhysical;
+
+        newQtyAvailable = salesLineNew.RemainInventPhysical;
+
+        SalesLine salesLineRemain;
+        InventQty remainQtyAvailable;
+        if (!origQtyAvailable && ETGOTMSplitMarkingLeftFlight::instance().isEnabled())
+        {
+            SalesDeliverySchedule salesDeliverySchedule;
+            select firstonly salesDeliverySchedule
+                where salesDeliverySchedule.OrderLine       == salesLineOrig.InventTransId
+                   && salesDeliverySchedule.DeliveryLine    != salesLineNew.InventTransId;
+
+            if (salesDeliverySchedule.DeliveryLine)
+            {
+                salesLineRemain = SalesLine::findInventTransId(salesDeliverySchedule.DeliveryLine);
+                remainQtyAvailable = salesLineRemain.RemainInventPhysical;
+            }
+        }
+    
+        while (sE.moveNext())
+        {
+            [markingRefInventTransOrigin, qty, inventDim] = sE.current();
+
+            inventDimParm.initFromInventDim(inventDim);
+    
+            if (abs(newQtyAvailable) > 0)
+            {
+                if (abs(qty) > abs(newQtyAvailable))
+                {
+                    updateMarking(salesLineNew, newQtyAvailable);
+                }
+                else
+                {
+                    updateMarking(salesLineNew, qty);
+                }
+    
+                newQtyAvailable += qtyMarked;
+
+                qty += qtyMarked;
+            }
+    
+            if (salesLineRemain && abs(remainQtyAvailable) > 0)
+            {
+                if (abs(qty) > abs(remainQtyAvailable))
+                {
+                    updateMarking(salesLineRemain, remainQtyAvailable);
+                }
+                else
+                {
+                    updateMarking(salesLineRemain, qty);
+                }
+    
+                remainQtyAvailable += qtyMarked;
+
+                qty += qtyMarked;
+            }
+            
+            if (qty && abs(origQtyAvailable) > 0)
+            {
+                if (abs(qty) > abs(origQtyAvailable))
+                {
+                    updateMarking(salesLineOrig, origQtyAvailable);
+                }
+                else
+                {
+                    updateMarking(salesLineOrig, qty);
+                }
+    
+                origQtyAvailable += qtyMarked;
+
+                qty += qtyMarked;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static ETGITMSplitMarkingOut construct()
+    {
+        return new ETGITMSplitMarkingOut();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

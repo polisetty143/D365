@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGIntegrationReversal</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGIntegrationReversal extends TransactionReversal_Cust
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static ETGIntegrationReversal construct()
+    {
+        return new ETGIntegrationReversal();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>showDialog</Name>
+				<Source><![CDATA[
+    public boolean showDialog()
+    {
+        return false;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postCustReversal</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Below code is custmer reversal posting
+    /// </summary>
+    /// <param name = "_ARAPRef"></param>
+    public void postCustReversal(str _ARAPRef)
+    {
+        str _arAPRefCust = _ARAPRef;
+        ETG_ARAP_MSGHEADER headerMsg;
+        ReasonTable reasonTable;
+        ReasonCode reasonCodeOrg;
+        ReasonRefRecID reasonRefRecIDOrg;
+        CustTrans custTransReversal;
+        ETGIntegrationReversal custReversal;
+        
+        select * from headerMsg where headerMsg.ETGARAPREF == _arAPRefCust;
+
+        changecompany(headerMsg.ETGLegalEntity)
+        {
+            reasonCodeOrg = "CANCELLED";
+            reasonTable = ReasonTable::find(reasonCodeOrg);
+            reasonRefRecIDOrg = ReasonTableRef::createReasonTableRef(
+            reasonTable.Reason, reasonTable.Description);
+
+            custTransReversal = CustTrans::findFromInvoice(headerMsg.ETGARAPREF);
+        
+            if(custTransReversal.RecId && !custTransReversal.LastSettleVoucher)
+            {
+                Args args = new Args();
+                args.record(custTransReversal);
+                custReversal = ETGIntegrationReversal::construct();
+                custReversal.parmReversalDate(str2Date(headerMsg.AXDocDate, 321));
+                custReversal.parmReasonRefRecId(reasonRefRecIDOrg);
+                custReversal.reversal(args);
+            }
+            else
+            {
+                throw error("The invoice %1 already has been settled", custTransReversal.Invoice);
+            }
+        }
+          
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

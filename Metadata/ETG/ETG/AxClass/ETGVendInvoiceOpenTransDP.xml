@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGVendInvoiceOpenTransDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// <c>ETGVendInvoiceOpenTransDP</c>is a Data provider class to fetch Vendor Open Invioces of project ETGInvoiceDueNotification
+/// Created by Asif on 11/02/2026
+/// Project: ETGInvoiceDueNotification
+/// </summary>
+[SRSReportQueryAttribute(queryStr(ETGVendOpenInvoices))]
+internal final class ETGVendInvoiceOpenTransDP extends SrsReportDataProviderPreProcessTempDB
+{
+    ETGVendInvoiceOpenTransTemp vendInvOpenTransTmp;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGVendInvoiceOpenTransTemp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETGVendInvoiceOpenTransTemp))]
+    public ETGVendInvoiceOpenTransTemp getETGVendInvoiceOpenTransTemp()
+    {
+        select vendInvOpenTransTmp;
+        return vendInvOpenTransTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        Query                   query = this.parmQuery();
+        QueryRun                queryRun;
+        QueryBuildDataSource    qbdsVendTrans;
+        QueryBuildRange         qbrDueDate;
+
+        VendTrans               vendTrans;
+        VendTransOpen           vendTransOpen;
+        VendTable               vendTable;
+
+        ETGCanadaParameters canadaParameters = ETGCanadaParameters::find();
+        int lookAheadDays = canadaParameters.ETGLookAheadDays;
+
+        date today = systemDateGet();
+        date fromDate;
+        date toDate;
+
+        if (lookAheadDays > 0)
+        {
+            fromDate = today;
+            toDate   = today + lookAheadDays;
+        }
+        else if (lookAheadDays < 0)
+        {
+            fromDate = today + lookAheadDays;
+            toDate   = today;
+        }
+        else
+        {
+            fromDate = today;
+            toDate   = today;
+        }
+
+        qbdsVendTrans = query.dataSourceTable(tableNum(VendTrans));
+
+        qbrDueDate = qbdsVendTrans.addRange(fieldNum(VendTrans, DueDate));
+        qbrDueDate.value(SysQuery::range(fromDate, toDate));
+
+        queryRun = new QueryRun(query);
+
+        while (queryRun.next())
+        {
+            vendTrans       = queryRun.get(tableNum(VendTrans));
+            vendTable       = queryRun.get(tableNum(VendTable));
+
+            VendTrans   locVendTrans;
+
+            select locVendTrans
+                where locVendTrans.Voucher == vendTrans.Voucher;
+
+            real invoiceAmount  = vendTrans.AmountCur;
+            real amountDue      = locVendTrans.remainAmountCur();
+
+            vendInvOpenTransTmp.clear();
+            vendInvOpenTransTmp.InvoiceId      = vendTrans.Invoice;
+            vendInvOpenTransTmp.InvoiceAccount = vendTrans.AccountNum;
+            vendInvOpenTransTmp.InvoiceDate    = vendTrans.TransDate;
+            vendInvOpenTransTmp.DueDate        = vendTrans.DueDate;
+            vendInvOpenTransTmp.InvoiceAmount  = invoiceAmount * -1;
+            vendInvOpenTransTmp.ETGAmountDue   = amountDue * -1;
+            vendInvOpenTransTmp.ETGDaysToDue   = vendTrans.DueDate - today;
+            vendInvOpenTransTmp.CurrencyCode   = vendTrans.CurrencyCode;
+            vendInvOpenTransTmp.Party          = vendTable.name();
+
+            vendInvOpenTransTmp.insert();
+
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

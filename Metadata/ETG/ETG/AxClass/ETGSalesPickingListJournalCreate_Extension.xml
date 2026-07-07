@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesPickingListJournalCreate_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// SYSTEM SHOULD NOT ALLOW TO BOOK PACKING LIST UNTILL GRN & PURCHASE INVOICE IS BOOKED.
+/// </summary>
+[ExtensionOf(classstr(SalesPickingListJournalCreate))]
+internal final class ETGSalesPickingListJournalCreate_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>createJournalLine</Name>
+				<Source><![CDATA[
+    //NS--11-04-2025--SYSTEM SHOULD NOT ALLOW TO BOOK PACKING LIST UNTILL GRN & PURCHASE INVOICE IS BOOKED.
+    protected void createJournalLine(Common _salesParmLine)
+    {
+        if (ETGACFParameters::find().EnableUATSmallPoints)
+        {
+            SalesParmTable          salesParmTable;
+            SalesParmLine           salesParmLineloc,salesParmLineloc1;
+
+            salesParmLineloc1 = _salesParmLine as SalesParmLine;
+            salesParmTable = salesParmLineloc1.salesParmTable();
+
+            while select salesParmLineloc where salesParmLineloc.ParmId == salesParmTable.ParmId
+                 && salesParmLineloc.TableRefId ==salesParmTable.TableRefId
+            {
+                EcoResProduct     ecoResProduct = EcoResProduct::find(InventTable::find(salesParmLineloc.ItemId).Product);
+                if(ecoResProduct.ProductType == EcoResProductType::Item)
+                {
+                    Qty totalPurchased = abs(this.TotalPurchased(salesParmLineloc));
+                    Qty totalDelivered = abs(this.Totaldeleveried(salesParmLineloc));
+
+                    if((totalPurchased-totalDelivered) < salesParmLineloc.DeliverNow )
+                    {
+                        throw error(strFmt("Picking list posting canceled due to insufficient quantity for item %1", salesParmLineLoc.ItemId));
+                    }
+                }
+            }
+        }
+        next createJournalLine(_salesParmLine);
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>TotalPurchased</Name>
+				<Source><![CDATA[
+    protected Qty TotalPurchased(SalesParmLine _salesParmLine)
+    {
+
+        SalesParmLine           salesParmLineloc = _salesParmLine;
+        InventTrans              inventTrans ;
+
+        select sum(Qty) from inventTrans where inventTrans.ItemId == salesParmLineloc.ItemId
+                              && inventTrans.inventDimId == salesParmLineloc.InventDimId
+                              && inventTrans.StatusReceipt == StatusReceipt::Purchased;
+           
+        return inventTrans.Qty;
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>Totaldeleveried</Name>
+				<Source><![CDATA[
+    protected Qty  Totaldeleveried(SalesParmLine _salesParmLine)
+    {
+
+        SalesParmLine           salesParmLineloc = _salesParmLine;
+        InventTrans              inventTrans ;
+
+        select sum(Qty) from inventTrans where inventTrans.ItemId == salesParmLineloc.ItemId
+                              && inventTrans.inventDimId == salesParmLineloc.InventDimId
+                              && ((inventTrans.StatusIssue == StatusIssue::Sold) ||(inventTrans.StatusIssue == StatusIssue::Deducted));
+           
+        return  inventTrans.Qty;
+
+    }
+    //NE--11-04-2025--SYSTEM SHOULD NOT ALLOW TO BOOK PACKING LIST UNTILL GRN & PURCHASE INVOICE IS BOOKED.
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

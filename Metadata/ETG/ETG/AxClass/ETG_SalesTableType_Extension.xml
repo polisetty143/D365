@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesTableType_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(SalesTableType))]
+final class ETG_SalesTableType_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>updateBackStatus</Name>
+				<Source><![CDATA[
+    void  updateBackStatus()
+    {
+        SalesAgreementHeader        salesAgreementHeader;
+        SalesTable                  salesTableMatchAgreement;
+        NoYesid                     salesStatusOpen,salesStatusReceived,salesStatusInv;
+
+        next updateBackStatus();
+
+        if(salesTable.MatchingAgreement)
+        {
+            while select SalesStatus from salesTableMatchAgreement
+                where salesTableMatchAgreement.MatchingAgreement == salesTable.MatchingAgreement
+            {
+                if(salesTableMatchAgreement.SalesStatus == SalesStatus::Backorder)
+                    salesStatusOpen = NoYes::Yes;
+
+                else if(salesTableMatchAgreement.SalesStatus == SalesStatus::Delivered)
+                    salesStatusReceived = NoYes::Yes;
+
+                else if(salesTableMatchAgreement.SalesStatus == SalesStatus::Invoiced)
+                    salesStatusInv = NoYes::Yes;
+            }
+              
+            if(salesStatusReceived && !salesStatusOpen && !salesStatusInv)
+            {
+                select firstonly forupdate ETG_DocumentStatusSales from salesAgreementHeader
+                    where salesAgreementHeader.RecId == salesTable.MatchingAgreement;
+        
+                salesAgreementHeader.ETG_DocumentStatusSales = ETG_DocumentStatus::Shipped;
+                salesAgreementHeader.update();
+            
+            }
+
+            else if(salesStatusReceived && !salesStatusOpen && salesStatusInv)
+            {
+                select firstonly forupdate ETG_DocumentStatusSales from salesAgreementHeader
+                    where salesAgreementHeader.RecId == salesTable.MatchingAgreement;
+        
+                salesAgreementHeader.ETG_DocumentStatusSales = ETG_DocumentStatus::Shipped;
+                salesAgreementHeader.update();
+            
+            }
+
+            else if(!salesStatusReceived && !salesStatusOpen && salesStatusInv)
+            {
+                select firstonly forupdate ETG_DocumentStatusSales from salesAgreementHeader
+                    where salesAgreementHeader.RecId == salesTable.MatchingAgreement;
+        
+                salesAgreementHeader.ETG_DocumentStatusSales = ETG_DocumentStatus::Invoice;
+                salesAgreementHeader.update();
+            
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>canInvoiceBeUpdated</Name>
+				<Source><![CDATA[
+    boolean  canInvoiceBeUpdated()
+    {
+        boolean  ok = next canInvoiceBeUpdated();
+
+        if(ok && ETGACFParameters::find().EnableSalesInvoiceWorkflow == NoYes::Yes)
+        {
+            ETGSalesEditLines salesEditLines,salesEditLinesLoc;
+            boolean isApproved;
+
+            select firstonly RecId from salesEditLines
+                where salesEditLines.SalesId == SalesTable.SalesId;
+
+            if(!salesEditLines.RecId)
+            {
+                ok = false;
+            }
+
+            select firstonly RecId from salesEditLines 
+                where salesEditLines.SalesId == SalesTable.SalesId
+                && salesEditLines.WorkflowStatus !=  ETGSalesEditLinesWorkflow::Approved;
+
+            if(salesEditLines.RecId)
+            {
+                ok = false;
+            }
+
+            select firstonly RecId from salesEditLines
+                where salesEditLines.SalesId == SalesTable.SalesId
+                && salesEditLines.WorkflowStatus ==  ETGSalesEditLinesWorkflow::Approved
+                && salesEditLines.CrDeJournalPosted == NoYes::Yes;
+
+            if(salesEditLines.RecId)
+            {
+                ok = false;
+            }
+
+            select firstonly RecId from salesEditLines
+                where salesEditLines.SalesId == SalesTable.SalesId
+                && salesEditLines.WorkflowStatus ==  ETGSalesEditLinesWorkflow::Approved
+                && salesEditLines.CrDeJournalPosted == NoYes::No;
+
+            if(salesEditLines.RecId)
+            {
+                ok = true;
+            }
+
+
+        }
+
+        return ok;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

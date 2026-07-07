@@ -1,0 +1,388 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_AgreementGenerationPurchToSalesStrategyTP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///    The <c>AgreementGenerationPurchToSalesStrategy</c> class is the strategy class for creating a sales
+///    agreement from a purchase agreement.
+/// </summary>
+class ETG_AgreementGenerationPurchToSalesStrategyTP extends ETG_AgreementGenerationStrategyTP
+{
+    CustTable               custTable;
+    PurchAgreementHeader    purchAgreementHeader;
+    AgreementHeaderDefault              agreementHeaderDefault;
+    SalesAgreementHeader                salesAgreementHeader;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>createAgreementHeader</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates the purchase agreement header.
+    /// </summary>
+    public void createAgreementHeader()
+    {
+       
+        this.createSalesAgreementH();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createAgreementLines</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates the sales agreement lines.
+    /// </summary>
+    public void createAgreementLines()
+    {
+        AgreementLineQuantityCommitment     agreementLine;      
+        AgreementLineQuantityCommitment     agreementLineQuantityCommitment;
+        ETG_AgreementLineNotes              agreementLineNotesSrc,agreementLineNotesDes;
+        ETG_AgreementLineQualityGrp         agreementLineQualityGrpSrc,agreementLineQualityGrpDes;
+        AgreementLineReference              agreementLineRef;
+        ETGAgrrementQualitySpecsLine        agreementQualitySpecsLineSrc,agreementQualitySpecsLineDes;
+        boolean                             isNotes = false;
+        ETG_IsCreatedAgreement              isCreatedAgreement;
+        RecordInsertList    tmpInsNotes = new RecordInsertList(tableNum(ETG_AgreementLineNotes));
+     
+        while select agreementLine
+            where agreementLine.Agreement == purchAgreementHeader.RecId
+        {
+           // InventTableModule   inventTablemodule = InventTableModule::find(agreementLine.ItemId,ModuleInventPurchSales::Sales);
+
+            agreementLineQuantityCommitment.ItemId              = agreementLine.ItemId;
+            agreementLineQuantityCommitment.AgreementLineType   = agreementLine.AgreementLineType;
+            agreementLineQuantityCommitment.Agreement           = salesAgreementHeader.RecId;
+            agreementLineQuantityCommitment.ItemDataAreaId      = curExt();
+            agreementLineQuantityCommitment.InventDimDataAreaId = curExt();
+           // agreementLineQuantityCommitment.DefaultDimension    = agreementLine.DefaultDimension;
+
+            if (ETGACFParameters::find().EnableContractFDAutomation)
+            {
+                agreementLineQuantityCommitment.DefaultDimension    = agreementLine.DefaultDimension;
+            }
+
+            agreementLineQuantityCommitment.ETG_IsGrossWeight       = agreementLine.ETG_IsGrossWeight;
+            agreementLineQuantityCommitment.ETG_ItemAlternativeName = agreementLine.ETG_ItemAlternativeName;
+            agreementLineQuantityCommitment.ETG_ItemQuantityGroup   = agreementLine.ETG_ItemQuantityGroup;
+            agreementLineQuantityCommitment.ETG_OverDeliveryPct     = agreementLine.ETG_OverDeliveryPct;
+            agreementLineQuantityCommitment.ETG_PriceType           = agreementLine.ETG_PriceType;
+            agreementLineQuantityCommitment.ETG_UnderDeliveryPct    = agreementLine.ETG_UnderDeliveryPct;
+            agreementLineQuantityCommitment.EffectiveDate           = agreementLine.EffectiveDate;
+            agreementLineQuantityCommitment.ExpirationDate          = agreementLine.ExpirationDate;
+            agreementLineQuantityCommitment.LineDiscountPercent     = agreementLine.LineDiscountPercent;
+
+            agreementLineQuantityCommitment.AgreedReleaseLineMinAmount  = agreementLine.AgreedReleaseLineMinAmount;
+            agreementLineQuantityCommitment.AgreedReleaseLineMaxAmount  = agreementLine.AgreedReleaseLineMaxAmount;
+            agreementLineQuantityCommitment.IsPriceInformationMandatory = agreementLine.IsPriceInformationMandatory;
+            agreementLineQuantityCommitment.CommitedQuantity            = agreementLine.CommitedQuantity;
+            agreementLineQuantityCommitment.ProductUnitOfMeasure        = agreementLine.ProductUnitOfMeasure;
+            agreementLineQuantityCommitment.PriceUnit                   = agreementLine.PriceUnit;
+            agreementLineQuantityCommitment.PricePerUnit                = agreementLine.PricePerUnit;
+            agreementLineQuantityCommitment.LineDiscountAmount          = agreementLine.LineDiscountAmount;
+            agreementLineQuantityCommitment.InventDimId                 = agreementLine.InventDimId;
+            agreementLineQuantityCommitment.IntercompanySkipUpdate      = InterCompanySkipUpdate::Both;
+            agreementLineQuantityCommitment.ETG_DerivedTP               = agreementLine.RecId;
+            agreementLineQuantityCommitment.ETG_IsThirdParty            = NoYes::Yes;
+            agreementLineQuantityCommitment.ETG_ReleaseOrderLowerLimit  = agreementLine.ETG_ReleaseOrderLowerLimit;
+            agreementLineQuantityCommitment.ETG_ReleaseOrderUpperLimit  = agreementLine.ETG_ReleaseOrderUpperLimit;
+            agreementLineQuantityCommitment.insert();
+
+           // ttsbegin;
+           // agreementLine.reread();
+            agreementLine.selectForUpdate(true);
+            agreementLine.ETG_IsThirdParty            = NoYes::Yes;
+            agreementLine.ETG_DerivedTP               = agreementLineQuantityCommitment.RecId;
+            agreementLine.doUpdate();
+
+           // AgreementLineReference::createRelationShip(agreementLineQuantityCommitment.RecId,agreementLine.RecId);
+         //   TradeInterCompany::synchronizeDocuRef(agreementLineQuantityCommitment);
+
+            while select EnumNotes,Description,ItemId,PrintNotesInContract from agreementLineNotesSrc
+                where agreementLineNotesSrc.AgreementLine == agreementLine.RecId
+            {
+                agreementLineNotesDes.AgreementLine        = agreementLineQuantityCommitment.RecId;
+                agreementLineNotesDes.EnumNotes            = agreementLineNotesSrc.EnumNotes;
+                agreementLineNotesDes.Description          = agreementLineNotesSrc.Description;
+                agreementLineNotesDes.ItemId               = agreementLineNotesSrc.ItemId;
+                agreementLineNotesDes.PrintNotesInContract = agreementLineNotesSrc.PrintNotesInContract;
+               
+                tmpInsNotes.add(agreementLineNotesDes);
+                isNotes = true;
+            }
+            if(isNotes)
+            {
+                tmpInsNotes.insertDatabase();
+                isNotes = false;
+            }
+
+            while select GroupId from agreementLineQualityGrpSrc
+                where agreementLineQualityGrpSrc.AgreementLine == agreementLine.RecId
+            {
+                agreementLineQualityGrpDes.AgreementLine   = agreementLineQuantityCommitment.RecId;
+                agreementLineQualityGrpDes.GroupId         = agreementLineQualityGrpSrc.GroupId;
+                agreementLineQualityGrpDes.insert();
+            }
+
+            while select * from agreementQualitySpecsLineSrc
+                where agreementQualitySpecsLineSrc.AgreementLineRefrecid == agreementLine.RecId
+            {
+                agreementQualitySpecsLineDes.MinRange       = agreementQualitySpecsLineSrc.MinRange;
+                agreementQualitySpecsLineDes.MaxRange       = agreementQualitySpecsLineSrc.MaxRange;
+                agreementQualitySpecsLineDes.AdjustmentType = agreementQualitySpecsLineSrc.AdjustmentType;
+                agreementQualitySpecsLineDes.Increment      = agreementQualitySpecsLineSrc.Increment;
+                agreementQualitySpecsLineDes.FixedValue     = agreementQualitySpecsLineSrc.FixedValue;
+                agreementQualitySpecsLineDes.SubGroupId     = agreementQualitySpecsLineSrc.SubGroupId;
+                agreementQualitySpecsLineDes.AgreementLineRefrecid = agreementLineQuantityCommitment.RecId;
+                agreementQualitySpecsLineDes.GroupID               = agreementQualitySpecsLineSrc.GroupID;
+                agreementQualitySpecsLineDes.GroupDescription      = agreementQualitySpecsLineSrc.GroupDescription;
+                agreementQualitySpecsLineDes.SubGrpId              = agreementQualitySpecsLineSrc.SubGrpId;
+                agreementQualitySpecsLineDes.SubGroupDescription   = agreementQualitySpecsLineSrc.SubGroupDescription;
+                agreementQualitySpecsLineDes.insert();
+            }
+
+          
+            isCreatedAgreement.AgreementLine = agreementLineQuantityCommitment.RecId;
+            isCreatedAgreement.insert();
+        } 
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createdAgreementHeader</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Retrieves the header buffer of the created sales agreement.
+    /// </summary>
+    /// <returns>
+    ///    The header buffer of the created sales agreement.
+    /// </returns>
+    public AgreementHeader createdAgreementHeader()
+    {
+        // <GEERU>
+        if (intraCompany_RU)
+        {
+            return purchAgreementHeader.salesAgreementHeader_RU();
+        }
+        // </GEERU>
+        return purchAgreementHeader.salesAgreementHeader();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setCustVendTable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Sets the customer record that is used for creating the sales agreement.
+    /// </summary>
+    public void setCustVendTable(CustAccount  _custAccount)
+    {
+        VendTable                           vendTable;
+
+        purchAgreementHeader = this.parmCallerRecord() as PurchAgreementHeader;
+        vendTable            = purchAgreementHeader.vendTable();
+       
+        custVendTable = CustTable::find(_custAccount);      
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static ETG_AgreementGenerationPurchToSalesStrategyTP construct()
+    {
+        return new ETG_AgreementGenerationPurchToSalesStrategyTP();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createSalesAgreementH</Name>
+				<Source><![CDATA[
+    public void createSalesAgreementH()
+    {       
+        CustTable                           custTableLoc; 
+        boolean                             create;
+        salesAgreementHeaderDefault         salesAgreementHeaderDefault;
+        PurchAgreementHeaderDefault         purchAgreementHeaderDefault;
+        AgreementReference                  agreementReference;
+        AgreementHeaderDefault              agreementHeaderDefaultPurch, agreementHeaderDefaultPurchCharges;
+      
+       
+        salesAgreementHeader.clear();
+        salesAgreementHeader.SalesNumberSequence        = NumberSeq::newGetNum(SalesParameters::numRefSalesAgreementId(),false).num();
+       
+        if (purchAgreementHeader.AgreementClassification)
+        {
+            salesAgreementHeader.AgreementClassification = purchAgreementHeader.AgreementClassification;
+        }
+        create = true;
+        setPrefix(strFmt("@SYS93821",TradeInterCompany::curCompanyName()));
+
+        custTableLoc                  = this.getCustVendTable();
+        
+        salesAgreementHeader.SellingLegalEntity = CompanyInfo::find().RecId;
+        salesAgreementHeader.initFromCustTable(custTableLoc);
+       
+        //salesAgreementHeader.AgreementState = purchAgreementHeader.AgreementState;
+        salesAgreementHeader.DocumentTitle  = purchAgreementHeader.DocumentTitle;
+        salesAgreementHeader.DocumentExternalReference = purchAgreementHeader.DocumentExternalReference;
+        salesAgreementHeader.Currency                  = purchAgreementHeader.Currency;
+        salesAgreementHeader.DefaultAgreementLineType  = CommitmentType::ProductQuantity;
+        salesAgreementHeader.DefaultAgreementLineEffectiveDate  = purchAgreementHeader.DefaultAgreementLineEffectiveDate;
+        salesAgreementHeader.DefaultAgreementLineExpirationDate = purchAgreementHeader.DefaultAgreementLineExpirationDate;
+        salesAgreementHeader.Language               = purchAgreementHeader.Language;
+        salesAgreementHeader.InterCompanySkipUpdate = InterCompanySkipUpdate::InterCompany;
+        salesAgreementHeader.ETG_IsThirdParty       = NoYes::Yes;
+        salesAgreementHeader.ETG_PurchAgreementIdTP = purchAgreementHeader.PurchNumberSequence;
+
+        if (ETGACFParameters::find().EnableContractFDAutomation)
+        {
+            salesAgreementHeader.DefaultDimension = purchAgreementHeader.DefaultDimension;
+        }
+        salesAgreementHeader.insert();
+       
+       /* agreementReference.SourceAgreement  = purchAgreementHeader.RecId;
+        agreementReference.DerivedAgreement = salesAgreementHeader.RecId;
+        agreementReference.ETG_IsThirdParty = NoYes::Yes;
+        agreementReference.insert();*/
+
+      //  TradeInterCompany::synchronizeDocuRef(purchAgreementHeader);
+       // agreementHeaderDefaultPurch = AgreementHeaderDefault::findAgreementHeader(purchAgreementHeader.RecId);
+
+        agreementHeaderDefault.agreementHeader  = salesAgreementHeader.RecId;
+        agreementHeaderDefault.initFromCustTable(custTableLoc);
+       // agreementHeaderDefault.DeliveryMode  = agreementHeaderDefaultPurch.DeliveryMode;
+       // agreementHeaderDefault.DeliveryTerm  = agreementHeaderDefaultPurch.DeliveryTerm;
+        //agreementHeaderDefault.PaymentTerms  = agreementHeaderDefaultPurch.PaymentTerms;
+        //NS, DLT, 02052025
+        if(ETGACFParameters::find().EnableProvisionalCharges == NoYes::Yes
+            && AgreementClassification::find(purchAgreementHeader.AgreementClassification).ETGIncoTerms == NoYes::Yes)
+        {
+            agreementHeaderDefaultPurchCharges          = AgreementHeaderDefault::findAgreementHeader(purchAgreementHeader.RecId);
+            agreementHeaderDefault.DeliveryTerm         = agreementHeaderDefaultPurchCharges.ETGDeliveryTermSales;
+            agreementHeaderDefault.ETGDeliveryTermSales = agreementHeaderDefaultPurchCharges.DeliveryTerm;
+        }
+        //NE, DLT, 02052025
+        agreementHeaderDefault.insert();
+
+       // purchAgreementHeaderDefault  = PurchAgreementHeaderDefault::findPurchAgreementHeader(purchAgreementHeader.RecId);
+
+        salesAgreementHeaderDefault.SalesAgreementHeader = salesAgreementHeader.RecId;
+        salesAgreementHeaderDefault.initFromCustTable(custTableLoc);
+       // salesAgreementHeaderDefault.CustomerMethodOfPayment = purchAgreementHeaderDefault.MethodOfPayment;       
+        salesAgreementHeaderDefault.insert();
+
+        this.createTradeDetails();
+
+       // purchAgreementHeader.reread();
+        purchAgreementHeader.selectForUpdate(true);
+       // purchAgreementHeader.ETG_IsThirdParty       = NoYes::Yes;
+        purchAgreementHeader.ETG_SalesAgreementIdTP = salesAgreementHeader.SalesNumberSequence;
+        purchAgreementHeader.doUpdate();
+
+        Info(strFmt('Third party sales agreement %1 has been created',salesAgreementHeader.SalesNumberSequence));
+          
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createTradeDetails</Name>
+				<Source><![CDATA[
+    public void createTradeDetails()
+    {
+        ETG_PurchaseAgreementHeader         tradeDetailsHeaderSource;
+        ETG_SalesAgreementHeader            tradeDetailsHeaderDes;        
+        ETG_PurchAgreementNotes             purchAgreementNotes;
+        ETG_SalesAgreementNotes             salesAgreementNotes;
+        ETG_PurchaseAgreementQualityGrp     PurchaseAgreementQualityGrp;
+        ETG_SalesAgreementQualityGrp        SalesAgreementQualityGrp;
+        CustBankAccount                     buyerBank;
+
+
+        select firstonly * from tradeDetailsHeaderSource
+            where tradeDetailsHeaderSource.PurchAgreementId == purchAgreementHeader.PurchNumberSequence;
+        
+        tradeDetailsHeaderDes.SalesAgreementId                  = salesAgreementHeader.SalesNumberSequence;
+        tradeDetailsHeaderDes.AdvanceDue                        = tradeDetailsHeaderSource.AdvanceDue;
+        tradeDetailsHeaderDes.BuyerAccountNum                   = salesAgreementHeader.CustAccount;
+        tradeDetailsHeaderDes.BuyerDeliveryAddress              = CustTable::find(salesAgreementHeader.CustAccount).postalAddress().RecId;
+        tradeDetailsHeaderDes.BuyerBank                         = CustTable::find(salesAgreementHeader.CustAccount).BankAccount;
+       
+        tradeDetailsHeaderDes.SellerAccountNum                  = tradeDetailsHeaderSource.BuyerAccountNum;
+        tradeDetailsHeaderDes.SellerBank                        = tradeDetailsHeaderSource.BuyerBank;
+        tradeDetailsHeaderDes.SellerDeliveryAddress             = tradeDetailsHeaderSource.BuyerDeliveryAddress;
+        tradeDetailsHeaderDes.Sellersecondarybank               = tradeDetailsHeaderSource.BuyerSecondaryBank;
+        tradeDetailsHeaderDes.CommissionType                    = tradeDetailsHeaderSource.CommissionType;
+        tradeDetailsHeaderDes.Consignee                         = tradeDetailsHeaderSource.Consignee;
+        tradeDetailsHeaderDes.CustomImport                      = tradeDetailsHeaderSource.CustomImport;
+        tradeDetailsHeaderDes.DeliveryDescription               = tradeDetailsHeaderSource.DeliveryDescription;
+        tradeDetailsHeaderDes.DisplayTotalCalculatedCommission  = tradeDetailsHeaderSource.DisplayTotalCalculatedCommission;
+        tradeDetailsHeaderDes.FromDatePort                      = tradeDetailsHeaderSource.FromDatePort;
+        tradeDetailsHeaderDes.Future                            = tradeDetailsHeaderSource.Future;
+        tradeDetailsHeaderDes.ImportDate                        = tradeDetailsHeaderSource.ImportDate;
+        tradeDetailsHeaderDes.Notes                             = tradeDetailsHeaderSource.Notes;
+        tradeDetailsHeaderDes.Notifytodifferentparty            = tradeDetailsHeaderSource.Notifytodifferentparty;
+        tradeDetailsHeaderDes.Number                            = tradeDetailsHeaderSource.Number;
+        tradeDetailsHeaderDes.OnAccountOf                       = tradeDetailsHeaderSource.OnAccountOf;
+        tradeDetailsHeaderDes.PortOfDischarge                   = tradeDetailsHeaderSource.PortOfDischarge;      
+        tradeDetailsHeaderDes.PortOfLoading                     = tradeDetailsHeaderSource.PortOfLoading;
+        tradeDetailsHeaderDes.PricingFromDate                   = tradeDetailsHeaderSource.PricingFromDate;
+        tradeDetailsHeaderDes.PricingMonth                      = tradeDetailsHeaderSource.PricingMonth;
+        tradeDetailsHeaderDes.PricingTodate                     = tradeDetailsHeaderSource.PricingTodate;
+        tradeDetailsHeaderDes.SalesPoolId                       = salesAgreementHeader.SalesPoolId;
+        tradeDetailsHeaderDes.TermPaymDescription               = tradeDetailsHeaderSource.TermPaymDescription;
+        tradeDetailsHeaderDes.TermsOfDelDescription             = tradeDetailsHeaderSource.TermsOfDelDescription;
+        tradeDetailsHeaderDes.Through                           = tradeDetailsHeaderSource.Through;
+        tradeDetailsHeaderDes.ToDatePort                        = tradeDetailsHeaderSource.ToDatePort;
+        tradeDetailsHeaderDes.TypeValue                         = tradeDetailsHeaderSource.TypeValue;
+        tradeDetailsHeaderDes.Name                              = tradeDetailsHeaderSource.Name;
+        tradeDetailsHeaderDes.Address                           = tradeDetailsHeaderSource.Address;
+        tradeDetailsHeaderDes.PermitNumber                      = tradeDetailsHeaderSource.PermitNumber;
+        tradeDetailsHeaderDes.AgreementType                     = tradeDetailsHeaderSource.AgreementType;
+        tradeDetailsHeaderDes.PackingGroup                      = tradeDetailsHeaderSource.PackingGroup;
+        tradeDetailsHeaderDes.QuantityConditions                = tradeDetailsHeaderSource.QuantityConditions;
+        tradeDetailsHeaderDes.PortOfDischargeDesc               = tradeDetailsHeaderSource.PortOfDischargeDesc;
+        tradeDetailsHeaderDes.PortOfLoadingDesc                 = tradeDetailsHeaderSource.PortOfLoadingDesc;
+        tradeDetailsHeaderDes.ShipperBuyer                      = tradeDetailsHeaderSource.ShipperBuyer;
+       
+        buyerBank     = CustBankAccount::find(tradeDetailsHeaderDes.BuyerAccountNum,tradeDetailsHeaderDes.BuyerBank);
+        if(buyerBank)
+            tradeDetailsHeaderDes.BuyerSecondaryBank = buyerBank.AccountNum + '\n'+buyerBank.SWIFTNo+'\n'+LogisticsPostalAddress::findByLocation(buyerBank.location).Address;
+
+        tradeDetailsHeaderDes.insert();
+
+        
+       
+        while select EnumNotes,Description from purchAgreementNotes
+                where purchAgreementNotes.PurchAgreementId == purchAgreementHeader.PurchNumberSequence        
+        {
+            salesAgreementNotes.SalesAgreementId     = salesAgreementHeader.SalesNumberSequence;
+            salesAgreementNotes.EnumNotes            = purchAgreementNotes.EnumNotes;
+            salesAgreementNotes.Description          = purchAgreementNotes.Description;
+            salesAgreementNotes.PrintNotesInContract = purchAgreementNotes.PrintNotesInContract;
+            salesAgreementNotes.insert();
+        }
+
+       /* while select GroupId from PurchaseAgreementQualityGrp
+            where PurchaseAgreementQualityGrp.PurchAgreementId == purchAgreementHeader.PurchNumberSequence
+        {
+            SalesAgreementQualityGrp.SalesAgreementId = salesAgreementHeader.SalesNumberSequence;
+            SalesAgreementQualityGrp.GroupId          = PurchaseAgreementQualityGrp.GroupId;
+            SalesAgreementQualityGrp.insert();
+        }*/
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

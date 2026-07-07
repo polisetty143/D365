@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>PurchCopying_CreditNote_ETGSPAIN_Class_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the <c>PurchCopying_CreditNote</c> class for the ETGSPAIN model.
+/// </summary>
+[ExtensionOf(classStr(PurchCopying_CreditNote))]
+final class PurchCopying_CreditNote_ETGSPAIN_Class_Extension
+{        
+    private boolean     etgspainHasUnsoldQty;
+    private RefRecId    etgspainUnsoldInventTransRefRecId;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>instantiatePurchLineCopyFromSource</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Instantiates a PurchLineCopyFromSource object based on the provided PurchLine and TmpFrmVirtualLine.
+    /// </summary>
+    /// <param name="_purchLine">The PurchLine object.</param>
+    /// <param name="_tmpFrmVirtualLine">The TmpFrmVirtualLine object.</param>
+    /// <returns>
+    /// Returns a <c>PurchLineCopyFromSource</c> object.
+    /// </returns>
+    protected PurchLineCopyFromSource instantiatePurchLineCopyFromSource(PurchLine _purchLine,
+                                                                        TmpFrmVirtual _tmpFrmVirtualLine)
+    {
+        PurchLineCopyFromSource purchLineCopyFromSource = next instantiatePurchLineCopyFromSource(_purchLine, _tmpFrmVirtualLine);
+        PurchLine               purchLine               = purchLineCopyFromSource.parmPurchLine();
+
+        if (_tmpFrmVirtualLine.ETGSPAINHasUpdateUnsoldQty)
+        {
+            VendInvoiceTrans vendInvoiceTrans = VendInvoiceTrans::findRecId(_tmpFrmVirtualLine.RecordNo);
+
+            if (vendInvoiceTrans)
+            {
+                InventTransId inventTransId = vendInvoiceTrans.InventTransId;
+
+                ETGSPAINUnsoldInventTrans unsoldInventTrans = ETGSPAINUnsoldInventTrans::findByInventTransId(inventTransId, true);
+            
+                if (unsoldInventTrans)
+                {
+                    etgspainHasUnsoldQty                = true;   
+                    etgspainUnsoldInventTransRefRecId   = _tmpFrmVirtualLine.ETGSPAINUnsoldInventTransRefRecId;
+                }            
+            }
+        }
+            
+        return purchLineCopyFromSource;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createLine</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates a purchase line based on the provided PurchLine object.
+    /// </summary>
+    /// <param name="_purchLine">The PurchLine object.</param>
+    protected void createLine(PurchLine _purchLine)
+    {
+        next createLine(_purchLine);
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            if (etgspainHasUnsoldQty)
+            {
+                InventTrans                 inventTransCreated  = InventTrans::ETGSPAINcreateUnsoldInventTrans(InventTrans::findRecId(etgspainUnsoldInventTransRefRecId));
+                ETGSPAINUnsoldInventTrans   unsoldInventTrans   = ETGSPAINUnsoldInventTrans::findOrCreateByRefRecIdandQty(inventTransCreated.RecId,
+                                                                                                                        0,
+                                                                                                                        _purchLine.PurchUnit,
+                                                                                                                        _purchLine,
+                                                                                                                        true);
+                        
+                if (unsoldInventTrans)
+                {
+                    ETGSPAINUnsoldInventTransModifyController::updateQty(unsoldInventTrans,
+                                                                        -abs(_purchLine.PurchQty),
+                                                                        false);
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

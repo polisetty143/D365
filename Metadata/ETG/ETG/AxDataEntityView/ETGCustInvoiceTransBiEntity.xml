@@ -1,0 +1,704 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxDataEntityView xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCustInvoiceTransBiEntity</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGCustInvoiceTransBiEntity extends common
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>postLoad</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    public void postLoad()
+    {
+        super();
+        Ledger          ledger;
+        DataArea        dataArea;
+
+        select firstonly RecId from dataArea where dataArea.id == curExt();
+        
+        ledger = Ledger::findByLegalEntity(dataArea.Recid);
+
+        ExchangeRateUnionView ExchangeRateUnionView, ExchangeRateUnionViewLoc;
+        select firstonly ExchangeRateUnionView
+            order by ExchangeRateUnionView.ValidFrom desc
+            where ExchangeRateUnionView.FromCurrencyCode == this.CurrencyCode && ExchangeRateUnionView.ToCurrencyCode == 'USD'
+            && ExchangeRateUnionView.ValidFrom <= DateTimeUtil::date(this.CreatedDateTime) &&  ExchangeRateUnionView.ValidTo >= DateTimeUtil::date(this.CreatedDateTime);
+        AmountMST AmtUSD;
+        if (this.CurrencyCode == 'USD')
+        {
+            this.ExchInUSD = 1;
+        }
+        else
+        {
+            this.ExchInUSD = (ExchangeRateUnionView.ExchangeRate)/100.00;
+        }
+        // test
+        
+
+        select firstonly  ExchangeRateUnionViewLoc
+            order by ExchangeRateUnionViewLoc.ValidFrom desc
+      where ExchangeRateUnionViewLoc.FromCurrencyCode == this.CurrencyCode && ExchangeRateUnionViewLoc.ToCurrencyCode == Ledger::accountingCurrency(CompanyInfo::current())
+      && ExchangeRateUnionViewLoc.ValidFrom <= DateTimeUtil::date(this.CreatedDateTime) &&  ExchangeRateUnionViewLoc.ValidTo >= DateTimeUtil::date(this.CreatedDateTime);
+
+       
+
+           
+
+        if (this.CurrencyCode == Ledger::accountingCurrency(CompanyInfo::current() ))
+        {
+            this.ExchInLC   = 1;
+        }
+        else
+
+        {
+            this.ExchInLC = (ExchangeRateUnionViewLoc.ExchangeRate)/100.00;
+        }
+
+        UnitOfMeasure FromunitOfMeasure = UnitOfMeasure::findBySymbol(this.SalesUnit);
+        UnitOfMeasure TounitOfMeasure = UnitOfMeasure::findBySymbol('MT');
+
+        if (FromunitOfMeasure == TounitOfMeasure)
+        {
+            this.ExchMT = 1;
+        }
+        else
+        {
+            this.ExchMT = UnitOfMeasureConversion::findByConversion(FromunitOfMeasure.RecId,TounitOfMeasure.RecId ).Factor;
+        }
+
+        this.GLCode         = LedgerDimensionFacade::getMainAccountFromLedgerDimension(this.LedgerDimension).MainAccountId;
+        this.GLdesc         = LedgerDimensionFacade::getMainAccountFromLedgerDimension(this.LedgerDimension).Name;
+        this.ExchInUSD      = CustInvoiceJour::findFromSalesId(this.SalesId).ReportingCurrencyExchangeRate;
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+	<ConfigurationKey>LedgerBasic</ConfigurationKey>
+	<Label>@SYS27200</Label>
+	<SubscriberAccessLevel>
+		<Read>Allow</Read>
+	</SubscriberAccessLevel>
+	<AutoCreateDataverse>Yes</AutoCreateDataverse>
+	<DataManagementEnabled>Yes</DataManagementEnabled>
+	<DataManagementStagingTable>ETGCustInvoiceTransBiStaging</DataManagementStagingTable>
+	<EntityCategory>Transaction</EntityCategory>
+	<IsPublic>Yes</IsPublic>
+	<IsReadOnly>Yes</IsReadOnly>
+	<PrimaryCompanyContext>DataAreaId</PrimaryCompanyContext>
+	<PrimaryKey>EntityKey</PrimaryKey>
+	<PublicCollectionName>ETGCustInvoiceTransBiEntities</PublicCollectionName>
+	<PublicEntityName>ETGCustInvoiceTransBiEntity</PublicEntityName>
+	<DeleteActions />
+	<FieldGroups>
+		<AxTableFieldGroup>
+			<Name>AutoReport</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoLookup</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoIdentification</Name>
+			<AutoPopulate>Yes</AutoPopulate>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoSummary</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoBrowse</Name>
+			<Fields />
+		</AxTableFieldGroup>
+	</FieldGroups>
+	<Fields>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>CountryRegionOfShipment</Name>
+			<DataField>CountryRegionOfShipment</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SysCreatedBy</Name>
+			<DataField>CreatedBy</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>CreatedOn</Name>
+			<DataField>CreatedDateTime</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>CurrencyCode</Name>
+			<DataField>CurrencyCode</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>CustInvoiceLineIdRef</Name>
+			<DataField>CustInvoiceLineIdRef</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>CustomerLineNum</Name>
+			<DataField>CustomerLineNum</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SysDataAreaId</Name>
+			<DataField>DataAreaId</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>DiscAmount</Name>
+			<DataField>DiscAmount</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>DiscPercent</Name>
+			<DataField>DiscPercent</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>DlvDate</Name>
+			<DataField>DlvDate</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ExternalItemId</Name>
+			<DataField>ExternalItemId</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>FinTag</Name>
+			<DataField>FinTag</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>InterCompanyInventTransId</Name>
+			<DataField>InterCompanyInventTransId</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>IntrastatCommodity</Name>
+			<DataField>IntrastatCommodity</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>IntrastatDispatchId</Name>
+			<DataField>IntrastatDispatchId</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>IntrastatFulfillmentDate_HU</Name>
+			<DataField>IntrastatFulfillmentDate_HU</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>InventDimId</Name>
+			<DataField>InventDimId</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>InventQty</Name>
+			<DataField>InventQty</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>InventRefId</Name>
+			<DataField>InventRefId</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>InventRefTransId</Name>
+			<DataField>InventRefTransId</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>InventRefType</Name>
+			<DataField>InventRefType</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>InventTransId</Name>
+			<DataField>InventTransId</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>InvoiceDate</Name>
+			<DataField>InvoiceDate</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>InvoiceId</Name>
+			<DataField>InvoiceId</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ItemId</Name>
+			<DataField>ItemId</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>LedgerDimension</Name>
+			<AccessModifier>Private</AccessModifier>
+			<DataField>LedgerDimension</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>LineAmount</Name>
+			<DataField>LineAmount</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>LineAmountMST</Name>
+			<DataField>LineAmountMST</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>LineAmountTax</Name>
+			<DataField>LineAmountTax</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>LineAmountTaxMST</Name>
+			<DataField>LineAmountTaxMST</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>LineDisc</Name>
+			<DataField>LineDisc</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>LineHeader</Name>
+			<DataField>LineHeader</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>LineNum</Name>
+			<DataField>LineNum</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>LinePercent</Name>
+			<DataField>LinePercent</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SysModifiedDateTime</Name>
+			<DataField>ModifiedDateTime</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Name</Name>
+			<DataField>Name</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>numberSequenceGroup</Name>
+			<DataField>numberSequenceGroup</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>OrigCountryRegionId</Name>
+			<DataField>OrigCountryRegionId</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>OrigSalesId</Name>
+			<DataField>OrigSalesId</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>OrigState</Name>
+			<DataField>OrigState</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ParentRecId</Name>
+			<DataField>ParentRecId</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PartDelivery</Name>
+			<DataField>PartDelivery</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PdsCWQty</Name>
+			<DataField>PdsCWQty</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PdsCWQtyPhysical</Name>
+			<DataField>PdsCWQtyPhysical</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PdsCWRemain</Name>
+			<DataField>PdsCWRemain</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PeriodChargeInvoiceLineBaseFromDate</Name>
+			<ConfigurationKey>Markup</ConfigurationKey>
+			<DataField>PeriodChargeInvoiceLineBaseFromDate</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PeriodChargeInvoiceLineBaseToDate</Name>
+			<ConfigurationKey>Markup</ConfigurationKey>
+			<DataField>PeriodChargeInvoiceLineBaseToDate</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PriceUnit</Name>
+			<DataField>PriceUnit</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Qty</Name>
+			<DataField>Qty</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>QtyPhysical</Name>
+			<DataField>QtyPhysical</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ReasonRefRecId</Name>
+			<DataField>ReasonRefRecId</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SourceKey</Name>
+			<DataField>RecId</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SysRecVersion</Name>
+			<DataField>RecVersion</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Remain</Name>
+			<DataField>Remain</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>RemainBefore</Name>
+			<DataField>RemainBefore</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>RetailCategory</Name>
+			<ConfigurationKey>Retail</ConfigurationKey>
+			<DataField>RetailCategory</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ReturnArrivalDate</Name>
+			<DataField>ReturnArrivalDate</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ReturnClosedDate</Name>
+			<DataField>ReturnClosedDate</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ReturnDispositionCodeId</Name>
+			<DataField>ReturnDispositionCodeId</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ReverseCharge_W</Name>
+			<DataField>ReverseCharge_W</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ReverseChargeSalesList</Name>
+			<DataField>ReverseChargeSalesList</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>ReversedRecId</Name>
+			<DataField>ReversedRecId</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SalesCategory</Name>
+			<DataField>SalesCategory</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SalesGroup</Name>
+			<DataField>SalesGroup</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SalesId</Name>
+			<DataField>SalesId</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SalesMarkup</Name>
+			<DataField>SalesMarkup</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SalesPrice</Name>
+			<DataField>SalesPrice</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SalesUnit</Name>
+			<DataField>SalesUnit</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SourceDocumentLine</Name>
+			<DataField>SourceDocumentLine</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>StateOfShipment</Name>
+			<DataField>StateOfShipment</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>StatLineAmountMST</Name>
+			<DataField>StatLineAmountMST</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>StockedProduct</Name>
+			<DataField>StockedProduct</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SumLineDisc</Name>
+			<DataField>SumLineDisc</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SumLineDiscMST</Name>
+			<DataField>SumLineDiscMST</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>TaxAmount</Name>
+			<DataField>TaxAmount</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>TaxAmountMST</Name>
+			<DataField>TaxAmountMST</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>TaxAutogenerated</Name>
+			<DataField>TaxAutogenerated</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>TaxGroup</Name>
+			<DataField>TaxGroup</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>TaxItemGroup</Name>
+			<DataField>TaxItemGroup</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Transport</Name>
+			<DataField>Transport</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Weight</Name>
+			<DataField>Weight</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>ExchInLC</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>ExchInUSD</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>ExchMT</Name>
+			<ExtendedDataType>UnitOfMeasureConversionFactor</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>LineCreationSequenceNumber</Name>
+			<DataField>LineCreationSequenceNumber</DataField>
+			<DataSource>CustInvoiceTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>GLCode</Name>
+			<ExtendedDataType>MainAccountNum</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+			<StringSize>20</StringSize>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>GLdesc</Name>
+			<ExtendedDataType>AccountName</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+			<StringSize>20</StringSize>
+		</AxDataEntityViewField>
+	</Fields>
+	<Keys>
+		<AxDataEntityViewKey>
+			<Name>EntityKey</Name>
+			<Fields>
+				<AxDataEntityViewKeyField>
+					<DataField>InvoiceId</DataField>
+				</AxDataEntityViewKeyField>
+				<AxDataEntityViewKeyField>
+					<DataField>InvoiceDate</DataField>
+				</AxDataEntityViewKeyField>
+				<AxDataEntityViewKeyField>
+					<DataField>LineCreationSequenceNumber</DataField>
+				</AxDataEntityViewKeyField>
+			</Fields>
+		</AxDataEntityViewKey>
+	</Keys>
+	<Mappings />
+	<Ranges />
+	<Relations />
+	<StateMachines />
+	<ViewMetadata>
+		<Name>Metadata</Name>
+		<SourceCode>
+			<Methods>
+				<Method>
+					<Name>classDeclaration</Name>
+					<Source><![CDATA[
+[Query]
+public class Metadata extends QueryRun
+{
+}
+]]></Source>
+				</Method>
+			</Methods>
+		</SourceCode>
+		<DataSources>
+			<AxQuerySimpleRootDataSource>
+				<Name>CustInvoiceTrans</Name>
+				<ChangeTrackingEnabled>No</ChangeTrackingEnabled>
+				<DynamicFields>Yes</DynamicFields>
+				<IsReadOnly>Yes</IsReadOnly>
+				<Table>CustInvoiceTrans</Table>
+				<DataSources />
+				<DerivedDataSources />
+				<Fields />
+				<Ranges />
+				<GroupBy />
+				<Having />
+				<OrderBy />
+			</AxQuerySimpleRootDataSource>
+		</DataSources>
+	</ViewMetadata>
+</AxDataEntityView>

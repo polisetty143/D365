@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGContainerTrackingReportDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The <c>ETGContainerTrackingReportDP</c> class is the report data provider class for container tracking report
+/// </summary>
+[SRSReportParameterAttribute(classStr(ETGContainerTrackingReportContract))]
+public class ETGContainerTrackingReportDP extends SrsReportDataProviderBase
+{
+    ETGContainerTrackingReportTmp       reportTmp;
+    ETGContainerTrackingReportContract  containerTrackingReportContract;
+    FromDate                            fromDate;
+    ToDate                              toDate;
+    ETGSalesShipmentCocoa               ETGSalesShipmentCocoaLine;
+    ETGSalesShipmentCashew              ETGSalesShipmentCashewLine;
+    CustInvoiceTrans                    custInvoiceTrans;
+    ETG_SalesTableTrade                 ETG_SalesTableTrade;
+    ITMContainerActivityTable           ITMContainerActivityTable;
+    ETGITMShippingContainerId           containerId;
+    RefRecId                            firstLegRecId;
+   
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getContainerTrackingReportTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Selects the <c>ETGContainerTrackingReportTmp</c> table.
+    /// </summary>
+    /// <returns>
+    ///    The <c>ETGContainerTrackingReportTmp</c> table.
+    /// </returns>
+    [SRSReportDataSetAttribute(tableStr(ETGContainerTrackingReportTmp))]
+    public ETGContainerTrackingReportTmp getContainerTrackingReportTmp()
+    {
+        select * from reportTmp;
+        return reportTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createReportLines</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// create report lines for container tracking report
+    /// </summary>
+    public Void createReportLines()
+    {
+        CompanyInfo                         companyInfo = CompanyInfo::find();
+        Query                               query;
+        QueryRun                            queryRun;
+        QueryBuildDataSource                qbdsITMTable, qbdsITMLine;
+        ITMTable                            itmTable;
+        ITMLine                             itmLine;
+
+        containerTrackingReportContract = new ETGContainerTrackingReportContract();
+        containerTrackingReportContract = this.parmDataContract() as ETGContainerTrackingReportContract;
+
+        fromDate            = containerTrackingReportContract.parmFromDate();
+        toDate              = containerTrackingReportContract.parmToDate();        
+        containerId         = containerTrackingReportContract.parmContainerId();
+    
+        query = new Query();
+
+        qbdsITMTable           = query.addDataSource(tableNum(ITMTable));
+        qbdsITMLine            = qbdsITMTable.addDataSource(tableNum(ITMLine));
+        qbdsITMLine.joinMode(JoinMode::InnerJoin);
+        qbdsITMLine.relations(true);
+        qbdsITMLine.addLink(fieldNum(ITMTable, ShipId), fieldNum(ITMLine, ShipId));
+       
+        FromDateTime fromDateTime = DateTimeUtil::newDateTime(fromDate, 0, DateTimeUtil::getUserPreferredTimeZone());
+        ToDateTime   toDateTime   = DateTimeUtil::newDateTime(toDate,   0, DateTimeUtil::getUserPreferredTimeZone());      
+        toDateTime                = DateTimeUtil::addDays(toDateTime, 1);
+
+        SysQuery::findOrCreateRange(qbdsITMTable, fieldNum(ITMTable, CreatedDateTime)).value(queryRange(fromDateTime, toDateTime));
+
+        if(containerId)
+        {
+            SysQuery::findOrCreateRange(qbdsITMTable, fieldNum(ITMTable, ETGITMShippingContainerId)).value(containerId);
+        }
+        queryRun = new QueryRun(query);
+        while(queryRun.next())
+        {
+            itmTable         = queryRun.get(tableNum(ITMTable));
+            itmLine          = queryRun.get(tableNum(ITMLine));
+
+            reportTmp.clear();
+            reportTmp.Line                   = itmTable.ETGRMINLineTableCode;
+            reportTmp.BookingDate            = DateTimeUtil::date(itmTable.CreatedDateTime);
+            reportTmp.BookingRef             = itmTable.ETGBookingRef;
+            reportTmp.Size                   = itmTable.ETGITMShippingContainerId;
+            reportTmp.ContainerNum           = itmLine.ShipContainerId;
+            reportTmp.FromPort               = itmTable.ShipFromPort;
+            reportTmp.ToPort                 = itmTable.ShipToPort;
+            reportTmp.VesselName             = itmTable.ShipVesselId;
+            reportTmp.LotNumber              = itmLine.salesLineETG().inventDim().inventSerialId;
+            custInvoiceTrans                 = custInvoiceTrans::findInventTransid(itmLine.InventTransId);
+
+            if(custInvoiceTrans)
+            {
+                select firstonly LotsNumber from ETGSalesShipmentCocoaLine
+                    where ETGSalesShipmentCocoaLine.RefInvoiceId == custInvoiceTrans.InvoiceId
+                        &&  ETGSalesShipmentCocoaLine.CustInvoiceTrans  == custInvoiceTrans.RecId;
+
+                select firstonly DeclarationNumber from ETGSalesShipmentCashewLine
+                    where ETGSalesShipmentCashewLine.RefInvoiceId == custInvoiceTrans.InvoiceId
+                        &&  ETGSalesShipmentCashewLine.CustInvoiceTrans  == custInvoiceTrans.RecId;
+
+                if (ETGSalesShipmentCocoaLine.TransitOrder)
+                {
+                    reportTmp.SerialNumberSalesOrder = ETGSalesShipmentCocoaLine.TransitOrder;
+                }
+                else
+                {
+                    reportTmp.SerialNumberSalesOrder = ETGSalesShipmentCashewLine.PKL;
+                }
+                reportTmp.DeclarationNum = ETGSalesShipmentCashewLine.DeclarationNumber;
+            }
+
+            if(itmLine.TransType == InventTransType::Sales)
+            {
+                select firstonly Name from ETG_SalesTableTrade where ETG_SalesTableTrade.SalesId ==  itmLine.TransRefId;
+                reportTmp.PartyName = ETG_SalesTableTrade.Name;
+            }
+
+            //first leg start date
+            select firstonly StartDate, RecId from ITMContainerActivityTable order by RecId asc
+                where ITMContainerActivityTable.ShipId == itmTable.ShipId;
+            reportTmp.StartDateFirstLeg = ITMContainerActivityTable.StartDate;
+            firstLegRecId = ITMContainerActivityTable.RecId;
+
+            //second leg start date
+            select firstonly StartDate from ITMContainerActivityTable order by RecId asc
+                where ITMContainerActivityTable.ShipId == itmTable.ShipId
+                    && ITMContainerActivityTable.RecId != firstLegRecId;
+            reportTmp.StartDateSecondLeg = ITMContainerActivityTable.StartDate;
+           
+            reportTmp.EndDate = itmLine.ETGGateInDate;
+
+            if(reportTmp.EndDate)
+            {
+                reportTmp.NumberOfDaysContainerProsession = 0;
+            }
+            else if(reportTmp.StartDateFirstLeg != dateNull())
+            {
+                reportTmp.NumberOfDaysContainerProsession = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()) - reportTmp.StartDateFirstLeg;
+            }
+            if(reportTmp.EndDate != dateNull())
+            {
+                reportTmp.NumberOfDaysTakenGateIn     = reportTmp.EndDate - reportTmp.StartDateFirstLeg;
+            }
+            reportTmp.CompanyLogo                     = FormLetter::companyLogo();
+            reportTmp.CompanyTeleFax                  = strFmt('Tel : %1  Fax : %2',companyInfo.phone(),companyInfo.teleFax());
+            reportTmp.CompanyAddress                  = companyInfo.postalAddress().Address;
+            reportTmp.CompanyAddress                  = strReplace(reportTmp.CompanyAddress,"\n","");
+            reportTmp.CompanyName                     = companyInfo.Name;
+            reportTmp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// create report lines for container tracking report
+    /// entry point of business logic
+    /// </summary>
+    public void processReport()
+    {
+        this.createReportLines();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

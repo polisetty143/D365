@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesTableFormEventHandlers</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_SalesTableFormEventHandlers
+{
+    
+    
+
+    
+    
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>ETGAutoPostPackAndInvoice_OnClicked</Name>
+				<Source><![CDATA[
+    /*
+    /// <summary>
+    /// QualitySpecificationBugs.,27 Jan 2021,Binay
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(SalesTable, QualityGroupLine), FormControlEventType::PageActivated)]
+    public static void QualityGroupLine_OnPageActivated(FormControl sender, FormControlEventArgs e)
+    {
+         
+        FormRun         form = sender.formRun();
+        SalesTable      salesTable;
+        FormControl     AddGrpLineButton     = sender.formrun().design(0).controlName('AddGrpLine');
+        FormControl     RemoveGrpLineButton  = sender.formrun().design(0).controlName('RemoveGrpLine');
+        
+        RemoveGrpLineButton.enabled(false);
+        AddGrpLineButton.enabled(false);
+
+        FormDataSource salesTable_ds  = form.dataSource(formDataSourceStr(SalesTable,SalesTable)) as FormDataSource;
+        salesTable                    = salesTable_ds.cursor();
+
+        if (salesTable.ETG_SalesAgreementIdComfirmVer == '')
+        {
+            RemoveGrpLineButton.enabled(true);
+            AddGrpLineButton.enabled(true);
+
+        }
+    }
+
+    /// <summary>
+    /// QualitySpecificationBugs.,27 Jan 2021,Binay
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+   
+
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(SalesTable, RemoveGrpLine), FormControlEventType::Clicked)]
+    public static void RemoveGrpLine_OnClicked(FormControl sender, FormControlEventArgs e)
+    {
+        SalesLine               salesLine;
+        ETG_SalesLineQualityGrp salesLineQualityGrp,salesLineQualityGrp2;
+         
+
+        FormDataSource salesLineQualityGrp_ds  = sender.formRun().dataSource(formDataSourceStr(SalesTable,ETG_SalesLineQualityGrp)) as FormDataSource;
+       
+        salesLineQualityGrp = salesLineQualityGrp_ds.cursor();
+
+        ttsbegin;
+        delete_from salesLineQualityGrp2 where salesLineQualityGrp2.RecId == salesLineQualityGrp.RecId;
+        ttscommit;
+        salesLineQualityGrp_ds.research(true);
+        salesLineQualityGrp_ds.reread();
+        salesLineQualityGrp_ds.refresh();
+
+    }*/
+
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(SalesTable, ETGAutoPostPackAndInvoice), FormControlEventType::Clicked)]
+    public static void ETGAutoPostPackAndInvoice_OnClicked(FormControl sender, FormControlEventArgs e)
+    {
+        SalesTable salestableLoc = sender.formRun().dataSource().cursor();
+        
+        SalesFormLetter_PackingSlip  salesFormLetterPackingSlip;
+        SalesFormLetter_Invoice  salesFormLetterInvoice;
+
+        
+        if (SalesLine::exist(salesTableLoc.SalesId) && salestableLoc.InterCompanyOrder)
+        {
+            try
+            {
+                ttsBegin;
+                salesFormLetterPackingSlip = SalesFormLetter::construct(DocumentStatus::PackingSlip);
+            
+                salesFormLetterPackingSlip.update(salesTableLoc,
+                                        DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()),
+                                        SalesUpdate::All,
+                                        AccountOrder::None,
+                                        NoYes::No,
+                                        NoYes::No );
+                ttsCommit;
+            }
+            catch
+            {
+                throw Error("@ETG_New:ErrorPackingSlipPosting");
+            }
+
+            try
+            {
+                if (salesTableLoc && salesTableLoc.SalesStatus != SalesStatus::Invoiced)
+                {
+                    ttsBegin;
+                    salesFormLetterInvoice = SalesFormLetter::construct(DocumentStatus::Invoice);
+
+                    salesFormLetterInvoice.update(salesTableLoc,
+                                        DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()),
+                                        SalesUpdate::PackingSlip,
+                                        AccountOrder::None,
+                                        NoYes::No,
+                                        NoYes::No );
+
+                    ttsCommit;
+                }
+            }
+            catch
+            {
+                throw Error("@ETG_New:ErrorInvoicePosting");
+            }
+        }
+        salesTableLoc.reread();
+
+        if(salesTableLoc.SalesStatus == SalesStatus::Invoiced)
+        {
+            changecompany(salesTableLoc.InterCompanyCompanyId)
+            {
+                CustpackingSlipJour             custPackingSlipJour;
+                CustInvoiceJour                 custInvoiceJour;
+                PurchFormLetter_Invoice         purchFormLetter;
+                PurchFormLetter                 purchFormLetterCnf;
+                PurchFormLetter_Invoice         purchFormLetterInv;
+                PurchFormLetter_PackingSlip     purchFormLetterPsilp;
+
+                PurchTable purchTable = PurchTable::find(salesTableLoc.InterCompanyPurchId);
+
+                changecompany(purchtable.InterCompanyCompanyId)
+                {
+                    select firstOnly custPackingSlipJour
+                                order by DeliveryDate desc, PackingSlipId desc
+                            where custPackingSlipJour.SalesId == purchtable.InterCompanySalesId;
+
+                    select firstOnly custInvoiceJour
+                                order by InvoiceDate desc, CreatedDateTime desc
+                            where custInvoiceJour.SalesId == purchtable.InterCompanySalesId;
+                }
+
+                purchFormLetterCnf = PurchFormLetter::construct(DocumentStatus::PurchaseOrder);
+
+                purchFormLetterCnf.update(
+                                        purchTable,
+                                        strFmt('%1-%2', purchTable.PurchId, DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone())),
+                                        SystemDateGet(),
+                                        PurchUpdate::All,
+                                        AccountOrder::None,
+                                        NoYes::No,
+                                        NoYes::No
+                                    );
+
+                purchTable.reread();
+
+                ttsbegin;
+                if (purchTable.DocumentState == VersioningDocumentState::Confirmed)
+                {
+                    purchFormLetterPsilp = PurchFormLetter::construct(DocumentStatus::PackingSlip);
+ 
+                    purchFormLetterPsilp.update( purchTable,
+                                            custPackingSlipJour.PackingSlipId,
+                                            SystemDateGet(),
+                                            PurchUpdate::All,
+                                            AccountOrder::None,
+                                            false,
+                                            false);
+                }
+                ttscommit;
+
+                ttsbegin;
+                if (purchTable.DocumentStatus != DocumentStatus::Invoice)
+                {
+                    purchFormLetter = PurchFormLetter::construct(DocumentStatus::Invoice);
+
+                    purchFormLetter.update( purchTable,
+                                            custInvoiceJour.InvoiceId,
+                                            systemDateGet(),
+                                            PurchUpdate::PackingSlip,
+                                            AccountOrder::None,
+                                            false,
+                                            false
+                                            );
+                }
+                ttsCommit;
+            }
+        }
+
+        sender.formRun().dataSource().refresh();
+        sender.formRun().dataSource().research(true);
+        
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

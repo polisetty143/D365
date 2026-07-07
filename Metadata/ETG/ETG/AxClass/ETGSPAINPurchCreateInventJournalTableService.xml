@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSPAINPurchCreateInventJournalTableService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Process that creates a Transfer Journal (<c>InventJournalTable</c>)
+/// and its lines (<c>InventJournalTrans</c>) from an Operation (<c>ETGSPAINPurchOperationTable</c>) (Service), for the ETGSPAIN model.
+/// </summary>
+class ETGSPAINPurchCreateInventJournalTableService extends SysOperationServiceBase
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>createInventJournalTransfer</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method to create an <c>InventJournalTrans</c>.
+    /// </summary>
+    /// <param name = "_ETGSPAINPurchOperationTable">ETGSPAINPurchOperationTable</param>
+    /// <param name = "_inventJournalTable">InventJournalTable</param>
+    /// <returns>Returns the created <c>InventJournalTrans</c>.</returns>
+    /// <remarks>Quantity and dimensions logic missing.</remarks>
+    private InventJournalTrans createInventJournalTransfer(ETGSPAINPurchOperationTable	_ETGSPAINPurchOperationTable,
+                                                            InventJournalTable      _inventJournalTable)
+    {
+        InventJournalTrans  inventJournalTrans;        
+        InventDim           inventDim;
+        JournalTransData    journalTransData;
+
+        try
+        {
+            ttsbegin;
+            inventJournalTrans.initValue();
+            inventJournalTrans.initFromInventJournalTable(_inventJournalTable);
+
+            inventJournalTrans.ItemId       = _ETGSPAINPurchOperationTable.ItemId;  
+            inventJournalTrans.initFromInventTable(_ETGSPAINPurchOperationTable.inventTable());
+
+            inventJournalTrans.TransDate    = systemDateGet();
+
+            inventJournalTrans.Qty = 1;
+            inventJournalTrans.LineNum = 1;
+        
+            inventDim.clear();
+            inventDim.initValue();
+        
+            inventDim.inventSiteId      = _ETGSPAINPurchOperationTable.InventSiteId;
+            inventDim.InventLocationId  = _ETGSPAINPurchOperationTable.InventLocationId;
+
+            InventBatch inventBatch = InventBatch::findOrCreate(_ETGSPAINPurchOperationTable.OperationId, _ETGSPAINPurchOperationTable.ItemId);
+
+            inventDim.inventBatchId     = inventBatch.inventBatchId;
+
+            inventJournalTrans.InventDimId      = InventDim::findOrCreate(inventDim).inventDimId;  
+
+            InventDim  toInventDimId    = InventDim::findOrCreateBlank();
+
+            toInventDimId.InventSiteId = inventDim.InventSiteId;            
+
+            inventJournalTrans.ToInventDimId = InventDim::findOrCreate(toInventDimId).inventDimId;
+            
+            inventJournalTrans.insert();
+            ttscommit;
+        }
+        catch
+        {
+            error("@ETGSPAINLabels:InventJournalTransCreateError");
+        }
+        return inventJournalTrans;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createInventJournalTable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method to create records in the <c>InventJournalTable</c>.
+    /// </summary>
+    /// <returns>Returns the created <c>InventJournalTable</c> record.</returns>
+    private InventJournalTable createInventJournalTable()
+    {        
+        InventJournalNameTransfer   journalIdParameter;
+        InventJournalName           transferJournalName;
+        InventJournalTable          inventJournalTable;
+
+        transferJournalName = InventJournalName::find(InventParameters::find().TransferJournalNameId);
+
+        inventJournalTable.initValue();
+        inventJournalTable.initFromInventJournalName(transferJournalName);
+
+        inventJournalTable.JournalId = NumberSeq::newGetNum(InventParameters::numRefInventJournalId()).num();
+        inventJournalTable.NumOfLines = 1;
+        inventJournalTable.insert();
+
+        return inventJournalTable;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createInventJournals</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method <c>createInventJournals</c>, executes the creation of Transfer Journals based on the record container of the service contract.
+    /// </summary>
+    /// <param name = "_contract">ETGSPAINPurchCreateInventJournalTableContract</param>
+    /// <remarks>Main method of the service.</remarks>
+    public void createInventJournals(ETGSPAINPurchCreateInventJournalTableContract _contract)
+    {
+        ETGSPAINPurchOperationTable	ETGSPAINPurchOperationTable;
+        InventJournalTable      inventJournalTable;
+        InventJournalTrans      inventJournalTrans;
+        SetEnumerator			se;
+        Common					record;
+        #OCCRetryCount
+        try
+        {
+            ttsBegin;
+            if (conLen(_contract.parmRecordCon()) > 0)
+            {                
+                se = Set::create(_contract.parmRecordCon()).getEnumerator();
+                while (se.moveNext())
+                {
+                    record = se.current();
+                    
+                    if (record.TableId == tableNum(ETGSPAINPurchOperationTable))
+                    {
+                        ETGSPAINPurchOperationTable = record;
+
+                        inventJournalTable = this.createInventJournalTable();
+                        inventJournalTrans = this.createInventJournalTransfer(ETGSPAINPurchOperationTable,
+                                                                                inventJournalTable);                                               
+                    }
+                }
+            }           
+            ttsCommit;
+        }    
+        catch (Exception::Deadlock)
+        {
+            retry;
+        }
+        catch (Exception::UpdateConflict)
+        {
+            if (appl.ttsLevel() == 0)
+            {
+                if (xSession::currentRetryCount() >= #RetryNum)
+                {
+                    throw Exception::UpdateConflictNotRecovered;
+                }
+                else
+                {
+                    retry;
+                }
+            }
+            else
+            {
+                throw Exception::UpdateConflict;
+            }
+        } 
+       
+        if (inventJournalTable && inventJournalTrans)
+        {
+            Args    args;
+            FormRun formRun;            
+
+            //Call the form using a Menu Item
+            args = new Args();
+            args.record(inventJournalTable);
+            
+            new MenuFunction(menuItemDisplayStr(InventJournalTableTransfer), MenuItemType::Display).run(args);            
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

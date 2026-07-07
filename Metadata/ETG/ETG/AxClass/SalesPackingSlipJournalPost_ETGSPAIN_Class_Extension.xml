@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>SalesPackingSlipJournalPost_ETGSPAIN_Class_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the <c>SalesPackingSlipJournalPost</c> class for the ETGSPAIN model.
+/// </summary>
+/// <remarks>
+/// This extension modifies the operation status and handles inventory updates for unsold quantities.
+/// </remarks>
+[ExtensionOf(classStr(SalesPackingSlipJournalPost))]
+final class SalesPackingSlipJournalPost_ETGSPAIN_Class_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>updateSourceLine</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>updateSourceLine</c> method.
+    /// </summary>
+    /// <remarks>
+    /// Modifies the operation status to "In Execution" based on the InventBatchId.
+    /// </remarks>
+    protected void updateSourceLine()
+    {
+        next updateSourceLine();
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            InventDim inventDim = custPackingSlipTrans.inventDim();
+
+            // Dimensión Operación (Número de lote)
+            if (inventDim.inventBatchId)
+            {
+                // Modificamos el estado de la operación a "En ejecución".
+                ETGSPAINPurchOperationTable ETGSPAINPurchOperationTable = ETGSPAINPurchOperationTable::find(inventDim.inventBatchId, true);
+
+                if (ETGSPAINPurchOperationTable)
+                {
+                    ttsbegin;
+                    ETGSPAINPurchOperationTable.OperationStatus = ETGSPAINOperationStatus::Execution;
+                    ETGSPAINPurchOperationTable.update();
+                    ttscommit;
+                }
+            }
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateInventoryForLine</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>updateInventoryForLine</c> method.
+    /// </summary>
+    /// <param name="_parameters">SalesPackingSlipJournalPostUpdateInventoryLineParameters.</param>
+    /// <param name="_postInventoryState">SalesPackingSlipJournalPostPostInventoryState.</param>
+    /// <remarks>
+    /// Updates unsold quantity and creates InventTrans records based on conditions.
+    /// </remarks>
+    protected void updateInventoryForLine(SalesPackingSlipJournalPostUpdateInventoryLineParameters _parameters, SalesPackingSlipJournalPostPostInventoryState _postInventoryState)
+    {
+        Qty                     qty2Unsold                  = 0;
+        CustPackingSlipTrans    custPackingSlipTransUnsold  = _parameters.CustPackingSlipTrans;
+
+       
+
+        next updateInventoryForLine(_parameters,
+                                    _postInventoryState);
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            if (custPackingSlipTransUnsold.ETGSPAINUnsoldQtyModify == NoYes::Yes
+            && custPackingSlipTransUnsold.Qty > custPackingSlipTransUnsold.Ordered)
+        
+            {
+                InventTrans         inventTrans         = InventTrans::findTransId(custPackingSlipTransUnsold.InventTransId);
+                InventTransOrigin   inventTransOrigin   = InventTransOrigin::find(inventTrans.InventTransOrigin);
+
+                if (inventTrans && inventTransOrigin)
+                {
+                    InventTrans         inventTransCreated;
+        
+                    inventTransCreated.clear();
+                    buf2Buf(inventTrans, inventTransCreated);
+
+                    inventTransCreated.StatusIssue                  = StatusIssue::None;
+                    inventTransCreated.StatusReceipt                = StatusReceipt::None;
+                    inventTransCreated.ETGSPAINInventTransIsUnsold  = NoYes::Yes;
+                    inventTransCreated.Qty                          = 0;
+
+                    inventTransCreated.insert();
+
+                    if (inventTransCreated)
+                    {
+                        ETGSPAINUnsoldInventTrans::findOrCreateByRefRecIdandQty(inventTransCreated.RecId, -abs(custPackingSlipTransUnsold.Qty), custPackingSlipTransUnsold.SalesUnit, custPackingSlipTransUnsold.salesLine(), true);
+                    }
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

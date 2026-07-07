@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGBankPaymAdviceVendDP_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classstr(BankPaymAdviceVendDP))]
+internal final class ETGBankPaymAdviceVendDP_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        BankPaymAdviceContract      contract;
+        BankPaymAdviceVendV2Tmp     bankPaymAdviceVendV2Tmp;
+        LedgerJournalTrans          ledgerJournalTrans;
+        ETGCanadaParameters         etgCanadaParameters;
+        CompanyInfo                 companyInfo;
+        VendTable                   vendTable;
+        real                        localPaymentAmount;
+        str                         address;
+
+        contract = this.parmDataContract();
+        etgCanadaParameters = ETGCanadaParameters::find();
+
+        next processReport();
+
+        if (etgCanadaParameters.ETGUnsettledPaymentAdvice != NoYes::Yes)
+        {
+            return;
+        }
+
+        bankPaymAdviceVendV2Tmp = this.getBankPaymAdviceVendTmp();
+
+        bankPaymAdviceVendV2Tmp.clear();
+
+        select firstOnly RecId from bankPaymAdviceVendV2Tmp;
+
+        if (bankPaymAdviceVendV2Tmp.RecId)
+        {
+            return;
+        }
+
+        vendTable   = VendTable::find(contract.parmAccountNum());
+        address     = DirParty::primaryPostalAddress(vendTable.Party).Address;
+        companyInfo = CompanyInfo::find();
+
+        select firstOnly ledgerJournalTrans
+            where ledgerJournalTrans.RecId == contract.parmLedgerJournalTransRecId();
+
+        if (!ledgerJournalTrans)
+        {
+            return;
+        }
+
+        localPaymentAmount =ledgerJournalTrans.AmountCurDebit -ledgerJournalTrans.AmountCurCredit;
+
+        bankPaymAdviceVendV2Tmp.clear();
+        bankPaymAdviceVendV2Tmp.TransDate           = ledgerJournalTrans.TransDate;
+        bankPaymAdviceVendV2Tmp.Balance01           = localPaymentAmount;
+        bankPaymAdviceVendV2Tmp.SettledCurrencyCode = ledgerJournalTrans.CurrencyCode;
+        bankPaymAdviceVendV2Tmp.CompanyAddress      = companyInfo.postalAddress().Address;
+        bankPaymAdviceVendV2Tmp.VendAddress         = address;
+        bankPaymAdviceVendV2Tmp.VendName            = ledgerJournalTrans.LedgerDimensionName;
+        bankPaymAdviceVendV2Tmp.insert();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

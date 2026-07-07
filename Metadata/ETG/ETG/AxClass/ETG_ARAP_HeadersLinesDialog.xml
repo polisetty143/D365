@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_ARAP_HeadersLinesDialog</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_ARAP_HeadersLinesDialog
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>dialog</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// 
+    /// </summary>
+    public void dialog()
+    {
+        Dialog                       dialog;
+        TransDate                    fromDate,toDate;
+        NoYes                        noYes;
+        DialogField                  dialogFromDate,dialogToDate,dialogNoYes;
+        DialogField                  dialogTransType;
+        ;
+ 
+        dialog = new dialog("Ctrm Integration Status");
+        dialogFromDate       = dialog.addField(extendedTypeStr(TransDate), "From date"); 
+        dialogToDate         = dialog.addField(extendedTypeStr(TransDate), "To date");
+        dialogNoYes          = dialog.addField(enumStr(NoYes), "Created Date");
+        dialog.run(); 
+ 
+        if(!dialogFromDate.value() || !dialogToDate.value() )
+        {
+            throw error("Date Should Not Be Null");
+        }
+        else if(dialogFromDate.value() >= dialogToDate.value())
+        {
+            throw error("From date should be less than Todate");
+        }
+        else if (dialog.run())
+        {
+            this.Tbl_Autorecondata_ax(dialogFromDate.value(),dialogToDate.value(), dialogNoYes.value());
+        }
+ 
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>Tbl_Autorecondata_ax</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name = "_fromdate"></param>
+    /// <param name = "_todate"></param>
+    public void Tbl_Autorecondata_ax(date _fromdate, date _todate, NoYes _createdDate)
+    {
+        ETG_AxVsCtrmRecon Tbl_AxVsCtrmRecon;
+        ETG_ARAP_MSGHEADER TBL_ARAP_MsgHeader;
+        ETG_ARAP_MSGLINES TBL_ARAP_MsgLines;
+        date fromdate,todate;
+        timeofday fromtime,totime;
+        Args args = new Args();
+        ;
+        ttsbegin;
+        delete_from Tbl_AxVsCtrmRecon;
+        ttscommit;
+ 
+        str fromDateAsString, toDateAsString;
+
+        fromDateAsString = date2Str(_fromdate, 321, DateDay::Digits2, DateSeparator::Hyphen, DateMonth::Digits2, DateSeparator::Hyphen, DateYear::Digits4);
+        toDateAsString   = date2Str(_todate,   321, DateDay::Digits2, DateSeparator::Hyphen, DateMonth::Digits2, DateSeparator::Hyphen, DateYear::Digits4);
+
+        if(_createdDate == NoYes::No)
+        {
+            while select TBL_ARAP_MsgHeader where TBL_ARAP_MsgHeader.ETGLegalEntity == curext()
+                //&& TBL_ARAP_MsgHeader.createdDateTime >= datetobeginUtcDateTime(_fromdate, DateTimeUtil::getUserPreferredTimeZone())
+            //&& TBL_ARAP_MsgHeader.createdDateTime <= datetoendUtcDateTime(_todate, DateTimeUtil::getUserPreferredTimeZone())
+            && TBL_ARAP_MsgHeader.AXDocDate >= fromDateAsString
+                && TBL_ARAP_MsgHeader.AXDocDate <= toDateAsString
+                && TBL_ARAP_MsgHeader.ETGDocuType != "STOCK"
+                && ((TBL_ARAP_MsgHeader.ETGIntegrationsStatus == ETGIntegrationStatus::Processed) || ( TBL_ARAP_MsgHeader.ETGIntegrationsStatus == ETGIntegrationStatus::Error) ||
+                                         ( TBL_ARAP_MsgHeader.ETGIntegrationsStatus == ETGIntegrationStatus::Unprocessed) )
+                                  //  &&  TBL_ARAP_MsgHeader.Log == "
+            // &&  TBL_ARAP_MsgHeader.IntegrationStatus != TBL_IntegrationStatus::Processed
+ 
+            if(TBL_ARAP_MsgHeader)
+            {
+                Tbl_AxVsCtrmRecon.InvoiceNum           = TBL_ARAP_MsgHeader.ETGARAPREF;
+                Tbl_AxVsCtrmRecon.ContractNum       = TBL_ARAP_MsgHeader.ETGCONTRACTNUMBER;
+                Tbl_AxVsCtrmRecon.TotalAmount          = str2num(TBL_ARAP_MsgHeader.AXNetAmount);
+                Tbl_AxVsCtrmRecon.CounterParty         = TBL_ARAP_MsgHeader.ETGCOUNTERPARTY;
+                Tbl_AxVsCtrmRecon.PaymentTerms          = TBL_ARAP_MsgHeader.ETGPAYMTERMS;
+                Tbl_AxVsCtrmRecon.DocumentCause        = TBL_ARAP_MsgHeader.ETGDOCUMENTCAUSE;
+                Tbl_AxVsCtrmRecon.Transdate            = str2date(TBL_ARAP_MsgHeader.AXApplyDate,321);
+                Tbl_AxVsCtrmRecon.DocuDate              = str2date(TBL_ARAP_MsgHeader.AXDocDate,321);
+                Tbl_AxVsCtrmRecon.ProfitCenter         = TBL_ARAP_MsgHeader.ETGPROFITCENTERGR;
+                Tbl_AxVsCtrmRecon.errorLog             =  TBL_ARAP_MsgHeader.ETGLOG;
+                Tbl_AxVsCtrmRecon.DocuType              = TBL_ARAP_MsgHeader.ETGDocuType;
+                Tbl_AxVsCtrmRecon.UserName             = TBL_ARAP_MsgHeader.ETGUSERNAME;
+                Tbl_AxVsCtrmRecon.DueDate              = str2date(TBL_ARAP_MsgHeader.AXDueDate,321);
+                Tbl_AxVsCtrmRecon.TransactionType      = TBL_ARAP_MsgHeader.ETGTRANSACTIONTYPE;
+                Tbl_AxVsCtrmRecon.InterCompanyRef      = TBL_ARAP_MsgHeader.ETGINTERCOMPANYREF;
+                Tbl_AxVsCtrmRecon.ExchangeRate      = str2num(TBL_ARAP_MsgHeader.AXExchRate);
+                Tbl_AxVsCtrmRecon.InterCompanyRef      = TBL_ARAP_MsgHeader.ETGINTERCOMPANYREF;
+                Tbl_AxVsCtrmRecon.TaxAmount            = str2num(TBL_ARAP_MsgHeader.AXTaxAmount);
+                Tbl_AxVsCtrmRecon.TotalQty             = str2num(TBL_ARAP_MsgHeader.AXTotalQty);
+                Tbl_AxVsCtrmRecon.Currency             = TBL_ARAP_MsgHeader.ETGCurrency;
+                Tbl_AxVsCtrmRecon.StringRef            = TBL_ARAP_MsgHeader.ETGSTRINGREF;
+ 
+                select * from TBL_ARAP_MsgLines
+                where TBL_ARAP_MsgLines.AxIntegrationHeaderRecId == TBL_ARAP_MsgHeader.AXHeaderRecId;
+ 
+                Tbl_AxVsCtrmRecon.Commodity = TBL_ARAP_MsgLines.ETGCOMMODITY;
+                Tbl_AxVsCtrmRecon.TaxCode = TBL_ARAP_MsgLines.ETGTAXCODE;
+ 
+                if(TBL_ARAP_MsgHeader.ETGIntegrationsStatus == ETGIntegrationStatus::Processed)
+                {
+                    Tbl_AxVsCtrmRecon.Status = NoYes::Yes;
+                }
+                else if(TBL_ARAP_MsgHeader.ETGIntegrationsStatus == ETGIntegrationStatus::Error)
+                {
+                    Tbl_AxVsCtrmRecon.Status = NoYes::No;
+                }
+           
+                Tbl_AxVsCtrmRecon.insert();
+            }
+        }
+        else if(_createdDate == NoYes::Yes)
+        {
+        
+        while select TBL_ARAP_MsgHeader where TBL_ARAP_MsgHeader.ETGLegalEntity == curext()
+                && TBL_ARAP_MsgHeader.createdDateTime >= datetobeginUtcDateTime(_fromdate, DateTimeUtil::getUserPreferredTimeZone())
+                && TBL_ARAP_MsgHeader.createdDateTime <= datetoendUtcDateTime(_todate, DateTimeUtil::getUserPreferredTimeZone())                
+                && TBL_ARAP_MsgHeader.ETGDocuType != "STOCK"
+                && ((TBL_ARAP_MsgHeader.ETGIntegrationsStatus == ETGIntegrationStatus::Processed) || ( TBL_ARAP_MsgHeader.ETGIntegrationsStatus == ETGIntegrationStatus::Error) ||
+                                         ( TBL_ARAP_MsgHeader.ETGIntegrationsStatus == ETGIntegrationStatus::Unprocessed) )
+                                  //  &&  TBL_ARAP_MsgHeader.Log == "
+                                  // &&  TBL_ARAP_MsgHeader.IntegrationStatus != TBL_IntegrationStatus::Processed
+ 
+        if(TBL_ARAP_MsgHeader)
+        {
+            Tbl_AxVsCtrmRecon.InvoiceNum           = TBL_ARAP_MsgHeader.ETGARAPREF;
+            Tbl_AxVsCtrmRecon.ContractNum       = TBL_ARAP_MsgHeader.ETGCONTRACTNUMBER;
+            Tbl_AxVsCtrmRecon.TotalAmount          = str2num(TBL_ARAP_MsgHeader.AXNetAmount);
+            Tbl_AxVsCtrmRecon.CounterParty         = TBL_ARAP_MsgHeader.ETGCOUNTERPARTY;
+            Tbl_AxVsCtrmRecon.PaymentTerms          = TBL_ARAP_MsgHeader.ETGPAYMTERMS;
+            Tbl_AxVsCtrmRecon.DocumentCause        = TBL_ARAP_MsgHeader.ETGDOCUMENTCAUSE;
+            Tbl_AxVsCtrmRecon.Transdate            = str2date(TBL_ARAP_MsgHeader.AXApplyDate,321);
+            Tbl_AxVsCtrmRecon.DocuDate              = str2date(TBL_ARAP_MsgHeader.AXDocDate,321);
+            Tbl_AxVsCtrmRecon.ProfitCenter         = TBL_ARAP_MsgHeader.ETGPROFITCENTERGR;
+            Tbl_AxVsCtrmRecon.errorLog             =  TBL_ARAP_MsgHeader.ETGLOG;
+            Tbl_AxVsCtrmRecon.DocuType              = TBL_ARAP_MsgHeader.ETGDocuType;
+            Tbl_AxVsCtrmRecon.UserName             = TBL_ARAP_MsgHeader.ETGUSERNAME;
+            Tbl_AxVsCtrmRecon.DueDate              = str2date(TBL_ARAP_MsgHeader.AXDueDate,321);
+            Tbl_AxVsCtrmRecon.TransactionType      = TBL_ARAP_MsgHeader.ETGTRANSACTIONTYPE;
+            Tbl_AxVsCtrmRecon.InterCompanyRef      = TBL_ARAP_MsgHeader.ETGINTERCOMPANYREF;
+            Tbl_AxVsCtrmRecon.ExchangeRate      = str2num(TBL_ARAP_MsgHeader.AXExchRate);
+            Tbl_AxVsCtrmRecon.InterCompanyRef      = TBL_ARAP_MsgHeader.ETGINTERCOMPANYREF;
+            Tbl_AxVsCtrmRecon.TaxAmount            = str2num(TBL_ARAP_MsgHeader.AXTaxAmount);
+            Tbl_AxVsCtrmRecon.TotalQty             = str2num(TBL_ARAP_MsgHeader.AXTotalQty);
+            Tbl_AxVsCtrmRecon.Currency             = TBL_ARAP_MsgHeader.ETGCurrency;
+            Tbl_AxVsCtrmRecon.StringRef            = TBL_ARAP_MsgHeader.ETGSTRINGREF;
+ 
+            select * from TBL_ARAP_MsgLines
+                where TBL_ARAP_MsgLines.AxIntegrationHeaderRecId == TBL_ARAP_MsgHeader.AXHeaderRecId;
+ 
+            Tbl_AxVsCtrmRecon.Commodity = TBL_ARAP_MsgLines.ETGCOMMODITY;
+            Tbl_AxVsCtrmRecon.TaxCode = TBL_ARAP_MsgLines.ETGTAXCODE;
+ 
+            if(TBL_ARAP_MsgHeader.ETGIntegrationsStatus == ETGIntegrationStatus::Processed)
+            {
+                Tbl_AxVsCtrmRecon.Status = NoYes::Yes;
+            }
+            else if(TBL_ARAP_MsgHeader.ETGIntegrationsStatus == ETGIntegrationStatus::Error)
+            {
+                Tbl_AxVsCtrmRecon.Status = NoYes::No;
+            }
+           
+            Tbl_AxVsCtrmRecon.insert();
+        }
+        }
+        new MenuFunction(menuItemdisplayStr(ETG_ARAP_MSGHeadersLines),MenuItemType::Display).run();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// 
+    /// </summary>
+    public void run()
+    {
+        this.dialog();        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name = "_args"></param>
+    public static void main(Args _args)
+    {
+        ETG_ARAP_HeadersLinesDialog headersLinesDialog;
+ 
+        headersLinesDialog = new ETG_ARAP_HeadersLinesDialog();
+        headersLinesDialog.run();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

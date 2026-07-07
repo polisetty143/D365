@@ -1,0 +1,464 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxTable xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerJournalTransAccrual</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGLedgerJournalTransAccrual extends common
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>calcEndDate</Name>
+				<Source><![CDATA[
+    public display TransDate calcEndDate()
+    {
+        ETGLedgerAccrualTrans  ledgerAccrualTrans = ETGLedgerAccrualTrans::construct(this);
+
+        return ledgerAccrualTrans ? ledgerAccrualTrans.endDate(this.TransDate) : dateNull();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initFromLedgerJournalTrans</Name>
+				<Source><![CDATA[
+    public void initFromLedgerJournalTrans(
+        LedgerJournalTrans  _ledgerJournalTrans,
+        LedgerJournalEngine _ledgerJournalEngine = null)
+    {
+        boolean isTaxable = _ledgerJournalTrans.isTaxable();
+        LedgerJournalTable ledgerJournalTable = _ledgerJournalTrans.ledgerJournalTable();
+        boolean isTaxIncluded = ledgerJournalTable.LedgerJournalInclTax;
+        boolean isNonLedgerAccount;
+        Amount amountCur;
+        Amount actualTax;        
+
+        if (_ledgerJournalTrans.AccountType == LedgerJournalACType::Ledger &&
+            _ledgerJournalTrans.parmLedgerDimension())
+        {
+            this.AccountOffsetaccount = AccountOffsetaccount::Account;
+        }
+        else
+        {
+            if (_ledgerJournalTrans.OffsetAccountType == LedgerJournalACType::Ledger &&
+                _ledgerJournalTrans.parmOffsetLedgerDimension())
+            {
+                this.AccountOffsetaccount = AccountOffsetaccount::OffsetAccount;
+                isNonLedgerAccount = true;
+            }
+        }
+
+        // If the transaction amount includes taxes in the total, the tax amount needs to be subtracted from the
+        // transaction amount to determine the amount origin.
+        if (isTaxable && isTaxIncluded)
+        {
+            if (!TaxUncommitted::existByDocumentAndInvoice(ledgerJournalTable.TableId, ledgerJournalTable.RecId, _ledgerJournalTrans.Voucher, _ledgerJournalTrans.Invoice))
+            {
+                LedgerJournalTrans::getTaxInstance(
+                    _ledgerJournalTrans.JournalNum,
+                    _ledgerJournalTrans.Voucher,
+                    _ledgerJournalTrans.Invoice,
+                    true,
+                    null,
+                    false,
+                    _ledgerJournalTrans.TransDate);
+            }
+
+            amountCur = TaxUncommitted::getOriginForSourceLine(tableNum(LedgerJournalTrans), _ledgerJournalTrans.RecId);
+
+            // There are some edge case conditions where TaxUncommitted::getOriginForSourceLine is unable to determine the amount origin.
+            // As a fallback condition, retrieve the tax amount and subtract it from the transaction amount to return the amount origin.
+            if (amountCur == 0)
+            {
+                amountCur = _ledgerJournalTrans.amount();
+                actualTax = TaxUncommitted::getActualTaxAmountForSourceLine(tableNum(LedgerJournalTrans), _ledgerJournalTrans.RecId, false, true);
+
+                if (isNonLedgerAccount)
+                {
+                    // For non ledger accounts the sign needs to be flipped to calculate the amount origin correctly.
+                    amountCur = amountCur * - 1;
+                    //this.Debit = NoYes::No;
+                }
+                else
+                {
+                    //this.Debit = NoYes::Yes;
+                }
+
+                amountCur = amountCur - actualTax;
+            }
+        }
+        else
+        {
+            if (isNonLedgerAccount)
+            {
+                amountCur = _ledgerJournalTrans.amount() * -1;
+                //this.Debit = NoYes::No;
+            }
+            else
+            {
+                amountCur = _ledgerJournalTrans.amount();
+                //this.Debit = NoYes::Yes;
+            }
+        }
+
+        this.TransDate = _ledgerJournalTrans.TransDate;
+        this.AmountCur = amountCur;
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>modifiedField</Name>
+				<Source><![CDATA[
+    public void modifiedField(fieldId _fieldId)
+    {
+        super(_fieldId);
+
+        ETGLedgerJournalTransAccrualTrans::deleteById(this.RefTableid, this.RefRecid);
+
+        //switch (_fieldId)
+        //{
+        //    case fieldNum(ETGLedgerJournalTransAccrual, AccountOffsetaccount):
+        //        if ((this.AccountOffsetaccount == AccountOffsetaccount::Account && this.Debit) ||
+        //            (this.AccountOffsetaccount == AccountOffsetaccount::OffsetAccount && !this.Debit))
+        //        {
+        //            this.AmountCur = abs(this.AmountCur);
+        //        }
+        //        else
+        //        {
+        //            this.AmountCur = this.AmountCur * -1;
+        //        }
+
+        //}
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>checkExist</Name>
+				<Source><![CDATA[
+    public static boolean checkExist(tableId _refTableid, recId _refRecid )
+    {
+        boolean ret = true;
+
+        if (!ETGLedgerJournalTransAccrual::exist(_refTableid, _refRecid))
+        {
+            ret = checkFailed(strfmt(ETGLedgerJournalTransAccrual::txtNotExist(), _refTableid, _refRecid));
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>exist</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Check id record exists for given parameters.
+    /// </summary>
+    /// <param name = "_refTableid">Reference table id</param>
+    /// <param name = "_refRecid">Reference record id</param>
+    /// <returns>true if found otherwise false</returns>
+    public static boolean exist(tableId _refTableid, recId _refRecid )
+    {
+        boolean found;
+
+        found = (select firstonly
+                     RecId
+                from
+                     etgLedgerJournalTransAccrual
+                 where
+                     etgLedgerJournalTransAccrual.RefTableid == _refTableid &&
+                    etgLedgerJournalTransAccrual.RefRecid == _refRecid).RecId != 0;
+
+        return found;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>find</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Find record of the table for given paramaters.
+    /// </summary>
+    /// <param name = "_refTableid">Reference table id</param>
+    /// <param name = "_refRecid">Reference record id</param>
+    /// <param name = "_forupdate">true or false</param>
+    /// <param name = "_concurrencyModel">Default value</param>
+    /// <returns>Returns the found instance of table</returns>
+    public static ETGLedgerJournalTransAccrual find(
+        tableId _refTableid,
+        recId _refRecid ,
+        boolean                 _forupdate = false,
+        ConcurrencyModel        _concurrencyModel = ConcurrencyModel::Auto)
+    {
+        ETGLedgerJournalTransAccrual ledgerJournalTransAccrual;
+
+        ledgerJournalTransAccrual.selectForUpdate(_forupdate);
+
+        if (_forupdate  && _concurrencyModel != ConcurrencyModel::Auto)
+        {
+            ledgerJournalTransAccrual.concurrencyModel(_concurrencyModel);
+        }
+
+        select firstonly ledgerJournalTransAccrual
+            where ledgerJournalTransAccrual.RefTableid == _refTableid &&
+                ledgerJournalTransAccrual.RefRecid == _refRecid;
+
+        return ledgerJournalTransAccrual;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>findAccountOffsetaccount</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Check if offset account exists for given parameters.
+    /// </summary>
+    /// <param name = "_refTableid">Refernce table id</param>
+    /// <param name = "_refRecid">Reference record id</param>
+    /// <param name = "_accountOffsetAccount"></param>
+    /// <returns>True or false</returns>
+    public static boolean findAccountOffsetaccount(
+        TableId _refTableid,
+        RecId _refRecid,
+        AccountOffsetaccount _accountOffsetAccount = AccountOffsetaccount::Account)
+    {
+        ETGLedgerJournalTransAccrual ledgerJournalTransAccrual = ETGLedgerJournalTransAccrual::find(_refTableid, _refRecid);
+
+        return ledgerJournalTransAccrual && ledgerJournalTransAccrual.AccountOffsetaccount == _accountOffsetAccount;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>txtNotExist</Name>
+				<Source><![CDATA[
+    public static TxtNotExist txtNotExist()
+    {
+        return "@SYS102199";
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+	<ConfigurationKey>LedgerAdvanced</ConfigurationKey>
+	<DeveloperDocumentation>@SYS126133</DeveloperDocumentation>
+	<FormRef>ETGLedgerJournalTransAccrual</FormRef>
+	<Label>@SYS78061</Label>
+	<TitleField1>AccrualId</TitleField1>
+	<TitleField2>TransDate</TitleField2>
+	<CacheLookup>FoundAndEmpty</CacheLookup>
+	<ClusteredIndex>RecId</ClusteredIndex>
+	<Modules>AccountingFoundation</Modules>
+	<PrimaryIndex>TableidRecid</PrimaryIndex>
+	<ReplacementKey>TableidRecid</ReplacementKey>
+	<DeleteActions>
+		<AxTableDeleteAction>
+			<Name>ETGLedgerJournalTransAccrualTrans</Name>
+			<DeleteAction>Cascade</DeleteAction>
+			<Relation></Relation>
+			<Table>ETGLedgerJournalTransAccrualTrans</Table>
+			<Tags></Tags>
+		</AxTableDeleteAction>
+	</DeleteActions>
+	<FieldGroups>
+		<AxTableFieldGroup>
+			<Name>AutoReport</Name>
+			<Fields>
+				<AxTableFieldGroupField>
+					<DataField>AccrualId</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>AmountCur</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>TransDate</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>AccountOffsetaccount</DataField>
+				</AxTableFieldGroupField>
+			</Fields>
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoLookup</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoIdentification</Name>
+			<AutoPopulate>Yes</AutoPopulate>
+			<Fields>
+				<AxTableFieldGroupField>
+					<DataField>RefTableid</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>RefRecid</DataField>
+				</AxTableFieldGroupField>
+			</Fields>
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoSummary</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoBrowse</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>General</Name>
+			<Label>@SYS2952</Label>
+			<Fields>
+				<AxTableFieldGroupField>
+					<DataField>AccrualId</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>AmountCur</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>TransDate</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>AccountOffsetaccount</DataField>
+				</AxTableFieldGroupField>
+			</Fields>
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>Identification</Name>
+			<Label>@SYS5711</Label>
+			<Fields>
+				<AxTableFieldGroupField>
+					<DataField>RefTableid</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>RefRecid</DataField>
+				</AxTableFieldGroupField>
+			</Fields>
+		</AxTableFieldGroup>
+	</FieldGroups>
+	<Fields>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldEnum">
+			<Name>AccountOffsetaccount</Name>
+			<AssetClassification>Customer Content</AssetClassification>
+			<EnumType>AccountOffsetaccount</EnumType>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldString">
+			<Name>AccrualId</Name>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>LedgerAccrualId</ExtendedDataType>
+			<Mandatory>Yes</Mandatory>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldReal">
+			<Name>AmountCur</Name>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>AmountCur</ExtendedDataType>
+			<Label>@SYS73028</Label>
+			<Mandatory>Yes</Mandatory>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldInt64">
+			<Name>RefRecid</Name>
+			<AllowEdit>No</AllowEdit>
+			<AssetClassification>System Metadata</AssetClassification>
+			<ExtendedDataType>RefRecId</ExtendedDataType>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldInt">
+			<Name>RefTableid</Name>
+			<AllowEdit>No</AllowEdit>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>RefTableId</ExtendedDataType>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldDate">
+			<Name>TransDate</Name>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>TransDate</ExtendedDataType>
+			<Label>@SYS2168</Label>
+			<Mandatory>Yes</Mandatory>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldEnum">
+			<Name>Debit</Name>
+			<ExtendedDataType>NoYesId</ExtendedDataType>
+			<EnumType>NoYes</EnumType>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldString">
+			<Name>CostAllocationRuleId</Name>
+			<ExtendedDataType>ETGCostAllocationRuleId</ExtendedDataType>
+			<IgnoreEDTRelation>Yes</IgnoreEDTRelation>
+		</AxTableField>
+	</Fields>
+	<FullTextIndexes />
+	<Indexes>
+		<AxTableIndex>
+			<Name>TableidRecid</Name>
+			<AlternateKey>Yes</AlternateKey>
+			<Fields>
+				<AxTableIndexField>
+					<DataField>RefTableid</DataField>
+				</AxTableIndexField>
+				<AxTableIndexField>
+					<DataField>RefRecid</DataField>
+				</AxTableIndexField>
+			</Fields>
+		</AxTableIndex>
+	</Indexes>
+	<Mappings />
+	<Relations>
+		<AxTableRelation xmlns=""
+			i:type="AxTableRelationForeignKey">
+			<Name>LedgerAccrualTable</Name>
+			<Cardinality>ZeroMore</Cardinality>
+			<EDTRelation>Yes</EDTRelation>
+			<RelatedTable>LedgerAccrualTable</RelatedTable>
+			<RelatedTableCardinality>ExactlyOne</RelatedTableCardinality>
+			<RelationshipType>Association</RelationshipType>
+			<Constraints>
+				<AxTableRelationConstraint xmlns=""
+					i:type="AxTableRelationConstraintField">
+					<Name>AccrualId</Name>
+					<SourceEDT>LedgerAccrualId</SourceEDT>
+					<Field>AccrualId</Field>
+					<RelatedField>Id</RelatedField>
+				</AxTableRelationConstraint>
+			</Constraints>
+			<Index>AccrualId</Index>
+		</AxTableRelation>
+		<AxTableRelation>
+			<Name>LedgerJournalTrans</Name>
+			<Cardinality>ZeroOne</Cardinality>
+			<EntityRelationshipRole>@SYS126076</EntityRelationshipRole>
+			<RelatedTable>LedgerJournalTrans</RelatedTable>
+			<RelatedTableCardinality>ZeroOne</RelatedTableCardinality>
+			<RelatedTableRole>LedgerJournalTrans</RelatedTableRole>
+			<RelationshipType>Composition</RelationshipType>
+			<Role>LedgerJournalTransAccrual</Role>
+			<UseDefaultRoleNames>No</UseDefaultRoleNames>
+			<Constraints>
+				<AxTableRelationConstraint xmlns=""
+					i:type="AxTableRelationConstraintField">
+					<Name>RefTableid</Name>
+					<Field>RefTableid</Field>
+					<RelatedField>TableId</RelatedField>
+				</AxTableRelationConstraint>
+				<AxTableRelationConstraint xmlns=""
+					i:type="AxTableRelationConstraintField">
+					<Name>RefRecid</Name>
+					<Field>RefRecid</Field>
+					<RelatedField>RecId</RelatedField>
+				</AxTableRelationConstraint>
+			</Constraints>
+		</AxTableRelation>
+	</Relations>
+	<StateMachines />
+</AxTable>

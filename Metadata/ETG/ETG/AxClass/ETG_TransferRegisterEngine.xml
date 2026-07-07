@@ -1,0 +1,621 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_TransferRegisterEngine</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_TransferRegisterEngine
+{
+    ETG_TransferRegisterTmp     transferRegisterTmp;
+    FromDate                    fromDate;
+    ToDate                      toDate;
+    InventTransferId            inventTransferId;
+
+      
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Runs the class with the specified arguments.
+    /// </summary>
+    /// <param name = "_args">The specified arguments.</param>
+    public static void main(Args _args)
+    {
+        ETG_TransferRegisterEngine   transferRegisterEngine = new ETG_TransferRegisterEngine();
+        
+       // transferRegisterEngine.run();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insTempTransferOrder</Name>
+				<Source><![CDATA[
+  /*  public void run()
+    {
+        InventTransferTable             inventTransferTable;
+        InventTransferLine              inventTransferLine;
+        InventDim                       inventDim, inventDimReceive;
+        InventTransferJour              inventTransferJour;
+        InventTransferJourLine          inventTransferJourLine;
+        GeneralJournalAccountEntry      generalJournalAccountEntry;
+        GeneralJournalEntry             generalJournalEntry;
+        ETG_InventTransJourQualitySpec  qualitySpecifications;
+        InventTrans                     inventTrans;
+        InventTransOrigin               inventTransOrigin;
+        ETG_TransferBillOfLadingHistory billOfLoadingHistory;
+        int                             i;
+        Qty                             countaddShip,countaddReceive;
+        MarkupTrans                      markuptrans;
+        ETG_TransferRegisterTmp         transferRegisterTmpUpd;
+        CreatedDateTime                 fromDateTime, toDateTime;
+
+        fromDateTime            = DateTimeUtil::newDateTime(this.parmFromDate(),0);
+        toDateTime              = DateTimeUtil::newDateTime(this.parmToDate(),86400);
+        transferRegisterTmp     = this.parmTransferRegisterTmp();
+
+        delete_from transferRegisterTmp;
+
+        while select inventTransferJour
+        join inventTransferTable
+            where inventTransferTable.TransferId    == inventTransferJour.TransferId
+            && inventTransferTable.CreatedDateTime >=  fromDateTime
+            && inventTransferTable.CreatedDateTime <=  toDateTime
+            && (inventTransferTable.TransferId      == inventTransferId || inventTransferId == "")
+        join inventTransferLine
+            where inventTransferLine.TransferId == inventTransferTable.TransferId
+        join inventDim
+            where inventDim.inventDimId== inventTransferLine.InventDimId
+        {
+            select firstonly transferRegisterTmp
+                    where transferRegisterTmp.TransferId == inventTransferJour.TransferId;
+            if(transferRegisterTmp.TransferId != inventTransferJour.TransferId)
+            {
+                transferRegisterTmp.clear();
+                transferRegisterTmp.TransferId      =   inventTransferTable.TransferId;
+            
+                transferRegisterTmp.ETG_Advance             =   inventTransferTable.ETG_Advance;
+                transferRegisterTmp.ETG_VendorName          =   inventTransferTable.ETG_VendorName;
+                transferRegisterTmp.QtyTransfer             =   inventTransferLine.QtyTransfer;
+                transferRegisterTmp.UnitPrice               =   inventTransferLine.UnitPrice;
+                transferRegisterTmp.UnitId                  =   inventTransferLine.UnitId;
+                transferRegisterTmp.NetAmount               =   inventTransferLine.NetAmount;
+                transferRegisterTmp.SKU                     =   InventTableModule::find(inventTransferLine.ItemId, ModuleInventPurchSales::Invent).UnitId;
+                transferRegisterTmp.InventColorId           =   inventDim.InventColorId;
+                transferRegisterTmp.inventDimId             =   inventDim.inventDimId;
+                transferRegisterTmp.BatchNumber             =   inventDim.inventBatchId;
+                transferRegisterTmp.VoucherId               =   inventTransferJour.VoucherId;
+                transferRegisterTmp.inventDimId             =   inventDim.inventDimId;
+                transferRegisterTmp.configId                =   inventDim.configId;
+                transferRegisterTmp.InventSizeId            =   inventDim.InventSizeId;
+                transferRegisterTmp.InventColorId           =   inventDim.InventColorId;
+                transferRegisterTmp.InventStyleId           =   inventDim.InventStyleId;
+                transferRegisterTmp.wMSLocationId           =   inventDim.wMSLocationId;
+                transferRegisterTmp.inventSerialId          =   inventDim.inventSerialId;
+                transferRegisterTmp.InventStatusId          =   inventDim.InventStatusId;
+                transferRegisterTmp.LicensePlateId          =   inventDim.LicensePlateId;
+                transferRegisterTmp.InventOwnerId_RU        =   inventDim.InventOwnerId_RU;
+                transferRegisterTmp.SupplyingSite           =   inventDim.InventSiteId;
+                transferRegisterTmp.SupplyingWarehouse      =   inventDim.InventLocationId;
+                transferRegisterTmp.SupplyingLocationId     =   inventDim.wMSLocationId;
+                transferRegisterTmp.InventLocationId        =   inventDim.InventLocationId;
+                transferRegisterTmp.InventSiteId            =   inventDim.InventSiteId;
+
+             
+
+                transferRegisterTmp.TransitDays             = inventTransferTable.ReceiveDate  -  inventTransferTable.ShipDate;
+
+                transferRegisterTmp.VoucherId               =   inventTransferJour.VoucherId;
+                transferRegisterTmp.TransDate               =   inventTransferJour.TransDate;
+                transferRegisterTmp.ETG_PackingGroup        =   inventTransferLine.ETG_PackingGroup;
+                transferRegisterTmp.StockTransferOrderType  =   "Transfer Order";
+                transferRegisterTmp.StockTransferOrderTypeDescription = "Transfer Order";
+
+                select sum(QtyReceived), maxof(InventTransId), maxof(InventDimId), sum(QtyScrapped) from inventTransferJourLine
+                where inventTransferJourLine.VoucherId == inventTransferJour.VoucherId
+                && inventTransferJourLine.TransferId   == inventTransferJourLine.TransferId;
+
+                transferRegisterTmp.QtyScrapped         = inventTransferJourLine.QtyScrapped;
+
+                select firstonly inventTrans
+                exists join inventTransOrigin
+                where inventTransOrigin.RecId      == inventTrans.InventTransOrigin
+                && inventTransOrigin.InventTransId == inventTransferJourLine.InventTransId;
+
+                select firstonly generalJournalAccountEntry
+                where generalJournalAccountEntry.PostingType == LedgerPostingType::InventIssue
+            join generalJournalEntry
+                where generalJournalEntry.RecId              == generalJournalAccountEntry.GeneralJournalEntry
+                && generalJournalEntry.SubledgerVoucher      == inventTransferJour.VoucherId;
+            
+                transferRegisterTmp.DeliveryValue            = abs(generalJournalAccountEntry.TransactionCurrencyAmount);
+
+                select firstonly markuptrans where markuptrans.TransRecId == inventTransferLine.RecId;
+      
+                while select  billOfLoadingHistory
+                    where billOfLoadingHistory.TransferId  == inventTransferJour.TransferId
+                         && billOfLoadingHistory.VoucherId == inventTransferJour.VoucherId
+                {
+                    select inventTransferJourLine
+                      where inventTransferJourLine.TransferId == inventTransferJour.TransferId
+                         &&  inventTransferJourLine.VoucherId  == inventTransferJour.VoucherId;
+
+                    if(inventTransferJour.UpdateType==InventTransferUpdateType::Shipment)
+                    {
+                        transferRegisterTmp.TareWeight           =  billOfLoadingHistory.TareWeight;
+                        transferRegisterTmp.NetWeight            =  billOfLoadingHistory.NetWeight;
+                        transferRegisterTmp.GrossWeight          =  billOfLoadingHistory.GrossWeight;
+                        transferRegisterTmp.VehicleNumber        =  billOfLoadingHistory.VehicleNumber;
+                        transferRegisterTmp.VehicleDriver        =  billOfLoadingHistory.VehicleDriver;
+                        transferRegisterTmp.Transporter          =  billOfLoadingHistory.Transporter;
+                        transferRegisterTmp.DeliveryQty          =  inventTransferJourLine.QtyShipped;
+                        transferRegisterTmp.inventBatchId        =  inventTrans.inventDim().inventBatchId;
+                        transferRegisterTmp.GoodRecieptNum       =  inventTransferJour.VoucherId;
+                        transferRegisterTmp.Value                =  markuptrans.Value;
+
+                       /* select count(RecId) from qualitySpecifications
+                        where qualitySpecifications.TransferId == inventTransferJour.TransferId
+                            && qualitySpecifications.VoucherId == inventTransferJour.VoucherId;
+                        countaddShip = any2Real(qualitySpecifications.RecId);
+
+                        for(i=1; i<=countaddShip; i++)
+                        {
+                            while select firstonly10 qualitySpecifications
+                                where qualitySpecifications.TransferId == inventTransferJour.TransferId
+                                    && qualitySpecifications.VoucherId == inventTransferJour.VoucherId
+                                        && (qualitySpecifications.SubGroupDescription || qualitySpecifications.ResultValue)
+                            {
+                    
+                                if (!transferRegisterTmp.SubGroupDescription1 && !transferRegisterTmp.ResultValue1 && i==1)
+                                {
+                                    transferRegisterTmp.SubGroupDescription1    = qualitySpecifications.SubGroupDescription;
+                                    transferRegisterTmp.ResultValue1            = qualitySpecifications.ResultValue;
+                                }
+                                if (!transferRegisterTmp.SubGroupDescription2 && !transferRegisterTmp.ResultValue2 && i==2)
+                                {
+                                    transferRegisterTmp.SubGroupDescription2    = qualitySpecifications.SubGroupDescription;
+                                    transferRegisterTmp.ResultValue2            = qualitySpecifications.ResultValue;
+                                }
+                                if (!transferRegisterTmp.SubGroupDescription3 && !transferRegisterTmp.ResultValue3 && i==3)
+                                {
+                                    transferRegisterTmp.SubGroupDescription3    = qualitySpecifications.SubGroupDescription;
+                                    transferRegisterTmp.ResultValue3            = qualitySpecifications.ResultValue;
+                                }
+                                if (!transferRegisterTmp.SubGroupDescription4 && !transferRegisterTmp.ResultValue4 && i==4)
+                                {
+                                    transferRegisterTmp.SubGroupDescription4    = qualitySpecifications.SubGroupDescription;
+                                    transferRegisterTmp.ResultValue4            = qualitySpecifications.ResultValue;
+                                }
+                                if (!transferRegisterTmp.SubGroupDescription5 && !transferRegisterTmp.ResultValue5 && i==5)
+                                {
+                                    transferRegisterTmp.SubGroupDescription5    = qualitySpecifications.SubGroupDescription;
+                                    transferRegisterTmp.ResultValue5            = qualitySpecifications.ResultValue;
+                                }
+                                i++;
+                            }
+                            }*/
+                    }
+
+                    transferRegisterTmp.insert();
+                }
+            }
+
+            else
+            {
+                transferRegisterTmp.selectForUpdate(true);
+                ttsbegin;
+                //transferRegisterTmp.clear();
+                transferRegisterTmp.TransferId      =   inventTransferTable.TransferId;
+            
+                transferRegisterTmp.ETG_Advance     =   inventTransferTable.ETG_Advance;
+                transferRegisterTmp.ETG_VendorName  =   inventTransferTable.ETG_VendorName;
+                transferRegisterTmp.QtyTransfer     =   inventTransferLine.QtyTransfer;
+                transferRegisterTmp.UnitPrice       =   inventTransferLine.UnitPrice;
+                transferRegisterTmp.UnitId          =   inventTransferLine.UnitId;
+                transferRegisterTmp.NetAmount       =   inventTransferLine.NetAmount;
+                transferRegisterTmp.SKU             =   InventTableModule::find(inventTransferLine.ItemId, ModuleInventPurchSales::Invent).UnitId;
+                transferRegisterTmp.InventColorId   =   inventDim.InventColorId;
+                transferRegisterTmp.inventDimId     =   inventDim.inventDimId;
+                transferRegisterTmp.BatchNumber     =   inventDim.inventBatchId;
+                transferRegisterTmp.VoucherId       =   inventTransferJour.VoucherId;
+                transferRegisterTmp.inventDimId     =   inventDim.inventDimId;
+                transferRegisterTmp.configId        =   inventDim.configId;
+                transferRegisterTmp.InventSizeId    =   inventDim.InventSizeId;
+                transferRegisterTmp.InventColorId   =   inventDim.InventColorId;
+                transferRegisterTmp.InventStyleId   =   inventDim.InventStyleId;
+                transferRegisterTmp.wMSLocationId   =   inventDim.wMSLocationId;
+                transferRegisterTmp.inventSerialId  =   inventDim.inventSerialId;
+                transferRegisterTmp.InventStatusId  =   inventDim.InventStatusId;
+                transferRegisterTmp.LicensePlateId  =   inventDim.LicensePlateId;
+                transferRegisterTmp.InventOwnerId_RU    = inventDim.InventOwnerId_RU;
+
+                transferRegisterTmp.TransitDays             = inventTransferTable.ReceiveDate  -  inventTransferTable.ShipDate;
+
+           
+
+                transferRegisterTmp.VoucherId       = inventTransferJour.VoucherId;
+                transferRegisterTmp.TransDate       = inventTransferJour.TransDate;
+
+                transferRegisterTmp.StockTransferOrderType            = "Transfer Order";
+                transferRegisterTmp.StockTransferOrderTypeDescription = "Transfer Order";
+                transferRegisterTmp.ETG_PackingGroup                  = inventTransferLine.ETG_PackingGroup;
+
+                select sum(QtyReceived), maxof(InventTransId), maxof(InventDimId), sum(QtyScrapped) from inventTransferJourLine
+                where inventTransferJourLine.VoucherId == inventTransferJour.VoucherId
+                && inventTransferJourLine.TransferId   == inventTransferJourLine.TransferId;
+
+                transferRegisterTmp.QtyScrapped             = inventTransferJourLine.QtyScrapped;
+
+                select firstonly inventTrans
+                exists join inventTransOrigin
+                where inventTransOrigin.RecId      == inventTrans.InventTransOrigin
+                && inventTransOrigin.InventTransId == inventTransferJourLine.InventTransId;
+
+                select firstonly generalJournalAccountEntry
+                where generalJournalAccountEntry.PostingType == LedgerPostingType::InventIssue
+            join generalJournalEntry
+                where generalJournalEntry.RecId         == generalJournalAccountEntry.GeneralJournalEntry
+                && generalJournalEntry.SubledgerVoucher == inventTransferJour.VoucherId;
+            
+                transferRegisterTmp.DeliveryValue   = abs(generalJournalAccountEntry.TransactionCurrencyAmount);
+
+                select firstonly markuptrans where markuptrans.TransRecId == inventTransferLine.RecId;
+      
+                while select  billOfLoadingHistory
+                    where billOfLoadingHistory.TransferId  == inventTransferJour.TransferId
+                         && billOfLoadingHistory.VoucherId == inventTransferJour.VoucherId
+                {
+                    select inventTransferJourLine
+                      where inventTransferJourLine.TransferId == inventTransferJour.TransferId
+                         &&  inventTransferJourLine.VoucherId  == inventTransferJour.VoucherId;
+
+                  
+
+                    if(inventTransferJour.UpdateType==InventTransferUpdateType::Receive)
+                    {
+                        transferRegisterTmp.ReceivingTareWeight      = billOfLoadingHistory.TareWeight;
+                        transferRegisterTmp.ReceivingNetWeight       = billOfLoadingHistory.NetWeight;
+                        transferRegisterTmp.ReceivingGrossWeight     = billOfLoadingHistory.GrossWeight;
+                        transferRegisterTmp.ReceiveVehicleNumber     = billOfLoadingHistory.VehicleNumber;
+                        transferRegisterTmp.ReceiveVehicleDriver     = billOfLoadingHistory.VehicleDriver;
+                        transferRegisterTmp.ReceiveTransporter       = billOfLoadingHistory.Transporter;
+                        transferRegisterTmp.GoodRecieptNumReceive    = inventTransferJour.VoucherId;
+                        transferRegisterTmp.TransDateReceive         = inventTransferJour.TransDate;
+                        transferRegisterTmp.QtyReceived              = inventTransferJourLine.QtyReceived;
+                        transferRegisterTmp.ReceivingSite            = inventTrans.inventDim().InventSiteId;
+                        transferRegisterTmp.ReceivingWarehouse       = inventTrans.inventDim().InventLocationId;
+                        transferRegisterTmp.ReceivingLocationId      = inventTrans.inventDim().wMSLocationId;
+                        transferRegisterTmp.inventBatchIdReceive     = inventTrans.inventDim().inventBatchId;
+
+                      /*  select count(RecId) from qualitySpecifications
+                            where qualitySpecifications.TransferId == inventTransferJour.TransferId
+                                && qualitySpecifications.VoucherId == inventTransferJour.VoucherId;
+
+                        countaddReceive = any2Real(qualitySpecifications.RecId);
+
+                        for(i=1; i<=countaddReceive; i++)
+                        {
+                            while select firstonly10 qualitySpecifications
+                                where qualitySpecifications.TransferId == inventTransferJour.TransferId
+                                    && qualitySpecifications.VoucherId == inventTransferJour.VoucherId
+                                        && (qualitySpecifications.SubGroupDescription || qualitySpecifications.ResultValue)
+                            {
+                                if (!transferRegisterTmp.ReceiveSubGroupDescription1 && !transferRegisterTmp.ReceiveResultValue1 && i==1)
+                                {
+                                    transferRegisterTmp.ReceiveSubGroupDescription1    = qualitySpecifications.SubGroupDescription;
+                                    transferRegisterTmp.ReceiveResultValue1            = qualitySpecifications.ResultValue;
+                                }
+                                if (!transferRegisterTmp.ReceiveSubGroupDescription2 && !transferRegisterTmp.ReceiveResultValue2 && i==2)
+                                {
+                                    transferRegisterTmp.ReceiveSubGroupDescription2    = qualitySpecifications.SubGroupDescription;
+                                    transferRegisterTmp.ReceiveResultValue2            = qualitySpecifications.ResultValue;
+                                }
+                                if (!transferRegisterTmp.ReceiveSubGroupDescription3 && !transferRegisterTmp.ReceiveResultValue3 && i==3)
+                                {
+                                    transferRegisterTmp.ReceiveSubGroupDescription3    = qualitySpecifications.SubGroupDescription;
+                                    transferRegisterTmp.ReceiveResultValue3            = qualitySpecifications.ResultValue;
+                                }
+                                if (!transferRegisterTmp.ReceiveSubGroupDescription4 && !transferRegisterTmp.ReceiveResultValue4 && i==4)
+                                {
+                                    transferRegisterTmp.ReceiveSubGroupDescription4    = qualitySpecifications.SubGroupDescription;
+                                    transferRegisterTmp.ReceiveResultValue4            = qualitySpecifications.ResultValue;
+                                }
+                                if (!transferRegisterTmp.ReceiveSubGroupDescription5 && !transferRegisterTmp.ReceiveResultValue5 && i==5)
+                                {
+                                    transferRegisterTmp.ReceiveSubGroupDescription5    = qualitySpecifications.SubGroupDescription;
+                                    transferRegisterTmp.ReceiveResultValue5            = qualitySpecifications.ResultValue;
+                                }
+                                i++;
+                            }
+
+                            select firstonly transferRegisterTmpUpd
+                            where transferRegisterTmpUpd.TransferId == inventTransferJour.TransferId;
+
+                            transferRegisterTmp.DiffSubGroupDescription1    = transferRegisterTmp.SubGroupDescription1 != "" ? transferRegisterTmp.SubGroupDescription1 : transferRegisterTmp.ReceiveSubGroupDescription1;
+                            transferRegisterTmp.DiffResultValue1            = abs(transferRegisterTmpUpd.ResultValue1 - transferRegisterTmp.ReceiveResultValue1);
+                            transferRegisterTmp.DiffSubGroupDescription2    = transferRegisterTmp.SubGroupDescription2 != "" ? transferRegisterTmp.SubGroupDescription2 : transferRegisterTmp.ReceiveSubGroupDescription2;
+                            transferRegisterTmp.DiffResultValue2            = abs(transferRegisterTmpUpd.ResultValue2 - transferRegisterTmp.ReceiveResultValue2);
+                            transferRegisterTmp.DiffSubGroupDescription3    = transferRegisterTmp.SubGroupDescription3 != "" ? transferRegisterTmp.SubGroupDescription3 : transferRegisterTmp.ReceiveSubGroupDescription3;
+                            transferRegisterTmp.DiffResultValue3            = abs(transferRegisterTmpUpd.ResultValue3 - transferRegisterTmp.ReceiveResultValue3);
+                            transferRegisterTmp.DiffSubGroupDescription4    = transferRegisterTmp.SubGroupDescription4 != "" ? transferRegisterTmp.SubGroupDescription4 : transferRegisterTmp.ReceiveSubGroupDescription4;
+                            transferRegisterTmp.DiffResultValue4            = abs(transferRegisterTmpUpd.ResultValue4 - transferRegisterTmp.ReceiveResultValue4);
+                            transferRegisterTmp.DiffSubGroupDescription5    = transferRegisterTmp.SubGroupDescription5 != "" ? transferRegisterTmp.SubGroupDescription5 : transferRegisterTmp.ReceiveSubGroupDescription5;
+                            transferRegisterTmp.DiffResultValue5            = abs(transferRegisterTmpUpd.ResultValue5 - transferRegisterTmp.ReceiveResultValue5);
+                        */
+                        }
+                    }
+                }
+                transferRegisterTmp.update();
+                ttscommit;
+               
+
+            }
+            
+            
+        }
+
+        this.parmTransferRegisterTmp(transferRegisterTmp);
+    }
+*/
+    public static server ETG_TransferRegisterTmp insTempTransferOrder(FromDate _fromdate,ToDate _todate,InventTransferId _inventTransferId)
+    {
+        InventTransferTable             inventTransferTable;
+        InventTransferLine              inventTransferLine;
+        InventDim                       inventDim, inventDimReceive;
+        InventTransferJour              inventTransferJour;
+        InventTransferJourLine          inventTransferJourLine;
+        ETG_InventTransJourQualitySpec  qualitySpecifications;      
+        ETG_TransferBillOfLadingHistory billOfLoadingHistory;
+        boolean                         isPartialShip,isPartialReceive;
+        int                             i,conCount = 1;
+        MarkupTrans                     markuptrans;
+        CreatedDateTime                 fromDateTime, toDateTime;
+        ETG_TransferRegisterTmp         transferRegisterTmp,transferRegisterShipTmp;       
+        container                       shipVoucherCon,receiveVoucherCon;       
+        InventOnHand                    inventOnHand;
+        InventDimParm                   inventDimParm;
+
+        fromDateTime            = DateTimeUtil::newDateTime(_fromdate,0);
+        toDateTime              = DateTimeUtil::newDateTime(_todate,86400);
+      
+        while select * from inventTransferTable
+            where inventTransferTable.CreatedDateTime >=  fromDateTime
+            && inventTransferTable.CreatedDateTime <=  toDateTime
+            && (inventTransferTable.TransferId     == _inventTransferId || _inventTransferId == "")
+        join inventTransferLine
+            where inventTransferLine.TransferId == inventTransferTable.TransferId       
+        {
+            isPartialReceive  = false;
+            isPartialShip     = false;
+            conCount          = 1;
+            shipVoucherCon    = conNull();
+            receiveVoucherCon = conNull();
+            transferRegisterTmp.clear();
+            transferRegisterTmp.TransferId              = inventTransferTable.TransferId;  
+            transferRegisterTmp.TransferStatus          = inventTransferTable.TransferStatus;
+            transferRegisterTmp.ItemId                  = inventTransferLine.ItemId;
+            transferRegisterTmp.ETG_Advance             = inventTransferTable.ETG_Advance;
+            transferRegisterTmp.ETG_VendorName          = inventTransferTable.ETG_VendorName;
+            transferRegisterTmp.QtyTransfer             = inventTransferLine.QtyTransfer;
+            transferRegisterTmp.UnitPrice               = inventTransferLine.UnitPrice;
+            transferRegisterTmp.UnitId                  = inventTransferLine.UnitId;
+            transferRegisterTmp.NetAmount               = inventTransferLine.NetAmount;
+            transferRegisterTmp.SKU                     = InventTableModule::find(inventTransferLine.ItemId, ModuleInventPurchSales::Invent).UnitId;
+            transferRegisterTmp.InventColorId           = inventTransferLine.inventDim().InventColorId;
+            transferRegisterTmp.inventDimId             = inventTransferLine.inventDim().inventDimId;
+            transferRegisterTmp.BatchNumber             = inventTransferLine.inventDim().inventBatchId;            
+            transferRegisterTmp.inventDimId             = inventTransferLine.inventDim().inventDimId;
+            transferRegisterTmp.configId                = inventTransferLine.inventDim().configId;
+            transferRegisterTmp.InventSizeId            = inventTransferLine.inventDim().InventSizeId;
+            transferRegisterTmp.InventColorId           = inventTransferLine.inventDim().InventColorId;
+            transferRegisterTmp.InventStyleId           = inventTransferLine.inventDim().InventStyleId;         
+            transferRegisterTmp.SupplyingSite           = inventTransferLine.inventDim().InventSiteId;
+            transferRegisterTmp.SupplyingWarehouse      = inventTransferLine.inventDim().InventLocationId;
+            transferRegisterTmp.wMSLocationId           = inventTransferLine.inventDim().wMSLocationId;
+            transferRegisterTmp.InventLocationId        = inventTransferLine.inventDim().InventLocationId;
+            transferRegisterTmp.InventSiteId            = inventTransferLine.inventDim().InventSiteId;
+            transferRegisterTmp.TransitDays             = inventTransferTable.ReceiveDate - inventTransferTable.ShipDate;           
+            transferRegisterTmp.ETG_PackingGroup        = inventTransferLine.ETG_PackingGroup;
+            transferRegisterTmp.StockTransferOrderType  = "Transfer Order";
+            transferRegisterTmp.StockTransferOrderTypeDescription = "Transfer Order";
+            
+            select firstonly Value from markuptrans
+                where markuptrans.TransRecId == inventTransferLine.RecId;
+
+            transferRegisterTmp.Value                =  markuptrans.Value;    
+        
+            inventDimParm.initFromInventDim(inventTransferLine.inventDim());
+            inventOnHand  = InventOnhand::newParameters(inventTransferLine.ItemId, inventTransferLine.inventDim(), inventDimParm);
+         
+            transferRegisterTmp.DeliveryPrice = inventOnHand.costPricePcs(false, systemDateGet());
+            transferRegisterTmp.UnitPrice     = transferRegisterTmp.DeliveryPrice;
+
+            while select VoucherId,UpdateType,TransDate from inventTransferJour
+                order by VoucherId asc
+                where inventTransferJour.TransferId == inventTransferTable.TransferId           
+            join InventDimId,QtyScrapped,QtyShipped,QtyReceived from inventTransferJourLine
+                where inventTransferJourLine.VoucherId == inventTransferJour.VoucherId
+            {
+                select firstonly TareWeight,NetWeight,GrossWeight,VehicleNumber,VehicleDriver,Transporter from billOfLoadingHistory
+                    where billOfLoadingHistory.VoucherId == inventTransferJour.VoucherId;
+
+                inventDim  = InventDim::find(inventTransferJourLine.InventDimId);
+                if(inventTransferJour.UpdateType==InventTransferUpdateType::Shipment)
+                {
+                    if(isPartialShip)
+                    {
+                        transferRegisterTmp.insert();
+                        isPartialReceive  = false;
+                        shipVoucherCon    = conIns(shipVoucherCon,conCount,transferRegisterTmp.GoodRecieptNum);
+                        receiveVoucherCon = conIns(receiveVoucherCon,conCount,transferRegisterTmp.GoodRecieptNumReceive);
+                        conCount++;
+                    }
+                    transferRegisterTmp.QtyScrapped          = inventTransferJourLine.QtyScrapped;
+                    transferRegisterTmp.TareWeight           = billOfLoadingHistory.TareWeight;
+                    transferRegisterTmp.NetWeight            = billOfLoadingHistory.NetWeight;
+                    transferRegisterTmp.GrossWeight          = billOfLoadingHistory.GrossWeight;
+                    transferRegisterTmp.VehicleNumber        = billOfLoadingHistory.VehicleNumber;
+                    transferRegisterTmp.VehicleDriver        = billOfLoadingHistory.VehicleDriver;
+                    transferRegisterTmp.Transporter          = billOfLoadingHistory.Transporter;
+                    transferRegisterTmp.DeliveryQty          = inventTransferJourLine.QtyShipped;
+                    transferRegisterTmp.inventBatchId        = inventDim.inventBatchId;
+                    transferRegisterTmp.GoodRecieptNum       = inventTransferJour.VoucherId;
+                    transferRegisterTmp.SupplyingLocationId  = inventDim.wMSLocationId;
+                    transferRegisterTmp.VoucherId            = inventTransferJour.VoucherId;
+                    transferRegisterTmp.TransDate            = inventTransferJour.TransDate;
+                    transferRegisterTmp.NetAmount            = transferRegisterTmp.DeliveryQty * transferRegisterTmp.DeliveryPrice;
+
+                    i = 1;
+                    while select SubGroupDescription,ResultValue from qualitySpecifications
+                        where qualitySpecifications.VoucherId == inventTransferJour.VoucherId
+                    {                        
+                        if(i < 12)
+                        {
+                            transferRegisterTmp.SpecificationGroupDsc[i] = qualitySpecifications.SubGroupDescription;
+                            transferRegisterTmp.ShipResultValue[i]       = qualitySpecifications.ResultValue;
+                        }
+
+                        i++;
+                    }
+                    transferRegisterTmp.SpecCount = i;                   
+
+                    isPartialShip = true;
+                }
+
+                else if(inventTransferJour.UpdateType==InventTransferUpdateType::Receive)
+                {
+                    if(isPartialReceive)
+                    {  
+                        if(conFind(shipVoucherCon,transferRegisterTmp.GoodRecieptNum))
+                        {
+                            transferRegisterTmp = ETG_TransferRegisterEngine::clearShipDetails(transferRegisterTmp);
+                        }
+                        transferRegisterTmp.insert(); 
+ 
+                        shipVoucherCon    = conIns(shipVoucherCon,conCount,transferRegisterTmp.GoodRecieptNum);
+                        receiveVoucherCon = conIns(receiveVoucherCon,conCount,transferRegisterTmp.GoodRecieptNumReceive);
+                        conCount++;
+                    }
+                    transferRegisterTmp.ReceivingTareWeight      = billOfLoadingHistory.TareWeight;
+                    transferRegisterTmp.ReceivingNetWeight       = billOfLoadingHistory.NetWeight;
+                    transferRegisterTmp.ReceivingGrossWeight     = billOfLoadingHistory.GrossWeight;
+                    transferRegisterTmp.ReceiveVehicleNumber     = billOfLoadingHistory.VehicleNumber;
+                    transferRegisterTmp.ReceiveVehicleDriver     = billOfLoadingHistory.VehicleDriver;
+                    transferRegisterTmp.ReceiveTransporter       = billOfLoadingHistory.Transporter;
+                    transferRegisterTmp.GoodRecieptNumReceive    = inventTransferJour.VoucherId;
+                    transferRegisterTmp.TransDateReceive         = inventTransferJour.TransDate;
+                    transferRegisterTmp.QtyReceived              = inventTransferJourLine.QtyReceived;
+                    transferRegisterTmp.ReceivingSite            = inventDim.InventSiteId;
+                    transferRegisterTmp.ReceivingWarehouse       = inventDim.InventLocationId;
+                    transferRegisterTmp.ReceivingLocationId      = inventDim.wMSLocationId;
+                    transferRegisterTmp.inventBatchIdReceive     = inventDim.inventBatchId;
+                    transferRegisterTmp.DeliveryValue            = transferRegisterTmp.QtyReceived * transferRegisterTmp.DeliveryPrice;
+
+                    i = 1;
+                    while select ResultValue from qualitySpecifications
+                        where qualitySpecifications.VoucherId == inventTransferJour.VoucherId
+                    {
+                        if(i < 12)
+                        {
+                            transferRegisterTmp.ReceiveResultValue[i]  = qualitySpecifications.ResultValue;
+                            transferRegisterTmp.DiffResultValue[i]     = transferRegisterTmp.ShipResultValue[i] - qualitySpecifications.ResultValue;                        
+                        }
+
+                        i++;
+                    }   
+                   
+
+                    isPartialReceive = true;
+                }               
+            }  
+
+            if(conFind(shipVoucherCon,transferRegisterTmp.GoodRecieptNum))
+            {
+                transferRegisterTmp = ETG_TransferRegisterEngine::clearShipDetails(transferRegisterTmp);
+            }
+            transferRegisterTmp.insert();
+        }
+
+        return transferRegisterTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>clearShipDetails</Name>
+				<Source><![CDATA[
+    public static ETG_TransferRegisterTmp clearShipDetails(ETG_TransferRegisterTmp  _transferRegisterTmp)
+    {
+        ETG_TransferRegisterTmp     transferRegisterTmp;
+
+        transferRegisterTmp = _transferRegisterTmp;
+
+        transferRegisterTmp.QtyScrapped          = 0;
+        transferRegisterTmp.TareWeight           = 0;
+        transferRegisterTmp.NetWeight            = 0;
+        transferRegisterTmp.GrossWeight          = 0;
+        transferRegisterTmp.VehicleNumber        = '';
+        transferRegisterTmp.VehicleDriver        = '';
+        transferRegisterTmp.Transporter          = '';
+        transferRegisterTmp.DeliveryQty          = 0;
+        transferRegisterTmp.inventBatchId        = '';
+        transferRegisterTmp.GoodRecieptNum       = '';
+        transferRegisterTmp.SupplyingLocationId  = '';
+        transferRegisterTmp.VoucherId            = '';
+        transferRegisterTmp.TransDate            = dateNull();
+        transferRegisterTmp.NetAmount            = 0;
+
+        return transferRegisterTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmTransferRegisterTmp</Name>
+				<Source><![CDATA[
+    public ETG_TransferRegisterTmp parmTransferRegisterTmp(ETG_TransferRegisterTmp _transferRegisterTmp = transferRegisterTmp)
+    {
+        transferRegisterTmp = _transferRegisterTmp;
+        return transferRegisterTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmFromDate</Name>
+				<Source><![CDATA[
+    public FromDate parmFromDate(FromDate _fromDate = fromDate)
+    {
+        fromDate = _fromDate;
+        return fromDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmToDate</Name>
+				<Source><![CDATA[
+    public ToDate parmToDate(ToDate _toDate = toDate)
+    {
+        toDate = _toDate;
+        return toDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmTransferId</Name>
+				<Source><![CDATA[
+    public InventTransferId parmTransferId(InventTransferId _inventTransferId = inventTransferId)
+    {
+        inventTransferId = _inventTransferId;
+        return inventTransferId;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

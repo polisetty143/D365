@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesAccountStatementBatch</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGSalesAccountStatementBatch extends RunBaseBatch
+{
+    CustGroupId custGroupId;
+    protected static const str custGroupConvert = 'cust group';
+    TransDate fromDate;
+    TransDate toDate;
+    DialogRunbase dialog;
+    DialogField custGroupField;
+    DialogField fromDateField;
+    DialogField toDateField;
+
+    #define.CurrentVersion(1)
+    #LOCALMACRO.CurrentList
+    custGroupId
+    #ENDMACRO
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>canRunInNewSession</Name>
+				<Source><![CDATA[
+    protected boolean canRunInNewSession()
+    {
+        return false;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args args)
+    {
+        ETGSalesAccountStatementBatch accountStatementBatch = new ETGSalesAccountStatementBatch();
+        if(accountStatementBatch.prompt())
+        {
+            accountStatementBatch.runOperation();
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    public void run()
+    {
+        CustTable                    custTable;
+        SrsReportRunService          reportRunService;
+        SRSPrintDestinationSettings  printDestinationSettings;
+        ETG_SalesAccountStatementContract rdpContract;
+        ETGSalesAccountStController1 controller;
+        ETGSalesAccountStContract    reportDataContract;
+        System.IO.MemoryStream       stream;
+        str                          fileName, downloadUrl;
+
+        while select custTable
+            where custTable.CustGroup == custGroupId
+        {
+            // Initialize the report contract
+            rdpContract = new ETG_SalesAccountStatementContract();
+
+            //  Set required report parameters
+            rdpContract.parmFromDate(fromDate);
+            rdpContract.parmToDate(toDate);
+            rdpContract.parmCustomerAccount(custTable.AccountNum);
+            // If your RDP also has a parmCompany or similar, set it here too
+
+            // Initialize controller
+            controller = new ETGSalesAccountStController1();
+            controller.parmReportName(ssrsReportStr(ETG_SalesAccountStatement, PrecisionDesign2));
+            controller.parmReportContract().parmRdpContract(rdpContract);
+
+            // Define print settings
+            fileName = strFmt("SalesStatement_%1.xlsx", custTable.AccountNum);
+            printDestinationSettings = new SRSPrintDestinationSettings();
+            printDestinationSettings.fileFormat(SRSReportFileFormat::Excel);
+            printDestinationSettings.parmFileName(fileName);
+            printDestinationSettings.printMediumType(SRSPrintMediumType::File);
+
+            // Prepare the report data contract
+            reportDataContract = new ETGSalesAccountStContract();
+            reportDataContract.unpack(controller.parmReportContract().pack());
+            reportDataContract.parmReportExecutionInfo(new SRSReportExecutionInfo());
+            reportDataContract.parmPrintSettings(printDestinationSettings);
+
+            // Run the report
+            reportRunService = new SrsReportRunService();
+            reportRunService.runReport(reportDataContract);
+
+            // Convert report to stream
+            stream = new System.IO.MemoryStream(reportDataContract.parmReportBytes());
+
+            // Send to temporary storage for download
+            downloadUrl = File::SendFileToTempStore(
+                stream,
+                printDestinationSettings.parmFileName(),
+                classStr(FileUploadTemporaryStorageStrategy),
+                true);
+
+            // Open PDF in browser (new tab)
+            new Browser().navigate(downloadUrl, true, false);
+        }
+
+        info("Report generation completed for all customers in group " + custGroupId);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>description</Name>
+				<Source><![CDATA[
+    public static ClassDescription description()
+    {
+        return "Customer account statement";
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>pack</Name>
+				<Source><![CDATA[
+    public container pack()
+    {
+        return [#CurrentVersion, #CurrentList];
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>unpack</Name>
+				<Source><![CDATA[
+    public boolean unpack(container packedClass)
+    {
+        Integer version = conPeek(packedClass,1);
+        switch (version)
+        {
+            case #CurrentVersion:
+                [version,#CurrentList] = packedClass;
+                break;
+            default:
+                return false;
+        }
+        return true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>putToDialog</Name>
+				<Source><![CDATA[
+    public void putToDialog()
+    {
+        super();
+        custGroupField.value(custGroupId);
+        fromDateField.value(fromDate);
+        toDateField.value(toDate);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getFromDialog</Name>
+				<Source><![CDATA[
+    public boolean getFromDialog()
+    {
+        custGroupId = custGroupField.value();
+        fromDate = fromDateField.value();
+        toDate = toDateField.value();
+
+        return super();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dialog</Name>
+				<Source><![CDATA[
+    public Object dialog()
+    {
+        dialog = super();
+        custGroupField = dialog.addFieldValue(IdentifierStr(CustGroupId), custGroupId, "Customer group");
+        fromDateField = dialog.addFieldValue(identifierStr(TransDate), fromDate, "From date");
+        toDateField = dialog.addFieldValue(identifierStr(TransDate), toDate, "To date");
+
+        return dialog;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmCustGroup</Name>
+				<Source><![CDATA[
+    public CustGroupId parmCustGroup(CustGroupId _custGroupId = custGroupId)
+    {
+        custGroupId = _custGroupId;
+        return custGroupId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmFromDate</Name>
+				<Source><![CDATA[
+    public TransDate parmFromDate(TransDate _fromDate = fromDate)
+    {
+        fromDate = _fromDate;
+        return fromDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmToDate</Name>
+				<Source><![CDATA[
+    public TransDate parmToDate(TransDate _toDate = toDate)
+    {
+        toDate = _toDate;
+        return toDate;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

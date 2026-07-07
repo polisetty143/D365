@@ -1,0 +1,1651 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPrepareDataForGCReportService_Optimised</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+internal final class ETGPrepareDataForGCReportService_Optimised extends SysOperationServiceBase
+{
+    // ===============================================================
+    // GLOBAL DECLARATIONS
+    // ===============================================================
+    TransDate        fiscalYearStartDate, lastExportedDate, toDateContract,
+                     currentExportDate, incrementalStartDate, lastrunFYStartDate;
+
+    ETGACFParameters aCFParameters;
+    DataArea         dataArea;
+    RecId            lastLineNumber;
+
+    Map              mappingCache;           // MainAccountId -> ReportParticulars
+    Map              salesGroupCache;        // SalesId -> CustGroup
+    Map              invoiceAmountCache;     // InventTransId|InvoiceId|InvoiceDateInt -> SUM(LineAmountMST)
+    Map              keyToAmountByMonth;     // String -> Amount
+
+    Map              itemNameCache;
+    Map              fdCombinationMap;
+    Map              fdCombinationMapFinance;
+
+    Set              reportParticularsSet;   // Normalized keys
+    Set              existingInventKeys;
+    Set              existingGLKeys;
+
+    List             reportParticularsList;  // Display/original values
+
+    int64            ms;
+    int              s;
+    str              reportId = "GC Report";
+
+    System.Diagnostics.Stopwatch stopWatch;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>process</Name>
+				<Source><![CDATA[
+    // ===============================================================
+    // Entry point
+    // ===============================================================
+    public void process(ETGPreparedataforGCReport_Contract      GCReport_Contract = null)
+    {
+        ETGGCReportStaging staging;
+              
+        // ------------------------------
+        // 0. Intialise all Paremeters
+        // ------------------------------
+
+        this.initializeParameters(GCReport_Contract);
+        this.initializeCaches();
+        
+        // ------------------------------
+        // 1. Preload existing staging keys
+        // ------------------------------
+
+        this.loadExistingStagingKeys();
+
+        // ------------------------------
+        // 2. Build inventory combinations (set-based)
+        // ------------------------------
+
+        this.buildInventoryCombinations();
+
+        // ------------------------------
+        // 3. Build GL combinations
+        // ------------------------------
+       
+        this.buildGLCombinations();
+
+        // ------------------------------
+        // 4. Build cache
+        // ------------------------------
+        
+        this.preloadCache();
+
+        // ------------------------------
+        // 5. INVENTORY PROCESSING
+        // ------------------------------
+        
+        this.processInventoryData(incrementalStartDate, currentExportDate, staging);
+
+        // ------------------------------
+        // 6. GL PROCESSING
+        // ------------------------------
+
+        this.processGLData(incrementalStartDate, currentExportDate, staging);
+
+        // ------------------------------
+        // Update parameters
+        // ------------------------------
+        
+        this.updateParameters();
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initializeParameters</Name>
+				<Source><![CDATA[
+    // ===============================================================
+    // PROCESS SUPPORTING METHODS
+    // ===============================================================
+
+    private void initializeParameters (ETGPreparedataforGCReport_Contract      GCReport_Contract = null)
+    {
+        // Load last staging record
+        ETGGCReportStaging stagingmax;
+        TransDate    prevMonth = endMth(prevMth(today()));
+        select maxof(RecId) from stagingmax;
+        lastLineNumber = stagingmax.RecId;
+
+        // Load ACF parameters
+        aCFParameters = ETGACFParameters::find(true);
+
+        // Determine export dates
+        lastExportedDate  = aCFParameters.GCReportLastExportedDate;
+        toDateContract    = GCReport_Contract ? GCReport_Contract.parmToDate() : prevMonth;
+        currentExportDate = toDateContract ? toDateContract : prevMonth;
+
+        // Fallback for first transaction date
+        if (!lastExportedDate)
+        {
+            lastExportedDate = mkDate(01, 12, 2022); // First transaction date for ACF Entity (O001)
+        }
+
+        // Determine incremental start date & fiscal year start
+        incrementalStartDate = DateStartMth(lastExportedDate);
+        lastrunFYStartDate   = this.getFiscalYearStartDate(lastExportedDate);
+
+        // Preload current company data
+        select * from dataArea where dataArea.Id == curext();
+
+        stopWatch = new System.Diagnostics.Stopwatch();
+
+        if(!this.isValidExportDate(currentExportDate))
+        {
+            throw error(strFmt("The date %1 is not a valid month-end date for this operation.", currentExportDate));
+            return;
+        }
+        info(strFmt("The report will consider the last month-end date: %1.", currentExportDate));
+
+        ETGUpdateGeneralJournalAccountEntryService service = new ETGUpdateGeneralJournalAccountEntryService();
+        service.process();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>loadExistingStagingKeys</Name>
+				<Source><![CDATA[
+    private void loadExistingStagingKeys()
+    {
+        ETGGCReportStaging stagingPrev;
+
+        while select ItemId, ETGCommodity, ETGSubCommodity, ETGVertical, ETGSubVertical, Year, MonthName, Isinvent
+        from stagingPrev
+        where stagingPrev.TransDate <= currentExportDate
+        {
+            str key = strFmt("%1|%2|%3|%4|%5|%6|%7|%8",
+            stagingPrev.ItemId, stagingPrev.ETGCommodity, stagingPrev.ETGSubCommodity,
+            stagingPrev.ETGVertical, stagingPrev.ETGSubVertical, stagingPrev.Year, stagingPrev.MonthName,
+            enum2int(stagingPrev.Isinvent));
+
+            if (stagingPrev.Isinvent == NoYes::Yes)
+            existingInventKeys.add(key);
+            else
+            existingGLKeys.add(key);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buildInventoryCombinations</Name>
+				<Source><![CDATA[
+    private void buildInventoryCombinations()
+    {
+        InventTransPosting itp;
+        InventTrans it;
+
+        stopWatch.Start();
+
+        while select ItemId, ETGCommodity, ETGSubCommodity, ETGVertical, ETGSubVertical
+        from itp
+        group by ItemId, ETGCommodity, ETGSubCommodity, ETGVertical, ETGSubVertical
+        exists join it
+            where it.InventTransOrigin == itp.InventTransOrigin
+               && it.Voucher == itp.Voucher
+               && it.DateFinancial == itp.TransDate
+               && it.DateFinancial <= currentExportDate
+               && itp.InventTransPostingType == InventTransPostingType::Financial
+               && it.DateFinancial != dateNull()
+        {
+            str key = strFmt("%1|%2|%3|%4|%5",
+                itp.ItemId, itp.ETGCommodity, itp.ETGSubCommodity,
+                itp.ETGVertical, itp.ETGSubVertical);
+
+            fdCombinationMap.insert(key,
+            [itp.ItemId, itp.ETGCommodity, itp.ETGSubCommodity, itp.ETGVertical, itp.ETGSubVertical]);
+        }
+
+        stopWatch.Stop();
+        this.logExecutionTime(stopWatch, "Inventory combination preparation");
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buildGLCombinations</Name>
+				<Source><![CDATA[
+    private void buildGLCombinations()
+    {
+        GeneralJournalAccountEntry gjAcc;
+        ETGGeneralJOurnalAccountEntryMMR GJAEMMR;
+        ETGPowerBIReportGLMappingTable existMapping;
+        MainAccount mainAccount;
+
+        stopWatch.Start();
+
+        while select itemId,commodity,subCommodity, vertical,subVertical
+        from GJAEMMR
+        group by  itemId,commodity,subCommodity, vertical,subVertical
+        exists join gjAcc
+            where GJAEMMR.GeneralJournalAccountEntryRecId == gjAcc.RecId
+            && GJAEMMR.DataAreaId ==curExt()
+        exists join mainAccount
+            where gjAcc.MainAccount == mainAccount.RecId
+        exists join existMapping
+            where mainAccount.MainAccountId== existMapping.MainAccountId
+            && existMapping.ReportId ==reportId
+        {
+            str dimKey = strFmt("%1|%2|%3|%4|%5",
+                GJAEMMR.itemId,
+                GJAEMMR.commodity,
+                GJAEMMR.subCommodity,
+                GJAEMMR.vertical,
+                GJAEMMR.subVertical);
+
+            fdCombinationMapFinance.insert(dimKey,
+            [GJAEMMR.itemId,
+            GJAEMMR.commodity,
+            GJAEMMR.subCommodity,
+            GJAEMMR.vertical,
+            GJAEMMR.subVertical]);
+        }
+
+        stopWatch.Stop();
+        this.logExecutionTime(stopWatch, "Finance FD combination preparation");
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>preloadCache</Name>
+				<Source><![CDATA[
+    private void preloadCache()
+    {
+        this.initializeCaches();
+        this.preloadGLMappingCache();
+        this.preloadSalesGroupCache(lastrunFYStartDate, currentExportDate);
+        this.preloadInvoiceAmountsCache(lastrunFYStartDate, currentExportDate);
+        this.preloadItemNames();
+        this.buildGLCacheByMonthRange(lastrunFYStartDate, currentExportDate);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processInventoryData</Name>
+				<Source><![CDATA[
+    private void processInventoryData(TransDate _incrementalStartDate, TransDate _currentExportDate, ETGGCReportStaging staging)
+    {
+
+        RecordInsertList ril = new RecordInsertList(tablenum(ETGGCReportStaging));
+        stopWatch.Start();
+
+        MapEnumerator me = fdCombinationMap.getEnumerator();
+        while (me.moveNext())
+        {
+            container dimParts  = me.currentValue();
+            str itemId          = conPeek(dimParts, 1);
+            str commodity       = conPeek(dimParts, 2);
+            str subCommodity    = conPeek(dimParts, 3);
+            str vertical        = conPeek(dimParts, 4);
+            str subVertical     = conPeek(dimParts, 5);
+
+            TransDate loopDate = _incrementalStartDate;
+            while (loopDate <= _currentExportDate)
+            {
+                int yr = year(loopDate);
+                int mn = mthOfYr(loopDate);
+
+                str key = strFmt("%1|%2|%3|%4|%5|%6|%7|%8",
+                itemId, commodity, subCommodity, vertical, subVertical,
+                yr, mn, enum2int(NoYes::Yes));
+
+                if (existingInventKeys.in(key))
+                {
+                    loopDate = nextMth(loopDate);
+                    continue;
+                }
+
+                existingInventKeys.add(key);
+
+                staging.clear();
+                staging.ItemId          = itemId;
+                staging.ItemName        = itemNameCache.lookup(itemId);
+                staging.ETGCommodity    = commodity;
+                staging.ETGSubCommodity = subCommodity;
+                staging.ETGVertical     = vertical;
+                staging.ETGSubVertical  = subVertical;
+                staging.TransDate       = loopDate;
+                staging.Year            = yr;
+                staging.MonthName       = int2Str(mn);
+                staging.Isinvent        = NoYes::Yes;
+                staging.LocalCurrency   = Ledger::accountingCurrency();
+                staging.EntityName      = dataArea.Name;
+
+                TransDate fy = this.getFiscalYearStartDate(loopDate);
+                TransDate to = endMth(loopDate);
+                
+                container openingInventory  =   ETGPrepareDataForGCReportService_Optimised::calculateOpeningAtFiscalYearStart (itemId, commodity, subCommodity, vertical, subVertical, fy );
+                container closingInventory  =   ETGPrepareDataForGCReportService_Optimised::calculateClosingStockAtMonthEnd (itemId, commodity, subCommodity, vertical, subVertical, to );
+                container stockTransfer     =   ETGPrepareDataForGCReportService_Optimised::calculateTransferStockYTD(itemId, commodity, subCommodity, vertical, subVertical, fy, to );
+                container purchaseInventory =   ETGPrepareDataForGCReportService_Optimised::calculatePurchase(itemId, commodity, subCommodity, vertical, subVertical, fy, to );
+
+                ETGGCReportSalesTotals salesInventory = this.calculateSalesYtd(itemId, commodity, subCommodity, vertical, subVertical, fy, to );
+
+
+                // Service calls
+                staging.OpeningQty              = conPeek(openingInventory,1);
+                staging.OpeningstockOPeningLC   = conPeek(openingInventory,2);
+                staging.ClosingQty              = conPeek(closingInventory,1);
+                staging.ClosingStockvalue       = conPeek(closingInventory,2);
+
+                staging.StockTransferQty        = conPeek(stockTransfer,1);
+                staging.StockTransferValueLC    = conPeek(stockTransfer,2);
+
+                staging.SalesQty                = salesInventory.totalQty;
+                staging.SalesValueinLC          = salesInventory.totalValue;
+
+                staging.SalesQty3rdParty        = salesInventory.thirdPartyQty;
+                staging.SalesValue3rdParty      = salesInventory.thirdPartyValue;
+
+                staging.SalesQtyGroup           = salesInventory.groupQty;
+                staging.SalesValueGroup         = salesInventory.groupValue;
+
+                staging.PurchQty                = conPeek(purchaseInventory,1);
+                staging.PurchValueLC            = conPeek(purchaseInventory,2);
+
+                staging.ExchInUSD               = this.getExchangeRate(to);
+                
+                lastLineNumber++;
+                
+                staging.RecordNum               = int642Str(lastLineNumber) + "-" + curext();
+
+                ril.add(staging);
+
+                loopDate                        = nextMth(loopDate);
+            }
+        }
+
+        // Insert Inventory records
+        ril.insertDatabase();
+        stopWatch.Stop();
+        this.logExecutionTime(stopWatch, "Inventory data insertion");
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processGLData</Name>
+				<Source><![CDATA[
+    private void processGLData(TransDate _incrementalStartDate, TransDate _currentExportDate, ETGGCReportStaging staging)
+    {
+        RecordInsertList ril = new RecordInsertList(tablenum(ETGGCReportStaging));
+        stopWatch.Start();
+
+        MapEnumerator me = fdCombinationMapFinance.getEnumerator();
+        while (me.moveNext())
+        {
+            container dimParts  = me.currentValue();
+            str itemId          = conPeek(dimParts, 1);
+            str commodity       = conPeek(dimParts, 2);
+            str subCommodity    = conPeek(dimParts, 3);
+            str vertical        = conPeek(dimParts, 4);
+            str subVertical     = conPeek(dimParts, 5);
+
+            TransDate loopDate = _incrementalStartDate;
+            while (loopDate <= _currentExportDate)
+            {
+                int yr = year(loopDate);
+                int mn = mthOfYr(loopDate);
+                TransDate fy = this.getFiscalYearStartDate(loopDate);
+
+
+                str key = strFmt("%1|%2|%3|%4|%5|%6|%7|%8",
+                itemId, commodity, subCommodity, vertical, subVertical,
+                yr, mn, enum2int(NoYes::No));
+
+                if (existingGLKeys.in(key))
+                {
+                    loopDate = nextMth(loopDate);
+                    continue;
+                }
+
+                existingGLKeys.add(key);
+
+                staging.clear();
+                staging.ItemId          = itemId;
+                staging.ItemName        = itemNameCache.lookup(itemId);
+                staging.ETGCommodity    = commodity;
+                staging.ETGSubCommodity = subCommodity;
+                staging.ETGVertical     = vertical;
+                staging.ETGSubVertical  = subVertical;
+                staging.TransDate       = loopDate;
+                staging.Year            = yr;
+                staging.MonthName       = int2Str(mn);
+                staging.Isinvent        = NoYes::No;
+                staging.LocalCurrency   = Ledger::accountingCurrency();
+                staging.EntityName      = dataArea.Name;
+
+                this.glAmountYTD(itemId, commodity, subCommodity, vertical, subVertical, staging,fy, endMth(loopDate));
+
+                // staging.ExchInUSD = this.getExchangeRate();
+
+                lastLineNumber++;
+                staging.RecordNum = int642Str(lastLineNumber) + "-" + curext();
+
+                ril.add(staging);
+
+                loopDate = nextMth(loopDate);
+            }
+        }
+
+        ril.insertDatabase();
+        stopWatch.Stop();
+        this.logExecutionTime(stopWatch, "GL data insertion");
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateParameters</Name>
+				<Source><![CDATA[
+    private void updateParameters()
+    {
+        ttsbegin;
+        aCFParameters.GCReportLastExportedDate = currentExportDate;
+        aCFParameters.update();
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>invoiceTripleKey</Name>
+				<Source><![CDATA[
+    // ===============================================================
+    // UTILITY METHODS
+    // ===============================================================
+    private str invoiceTripleKey(InventTransId _inventTransId, InvoiceId _invoiceId, date _invoiceDate)
+    {
+        return strFmt("%1|%2|%3", _inventTransId, _invoiceId, date2StrXpp(_invoiceDate));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>makeCompositeKey</Name>
+				<Source><![CDATA[
+    // Composite key: particular + item + dims + month + year.
+    private str makeCompositeKey(
+    Name reportParticular,
+    str  itemId,
+    str  commodity,
+    str  subCommodity,
+    str  vertical,
+    str  subVertical,
+    int  monthNumber,
+    int  yearNumber)
+    {
+        return strFmt("%1|%2|%3|%4|%5|%6|%7|%8",
+                  reportParticular,
+                  itemId,
+                  commodity,
+                  subCommodity,
+                  vertical,
+                  subVertical,
+                  monthNumber,
+                  yearNumber);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>preloadGLMappingCache</Name>
+				<Source><![CDATA[
+    // ===============================================================
+    // PRELOADS
+    // ===============================================================
+
+    // 1) GL mapping cache for assignChargesFromMainAccount()
+    //    MainAccountId -> ReportParticular
+    private void preloadGLMappingCache()
+    {
+        mappingCache            = new Map(Types::Int64, Types::String);
+        
+        reportParticularsSet    = new Set(Types::String);
+        
+        reportParticularsList   = new List(Types::String);
+
+        ETGPowerBIReportGLMappingTable  mapping;
+        MainAccount                     mainAccount;
+        Ledger                          ledger;
+       
+        select firstonly ledger
+        where ledger.Name == curExt();
+
+        while select MainAccountId, ReportPerticularId
+        from mapping
+        join RecId, LedgerChartOfAccounts from mainAccount
+           where mainAccount.MainAccountId == mapping.MainAccountId
+              && mainAccount.LedgerChartOfAccounts == ledger.ChartOfAccounts
+              && mapping.ReportId ==reportId
+
+        {
+            if (mainAccount.RecId && mapping.ReportPerticularId)
+            {
+                mappingCache.insert(mainAccount.RecId, mapping.ReportPerticularId);
+            }
+
+            str p     = strLTrim(strRTrim(mapping.ReportPerticularId));
+            str pKey  = strLwr(p);
+
+            if (p && !reportParticularsSet.in(pKey))
+            {
+                reportParticularsSet.add(pKey);
+                reportParticularsList.addEnd(p);
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>preloadSalesGroupCache</Name>
+				<Source><![CDATA[
+    // 2) Sales group cache: SalesId -> CustGroup for SalesIds in posted IT/ITP within FY window
+    private void preloadSalesGroupCache(TransDate _fyStart, TransDate _endDate)
+    {
+        salesGroupCache = new Map(Types::String, Types::String);
+
+        InventTrans         it;
+        InventTransOrigin   ito;
+        InventTransPosting  itp;
+
+        Set salesIds = new Set(Types::String);
+
+        // Collect SalesIds used by posted inventory transactions within FY window
+        while select ReferenceId from ito
+        group by ReferenceId
+        where ito.ReferenceCategory == InventTransType::Sales
+        exists join it
+        where it.InventTransOrigin == ito.RecId
+          && it.DateFinancial      != dateNull()
+          && it.DateFinancial      >= _fyStart
+          && it.DateFinancial      <= _endDate
+        exists join itp
+        where itp.InventTransOrigin == ito.RecId
+          && itp.IsPosted           == NoYes::Yes
+          && it.Voucher             == itp.Voucher
+          && it.DateFinancial       == itp.TransDate
+        {
+            if (ito.ReferenceId)
+            {
+                salesIds.add(ito.ReferenceId);
+            }
+        }
+
+        // Resolve CustGroup for those SalesIds once
+        SalesTable st;
+        CustTable  ct;
+        SetEnumerator se = salesIds.getEnumerator();
+        while (se.moveNext())
+        {
+            SalesId sid = se.current();
+            st = SalesTable::find(sid);
+            if (st)
+            {
+                ct = CustTable::find(st.CustAccount);
+                if (ct && ct.CustGroup)
+                {
+                    salesGroupCache.insert(sid, ct.CustGroup);
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>preloadInvoiceAmountsCache</Name>
+				<Source><![CDATA[
+    // 3) Invoice amounts cache aggregated by (InventTransId, InvoiceId, InvoiceDate)
+    private void preloadInvoiceAmountsCache(TransDate _fyStart, TransDate _endDate)
+    {
+        invoiceAmountCache = new Map(Types::String, Types::Real);
+
+        CustInvoiceTrans cit;
+
+        // Aggregate once for the full window to avoid runtime CustInvoiceTrans scans
+        while select sum(LineAmountMST) from cit
+        group by cit.InventTransId, cit.InvoiceId, cit.InvoiceDate
+        where cit.InvoiceDate != dateNull()
+          && cit.InvoiceDate >= _fyStart
+          && cit.InvoiceDate <= _endDate
+        {
+            str tripleKey = this.invoiceTripleKey(cit.InventTransId, cit.InvoiceId, cit.InvoiceDate);
+            invoiceAmountCache.insert(tripleKey, any2real(cit.LineAmountMST));
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>preloadItemNames</Name>
+				<Source><![CDATA[
+    // 4) Item name cache based on Item code
+
+    private void preloadItemNames()
+    {
+        Set allItemIds = new Set(Types::String);
+
+        MapEnumerator me = fdCombinationMap.getEnumerator();
+
+        while (me.moveNext())
+        {
+            allItemIds.add(conPeek(me.currentValue(), 1));
+        }
+
+        me = fdCombinationMapFinance.getEnumerator();
+
+        while (me.moveNext())
+        {
+            allItemIds.add(conPeek(me.currentValue(), 1));
+        }
+
+        SetEnumerator se = allItemIds.getEnumerator();
+
+        while (se.moveNext())
+        {
+            ItemId id = se.current();
+            InventTable itb = InventTable::find(id, true);
+
+            itemNameCache.insert(id,
+            itb ? itb.productNameInSystemLanguage() : id);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculatePurchase</Name>
+				<Source><![CDATA[
+    // ===============================================================
+    // PURCHASES (YTD)
+    // ===============================================================
+   
+    private static container calculatePurchase(
+    ETGItemNumber   _item,
+    ETGCommodity    _comm,
+    ETGSubCommodity _subComm,
+    ETGVertical     _ver,
+    ETGSubVertical  _subVer,
+    date            _fromDate,
+    date            _toDate)
+    {
+        InventTrans         it;
+        InventTransOrigin   ito;
+        InventTransPosting  itp;
+
+        Qty  totalQty   = 0;
+        real totalValue = 0;
+
+        while select
+        sum(Qty),
+        sum(CostAmountPosted),
+        sum(CostAmountAdjustment)
+        from it
+        join ito
+            where ito.RecId == it.InventTransOrigin
+               && ito.ReferenceCategory == InventTransType::Purch
+        exists join itp
+            where itp.InventTransOrigin == ito.RecId
+               && itp.ItemId            == _item
+               && itp.ETGCommodity      == _comm
+               && itp.ETGSubCommodity   == _subComm
+               && itp.ETGVertical       == _ver
+               && itp.ETGSubVertical    == _subVer
+               && itp.IsPosted          == NoYes::Yes
+               && it.Voucher            == itp.Voucher
+               && it.DateFinancial      == itp.TransDate
+               && it.DateFinancial      != dateNull()
+               && it.DateFinancial      >= _fromDate
+               && it.DateFinancial      <= _toDate
+        {
+            totalQty   = it.Qty;
+            totalValue = it.CostAmountPosted + it.CostAmountAdjustment;
+        }
+
+        return [totalQty, totalValue];
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateSalesYtd</Name>
+				<Source><![CDATA[
+    // ===============================================================
+    // SALES (YTD) — Qty / Value / Group splits
+    //  - Uses preloaded salesGroupCache and invoiceAmountCache
+    // ===============================================================
+ 
+    public ETGGCReportSalesTotals calculateSalesYtd(
+    ETGItemNumber   _item,
+    ETGCommodity    _comm,
+    ETGSubCommodity _subComm,
+    ETGVertical     _ver,
+    ETGSubVertical  _subVer,
+    TransDate       _fyStart,
+    TransDate       _toDate)
+    {
+        InventTrans        it;
+        InventTransOrigin  ito;
+        InventTransPosting itp;
+
+        ETGGCReportSalesTotals res  = new ETGGCReportSalesTotals();
+        Set seenTriples     = new Set(Types::String);
+
+        str     custGroup;
+        real    lineAmount;
+        str     invoiceKey;
+        SalesId salesId;
+
+
+        real qtyTotal = 0, qtyGroup = 0, qty3P = 0;
+        real valTotal = 0, valGroup = 0, val3P = 0;
+
+        while select it
+        where it.DateFinancial >= _fyStart
+           && it.DateFinancial <= _toDate
+        join ito
+            where ito.RecId == it.InventTransOrigin
+               && ito.ReferenceCategory  == InventTransType::Sales
+        join itp
+            where itp.InventTransOrigin  == it.InventTransOrigin
+               && itp.Voucher            == it.Voucher
+               && itp.TransDate          == it.DateFinancial
+               && itp.IsPosted           == NoYes::Yes
+               && itp.ItemId             == _item
+               && itp.ETGCommodity       == _comm
+               && itp.ETGSubCommodity    == _subComm
+               && itp.ETGVertical        == _ver
+               && itp.ETGSubVertical     == _subVer
+        {
+            // --------------------------------------------------------------------
+            // 1) Resolve Customer Group from preloaded cache (with fallback)
+            // --------------------------------------------------------------------
+            SalesId sid = ito.ReferenceId;
+            custGroup = (salesGroupCache && salesGroupCache.exists(sid)) ?
+                            salesGroupCache.lookup(sid) : "";
+
+            if (!custGroup)
+            {
+                // Fallback only once
+                SalesTable stable   = SalesTable::find(sid);
+                CustTable  ctable   = stable ? CustTable::find(stable.CustAccount) : null;
+                custGroup           = ctable ? ctable.CustGroup : "";
+
+                if (custGroup)
+                    salesGroupCache.insert(sid, custGroup);
+            }
+
+            boolean isGroup = (custGroup == "40");
+
+            // --------------------------------------------------------------------
+            // 2) Quantity
+            // --------------------------------------------------------------------
+            real qty = -it.Qty; // IT qty is negative for
+               
+            qtyTotal += qty;
+                
+            if (isGroup) qtyGroup += qty;
+            else         qty3P    += qty;
+
+            // --------------------------------------------------------------------
+            // 3) Value (dedupe by invoice triple)
+            // --------------------------------------------------------------------
+            str tripleKey = strFmt("%1|%2|%3",
+                ito.InventTransId, it.InvoiceId, date2StrXpp(it.DateFinancial));
+
+            if (!seenTriples.in(tripleKey))
+            {
+                real amt = 0.0;
+
+                // Lookup in preloaded invoice cache
+                if (invoiceAmountCache && invoiceAmountCache.exists(tripleKey))
+                {
+                    amt = any2real(invoiceAmountCache.lookup(tripleKey));
+                }
+                else
+                {
+                    // Fallback fetch + store for future (rare)
+                    CustInvoiceTrans citLocal;
+                    while select sum(LineAmountMST) from citLocal
+                        where citLocal.InventTransId == ito.InventTransId
+                          && citLocal.InvoiceId      == it.InvoiceId
+                          && citLocal.InvoiceDate    == it.DateFinancial
+                    {
+                        amt = any2real(citLocal.LineAmountMST);
+                    }
+
+                    if (amt)
+                        invoiceAmountCache.insert(tripleKey, amt);
+                }
+
+                valTotal += amt;
+                if (isGroup) valGroup += amt;
+                else         val3P    += amt;
+
+                seenTriples.add(tripleKey);
+            }
+        }
+
+        res.totalQty        =   qtyTotal;
+        res.totalValue      =   valTotal;
+        res.groupQty        =   qtyGroup;
+        res.groupValue      =   valGroup;
+        res.thirdPartyQty   =   qty3P;
+        res.thirdPartyValue =   val3P;
+       
+        return res;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateTransferStockYTD</Name>
+				<Source><![CDATA[
+    // ===============================================================
+    // TRANSFERS (YTD)
+    // ===============================================================
+    private static container calculateTransferStockYTD(
+    ETGItemNumber   _item,
+    ETGCommodity    _comm,
+    ETGSubCommodity _subComm,
+    ETGVertical     _ver,
+    ETGSubVertical  _subVer,
+    date            _fromDate, //_fiscalStartDate
+    date            _toDate)   // _monthEndDate
+    {
+        InventTrans         it;
+        InventTransOrigin   ito;
+        InventTransPosting  itp;
+
+        Qty  totalQty   = 0;
+        real totalValue = 0;
+
+        while select
+        sum(Qty),
+        sum(CostAmountPosted),
+        sum(CostAmountAdjustment)
+        from it
+        join ito
+            where ito.RecId == it.InventTransOrigin
+               && (ito.ReferenceCategory == InventTransType::TransferOrderShip
+                ||  ito.ReferenceCategory == InventTransType::TransferOrderReceive)
+        exists join itp
+            where itp.InventTransOrigin == ito.RecId
+               && itp.ItemId            == _item
+               && itp.ETGCommodity      == _comm
+               && itp.ETGSubCommodity   == _subComm
+               && itp.ETGVertical       == _ver
+               && itp.ETGSubVertical    == _subVer
+               && itp.IsPosted          == NoYes::Yes
+               && it.Voucher            == itp.Voucher
+               && it.DateFinancial      == itp.TransDate
+               && it.DateFinancial != dateNull()
+               && it.DateFinancial >= _fromDate
+               && it.DateFinancial <= _toDate
+        {
+            totalQty   = it.Qty;
+            totalValue = it.CostAmountPosted + it.CostAmountAdjustment;
+        }
+
+        return [totalQty, totalValue];
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateStock</Name>
+				<Source><![CDATA[
+    // ===============================================================
+    // STOCK (Opening / Closing) — Qty / Value
+    // ===============================================================
+    private static container calculateStock(
+    str       _itemId,
+    str       _commodity,
+    str       _subCommodity,
+    str       _vertical,
+    str       _subVertical,
+    TransDate _fromDate,      // can be dateNull()
+    TransDate _toDate)        // can be dateNull()
+    {
+        InventTrans        it;
+        InventTransPosting itp;
+
+        Qty  totalQty   = 0;
+        real totalValue = 0;
+
+        while select
+        sum(Qty),
+        sum(CostAmountPosted),
+        sum(CostAmountAdjustment)
+        from it
+        exists join itp
+            where itp.InventTransOrigin == it.InventTransOrigin
+               && itp.IsPosted          == NoYes::Yes
+               && itp.ItemId            == _itemId
+               && itp.ETGCommodity      == _commodity
+               && itp.ETGSubCommodity   == _subCommodity
+               && itp.ETGVertical       == _vertical
+               && itp.ETGSubVertical    == _subVertical
+               && it.Voucher            == itp.Voucher
+               && it.DateFinancial      == itp.TransDate
+               && it.DateFinancial != dateNull()
+               && (_fromDate == dateNull() || it.DateFinancial >= _fromDate)
+               && (_toDate   == dateNull() || it.DateFinancial <= _toDate)
+        {
+            totalQty   = it.Qty;
+            totalValue = it.CostAmountPosted + it.CostAmountAdjustment;
+        }
+
+        return [totalQty, totalValue];
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateClosingStockAtMonthEnd</Name>
+				<Source><![CDATA[
+    public static container calculateClosingStockAtMonthEnd(
+    str _itemId,
+    str _commodity,
+    str _subCommodity,
+    str _vertical,
+    str _subVertical,
+    TransDate _monthEndDate)
+    {
+        TransDate endDate = endMth(_monthEndDate);
+
+        return ETGPrepareDataForGCReportService_Optimised::calculateStock(
+        _itemId,
+        _commodity,
+        _subCommodity,
+        _vertical,
+        _subVertical,
+        dateNull(),
+        endDate);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateOpeningAtFiscalYearStart</Name>
+				<Source><![CDATA[
+    public static container calculateOpeningAtFiscalYearStart(
+    str _itemId,
+    str _commodity,
+    str _subCommodity,
+    str _vertical,
+    str _subVertical,
+    TransDate _fyStartDate)
+    {
+        TransDate fyStartDate = DateStartMth(_fyStartDate);
+
+        return ETGPrepareDataForGCReportService_Optimised::calculateStock(
+        _itemId,
+        _commodity,
+        _subCommodity,
+        _vertical,
+        _subVertical,
+        dateNull(),
+        fyStartDate-1);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>glAmountYTD</Name>
+				<Source><![CDATA[
+    // ===============================================================
+    // GL YTD (FY start -> month end) using mappingCache
+    // ===============================================================
+    public void glAmountYTD(
+    str _etgitemid,
+    str _etgCommodity,
+    str _etgSubCommodity,
+    str _etgVertical,
+    str _etgSubVertical,
+    ETGGCReportStaging staging,
+    TransDate _fyStartDate,
+    TransDate _monthEndDate)
+    {
+        ListEnumerator le        = reportParticularsList.getEnumerator();
+
+        int yr = year(_monthEndDate);
+        int mn = mthOfYr(_monthEndDate);
+
+        while (le.moveNext())
+        {
+            str reportParticular = le.current();
+
+            real amt = this.getYtdAmountFromCache(
+                        reportParticular,
+                        _etgitemid,
+                        _etgCommodity,
+                        _etgSubCommodity,
+                        _etgVertical,
+                        _etgSubVertical,
+                        mn,
+                        yr);
+
+            if (amt != 0)
+            {
+                this.assignChargesFromMainAccount(staging, reportParticular, amt);
+            }
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buildYtdGLAmtCache</Name>
+				<Source><![CDATA[
+    // ===============================================================
+    // GL Helper
+    // ===============================================================
+
+    private void buildYtdGLAmtCache(TransDate _fyStartDate, TransDate _monthEndDate)
+    {
+        int        yr        = year(_monthEndDate);
+        int        mn        = mthOfYr(_monthEndDate);
+        DataAreaId _company  = curext();
+
+        this.initializeCaches();
+
+        // ------------------------------
+        // Load mapping once per process
+        // ------------------------------
+        if (mappingCache.elements() == 0)
+        {
+            ETGPowerBIReportGLMappingTable mapping;
+            MainAccount                    ma;
+
+            while select ma
+            join mapping
+                where mapping.MainAccountId == ma.MainAccountId
+                   && mapping.ReportId      == reportId
+            {
+                // If multiple mappings per MainAccountId exist, last one wins
+                mappingCache.insert(ma.RecId, mapping.ReportPerticularId);
+            }
+        }
+
+        // -------------------------------------------
+        // ONE grouped YTD query for the month end
+        // -------------------------------------------
+        GeneralJournalEntry              gje;
+        GeneralJournalAccountEntry       gjae;
+        ETGGeneralJournalAccountEntryMMR mmr;
+
+        while select
+            sum(AccountingCurrencyAmount),
+            MainAccount
+        from gjae
+            group by gjae.MainAccount,
+                     mmr.ItemId,
+                     mmr.Commodity,
+                     mmr.SubCommodity,
+                     mmr.Vertical,
+                     mmr.SubVertical
+        join ItemId,
+             Commodity,
+             SubCommodity,
+             Vertical,
+             SubVertical
+            from mmr
+            where mmr.GeneralJournalAccountEntryRecId == gjae.RecId
+        join gje
+            where gje.RecId                       == gjae.GeneralJournalEntry
+               && gje.AccountingDate              >= _fyStartDate
+               && gje.AccountingDate              <= _monthEndDate
+               && gje.SubledgerVoucherDataAreaId  == _company
+        {
+            if (!mappingCache.exists(gjae.MainAccount))
+            {
+                // Unmapped main account for this report -> skip
+                continue;
+            }
+
+            str  particular = mappingCache.lookup(gjae.MainAccount);
+            real amt        = gjae.AccountingCurrencyAmount;
+
+            str cacheKey = this.makeCompositeKey(
+                            particular,
+                            mmr.ItemId,
+                            mmr.Commodity,
+                            mmr.SubCommodity,
+                            mmr.Vertical,
+                            mmr.SubVertical,
+                            mn,
+                            yr);
+
+            // Accumulate (many MainAccounts can map to same particular)
+            if (keyToAmountByMonth.exists(cacheKey))
+            {
+                keyToAmountByMonth.insert(cacheKey, keyToAmountByMonth.lookup(cacheKey) + amt);
+            }
+            else
+            {
+                keyToAmountByMonth.insert(cacheKey, amt);
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initializeCaches</Name>
+				<Source><![CDATA[
+    // ===============================================================
+    // Cache Helpers
+    // ===============================================================
+
+    // Initialize required caches and maps used throughout processing
+    private void initializeCaches()
+    {
+        // Initialize Sets
+        if (!existingInventKeys)
+        {
+            existingInventKeys = new Set(Types::String);
+        }
+
+        if (!existingGLKeys)
+        {
+            existingGLKeys = new Set(Types::String);
+        }
+
+        // Initialize Maps
+        if (!itemNameCache)
+        {
+            itemNameCache = new Map(Types::String, Types::String);
+        }
+
+        if (!fdCombinationMap)
+        {
+            fdCombinationMap = new Map(Types::String, Types::Container);
+        }
+
+        if (!fdCombinationMapFinance)
+        {
+            fdCombinationMapFinance = new Map(Types::String, Types::Container);
+        }
+
+        // Example: additional maps if needed
+        if (!keyToAmountByMonth)
+        {
+            keyToAmountByMonth = new Map(Types::String, Types::Real);
+        }
+
+        if (!mappingCache)
+        {
+            mappingCache = new Map(Types::Int64, Types::String);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getYtdAmountFromCache</Name>
+				<Source><![CDATA[
+    public real getYtdAmountFromCache(
+    Name _reportParticular,
+    str  _itemId,
+    str  _commodity,
+    str  _subCommodity,
+    str  _vertical,
+    str  _subVertical,
+    int  _monthNumber,  // same month number convention used during warm
+    int  _yearNow)
+    {
+        if (!keyToAmountByMonth)
+        {
+            return 0.0;
+        }
+
+        str key = this.makeCompositeKey(
+                _reportParticular,
+                _itemId,
+                _commodity,
+                _subCommodity,
+                _vertical,
+                _subVertical,
+                _monthNumber,
+                _yearNow);
+
+        return keyToAmountByMonth.exists(key) ? keyToAmountByMonth.lookup(key) : 0.0;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buildGLCacheByMonthRange</Name>
+				<Source><![CDATA[
+    // ===============================================================
+    // YTD GL Amount by month
+    // ===============================================================
+
+
+    private void buildGLCacheByMonthRange(TransDate _startDate, TransDate _currentExportDate)
+    {
+        TransDate startDate = dateStartMth(_startDate);
+        TransDate endDate   = endMth(_currentExportDate);
+       
+        stopWatch.Start();
+
+        while (startDate <= endDate)
+        {
+            this.buildYtdGLAmtCache(this.getFiscalYearStartDate(startDate), endMth(startDate));
+            startDate = nextMth(startDate);
+        }
+
+        stopWatch.Stop();
+        this.logExecutionTime(stopWatch, "GL Cache processing");
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getFiscalYearStartDate</Name>
+				<Source><![CDATA[
+    // ===============================================================
+    // FY Helper
+    // ===============================================================
+    public TransDate getFiscalYearStartDate(TransDate _date)
+    {
+        RecId calendarRecId;
+        FiscalCalendarYear fiscalCalenderYear;
+
+        calendarRecId      = Ledger::fiscalCalendar(CompanyInfo::find().RecId);
+        fiscalCalenderYear = FiscalCalendarYear::findYearByCalendarDate(calendarRecId, _date);
+
+        if (fiscalCalenderYear)
+        {
+            return fiscalCalenderYear.StartDate;
+        }
+        else
+        {
+            throw error("No fiscal period found for the given date.");
+        }
+        return fiscalCalenderYear.StartDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getExchangeRate</Name>
+				<Source><![CDATA[
+    // ===============================================================
+    // Exchange rate
+    // ===============================================================
+    public AmountMST getExchangeRate(TransDate _monthEndDate)
+    {
+        ExchangeRate             exchangeRate;
+        ExchangeRateType         ExchangeRateType;
+        ExchangeRateCurrencyPair exchangeRateCurrencyPair;
+        real                     exchRate;
+        Ledger                   ledger; 
+
+        CurrencyCode fromCurrency  = Ledger::accountingCurrency();
+        CurrencyCode toCurrency    = Ledger::reportingCurrency();
+        TransDate    transDate     = _monthEndDate;
+
+        select firstonly exchangeRateCurrencyPair
+        where exchangeRateCurrencyPair.ExchangeRateType
+              == Ledger::find(Ledger::current()).DefaultExchangeRateType
+          &&  exchangeRateCurrencyPair.FromCurrencyCode == fromCurrency
+          &&  exchangeRateCurrencyPair.ToCurrencyCode   == toCurrency;
+
+        try
+        {
+            exchRate = exchangeRate::findByDate(exchangeRateCurrencyPair.RecId, transDate).ExchangeRate;
+        }
+        catch
+        {
+            warning(strFmt("Exchange rate missing for %1", transDate));
+            return 0;
+        }
+        
+
+        return (exchRate / 100);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>logExecutionTime</Name>
+				<Source><![CDATA[
+    // ===============================================================
+    // Stopwatch Logging
+    // ===============================================================
+    private void logExecutionTime(System.Diagnostics.Stopwatch _stopwatch, str _message)
+    {
+        int64 elapsedMs = _stopwatch.get_ElapsedMilliseconds();
+        int seconds = elapsedMs div 1000;
+
+        info(strFmt("%1 completed in %2:%3 min (%4 ms)",
+        _message,
+        seconds div 60,
+        seconds mod 60,
+        elapsedMs));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>isValidExportDate</Name>
+				<Source><![CDATA[
+    // ===============================================================
+    // Stopwatch Logging
+    // ===============================================================
+    private boolean isValidExportDate(TransDate _currentExportDate)
+    {
+        if(_currentExportDate==endMth(_currentExportDate))
+        {
+            return true;
+        }
+        return false;
+    
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>assignChargesFromMainAccount</Name>
+				<Source><![CDATA[
+    // ===============================================================
+    // GL amount distribution basis the mapping. Used by glAmountYTD.
+    // ===============================================================
+
+    private void assignChargesFromMainAccount(ETGGCReportStaging staging, str mainAccName, AmountCur amount)
+    {
+        switch (mainAccName)
+        {
+            // Main
+        case "COS - Handling charges":
+            staging.COSHandlingCleaningCharges += amount;
+            break;
+        case "COS - Fumigation Charges":
+            staging.COSFumigationCharges += amount;
+            break;
+        case "COS - Port Charges Imports":
+            staging.COSPortChargesImports += amount;
+            break;
+        case "COS - IMPORT DUTIES AND TAXES":
+            staging.COSImportDutiesAndTaxes += amount;
+            break;
+        case "COS - Rates and Duties":
+            staging.COSRatesAndDuties += amount;
+            break;
+        case "COS - Freight Inward Third Party":
+        case "COS - Freight Inward Intercompany":
+            staging.COSFreightInward += amount;
+            break;
+        case "COS - Demurrage and Wharfage Charges":
+            staging.CosDemurrageAndWharfageCharges += amount;
+            break;
+        case "Stevedoring Charges - Imports":
+            staging.StevedoringChargesImports += amount;
+            break;
+        case "COS - Storage Charges - Centres":
+            staging.StorageChargesImports += amount;
+            break;
+        case "COS - Electricity":
+            staging.COSElectricity += amount;
+            break;
+        case "COS - UTILITY COST":
+            staging.COSUtilityCost += amount;
+            break;
+        case "COS - RENT BUILDINGS AND WAREHOUSES":
+            staging.CosRentBuildingsAndWarehouses += amount;
+            break;
+        case "COS - OTHER DIRECT EXPENSES":
+            staging.COSOtherDirectExpenses += amount;
+            break;
+        case "COS - Other Processing Costs / Miscellaneous":
+            staging.CosOtherProcessingCostsMiscellaneous += amount;
+            break;
+        case "COS - Loading / Unloading Charges":
+            staging.COSLoadingUnloadingCharges += amount;
+            break;
+        case "COS - PACKING AND REBAGGING CHARGES":
+            staging.CosPackingAndRebaggingCharges += amount;
+            break;
+        case "COS - CLEARNING AND FORWARDING AGENCY CHARGES":
+            staging.CosClearningAndForwardingAgencyCharges += amount;
+            break;
+        case "COS - SALARIES":
+            staging.COSSalaries += amount;
+            break;
+        case "COS - WAGES":
+            staging.COSWages += amount;
+            break;
+        case "COS - BONUS":
+            staging.COSBonus += amount;
+            break;
+        case "COS - OTHER DIRECT STAFF COST":
+            staging.COSOtherDirectStaffCost += amount;
+            break;
+
+            // New1
+        case "COS - Water":
+            staging.COSWater += amount;
+            break;
+        case "COS - Energy Charges":
+            staging.COSEnergyCharges += amount;
+            break;
+        case "COS - Diesel":
+            staging.COSDiesel += amount;
+            break;
+        case "COS - VEHICLE DIESEL":
+            staging.COSVehicleDiesel += amount;
+            break;
+        case "COS - Petrol":
+            staging.COSPetrol += amount;
+            break;
+        case "COS - VEHICLE PETROL":
+            staging.COSVehiclePetrol +=amount;
+            break;
+        case "COS - Gas":
+            staging.COSGas += amount;
+            break;
+        case "COS - Rent Others":
+            staging.COSRentOthers += amount;
+            break;
+
+            // New2
+        case "COS - Rent Buildings and Warehouses Third Party":
+            staging.COSRentBuildingsWarehousesTP += amount;
+            break;
+        case "COS - Rent Buildings and Warehouses Intercompany":
+            staging.COSRentBuildingsWarehousesIC += amount;
+            break;
+        case "COS - Rent Machinery & Store Equipments":
+            staging.COSRentMachineryStoreEquipments += amount;
+            break;
+        case "COS - Rent Motor Vehicles":
+            staging.COSRentMotorVehicles += amount;
+            break;
+        case "COS - RENT MOTOR VEHICLE REPAIRS & MAINTAINANCE":
+            staging.COSRentVehicleRepairsMaintenance += amount;
+            break;
+        case "COS - Rent Furniture, Fittings & Office Equipments":
+            staging.COSRentFurnitureFittingsOffice += amount;
+            break;
+
+            // New3
+        case "COS - Repair":
+            staging.COSRepair += amount;
+            break;
+        case "COS - Maintenance":
+            staging.COSMaintenance += amount;
+            break;
+        case "COS - Lab Expenses":
+            staging.COSLabExpenses += amount;
+            break;
+        case "COS - Quality Issue Expenses":
+            staging.COSQualityIssueExpenses += amount;
+            break;
+        case "COS - Staff Meal":
+            staging.COSStaffMeal += amount;
+            break;
+        case "COS - Staff Recruitment & Training":
+            staging.COSStaffRecruitmentTraining += amount;
+            break;
+        case "Cost of Goods Sold - Intercompany":
+            staging.CostOfGoodsSoldIntercompanyLc += amount;
+            break;
+        case "Cost of Goods Sold - Third Party":
+            staging.CostOfGoodsSold3rdPartyLc += amount;
+            break;
+
+            // Selling and distribution
+
+        case "S&D - Digital":
+            staging.SDDigital += amount;
+            break;
+        case "S&D - TV":
+            staging.SDTV += amount;
+            break;
+        case "S&D - Radio":
+            staging.SDRadio += amount;
+            break;
+        case "S&D - Print":
+            staging.SDPrint += amount;
+            break;
+        case "S&D - Others":
+            staging.SDOthers += amount;
+            break;
+        case "S&D - Expense":
+            staging.SDOthers += amount;
+            break;
+        case "S&D - Commission":
+            staging.SDCommission += amount;
+            break;
+        case "S&D - Brokerage":
+            staging.SDBrokerage += amount;
+            break;
+        case "S&D - Entertainment Expenses":
+            staging.SDEntertainmentExpenses += amount;
+            break;
+        case "S&D - Vehicle Hire charges":
+            staging.SDVehicleHireCharges += amount;
+            break;
+        case "S&D - Vehicle Fuel charges":
+            staging.SDVehicleFuelCharges += amount;
+            break;
+        case "S&D - Vehicle Expenses Fuel":
+            staging.SDVehicleExpensesFuel += amount;
+            break;
+        case "S&D - Vehicle Expenses Maintenance":
+            staging.SDVehicleExpensesMaintenance += amount;
+            break;
+        case "S&D - Vehicle Expenses Insurance":
+            staging.SDVehicleExpensesInsurance += amount;
+            break;
+        case "S&D - Promotion Sponsorships":
+            staging.SDPromotionSponsorships += amount;
+            break;
+        case "S&D - Business Promotion":
+            staging.SDBusinessPromotion += amount;
+            break;
+        case "S&D - Promotion Exhibition":
+            staging.SDPromotionExhibition += amount;
+            break;
+        case "S&D - Promotion Others":
+            staging.SDPromotionOthers += amount;
+            break;
+        case "S&D - Cost of Recoveries":
+            staging.SDCostOfRecoveries += amount;
+            break;
+        case "S&D - Royalties":
+            staging.SDRoyalties += amount;
+            break;
+        case "S&D - Freight Outward Road":
+            staging.SDFreightOutwardRoad += amount;
+            break;
+        case "S&D - Freight Outward Sea":
+            staging.SDFreightOutwardSea += amount;
+            break;
+        case "S&D - Freight Outward Rail":
+            staging.SDFreightOutwardRail += amount;
+            break;
+        case "S&D - Customer Claims":
+            staging.SDCustomerClaims += amount;
+            break;
+        case "S&D - Warranty Expenses":
+            staging.SDWarrantyExpenses += amount;
+            break;
+        case "S&D - Product Loss Claims (Weight & Quality)":
+            staging.SDProductLossClaims += amount;
+            break;
+        case "S&D - Document Charges":
+            staging.SDDocumentCharges += amount;
+            break;
+        case "S&D - Loading & unloading Charges":
+            staging.SDLoadingUnloadingCharges += amount;
+            break;
+        case "S&D - Handling Charges":
+            staging.SDHandlingCharges += amount;
+            break;
+        case "S&D - Duties & Charges - Exports":
+            staging.SDDutiesChargesExports += amount;
+            break;
+        case "S&D - Inspection Charges":
+            staging.SDInspectionCharges += amount;
+            break;
+        case "S&D - Port Charges Exports":
+            staging.SDPortChargesExports += amount;
+            break;
+        case "S&D - Storage Charges":
+            staging.SDStorageCharges += amount;
+            break;
+        case "S&D - Packing and Rebagging Charges":
+            staging.SDPackingRebaggingCharges += amount;
+            break;
+        case "S&D - Weighbridge Charges":
+            staging.SDWeighbridgeCharges += amount;
+            break;
+        case "S&D - Insurance Marine / Stock Throughput":
+            staging.SDInsuranceMarineStockThroughput += amount;
+            break;
+        case "S&D - Bank Charges on Exports":
+            staging.SDBankChargesOnExports += amount;
+            break;
+        case "S&D - Miscellaneous Expenses":
+            staging.SDMiscellaneousExpenses += amount;
+            break;
+        case "S&D - Depreciation - Motor vehicle":
+            staging.SDDepreciationMotorVehicle += amount;
+            break;
+        case "S&D - Electricity charges":
+            staging.SDElectricityCharges += amount;
+            break;
+        case "S&D - Sustainability Expenses":
+            staging.SDSustainabilityExpenses += amount;
+            break;
+
+           
+           
+
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

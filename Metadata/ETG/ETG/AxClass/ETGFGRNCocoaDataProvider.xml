@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGFGRNCocoaDataProvider</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(ETGFGRNCocoaContract))]
+class ETGFGRNCocoaDataProvider extends  SRSReportDataProviderPreProcessTempDB
+
+{
+    ETGFGRNCocoaTemp                        ETGFGRNCocoaTemp;
+    TransDate                               _fromDate,_ToDate;
+    //ItemId                                  _ItemId;
+    //JournalId                               _JournalId;
+    ETGBinLotLine                           _ETGBinLotLine;
+    ETGLotInfoDetails                       _ETGLotInfoDetails;
+    ETGBinJournalHeader                     ETGBinJournalHeader;
+    ETGBinJournalLine                       ETGBinJournalLine;
+    
+    
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGFGRNCocoaTemp</Name>
+				<Source><![CDATA[
+    [SrsReportDataSetAttribute(tableStr(ETGFGRNCocoaTemp))]
+    public ETGFGRNCocoaTemp getETGFGRNCocoaTemp()
+    {
+        select * from ETGFGRNCocoaTemp;
+        return ETGFGRNCocoaTemp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ProcessReport</Name>
+				<Source><![CDATA[
+    public void ProcessReport()
+    {
+        Query                               query;
+        QueryRun                            queryRun;
+        QueryBuildDataSource                queryBuildDataSource, queryBuildDataSource1;
+        QueryBuildDataSource                queryBuildDataSource2;
+        QueryBuildRange                     queryBuildRange;
+        QueryBuildRange                     queryBuildRange2;
+        
+        ETGFGRNCocoaContract   Contract;
+
+        Contract        = this.parmDataContract();
+        List            _ItemId = new List(Types::String);
+        List            _JournalId= new List(Types::String);
+        ListIterator             ItemIdListIterator,journalIdListIterator;
+        ListEnumerator           ListEnumerator;
+
+        _fromDate       = Contract.parmFromDate();
+        _ToDate         = Contract.parmToDate();
+        _ItemId         = Contract.parmItemId();
+        _JournalId      = Contract.parmJournalId();
+
+        query   =   new query();
+        queryBuildDataSource    =   query.addDataSource(tableNum(ETGBinLotLine));
+        if(_fromDate && !_ToDate)
+        {
+            queryBuildRange = queryBuildDataSource.addRange(fieldNum(ETGBinLotLine,TransDate));
+            queryBuildRange.value(strFmt('>%1',queryvalue(_fromDate-1)));
+        }
+        if(!_fromDate && _ToDate)
+        {
+            queryBuildDataSource.addRange(fieldNum(ETGBinLotLine,TransDate)).value(strFmt("<%1",queryValue(_ToDate+1)));
+        }
+        if(_fromDate && _ToDate)
+        {
+            queryBuildDataSource.addRange(fieldNum(ETGBinLotLine,TransDate)).value(queryRange(_fromDate,_toDate));
+        }
+
+        if(_ItemId !=null)
+        {
+            ListEnumerator  = _ItemId.getEnumerator();
+            while (ListEnumerator.moveNext())
+            {
+                queryBuildDataSource.addRange(fieldNum(ETGBinLotLine,ItemId)).value(ListEnumerator.current());
+            }
+           
+        }
+        if(_JournalId !=null)
+        {
+            ListEnumerator  = _JournalId.getEnumerator();
+            while (ListEnumerator.moveNext())
+            {
+                queryBuildDataSource.addRange(fieldNum(ETGBinLotLine,JournalId)).value(ListEnumerator.current());
+            }
+        }
+        queryRun    = new queryRun(query) ;
+        while (queryRun.next())
+        {
+
+
+            _ETGBinLotLine                                      =   queryRun.get(tableNum(ETGBinLotLine )) ;
+           // _ETGLotInfoDetails                                  =   queryRun.get(tableNum(ETGLotInfoDetails)) ;
+
+            select _ETGLotInfoDetails
+                where _ETGLotInfoDetails.BinLotLine             == _ETGBinLotLine.RecId
+                &&  _ETGLotInfoDetails.JournalId                == _ETGBinLotLine.JournalId;
+          
+            select ETGBinJournalHeader
+                where ETGBinJournalHeader.JournalId             == _ETGBinLotLine.JournalId;
+
+            select ETGBinJournalLine
+                where ETGBinJournalLine.JournalId               == _ETGBinLotLine.JournalId
+                &&      ETGBinJournalLine.RecId                 == _ETGBinLotLine.BinJournalLine;
+           
+            ETGFGRNCocoaTemp.clear();
+            ETGFGRNCocoaTemp.initValue();
+            ETGFGRNCocoaTemp.Transdate                          = _ETGBinLotLine.Transdate;
+            ETGFGRNCocoaTemp.JournalId                          = _ETGBinLotLine.JournalId;
+            ETGFGRNCocoaTemp.ItemId                             = _ETGBinLotLine.ItemId;
+            ETGFGRNCocoaTemp.VariantId                          = ETGBinJournalLine.RetailvariantId;
+            ETGFGRNCocoaTemp.Description                        = ETGBinJournalHeader.Description;
+            ETGFGRNCocoaTemp.Configuration                      = _ETGBinLotLine.Configuration;
+            ETGFGRNCocoaTemp.Size                               = _ETGBinLotLine.Size;
+            ETGFGRNCocoaTemp.Colour                             = _ETGBinLotLine.Colour;
+            ETGFGRNCocoaTemp.Style                              = _ETGBinLotLine.Style;
+            ETGFGRNCocoaTemp.SiteId                             = _ETGBinLotLine.SiteId;
+            ETGFGRNCocoaTemp.Warehouse                          = _ETGBinLotLine.Warehouse;
+            ETGFGRNCocoaTemp.Location                           = _ETGBinLotLine.Location;
+            ETGFGRNCocoaTemp.Port                               = _ETGLotInfoDetails.Port;
+            ETGFGRNCocoaTemp.ProcessingPlant                    = _ETGLotInfoDetails.ProcessingPlant;
+            ETGFGRNCocoaTemp.ProductionDate                     = _ETGLotInfoDetails.ProductionDate;
+            ETGFGRNCocoaTemp.InventSerialId                     = _ETGBinLotLine.InventSerialId;
+            ETGFGRNCocoaTemp.ToBatch                            = _ETGBinLotLine.ToBatch;
+            ETGFGRNCocoaTemp.TheoreticalWeight                  = _ETGLotInfoDetails.TheoreticalWeight;
+            ETGFGRNCocoaTemp.PalletsLotWeight                   = _ETGLotInfoDetails.PalletsLotWeight;
+            ETGFGRNCocoaTemp.LotsTransferDate                   = _ETGLotInfoDetails.LotsTransferDate;
+            ETGFGRNCocoaTemp.ProcessingPlantTimeofStorage       = _ETGLotInfoDetails.ProcessingPlantTimeofStorage;
+            ETGFGRNCocoaTemp.TransitWarehouse                   = _ETGLotInfoDetails.TransitWarehouse;
+            ETGFGRNCocoaTemp.WeightatProcessingExit             = _ETGLotInfoDetails.WeightatProcessingExit;
+            ETGFGRNCocoaTemp.Storageweightloss                  = _ETGLotInfoDetails.Storageweightloss;
+            ETGFGRNCocoaTemp.StorageweightlossPer               = _ETGLotInfoDetails.StorageweightlossPer;
+            ETGFGRNCocoaTemp.Stuffing                           = _ETGLotInfoDetails.Stuffing;
+            ETGFGRNCocoaTemp.Stuffingdate                       = _ETGLotInfoDetails.Stuffingdate;
+            ETGFGRNCocoaTemp.TimeofStoragebeforeStuffing        = _ETGLotInfoDetails.TimeofStoragebeforeStuffing;
+            ETGFGRNCocoaTemp.StuffingWeight                     = _ETGLotInfoDetails.StuffingWeight;
+            ETGFGRNCocoaTemp.Wharfage                           = _ETGLotInfoDetails.Wharfage;
+            ETGFGRNCocoaTemp.WharfageWeightLoss                 = _ETGLotInfoDetails.WharfageWeightLoss;
+            ETGFGRNCocoaTemp.WharfageWeightLossPer              = _ETGLotInfoDetails.WharfageWeightLossPer;
+            ETGFGRNCocoaTemp.VerifiedGrossShippedWeight         = _ETGLotInfoDetails.VerifiedGrossShippedWeight;
+            ETGFGRNCocoaTemp.VerifiedGrossShippedWeightloss     = _ETGLotInfoDetails.VerifiedGrossShippedWeightloss;
+            ETGFGRNCocoaTemp.VerifiedGrossShippedWeightlossPer  = _ETGLotInfoDetails.VerifiedGrossShippedWeightlossPer;
+            ETGFGRNCocoaTemp.BillofLadingWeight                 = _ETGLotInfoDetails.BillofLadingWeight;
+            ETGFGRNCocoaTemp.BillofLadingWeightLoss             = _ETGLotInfoDetails.BillofLadingWeightLoss;
+            ETGFGRNCocoaTemp.BillofLadingWeightLossPer          = _ETGLotInfoDetails.BillofLadingWeightLossPer;
+            ETGFGRNCocoaTemp.TransitOrder                       = _ETGLotInfoDetails.TransitOrder;
+            ETGFGRNCocoaTemp.Consumer                           = _ETGLotInfoDetails.Consumer;
+            ETGFGRNCocoaTemp.InternationalContractNumber        = _ETGLotInfoDetails.InternationalContractNumber;
+            ETGFGRNCocoaTemp.Collectedaftercleaning             = _ETGLotInfoDetails.Collectedaftercleaning;
+            ETGFGRNCocoaTemp.Nutcount                           = _ETGLotInfoDetails.Nutcount;
+            ETGFGRNCocoaTemp.Humidity                           = _ETGLotInfoDetails.Humidity;
+            ETGFGRNCocoaTemp.Damaged                            = _ETGLotInfoDetails.Damaged;
+            ETGFGRNCocoaTemp.Blue                               = _ETGLotInfoDetails.Blue;
+            ETGFGRNCocoaTemp.Insectedamaged                     = _ETGLotInfoDetails.Insectedamaged;
+            ETGFGRNCocoaTemp.flatSeeds                          = _ETGLotInfoDetails.flatSeeds;
+            ETGFGRNCocoaTemp.Growing                            = _ETGLotInfoDetails.Growing;
+            ETGFGRNCocoaTemp.DamagedInsectedamaged              = _ETGLotInfoDetails.DamagedInsectedamaged;
+            ETGFGRNCocoaTemp.Violet                             = _ETGLotInfoDetails.Violet;
+            ETGFGRNCocoaTemp.Brokenparts                        = _ETGLotInfoDetails.Brokenparts;
+            ETGFGRNCocoaTemp.Fragment                           = _ETGLotInfoDetails.Fragment;
+            ETGFGRNCocoaTemp.Brokensmallparts                   = _ETGLotInfoDetails.Brokensmallparts;
+            ETGFGRNCocoaTemp.Seedsstickstogether                = _ETGLotInfoDetails.Seedsstickstogether;
+            ETGFGRNCocoaTemp.CRM                                = _ETGLotInfoDetails.CRM;
+            ETGFGRNCocoaTemp.Dirt                               = _ETGLotInfoDetails.Dirt;
+            ETGFGRNCocoaTemp.ForeignItems                       = _ETGLotInfoDetails.ForeignItems;
+            ETGFGRNCocoaTemp.Waste                              = _ETGLotInfoDetails.Waste;
+            ETGFGRNCocoaTemp.FFA                                = _ETGLotInfoDetails.FFA;
+            ETGFGRNCocoaTemp.GradeClassification                = _ETGLotInfoDetails.GradeClassification;
+            ETGFGRNCocoaTemp.insert();
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

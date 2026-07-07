@@ -1,0 +1,595 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGAgreementTrackingPurchReportDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(ETGAgreementTrackingPurchReportContract))]
+internal final class ETGAgreementTrackingPurchReportDP extends SRSReportDataProviderBase
+{
+    ETGAgreementTrackingPurchReportTemp agreementTrackingTemp;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGAgreementTrackingPurchReportTemp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETGAgreementTrackingPurchReportTemp))]
+    public ETGAgreementTrackingPurchReportTemp getETGAgreementTrackingPurchReportTemp()
+    {
+        return agreementTrackingTemp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETGAgreementTrackingPurchReportContract contract = this.parmDataContract() as ETGAgreementTrackingPurchReportContract;
+
+        ToDate   toDate   = contract.parmPerDate();
+        FromDate fromDate = contract.parmFromDate();
+        ETGVertical etgVertical = contract.parmETGVertical();
+        ETGSubVertical etgSubVertical = contract.parmETGSubVertical();
+        ETGCommodity etgCommodity = contract.parmETGCommodity();
+        ETGSubCommodity etgSubCommodity = contract.parmETGSubCommodity();
+      
+        if(contract.parmQty() == NoYes::Yes)
+        {
+            this.processReportQualityGroup(fromDate, toDate, etgVertical, etgSubVertical, etgCommodity, etgSubCommodity);
+        }
+        else
+        {
+            this.processReportMain(fromDate, toDate, etgVertical, etgSubVertical, etgCommodity, etgSubCommodity);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReportMain</Name>
+				<Source><![CDATA[
+    public void processReportMain(FromDate fromDate,ToDate toDate, ETGVertical etgVertical, ETGSubVertical etgSubVertical,ETGCommodity etgCommodity, ETGSubCommodity etgSubCommodity)
+    {
+        ETG_PurchaseAgreementHeader         etg_PurchAgreementHeader;
+        AgreementHeaderDefault              agreementHeaderDef;
+        PurchAgreementHeader                purchAgreementHeader;
+        PurchAgreementHeaderDefault         purchAgreementHeaderDef;
+        AgreementLine                       agreementLine;
+        InventDim                           inventDim;
+        AgreementLineQuantityCommitment     aLineQtyComm;
+        PurchTable                          purchTable;
+        AgreementHeader                     agreementHeader;
+        VendInvoiceJour                     vendInvoiceJour;
+        VendInvoiceTrans                    vendInvoiceTrans;
+        VendTable                           vendTable;
+        InventTrans                         inventTrans;
+        PurchLine                           purchLineLocal;
+        VendBankAccount                     sellerBank;
+        VendPackingSlipTrans                vendPackingSlipTrans;
+        VendPackingSlipJour                 vendPackingSlipJour, vendPackingSlipJourLocal;
+        VendTrans                           vendTrans;
+        str                                 mainCommodity;
+        Qty                                 totalInvoicedQty;
+        Qty                                 totalInvoicedQtyLocal;
+        Qty                                 totalGRNQty;
+        Qty                                 totalGRNQtyLocal;
+        VendInvoicePackingSlipQuantityMatch packingSlipMatch;
+        ETGACFParameters acfParameters =    ETGACFParameters::find();
+        str                                 allBOLNos = "", allBOLNosPL="";
+        str                                 allPackingSlips = "", allPackingSlipsPL="";
+        boolean                             isFirst = true;
+
+
+        while select agreementHeader
+           where (fromDate == dateNull() || agreementHeader.DefaultAgreementLineEffectiveDate >= fromDate)
+          &&  agreementHeader.DefaultAgreementLineEffectiveDate <= toDate
+          && fromDate <= toDate
+        join agreementHeaderDef
+            where agreementHeaderDef.AgreementHeader == agreementHeader.RecId
+        join purchAgreementHeader
+           where purchAgreementHeader.RecId == agreementHeader.RecId
+        join etg_PurchAgreementHeader
+            where etg_PurchAgreementHeader.PurchAgreementId == purchAgreementHeader.PurchNumberSequence
+        join agreementLine
+            where agreementLine.Agreement == agreementHeader.RecId
+        join aLineQtyComm
+            where aLineQtyComm.RecId == agreementLine.RecId
+        join inventDim
+            where inventDim.inventDimId == agreementLine.InventDimId
+            && inventDim.DataAreaId == agreementLine.InventDimDataAreaId
+        {
+            agreementTrackingTemp.ETGCommodity     = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(agreementLine.DefaultDimension,acfParameters.MainCommodity);
+            agreementTrackingTemp.ETGSubCommodity  = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(agreementLine.DefaultDimension,acfParameters.SubCommodity);
+            agreementTrackingTemp.ETGVertical     = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(agreementLine.DefaultDimension,acfParameters.Vertical);
+            agreementTrackingTemp.ETGSubVertical  = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(agreementLine.DefaultDimension,acfParameters.BusinessUnit);
+
+            if ((etgCommodity     && etgCommodity     != agreementTrackingTemp.ETGCommodity)
+             || (etgSubCommodity  && etgSubCommodity  != agreementTrackingTemp.ETGSubCommodity)
+             || (etgVertical      && etgVertical      != agreementTrackingTemp.ETGVertical)
+             || (etgSubVertical   && etgSubVertical   != agreementTrackingTemp.ETGSubVertical))
+            {
+                continue;
+            }
+            mainCommodity = agreementTrackingTemp.ETGCommodity;
+            
+            
+            totalInvoicedQty = 0;
+            while select purchLineLocal
+            where purchLineLocal.MatchingAgreementLine == agreementLine.RecId
+            {
+                totalInvoicedQtyLocal = 0;
+                while select vendInvoiceJour
+                where vendInvoiceJour.PurchId == purchLineLocal.PurchId
+                join vendInvoiceTrans
+                    where vendInvoiceTrans.InvoiceId == vendInvoiceJour.InvoiceId
+                {
+                    totalInvoicedQtyLocal += vendInvoiceTrans.Qty;
+                }
+                totalInvoicedQty += totalInvoicedQtyLocal;
+            }
+          
+            boolean hasPurchLine = false;
+            allBOLNosPL = "";
+            allPackingSlipsPL = "";
+            while select purchLineLocal
+            where purchLineLocal.MatchingAgreementLine == agreementLine.RecId
+            {
+                hasPurchLine = true;
+                purchTable = PurchTable::find(purchLineLocal.PurchId);
+
+                select firstonly vendPackingSlipJour
+                    where vendPackingSlipJour.PurchId == purchLineLocal.PurchId;
+
+                boolean hasInvoice = false;
+               
+                totalGRNQty = 0;
+                allBOLNos = "";
+                allPackingSlips = "";
+                while select vendInvoiceJour
+                where vendInvoiceJour.PurchId == purchLineLocal.PurchId
+                join vendInvoiceTrans
+                    where vendInvoiceTrans.InvoiceId == vendInvoiceJour.InvoiceId
+                {
+                    hasInvoice = true;
+                   
+                    vendTable = VendTable::find(vendInvoiceJour.InvoiceAccount);
+
+                    select firstonly vendTrans
+                    where vendTrans.Invoice == vendInvoiceJour.InvoiceId
+                    && vendTrans.AccountNum == vendInvoiceJour.InvoiceAccount
+                    && vendTrans.TransDate == vendInvoiceJour.InvoiceDate
+                    && vendTrans.Voucher == vendInvoiceJour.LedgerVoucher;
+
+                    select firstonly inventTrans
+                    where inventTrans.InvoiceId == vendInvoiceTrans.InvoiceId
+                    && inventTrans.ItemId == vendInvoiceTrans.ItemId;
+
+
+                    while select packingSlipMatch
+                        where packingSlipMatch.InvoiceSourceDocumentLine == vendInvoiceTrans.SourceDocumentLine
+                    join vendPackingSlipTrans
+                            where vendPackingSlipTrans.SourceDocumentLine == packingSlipMatch.PackingSlipSourceDocumentLine
+                    {
+                        totalGRNQty += vendPackingSlipTrans.Qty;
+                       
+                        if (vendPackingSlipTrans.BOLNo && !strScan(allBOLNos, vendPackingSlipTrans.BOLNo, 1, strLen(allBOLNos)))
+                        {
+                            if (allBOLNos == "")
+                            {
+                                allBOLNos = vendPackingSlipTrans.BOLNo;
+                            }
+                            else
+                            {
+                                allBOLNos += ", " + vendPackingSlipTrans.BOLNo;
+                            }
+                        }
+
+                        if (vendPackingSlipTrans.PackingSlipId && !strScan(allPackingSlips, vendPackingSlipTrans.PackingSlipId, 1, strLen(allPackingSlips)))
+                        {
+                            if (allPackingSlips == "")
+                            {
+                                allPackingSlips = vendPackingSlipTrans.PackingSlipId;
+                            }
+                            else
+                            {
+                                allPackingSlips += ", " + vendPackingSlipTrans.PackingSlipId;
+                            }
+                        }
+                    }
+
+                    this.insertTempLine(etgCommodity, agreementHeader, agreementLine, purchLineLocal, vendInvoiceJour, vendInvoiceTrans, purchTable,
+                               vendTrans, vendPackingSlipJour, vendPackingSlipTrans, aLineQtyComm,
+                               vendTable, purchAgreementHeader, etg_PurchAgreementHeader, inventDim, agreementHeaderDef, toDate, mainCommodity, totalInvoicedQty, hasPurchLine, hasInvoice, totalGRNQty, allBOLNos, allPackingSlips);
+                }
+                
+
+                if (!hasInvoice)
+                {
+             totalGRNQtyLocal= 0;
+               while select vendPackingSlipTrans
+                where vendPackingSlipTrans.PurchaseLineLineNumber == purchLineLocal.LineNumber
+                join vendPackingSlipJourLocal
+                where vendPackingSlipJourLocal.RecId == vendPackingSlipTrans.VendPackingSlipJour
+                   && vendPackingSlipJourLocal.PurchId == purchLineLocal.PurchId
+                    {
+                        totalGRNQtyLocal += vendPackingSlipTrans.Qty;
+                    }
+                    //if (vendPackingSlipTrans.BOLNo && !strScan(allBOLNosPL, vendPackingSlipTrans.BOLNo, 1, strLen(allBOLNosPL)))
+                    //{
+                    //    if (allBOLNosPL == "")
+                    //    {
+                    //        allBOLNosPL = vendPackingSlipTrans.BOLNo;
+                    //    }
+                    //    else
+                    //    {
+                    //        allBOLNosPL += ", " + vendPackingSlipTrans.BOLNo;
+                    //    }
+                    //}
+
+                    //if (vendPackingSlipTrans.PackingSlipId && !strScan(allPackingSlipsPL, vendPackingSlipTrans.PackingSlipId, 1, strLen(allPackingSlipsPL)))
+                    //{
+                    //    if (allPackingSlipsPL == "")
+                    //    {
+                    //        allPackingSlipsPL = vendPackingSlipTrans.PackingSlipId;
+                    //    }
+                    //    else
+                    //    {
+                    //        allPackingSlipsPL += ", " + vendPackingSlipTrans.PackingSlipId;
+                    //    }
+                    //}
+
+                    // Inserting line per Purchase Line if no Invoice
+                    this.insertTempLine(etgCommodity, agreementHeader, agreementLine, purchLineLocal, null, null, purchTable,
+                               null, null, null, aLineQtyComm,
+                               vendTable, purchAgreementHeader, etg_PurchAgreementHeader, inventDim, agreementHeaderDef, toDate, mainCommodity, totalInvoicedQty, hasPurchLine, hasInvoice, totalGRNQtyLocal, '', '');
+                }
+            }
+
+            if (!hasPurchLine)
+            {
+                boolean hasInvoiceLocal = false;
+                // Inserting only Agreement data if no Purchase Line
+                this.insertTempLine(etgCommodity, agreementHeader, agreementLine, null, null, null, null,
+                           null, null, null, aLineQtyComm,
+                           vendTable, purchAgreementHeader, etg_PurchAgreementHeader, inventDim, agreementHeaderDef, toDate, mainCommodity, totalInvoicedQty, hasPurchLine, hasInvoiceLocal, 0, '', '');
+            }
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertTempLine</Name>
+				<Source><![CDATA[
+    private void insertTempLine(ETGCommodity etgCommodity, AgreementHeader agreementHeader, AgreementLine agreementLine, PurchLine purchLineLocal, VendInvoiceJour vendInvoiceJour, VendInvoiceTrans vendInvoiceTrans, PurchTable purchTable, VendTrans vendTrans,
+                          VendPackingSlipJour vendPackingSlipJour, VendPackingSlipTrans vendPackingSlipTrans, AgreementLineQuantityCommitment aLineQtyComm, VendTable vendTable,
+                          PurchAgreementHeader purchAgreementHeader,ETG_PurchaseAgreementHeader etg_PurchAgreementHeader, InventDim inventDim, AgreementHeaderDefault agreementHeaderDef, ToDate toDate, Str mainCommodity,
+                           Qty totalInvoicedQty, boolean hasPurchLine, boolean hasInvoice, Qty totalGRNQty, Str allBOLNos, Str allPackingSlips)
+    {
+        ETG_PackingGroup                        packingGroup;
+        DlvMode                                 dlvMode;
+        DlvTerm                                 dlvTerms;
+        PaymTerm                                paymTerm;
+        ETG_PlaceOfLoading                      etg_placeOfLoading;
+        ETG_PlaceOfDischarge                    etg_placeOfDischarge;
+        date today = systemDateGet();
+        Qty actualCommited;
+        CustInvoiceId previousRecInvoiceId;
+        RecId previousAgreementLine;
+
+        agreementTrackingTemp.clear();
+
+        agreementTrackingTemp.ETGCommodity = mainCommodity;
+        agreementTrackingTemp.DefaultAgreementLineEffectiveDate = agreementHeader.DefaultAgreementLineEffectiveDate;
+        agreementTrackingTemp.DocumentExternalReference = agreementHeader.DocumentExternalReference;
+        agreementTrackingTemp.PurchNumberSequence = purchAgreementHeader.PurchNumberSequence;
+        agreementTrackingTemp.PurchaseId = purchTable.PurchId;
+        agreementTrackingTemp.Through = etg_PurchAgreementHeader.Through;
+        agreementTrackingTemp.BrokerName = VendTable::find(etg_PurchAgreementHeader.Through).name();
+        agreementTrackingTemp.ItemId = agreementLine.ItemId;
+        agreementTrackingTemp.ItemDesc = agreementLine.name();
+                    
+        if(etg_PurchAgreementHeader.PackingGroup)
+        {
+            select Description from packingGroup
+                            where packingGroup.PackingGroup == etg_PurchAgreementHeader.PackingGroup;
+
+            agreementTrackingTemp.PackingGroup     = packingGroup.Description;
+        }
+
+        agreementTrackingTemp.InventColorId  = inventDim.InventColorId;
+        agreementTrackingTemp.CurrencyCode    = agreementHeader.Currency;
+
+
+        if(agreementHeaderDef.DeliveryMode)
+        {
+            select Txt from dlvMode
+                            where dlvMode.Code == agreementHeaderDef.DeliveryMode
+                            &&  dlvMode.DataAreaId == agreementHeaderDef.DeliveryModeDataAreaId;
+            agreementTrackingTemp.DeliveryMode   =  dlvMode.Txt;
+        }
+
+        if(agreementHeaderDef.DeliveryTerm)
+        {
+            select Txt from dlvTerms
+                            where dlvTerms.Code == agreementHeaderDef.DeliveryTerm
+                             &&  dlvTerms.DataAreaId == agreementHeaderDef.DeliveryTermDataAreaId;
+            agreementTrackingTemp.DeliveryTerm   =  dlvTerms.Txt;
+        }
+
+        agreementTrackingTemp.ExternalReference = agreementHeaderDef.ExternalReference;
+        agreementTrackingTemp.VendAccount    = purchAgreementHeader.VendAccount;
+        agreementTrackingTemp.SellerName         = etg_PurchAgreementHeader.sellerName();
+        agreementTrackingTemp.CommitedQuantity  = aLineQtyComm.CommitedQuantity;
+        agreementTrackingTemp.PricePerUnit  = aLineQtyComm.PricePerUnit;
+        agreementTrackingTemp.ProductUnitOfMeasure  = aLineQtyComm.ProductUnitOfMeasure;
+
+        agreementTrackingTemp.NetWeight  = totalGRNQty;
+
+        agreementTrackingTemp.TransactionalCurrency = vendTrans.CurrencyCode;
+        if(agreementHeaderDef.PaymentTerms)
+        {
+            select firstonly Description from paymTerm
+                            where paymTerm.PaymTermId == agreementHeaderDef.PaymentTerms;
+            agreementTrackingTemp.TermPaymDescription   =  paymTerm.Description;
+        }
+        agreementTrackingTemp.ShipmentText   = etg_PurchAgreementHeader.DeliveryDescription;
+        agreementTrackingTemp.FromDatePort   = etg_PurchAgreementHeader.FromDatePort;
+        agreementTrackingTemp.ToDatePort = etg_PurchAgreementHeader.ToDatePort;
+        if(etg_PurchAgreementHeader.PortOfLoading)
+        {
+            select firstonly Description from etg_placeOfLoading
+                            where etg_placeOfLoading.PlaceOfLoading == etg_PurchAgreementHeader.PortOfLoading;
+            agreementTrackingTemp.PortOfLoading   =  etg_placeOfLoading.Description;
+        }
+
+        if(etg_PurchAgreementHeader.PortOfDischarge)
+        {
+            select firstonly Description from etg_placeOfDischarge
+                            where etg_placeOfDischarge.PlaceOfDischarge == etg_PurchAgreementHeader.PortOfDischarge;
+            agreementTrackingTemp.PortOfDischarge   =  etg_placeOfDischarge.Description;
+        }
+
+        //agreementTrackingTemp.BOLNo            = vendInvoiceJour.ETG_BLnumber; //main uncomment if up loop does not work
+        if(hasInvoice)
+        {
+            agreementTrackingTemp.BOLNo  = allBOLNos;
+            agreementTrackingTemp.PackingSlipId = allPackingSlips;
+        }
+        //else if(hasPurchLine && !hasInvoice)
+        //{
+        //    agreementTrackingTemp.BOLNo  = allBOLNos;
+        //    agreementTrackingTemp.PackingSlipId = allPackingSlips;
+        //}
+        else
+        {
+            agreementTrackingTemp.BOLNo            = vendPackingSlipJour.BOLNo;
+            agreementTrackingTemp.PackingSlipId    = vendPackingSlipJour.PackingSlipId;
+        }
+        agreementTrackingTemp.VesselETD        = vendInvoiceJour.ETG_BLDate;
+        //agreementTrackingTemp.VesselETD        = vendPackingSlipJour.BOLDate;
+
+        agreementTrackingTemp.InvoiceId = vendInvoiceTrans.InvoiceId;
+        agreementTrackingTemp.LineAmountMST = vendInvoiceTrans.Qty*vendInvoiceTrans.PurchPrice;
+
+        if(previousRecInvoiceId != agreementTrackingTemp.InvoiceId )
+        {
+            agreementTrackingTemp.PaymentOutstanding = vendTrans.remainAmountCur();
+        }
+
+        agreementTrackingTemp.QuantityConditions = etg_PurchAgreementHeader.QuantityConditions;
+
+        
+                    
+        if(previousAgreementLine != agreementLine.RecId)
+        {
+            actualCommited = agreementTrackingTemp.CommitedQuantity * (1.0 - (agreementLine.ETG_UnderDeliveryPct / 100.0));
+           
+
+            if(agreementHeader.AgreementState== AgreementState::ETGTerminated)
+            {
+                agreementTrackingTemp.ETGAgeingExecPendDef = ETGAgeingExecPendDef::Terminated;
+            }
+            else if((hasPurchLine && hasInvoice && totalInvoicedQty != 0 && totalInvoicedQty >= actualCommited)
+                     ||
+                   (agreementHeader.AgreementState== AgreementState::ETGForceClosed && hasPurchLine && hasInvoice))
+            {
+                agreementTrackingTemp.ETGAgeingExecPendDef = ETGAgeingExecPendDef::Executed;
+            }
+           
+            else
+            {
+                if( agreementTrackingTemp.ToDatePort &&  toDate > agreementTrackingTemp.ToDatePort)
+                {
+                    agreementTrackingTemp.ETGAgeingExecPendDef = ETGAgeingExecPendDef::Default;
+                }
+                else
+                {
+                    agreementTrackingTemp.ETGAgeingExecPendDef = ETGAgeingExecPendDef::PendingToExecute;
+                }
+            }
+        }
+        
+
+        agreementTrackingTemp.insert();
+        previousRecInvoiceId = agreementTrackingTemp.InvoiceId;
+        previousAgreementLine = agreementLine.RecId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReportQualityGroup</Name>
+				<Source><![CDATA[
+    public void processReportQualityGroup(FromDate fromDate,ToDate toDate, ETGVertical etgVertical, ETGSubVertical etgSubVertical,ETGCommodity etgCommodity, ETGSubCommodity etgSubCommodity)
+    {
+        
+        ETG_PurchaseAgreementHeader         etg_PurchAgreementHeader;
+        AgreementHeaderDefault              agreementHeaderDef;
+        PurchAgreementHeader                purchAgreementHeader;
+        InventDim                           inventDim;
+        AgreementLineQuantityCommitment     aLineQtyComm;
+        AgreementHeader                     agreementHeader;
+        VendTable                           vendTable;
+        AgreementLine                       agreementLine;
+        Qty                                 actualCommited;
+        
+        RecId                               previousAgreementLine, previousALineQG;
+        ETG_AgreementLineQualityGrp         aLineQualityGroup;
+        PurchLine                           purchLineLocal;
+        str                                 mainCommodity;
+        PurchTable                          purchTable;
+        VendInvoiceJour                     vendInvoiceJour;
+        VendInvoiceTrans                    vendInvoiceTrans;
+        Qty                                 totalInvoicedQty;
+        Qty                                 totalInvoicedQtyLocal;
+        boolean hasPurchLine, hasInvoice, hasQualityGroup;
+        ETGAgeingExecPendDef execStatus;
+
+        ETGACFParameters acfParameters = ETGACFParameters::find();
+
+        while select agreementHeader
+           where (fromDate == dateNull() || agreementHeader.DefaultAgreementLineEffectiveDate >= fromDate)
+          &&  agreementHeader.DefaultAgreementLineEffectiveDate <= toDate
+          && fromDate <= toDate
+        join agreementHeaderDef
+            where agreementHeaderDef.AgreementHeader == agreementHeader.RecId
+        join purchAgreementHeader
+           where purchAgreementHeader.RecId == agreementHeader.RecId
+        join etg_PurchAgreementHeader
+            where etg_PurchAgreementHeader.PurchAgreementId == purchAgreementHeader.PurchNumberSequence
+        join agreementLine
+            where agreementLine.Agreement == agreementHeader.RecId
+        join aLineQtyComm
+            where aLineQtyComm.RecId == agreementLine.RecId
+        join inventDim
+            where inventDim.inventDimId == agreementLine.InventDimId
+            && inventDim.DataAreaId == agreementLine.InventDimDataAreaId
+        {
+            agreementTrackingTemp.ETGCommodity     = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(agreementLine.DefaultDimension,acfParameters.MainCommodity);
+            agreementTrackingTemp.ETGSubCommodity  = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(agreementLine.DefaultDimension,acfParameters.SubCommodity);
+            agreementTrackingTemp.ETGVertical     = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(agreementLine.DefaultDimension,acfParameters.Vertical);
+            agreementTrackingTemp.ETGSubVertical  = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(agreementLine.DefaultDimension,acfParameters.BusinessUnit);
+
+            if ((etgCommodity     && etgCommodity     != agreementTrackingTemp.ETGCommodity)
+             || (etgSubCommodity  && etgSubCommodity  != agreementTrackingTemp.ETGSubCommodity)
+             || (etgVertical      && etgVertical      != agreementTrackingTemp.ETGVertical)
+             || (etgSubVertical   && etgSubVertical   != agreementTrackingTemp.ETGSubVertical))
+            {
+                continue;
+            }
+            mainCommodity = agreementTrackingTemp.ETGCommodity;
+
+            hasPurchLine = false;
+            totalInvoicedQty = 0;
+            while select purchLineLocal
+            where purchLineLocal.MatchingAgreementLine == agreementLine.RecId
+            {
+                hasPurchLine = true;
+
+                totalInvoicedQtyLocal = 0;
+                purchTable = PurchTable::find(purchLineLocal.PurchId);
+
+                hasInvoice = false;
+                while select vendInvoiceJour
+                where vendInvoiceJour.PurchId == purchLineLocal.PurchId
+                join vendInvoiceTrans
+                where vendInvoiceTrans.InvoiceId == vendInvoiceJour.InvoiceId
+                {
+                    hasInvoice = true;
+                    totalInvoicedQtyLocal += vendInvoiceTrans.Qty;
+                }
+                totalInvoicedQty += totalInvoicedQtyLocal;
+            }
+
+            if(previousAgreementLine != agreementLine.RecId)
+            {
+                actualCommited = agreementTrackingTemp.CommitedQuantity * (1.0 - (agreementLine.ETG_UnderDeliveryPct / 100.0));
+               
+                if(agreementHeader.AgreementState== AgreementState::ETGTerminated)
+                {
+                    execStatus= ETGAgeingExecPendDef::Terminated;
+                }
+                else if((hasPurchLine && hasInvoice && totalInvoicedQty != 0 && totalInvoicedQty >= actualCommited)
+                     ||
+                   (agreementHeader.AgreementState== AgreementState::ETGForceClosed && hasPurchLine && hasInvoice))
+                {
+                    execStatus = ETGAgeingExecPendDef::Executed;
+                }
+                else
+                {
+                    if( agreementTrackingTemp.ToDatePort &&  toDate > agreementTrackingTemp.ToDatePort)
+                    {
+                        execStatus= ETGAgeingExecPendDef::Default;
+                    }
+                    else
+                    {
+                        execStatus= ETGAgeingExecPendDef::PendingToExecute;
+                    }
+                }
+                previousAgreementLine = agreementLine.RecId;
+            }
+
+            hasQualityGroup = false;
+            while select aLineQualityGroup
+            where agreementLine.RecId == aLineQualityGroup.AgreementLine
+            {
+                hasQualityGroup = true;
+
+                this.insertTmpQualitySpecsLine(agreementHeader, agreementLine, purchLineLocal, purchTable, aLineQtyComm, vendTable, purchAgreementHeader, etg_PurchAgreementHeader,
+                    inventDim, agreementHeaderDef, mainCommodity, execStatus,  aLineQualityGroup);
+            }
+
+            if(!hasQualityGroup)
+            {
+                this.insertTmpQualitySpecsLine(agreementHeader, agreementLine, purchLineLocal, purchTable, aLineQtyComm, vendTable, purchAgreementHeader, etg_PurchAgreementHeader,
+                    inventDim, agreementHeaderDef, mainCommodity, execStatus, null);
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertTmpQualitySpecsLine</Name>
+				<Source><![CDATA[
+    private void insertTmpQualitySpecsLine(AgreementHeader agreementHeader, AgreementLine agreementLine, PurchLine purchLineLocal, PurchTable purchTable, AgreementLineQuantityCommitment aLineQtyComm,
+        VendTable vendTable, PurchAgreementHeader purchAgreementHeader,ETG_PurchaseAgreementHeader etg_PurchAgreementHeader, InventDim inventDim, AgreementHeaderDefault agreementHeaderDef, Str mainCommodity,
+        ETGAgeingExecPendDef execStatus, ETG_AgreementLineQualityGrp aLineQualityGroup)
+    {
+        agreementTrackingTemp.clear();
+        agreementTrackingTemp.ETGCommodity = mainCommodity;
+        agreementTrackingTemp.DefaultAgreementLineEffectiveDate = agreementHeader.DefaultAgreementLineEffectiveDate;
+        agreementTrackingTemp.DocumentExternalReference = agreementHeader.DocumentExternalReference;
+        agreementTrackingTemp.PurchNumberSequence = purchAgreementHeader.PurchNumberSequence;
+
+        agreementTrackingTemp.Through = etg_PurchAgreementHeader.Through;
+        agreementTrackingTemp.BrokerName = VendTable::find(etg_PurchAgreementHeader.Through).name();
+        agreementTrackingTemp.ItemId = agreementLine.ItemId;
+        agreementTrackingTemp.ItemDesc = agreementLine.name();
+
+        agreementTrackingTemp.InventColorId  = inventDim.InventColorId;
+        agreementTrackingTemp.VendAccount    = purchAgreementHeader.VendAccount;
+
+        agreementTrackingTemp.SellerName         = etg_PurchAgreementHeader.sellerName();
+
+        agreementTrackingTemp.PricePerUnit  = aLineQtyComm.PricePerUnit;
+
+        agreementTrackingTemp.GroupId     =  aLineQualityGroup.GroupId;
+        agreementTrackingTemp.GroupDescription = aLineQualityGroup.groupDescription();
+        agreementTrackingTemp.Value = aLineQualityGroup.Value;
+        
+        agreementTrackingTemp.CommitedQuantity  = aLineQtyComm.CommitedQuantity;
+        agreementTrackingTemp.ETGAgeingExecPendDef = execStatus;
+        agreementTrackingTemp.insert();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

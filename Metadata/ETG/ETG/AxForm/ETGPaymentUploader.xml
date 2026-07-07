@@ -1,0 +1,1131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxForm xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V6">
+	<Name>ETGPaymentUploader</Name>
+	<SourceCode>
+		<Methods xmlns="">
+			<Method>
+				<Name>classDeclaration</Name>
+				<Source><![CDATA[
+[Form]
+public class ETGPaymentUploader extends FormRun
+{
+    ModuleCustVend moduleCustVend;
+
+}
+]]></Source>
+			</Method>
+			<Method>
+				<Name>init</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    public void init()
+    {
+        moduleCustVend = element.args().parmEnum();
+
+        super();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>custSettleTransaction</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    public void custSettleTransaction()
+    {
+        MultiSelectionHelper        selectionHelper = MultiSelectionHelper::construct();//Create instance of class
+        Set                         selectedRecords = new Set(Types::Record);//Declare a set of type record
+        NumberSequenceReference     numberSequenceReference;
+        ETGSettlementNumberSequence numSeq;
+
+        ETGPaymentUploaderTable     custPaymentUpload, custPaymentUploadLoc, custPaymentUploadNxt, custPaymentUploadSeq;
+        CustTrans                   invCustTrans, payCustTrans;
+        CustTransOpen               invCustTransOpen, payCustTransOpen;
+        real                        invSettle, paySettle;
+        SpecTransExecutionContext   specTransExecutionContext;
+        SpecTransManager            specTransManager;
+        TransDate                   settlementDate;
+        int                         settleNum, settleNumPost, invoiceCount = 0, payCount = 0;
+        CustTransSettleTransactionParameters    parameter = CustTransSettleTransactionParameters::construct();
+
+        selectionHelper.parmDataSource(ETGPaymentUploaderTable_ds);   //Set the datasource
+
+        custPaymentUploadNxt = selectionHelper.getFirst();
+
+        if(custPaymentUploadNxt.RecId)
+        {
+            ttsbegin;
+            while(custPaymentUploadNxt)
+            {
+                if(custPaymentUploadNxt.SettlementNumber != settleNum)
+                {
+                    specTransExecutionContext = SpecTransExecutionContext::newFromSource(CustTable::find(custPaymentUploadNxt.AccountNum));
+                    specTransManager = SpecTransManager::construct(specTransExecutionContext.parmSpecContext());
+                    invoiceCount = 0;
+                    payCount = 0;
+                    while select custPaymentUpload 
+                        where custPaymentUpload.SettlementNumber == custPaymentUploadNxt.SettlementNumber &&
+                        !custPaymentUpload.SettlementNumberSequence
+                    {
+                            if(custPaymentUpload.Validated && !custPaymentUpload.Posted )
+                            {
+                                select firstonly invCustTrans
+                                    where invCustTrans.Voucher == custPaymentUpload.Voucher &&
+                                        invCustTrans.AmountCur > 0
+                                    join invCustTransOpen
+                                    where invCustTransOpen.RefRecId == invCustTrans.RecId;
+
+                                if(invCustTransOpen)
+                                {
+                                    invoiceCount++;
+                                    invSettle = custPaymentUpload.SettlementAmount;
+                                    settlementDate = custPaymentUpload.SettlementDate;
+                                    specTransManager.insert(invCustTransOpen.dataAreaId, invCustTransOpen.TableId, invCustTransOpen.RecId, invSettle, invCustTrans.CurrencyCode);
+                                }
+                
+                                select firstonly payCustTrans
+                                    where payCustTrans.Voucher == custPaymentUpload.Voucher &&
+                                        payCustTrans.AmountCur < 0
+                                    join payCustTransOpen
+                                    where payCustTransOpen.RefRecId == payCustTrans.RecId;
+
+                                if(payCustTransOpen)
+                                {
+                                    payCount++;
+                                    paySettle = custPaymentUpload.SettlementAmount;
+                                    specTransManager.insert(payCustTransOpen.dataAreaId, payCustTransOpen.TableId, payCustTransOpen.RecId, paySettle, payCustTrans.CurrencyCode);
+                                }
+                                settleNum = custPaymentUpload.SettlementNumber;
+                            }
+                            else
+                            {
+                                throw Error(strFmt("@ETG_New:PaymentUploaderSettleTransac",custPaymentUpload.Voucher,custPaymentUpload.SettlementNumber));
+                            }
+                        
+                    }
+                    parameter.saveDatePrinciple = SettleDatePrinc::SelectDate;
+                    parameter.saveDate = settlementDate;
+                    if(invoiceCount > 0 && payCount > 0)
+                    {
+                        if(CustTrans::settleTransaction(specTransExecutionContext,parameter))
+                        {
+                            numberSequenceReference = NumberSeqReference::findReference(extendedTypeNum(ETGSettlementNumberSequence));
+                            if(numberSequenceReference)
+                            {
+                                numSeq = NumberSeq::newGetNum(numberSequenceReference).num();
+                            }
+                            while select custPaymentUploadLoc 
+                                where custPaymentUploadLoc.SettlementNumber == settleNum &&
+                                !custPaymentUploadLoc.SettlementNumberSequence
+                            {
+                                custPaymentUploadLoc.selectForUpdate(true);
+                                custPaymentUploadLoc.Posted = NoYes::Yes;
+                                custPaymentUploadLoc.SettlementNumberSequence = numSeq;
+                                custPaymentUploadLoc.update();
+                            }
+                        }
+                    }
+                }
+                custPaymentUploadNxt = selectionHelper.getNext();
+            }
+        }
+        else
+        {
+            throw Error(strFmt("@ETG_New:PaymentUploaderTransactionSettlement"));
+        }
+        Info("@ETG_New:PaymentUploaderTransactionPosted");
+        ttscommit;
+        ETGPaymentUploaderTable_ds.research(true);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>vendSettleTransaction</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    public void vendSettleTransaction()
+    {
+        MultiSelectionHelper        selectionHelper = MultiSelectionHelper::construct();//Create instance of class
+        Set                         selectedRecords = new Set(Types::Record);//Declare a set of type record
+        NumberSequenceReference     numberSequenceReference;
+        ETGSettlementNumberSequence numSeq;
+
+        ETGPaymentUploaderTable     vendPaymentUpload, vendPaymentUploadLoc, vendPaymentUploadNxt, vendPaymentUploadSeq;
+        VendTable                   vendTableSettle;
+        VendTrans                   invVendTrans, payVendTrans;
+        VendTransOpen               invVendTransOpen, payVendTransOpen;
+        real                        invSettle, paySettle;
+        CustVendTransData           vendTransData;
+        CustVendOpenTransManager    vendManager;
+        TransDate                   settlementDate;
+        int                         settleNum, invoiceCount = 0, payCount = 0;
+
+        selectionHelper.parmDataSource(ETGPaymentUploaderTable_ds);   //Set the datasource
+
+        vendPaymentUploadNxt = selectionHelper.getFirst();
+
+        if(vendPaymentUploadNxt.RecId)
+        {
+            ttsbegin;
+            while(vendPaymentUploadNxt)
+            {
+                if(vendPaymentUploadNxt.SettlementNumber != settleNum)
+                {
+                    vendTableSettle = VendTable::find(vendPaymentUploadNxt.AccountNum);
+                    vendManager = CustVendOpenTransManager::construct(vendTableSettle);
+                    invoiceCount = 0;
+                    payCount = 0;
+                    while select vendPaymentUpload 
+                        where vendPaymentUpload.SettlementNumber == vendPaymentUploadNxt.SettlementNumber &&
+                        !vendPaymentUpload.SettlementNumberSequence
+                    {
+                        if(vendPaymentUpload.Validated && !vendPaymentUpload.Posted )
+                        {
+                            select firstonly invVendTrans
+                            where invVendTrans.Voucher == vendPaymentUpload.Voucher &&
+                                invVendTrans.AmountCur < 0
+                            join invVendTransOpen
+                            where invVendTransOpen.RefRecId == invVendTrans.RecId;
+
+                            if(invVendTransOpen)
+                            {
+                                invoiceCount++;
+                                settlementDate  = vendPaymentUpload.SettlementDate;
+                                invSettle       = vendPaymentUpload.SettlementAmount;
+                                vendManager.updateTransMarked(invVendTransOpen,true);
+                                vendManager.updateSettleAmount(invVendTransOpen, invSettle);
+                                vendTransData = CustVendTransData::construct(invVendTrans);
+                                vendTransData.markForSettlement(vendTableSettle);
+                            }
+
+                            select firstonly payVendTrans
+                            where payVendTrans.Voucher == vendPaymentUpload.Voucher &&
+                                payVendTrans.AmountCur > 0
+                            join payVendTransOpen
+                            where payVendTransOpen.RefRecId == payVendTrans.RecId;
+
+                            if(payVendTransOpen)
+                            {
+                                payCount++;
+                                paySettle       = vendPaymentUpload.SettlementAmount;
+                                vendManager.updateTransMarked(payVendTransOpen,true);
+                                vendManager.updateSettleAmount(payVendTransOpen, paySettle);
+                                vendTransData = CustVendTransData::construct(payVendTrans);
+                                vendTransData.markForSettlement(vendTableSettle);
+                            }
+                            settleNum = vendPaymentUpload.SettlementNumber;
+                        }
+                        else
+                        {
+                            throw Error(strFmt("@ETG_New:PaymentUploaderSettleTransac",vendPaymentUpload.Voucher,vendPaymentUpload.SettlementNumber));
+                        }
+                    }
+                    if(invoiceCount > 0 && payCount > 0)
+                    {
+                        if(VendTrans::settleTransact(vendTableSettle, null, true, SettleDatePrinc::SelectDate, settlementDate))
+                        {
+                            numberSequenceReference = NumberSeqReference::findReference(extendedTypeNum(ETGSettlementNumberSequence));
+                            if(numberSequenceReference)
+                            {
+                                numSeq = NumberSeq::newGetNum(numberSequenceReference).num();
+                            }
+                                while select vendPaymentUploadLoc 
+                                    where vendPaymentUploadLoc.SettlementNumber == settleNum &&
+                                    !vendPaymentUploadLoc.SettlementNumberSequence
+                                {
+                                    vendPaymentUploadLoc.selectForUpdate(true);
+                                    vendPaymentUploadLoc.Posted = NoYes::Yes;
+                                    vendPaymentUploadLoc.SettlementNumberSequence = numSeq;
+                                    vendPaymentUploadLoc.update();
+                                }
+                        }
+                    }
+                }
+                vendPaymentUploadNxt = selectionHelper.getNext();
+            }
+        }
+        else
+        {
+            throw Error(strFmt("@ETG_New:PaymentUploaderTransactionSettlement"));
+        }
+        info("@ETG_New:PaymentUploaderTransactionPosted");
+        ttscommit;
+        ETGPaymentUploaderTable_ds.research(true);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>undoCustSettleTransaction</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    public void undoCustSettleTransaction()
+    {
+        MultiSelectionHelper selectionHelper = MultiSelectionHelper::construct();//Create instance of class
+        Set selectedRecords = new Set(Types::Record);//Declare a set of type record
+
+        ETGPaymentUploaderTable     custPaymentUpload, custPaymentUploadLoc;
+        CustTrans                   payCustTrans;
+        CustSettlement              custSettlement;
+        CustTable                   custTable;
+        SpecTransManager            specTransManager;
+        TransDate                   settlementDate;
+        str                         settleSeqNum;
+        boolean                     undo = false;
+
+        selectionHelper.parmDataSource(ETGPaymentUploaderTable_ds);   //Set the datasource
+
+        custPaymentUploadLoc = selectionHelper.getFirst();
+
+        if(custPaymentUploadLoc.RecId)
+        {
+            ttsbegin;
+            while(custPaymentUploadLoc)
+            {
+                if(custPaymentUploadLoc.SettlementNumberSequence != settleSeqNum)
+                {
+                    while select custPaymentUpload 
+                        where custPaymentUpload.SettlementNumberSequence == custPaymentUploadLoc.SettlementNumberSequence &&
+                              custPaymentUpload.Posted && 
+                              !custPaymentUpload.Reversed
+                    {
+                        select firstonly payCustTrans where payCustTrans.Voucher == custPaymentUpload.Voucher;
+                            
+                            settlementDate = custPaymentUploadLoc.SettlementDate;
+                            select * from custSettlement
+                                    where custSettlement.TransRecId == payCustTrans.RecId &&
+                                    custSettlement.TransCompany  == payCustTrans.DataAreaId &&
+                                    custSettlement.AccountNum    == payCustTrans.AccountNum &&
+                                    custSettlement.CanBeReversed == NoYes::Yes &&
+                                    custSettlement.TransDate     == settlementDate;
+                            {
+                                custTable   = CustTable::find(payCustTrans.AccountNum);
+ 
+                                specTransManager = SpecTransManager::newRefTableId(custTable, tablenum(custSettlement), true);
+ 
+                                specTransManager.insert(custSettlement.DataAreaId
+                                                        , custSettlement.TableId
+                                                        , custSettlement.RecId
+                                                        , custSettlement.SettleAmountCur
+                                                        , payCustTrans.CurrencyCode);
+ 
+                                custSettlement.CustVendSettlement::markThisAndRelatedOffsets(specTransManager, payCustTrans.CurrencyCode);
+ 
+                                if (CustTrans::reverseTransact(custTable, null, settleDatePrinc::SelectDate, settlementDate))
+                                {
+                                    specTransManager.deleteAll();
+                                    undo = true;
+                                }
+                            }
+                            
+                        if(undo)
+                        {
+                            custPaymentUpload.selectForUpdate(true);
+                            custPaymentUpload.Reversed = NoYes::Yes;
+                            custPaymentUpload.update();
+                        }
+                        settleSeqNum = custPaymentUpload.SettlementNumberSequence;
+                    }
+                }
+                custPaymentUploadLoc = selectionHelper.getNext();
+            }
+            
+        }
+        else
+        {
+            throw error("@ETG_New:PaymentUploaderTransactionSettlement");
+        }
+        info("@ETG_New:PaymentUploaderUndoSettlement");
+        ttscommit;
+        ETGPaymentUploaderTable_ds.research(true);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>undoVendSettleTransaction</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    public void undoVendSettleTransaction()
+    {
+        MultiSelectionHelper selectionHelper = MultiSelectionHelper::construct();//Create instance of class
+        Set selectedRecords = new Set(Types::Record);//Declare a set of type record
+
+        ETGPaymentUploaderTable     vendPaymentUpload, vendPaymentUploadLoc;
+        VendTrans                   payVendTrans;
+        VendSettlement              vendSettlement;
+        VendTable                   vendTable;
+        SpecTransManager            specTransManager;
+        TransDate                   settlementDate;
+        str                         settleSeqNum;
+        boolean                     undo = false;
+
+        selectionHelper.parmDataSource(ETGPaymentUploaderTable_ds);   //Set the datasource
+
+        vendPaymentUpload = selectionHelper.getFirst();
+
+        if(vendPaymentUpload.RecId)
+        {
+            ttsbegin;
+            while(vendPaymentUpload)
+            {
+                if(vendPaymentUpload.SettlementNumberSequence != settleSeqNum)
+                {
+                    while select vendPaymentUploadLoc 
+                        where vendPaymentUploadLoc.SettlementNumberSequence == vendPaymentUpload.SettlementNumberSequence &&
+                        vendPaymentUploadLoc.Posted 
+                        && !vendPaymentUploadLoc.Reversed
+                    {
+                        select firstonly payVendTrans where payVendTrans.Voucher == vendPaymentUploadLoc.Voucher;
+                            
+                        settlementDate = vendPaymentUpload.SettlementDate;
+                        select * from vendSettlement
+                        where vendSettlement.TransRecId == payVendTrans.RecId &&
+                        vendSettlement.TransCompany  == payVendTrans.DataAreaId &&
+                        vendSettlement.AccountNum    == payVendTrans.AccountNum &&
+                        vendSettlement.CanBeReversed == NoYes::Yes &&
+                        vendSettlement.TransDate == settlementDate;
+                        {
+                            vendTable   = VendTable::find(payVendTrans.AccountNum);
+ 
+                            specTransManager = SpecTransManager::newRefTableId(vendTable, tablenum(vendSettlement), true);
+ 
+                            specTransManager.insert(vendSettlement.DataAreaId
+                                                , vendSettlement.TableId
+                                                , vendSettlement.RecId
+                                                , vendSettlement.SettleAmountCur
+                                                , payVendTrans.CurrencyCode);
+ 
+                            vendSettlement.CustVendSettlement::markThisAndRelatedOffsets(specTransManager, payVendTrans.CurrencyCode);
+ 
+                            if (VendTrans::reverseTransact(vendTable, null, settleDatePrinc::SelectDate, settlementDate))
+                            {
+                                specTransManager.deleteAll();
+                                undo = true;
+                            }
+                        }
+                        if(undo)
+                        {
+                            {
+                                vendPaymentUploadLoc.selectForUpdate(true);
+                                vendPaymentUploadLoc.Reversed = NoYes::Yes;
+                                vendPaymentUploadLoc.update();
+                            }
+                        }
+                        settleSeqNum = vendPaymentUploadLoc.SettlementNumberSequence;
+                    }
+                }
+                vendPaymentUpload = selectionHelper.getNext();
+            }
+        }
+        else
+        {
+            throw error("@ETG_New:PaymentUploaderTransactionSettlement");
+        }
+        info("@ETG_New:PaymentUploaderUndoSettlement");
+        ttscommit;
+        ETGPaymentUploaderTable_ds.research(true);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+		<DataSources xmlns="">
+			<DataSource>
+				<Name>ETGPaymentUploaderTable</Name>
+				<Methods>
+					<Method>
+						<Name>init</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void init()
+        {
+            super();
+
+            QueryBuildDataSource paymentUploaderQBDS = this.query().dataSourceTable(tableNum(ETGPaymentUploaderTable));
+            QueryBuildRange accountTypeRange = SysQuery::findOrCreateRange(paymentUploaderQBDS, fieldNum(ETGPaymentUploaderTable,AccountType));
+            
+            switch(moduleCustVend)
+            {
+                case ModuleCustVend::Vend:
+                    accountTypeRange.value(enum2str(ModuleCustVend::Vend));
+                    break;
+
+                case ModuleCustVend::Cust:
+                    accountTypeRange.value(enum2str(ModuleCustVend::Cust));
+                    break;
+            }
+
+            paymentUploaderQBDS.addSortField(fieldNum(ETGPaymentUploaderTable,SettlementNumberSequence ),SortOrder::Ascending);
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields />
+			</DataSource>
+		</DataSources>
+		<DataControls xmlns="">
+			<Control>
+				<Name>SettleTransactions</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void clicked()
+        {
+            super();
+
+            switch(moduleCustVend)
+            {
+                case ModuleCustVend::Vend:
+                    element.vendSettleTransaction();
+                    break;
+
+                case ModuleCustVend::Cust:
+                    element.custSettleTransaction();
+                    break;
+            }
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ValidateTransactions</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void clicked()
+        {
+            MultiSelectionHelper selectionHelper = MultiSelectionHelper::construct();//Create instance of class
+            Set selectedRecords = new Set(Types::Record);//Declare a set of type record
+
+            super();
+
+            ETGPaymentUploaderTable     paymentUpload, paymentUploadLoc;
+            boolean                     validate = true;
+            real                        totalAmount;
+            CurrencyCode                curr;
+            int                         settlementNum, invoiceCount, paymentCount;
+            VendTrans                   invVendTrans, payVendTrans;
+            VendTransOpen               invVendTransOpen, payVendTransOpen;
+            CustTrans                   invCustTrans, payCustTrans;
+            CustTransOpen               invCustTransOpen, payCustTransOpen;
+
+            selectionHelper.parmDataSource(ETGPaymentUploaderTable_ds);   //Set the datasource
+
+            paymentUpload = selectionHelper.getFirst();
+
+            if(paymentUpload.RecId)
+            {
+                while(paymentUpload)
+                {
+                    if(paymentUpload.SettlementNumber != settlementNum)
+                    {
+                        curr = '';
+                        invoiceCount = 0;
+                        paymentCount = 0;
+                        while select paymentUploadLoc 
+                            where paymentUploadLoc.SettlementNumber == paymentUpload.SettlementNumber &&
+                            !paymentUploadLoc.SettlementNumberSequence
+                        {
+                            if(paymentUploadLoc.AccountType == ModuleCustVend::Cust)
+                            {
+                                select firstonly invCustTrans
+                                    where invCustTrans.Voucher == paymentUploadLoc.Voucher &&
+                                        invCustTrans.AmountCur > 0
+                                    join invCustTransOpen
+                                    where invCustTransOpen.RefRecId == invCustTrans.RecId;
+
+                                if(invCustTransOpen)
+                                {
+                                    invoiceCount++;
+                                }
+                
+                                select firstonly payCustTrans
+                                    where payCustTrans.Voucher == paymentUploadLoc.Voucher &&
+                                        payCustTrans.AmountCur < 0
+                                    join payCustTransOpen
+                                    where payCustTransOpen.RefRecId == payCustTrans.RecId;
+
+                                if(payCustTransOpen)
+                                {
+                                    paymentCount++;
+                                }
+                            }
+                            else if(paymentUploadLoc.AccountType == ModuleCustVend::Vend)
+                            {
+                                select firstonly invVendTrans
+                                where invVendTrans.Voucher == paymentUploadLoc.Voucher &&
+                                    invVendTrans.AmountCur < 0
+                                join invVendTransOpen
+                                where invVendTransOpen.RefRecId == invVendTrans.RecId;
+
+                                if(invVendTransOpen)
+                                {
+                                    invoiceCount++;
+                                }
+
+                                select firstonly payVendTrans
+                                where payVendTrans.Voucher == paymentUploadLoc.Voucher &&
+                                    payVendTrans.AmountCur > 0
+                                join payVendTransOpen
+                                where payVendTransOpen.RefRecId == payVendTrans.RecId;
+
+                                if(payVendTransOpen)
+                                {
+                                    paymentCount++;
+                                }
+
+                                //
+                                if(paymentUpload.SettlementDate < paymentUpload.TransDate  )
+                                {
+                                    throw error(strFmt('Settlement date should be greater than or equal to Trans Date Voucher: %1',paymentUpload.Voucher));
+                                }
+                                else if(paymentUploadLoc.SettlementDate < paymentUploadLoc.TransDate)
+                                {
+                                    throw error(strFmt('Settlement date should be greater than or equal to Trans Date Voucher: %1',paymentUploadLoc.Voucher));
+
+                                }
+
+                            }
+                            if((curr && paymentUploadLoc.CurrencyCode != curr) && !paymentUploadLoc.Posted)
+                            {
+                                validate = false;
+                                throw error(strFmt("@ETG_New:PaymentUploaderCurrencymismatchError"));
+                            }
+                            if(abs(paymentUploadLoc.SettlementAmount) > abs(paymentUploadLoc.remainAmountCur()))
+                            {
+                                validate = false;
+                                throw error(strFmt("@ETG_New:PaymentUploaderSettlementAmountError",paymentUploadLoc.Voucher));
+                            }
+                            totalAmount     = totalAmount + paymentUploadLoc.SettlementAmount;
+                            curr            = paymentUploadLoc.CurrencyCode;
+                            settlementNum   = paymentUploadLoc.SettlementNumber;
+                        }
+                        if(invoiceCount <= 0 ||  paymentCount <= 0)
+                        {
+                            throw error(strFmt("@ETG_New:PaymentUploaderTransactionError",paymentUploadLoc.SettlementNumber));
+                        }
+                        if(totalAmount != 0)
+                        {
+                            validate = false;
+                            throw error(strFmt("@ETG_New:PaymentUploaderTotalSettlementAmountError"));
+                        }
+                    }
+                    paymentUpload = selectionHelper.getNext();
+                }
+            }
+            paymentUploadLoc = selectionHelper.getFirst();
+
+            if(paymentUploadLoc.RecId && validate)
+            {
+                ttsbegin;
+                while(paymentUploadLoc)
+                {
+                    paymentUploadLoc.selectForUpdate();
+                    paymentUploadLoc.Validated = NoYes::Yes;
+                    paymentUploadLoc.update();
+                    paymentUploadLoc   = selectionHelper.getNext();
+;               }
+                ttscommit;
+            }
+            info("@ETG_New:PaymentUploaderValidation");
+            ETGPaymentUploaderTable_ds.research(true);
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>UndoSettlement</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void clicked()
+        {
+            super();
+
+            switch(moduleCustVend)
+            {
+                case ModuleCustVend::Vend:
+                    element.undoVendSettleTransaction();
+                    break;
+
+                case ModuleCustVend::Cust:
+                    element.undoCustSettleTransaction();
+                    break;
+            }
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ETGPaymentUploaderTable_AccountNum</Name>
+				<Type>String</Type>
+				<Methods>
+					<Method>
+						<Name>jumpRef</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void jumpRef()
+        {
+            str accountNum = ETGPaymentUploaderTable_AccountNum.valueStr();
+
+            super();
+
+            switch(moduleCustVend)
+            {
+                case ModuleCustVend::Vend:
+                    VendTable vend = VendTable::find(accountNum);
+                    Args vendArgs = new Args();
+                    vendArgs.record(vend); // Pass the found record
+                    vendArgs.lookupRecord(vend); // Set the record as the current lookup record
+                    // Open the target form with the record
+                    MenuFunction vendMenuFunction;
+                    vendMenuFunction = new MenuFunction(menuitemDisplayStr(VendTable), MenuItemType::Display);
+                    vendMenuFunction.run(vendArgs);
+                    break;
+
+                case ModuleCustVend::Cust:
+                    CustTable cust = CustTable::find(accountNum);
+                    Args custArgs = new Args();
+                    custArgs.record(cust); // Pass the found record
+                    custArgs.lookupRecord(cust); // Set the record as the current lookup record
+                    // Open the target form with the record
+                    MenuFunction custMenuFunction;
+                    custMenuFunction = new MenuFunction(menuitemDisplayStr(CustTable), MenuItemType::Display);
+                    custMenuFunction.run(custArgs);
+                    break;
+            }
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ETGPaymentUploaderTable_Voucher</Name>
+				<Type>String</Type>
+				<Methods>
+					<Method>
+						<Name>jumpRef</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void jumpRef()
+        {
+            str voucher = ETGPaymentUploaderTable_Voucher.valueStr();
+
+            super();
+
+            switch(moduleCustVend)
+            {
+                case ModuleCustVend::Vend:
+                    VendTrans vend;
+                    select * from vend where vend.Voucher == voucher;
+                    Args vendArgs = new Args();
+                    vendArgs.record(vend); // Pass the found record
+                    // Open the target form with the record
+                    MenuFunction vendMenuFunction;
+                    vendMenuFunction = new MenuFunction(menuitemDisplayStr(VendTrans), MenuItemType::Display);
+                    vendMenuFunction.run(vendArgs);
+                    break;
+
+                case ModuleCustVend::Cust:
+                    CustTrans cust = CustTrans::findByVoucher(voucher);
+                    Args custArgs = new Args();
+                    custArgs.record(cust); // Pass the found record
+                    // Open the target form with the record
+                    MenuFunction custMenuFunction;
+                    custMenuFunction = new MenuFunction(menuitemDisplayStr(CustTrans), MenuItemType::Display);
+                    custMenuFunction.run(custArgs);
+                    break;
+            }
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+		</DataControls>
+		<Members xmlns="" />
+	</SourceCode>
+	<DataSources>
+		<AxFormDataSource xmlns="">
+			<Name>ETGPaymentUploaderTable</Name>
+			<Table>ETGPaymentUploaderTable</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>AccountNum</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>AccountType</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>AmountCur</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CreatedBy</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CreatedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CurrencyCode</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InvoiceNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ModifiedBy</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ModifiedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Posted</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Reversed</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SettlementAmount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SettlementDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SettlementNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SettlementNumberSequence</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TransDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Validated</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Voucher</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<InsertIfEmpty>No</InsertIfEmpty>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+	</DataSources>
+	<Design>
+		<Caption xmlns="">@ETG_New:ETGPaymentUploaderForm</Caption>
+		<DataSource xmlns="">ETGPaymentUploaderTable</DataSource>
+		<HideIfEmpty xmlns="">No</HideIfEmpty>
+		<Pattern xmlns="">SimpleList</Pattern>
+		<PatternVersion xmlns="">1.1</PatternVersion>
+		<ShowDeleteButton xmlns="">Yes</ShowDeleteButton>
+		<ShowNewButton xmlns="">No</ShowNewButton>
+		<Style xmlns="">SimpleList</Style>
+		<Controls xmlns="">
+			<AxFormControl xmlns=""
+				i:type="AxFormActionPaneControl">
+				<Name>ActionPane</Name>
+				<Type>ActionPane</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormButtonGroupControl">
+						<Name>PaymentUploadPostButtonGroup</Name>
+						<Type>ButtonGroup</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormMenuFunctionButtonControl">
+								<Name>PaymentUploaderTemplateExport</Name>
+								<Type>MenuFunctionButton</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<MenuItemName>ETGPaymentUploaderTemplateExportAction</MenuItemName>
+								<MenuItemType>Action</MenuItemType>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormMenuFunctionButtonControl">
+								<Name>PaymentUpload</Name>
+								<Type>MenuFunctionButton</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<MenuItemName>ETGPaymentUploaderAction</MenuItemName>
+								<MenuItemType>Action</MenuItemType>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonControl">
+								<Name>SettleTransactions</Name>
+								<Type>Button</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<MultiSelect>Yes</MultiSelect>
+								<Text>Post</Text>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonControl">
+								<Name>ValidateTransactions</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<Type>Button</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<MultiSelect>Yes</MultiSelect>
+								<Text>Validate</Text>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonControl">
+								<Name>UndoSettlement</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<Type>Button</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Text>Undo Settlement</Text>
+							</AxFormControl>
+						</Controls>
+					</AxFormControl>
+				</Controls>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGroupControl">
+				<Name>FilterGroup</Name>
+				<Pattern>CustomAndQuickFilters</Pattern>
+				<PatternVersion>1.1</PatternVersion>
+				<Type>Group</Type>
+				<WidthMode>SizeToAvailable</WidthMode>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl>
+						<Name>QuickFilter</Name>
+						<FormControlExtension>
+							<Name>QuickFilterControl</Name>
+							<ExtensionComponents />
+							<ExtensionProperties>
+								<AxFormControlExtensionProperty>
+									<Name>targetControlName</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>placeholderText</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>defaultColumnName</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+							</ExtensionProperties>
+						</FormControlExtension>
+					</AxFormControl>
+				</Controls>
+				<ArrangeMethod>HorizontalLeft</ArrangeMethod>
+				<FrameType>None</FrameType>
+				<Style>CustomFilter</Style>
+				<ViewEditMode>Edit</ViewEditMode>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGridControl">
+				<Name>ETGPaymentUploaderGrid</Name>
+				<AllowEdit>No</AllowEdit>
+				<Type>Grid</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGPaymentUploaderTable_SettlementNumberSequence</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>SettlementNumberSequence</DataField>
+						<DataSource>ETGPaymentUploaderTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormIntegerControl">
+						<Name>ETGPaymentUploaderTable_SettlementNumber</Name>
+						<Type>Integer</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>SettlementNumber</DataField>
+						<DataSource>ETGPaymentUploaderTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGPaymentUploaderTable_AccountNum</Name>
+						<AutoDeclaration>Yes</AutoDeclaration>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>AccountNum</DataField>
+						<DataSource>ETGPaymentUploaderTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGPaymentUploaderTable_Voucher</Name>
+						<AutoDeclaration>Yes</AutoDeclaration>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Voucher</DataField>
+						<DataSource>ETGPaymentUploaderTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGPaymentUploaderTable_InvoiceNumber</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>InvoiceNumber</DataField>
+						<DataSource>ETGPaymentUploaderTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormRealControl">
+						<Name>ETGPaymentUploaderTable_AmountCur</Name>
+						<Type>Real</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>AmountCur</DataField>
+						<DataSource>ETGPaymentUploaderTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormRealControl">
+						<Name>ETGPaymentUploaderTable_SettlementAmount</Name>
+						<Type>Real</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>SettlementAmount</DataField>
+						<DataSource>ETGPaymentUploaderTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormRealControl">
+						<Name>RemainAmount</Name>
+						<Type>Real</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataMethod>remainAmountCur</DataMethod>
+						<DataSource>ETGPaymentUploaderTable</DataSource>
+						<Label>Balance Amount</Label>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGPaymentUploaderTable_CurrencyCode</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>CurrencyCode</DataField>
+						<DataSource>ETGPaymentUploaderTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormDateControl">
+						<Name>ETGPaymentUploaderTable_SettlementDate</Name>
+						<Type>Date</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>SettlementDate</DataField>
+						<DataSource>ETGPaymentUploaderTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormComboBoxControl">
+						<Name>ETGPaymentUploaderTable_AccountType</Name>
+						<Type>ComboBox</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>AccountType</DataField>
+						<DataSource>ETGPaymentUploaderTable</DataSource>
+						<Items />
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormCheckBoxControl">
+						<Name>ETGPaymentUploaderTable_Validated</Name>
+						<Type>CheckBox</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Validated</DataField>
+						<DataSource>ETGPaymentUploaderTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormCheckBoxControl">
+						<Name>ETGPaymentUploaderTable_Posted</Name>
+						<Type>CheckBox</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Posted</DataField>
+						<DataSource>ETGPaymentUploaderTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormCheckBoxControl">
+						<Name>ETGPaymentUploaderTable_Reversed</Name>
+						<Type>CheckBox</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Reversed</DataField>
+						<DataSource>ETGPaymentUploaderTable</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormDateControl">
+						<Name>ETGPaymentUploaderTable_TransDate</Name>
+						<Type>Date</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>TransDate</DataField>
+						<DataSource>ETGPaymentUploaderTable</DataSource>
+					</AxFormControl>
+				</Controls>
+				<Style>Tabular</Style>
+			</AxFormControl>
+		</Controls>
+	</Design>
+	<Parts />
+</AxForm>

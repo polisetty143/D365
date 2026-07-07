@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchasePurchLineForm_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formDataSourceStr(PurchTable, PurchLine))]
+final class ETGPurchasePurchLineForm_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>write</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// 
+    /// </summary>
+    public void write()
+    {
+        next write();
+
+        if(curExt() == "O014")
+        {
+            PurchLine line, purchLine;
+            PurchTable header, headerUpd, currentHeader;
+            FormDataSource fds, fdsHeader;
+
+            line      = this.cursor();
+            header    = line.purchTable();
+            fdsHeader = this.formRun().dataSource(formDataSourceStr(PurchTable, PurchTable));
+        
+            if(line.DefaultDimension != header.DefaultDimension)
+            {
+                select firstonly RecId from purchLine order by LineNumber asc
+                    where purchLine.PurchId == header.PurchId;
+                if(purchLine.RecId == line.RecId)
+                {
+                    DialogButton diagBut;
+
+                    str strMessage = 'Do you want to copy financial dimension from line to header?';
+                    str strTitle   = 'Copy financial dimension';
+
+                    diagBut = Box::yesNo(strMessage, DialogButton::No, strTitle);
+
+                    if(diagBut == DialogButton::Yes)
+                    {
+                        PurchId currentPurchId =  header.PurchId;
+                        ttsBegin;
+                        header.skipDataMethods(true);
+                        header.selectForUpdate(true);
+                        header.DefaultDimension = line.DefaultDimension;
+                        header.doUpdate();
+                        ttsCommit;
+                        fdsHeader.reread();
+                        fdsHeader.research(true);
+
+                        currentHeader = PurchTable::find(currentPurchId);
+                        fdsHeader.findRecord(currentHeader);
+                        
+                        Info("Financial dimesnions has been copied to header.");
+
+                    }
+
+                }
+                   
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

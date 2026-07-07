@@ -1,0 +1,1145 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_CustVendBalanceList</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Legacy aging engine class.
+/// </summary>
+/// <remarks>
+/// All the calculations are now done in <c>CustVendAgingCalculation</c> and it's derived classes.
+/// <c>ETG_CustVendBalanceList</c> will be deprecated in future, when application usages will be updated also.
+/// </remarks>
+abstract class ETG_CustVendBalanceList
+{
+    
+
+    // In the following:
+    // 0 = Balance(?)
+    // 1 = total of all aging buckets(?)
+    // 2..maxColumns = total by aging bucket
+    AmountMST balanceAge[ETG_CustVendBalanceList::numOfBalanceAge()];
+
+    Map lineToCounterMap;
+
+    ETG_AccountSumMap tmpAccountSum;
+    TransDate balanceDate;
+    TransDate transactionDate;
+    NoYes payments;
+    NoYes printReversed;
+    NoYes details;
+    ForwardBackwardPrinting direction;
+    CustVendReportName agingBucket;
+    int agingBucketCount;
+    boolean updateCollectionsStatus;
+    CustAgingDate agingDate;
+    NoYes excludeZeroBalance;
+    NoYes excludeNegativeBalance;
+    CustVendAgingPeriodScaleTmp agingPeriodScaleTmp;
+    CustVendAgingCalculation agingCalculation;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>calculateDetails</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculates the aging results and stores them in the class level <c>AccountSumMap</c> table buffer.
+    /// </summary>
+    /// <param name="_custVendTable">
+    ///    The <c>CustVendTable</c> table buffer that represents the account for which aging should be run.
+    /// </param>
+    /// <remarks>
+    ///    This method calculates both accounting currency and transaction currency amounts. The aging results
+    ///    can be accessed from the <c>initTmpAccountSum</c> method, the <c>parmTmpAccountSum</c> method or the
+    ///    <c>getBalanceByLineNum</c> method.
+    /// </remarks>
+    abstract void calculateDetails(CustVendTable _custVendTable)
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>releaseTempTables</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///     Explicitly releases temp tables used in this class.
+    /// </summary>
+    /// <remarks>
+    ///    Aging calculations create temp tables which are not released in a timely fashion.
+    ///    The <c>releaseTempTables</c> method should to be called immediately after an aging calculations is completed and the results consumed.
+    /// </remarks>
+    abstract void releaseTempTables()
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateDetailsCur</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Calculates the aging results and stores them in the class level <c>AccountSumMap</c> table buffer.
+    /// </summary>
+    /// <param name="_custVendTable">
+    ///    The <c>CustVendTable</c> table buffer that represents the account for which aging should be run.
+    /// </param>
+    /// <remarks>
+    ///    This method calculates only the transaction currency amounts. The aging results can be accessed from
+    ///    the <c>initTmpAccountSum</c> method, the <c>parmTmpAccountSum</c> method or the <c>getBalanceByLineNum</c> method.
+    /// </remarks>
+    void calculateDetailsCur(CustVendTable _custVendTable)
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateDetailsForMultiple</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Calculates the aging results and stores them in the class level <c>AccountSumMap</c> table buffer.
+    /// </summary>
+    /// <param name="_queryRun">
+    ///    The set of customers or vendors to process.
+    /// </param>
+    /// <param name="_transactionQuery">
+    ///    The set of customers or vendors transactions to process if any transactional ranges have been specified.
+    /// </param>
+    /// <param name="_withAmountCur">
+    ///    A boolean value which indicates if amounts in transaction currency need to be calculated.
+    /// </param>
+    /// <param name="_withAmountMst">
+    ///    A boolean value indicates if amounts in accounting currency need to be calculated.
+    /// </param>
+    /// <remarks>
+    ///    The aging results can be accessed from the <c>initTmpAccountSum</c> method, the <c>parmTmpAccountSum</c>
+    ///    method or the <c>getBalanceByLineNum</c> method. The accounting and transaction currency amounts calculated
+    ///    will be determined by the parameters passed to this method.
+    /// </remarks>
+    abstract void calculateDetailsForMultiple(QueryRun _queryRun, Query _transactionQuery = null, boolean _withAmountCur = true, boolean _withAmountMst = true)
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateDetailsSrl</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Calculates the aging results and stores them in the class level <c>AccountSumMap</c> table buffer.
+    /// </summary>
+    /// <param name="_accountNum">
+    ///    The account for which aging should be run.
+    /// </param>
+    /// <returns>
+    ///    An <c>AccountSumMap</c> table buffer that stores the aging results.
+    /// </returns>
+    /// <remarks>
+    ///    This method calculates both accounting currency and transaction currency amounts. The aging results
+    ///    can be accessed from the <c>initTmpAccountSum</c> method, the <c>parmTmpAccountSum</c> method or the
+    ///    <c>getBalanceByLineNum</c> method.
+    /// </remarks>
+    abstract ETG_AccountSumMap calculateDetailsSrl(CustVendAC _accountNum)
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>enddate</Name>
+				<Source><![CDATA[
+    TransDate enddate(Counter _counter)
+    {
+        TransDate enddate;
+
+        if (_counter)
+        {
+            if (direction == ForwardBackwardPrinting::Backward)
+            {
+                _counter = agingBucketCount - _counter + 1;
+            }
+            else
+            {
+                _counter = _counter - 1;
+            }
+
+            select maxOf(TransDate) from agingPeriodScaleTmp
+                where agingPeriodScaleTmp.BucketNumber == _counter;
+
+            enddate = agingPeriodScaleTmp.TransDate;
+        }
+
+        return enddate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getAgedBy</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Determines which date will be used to assign aging buckets to transactions.
+    /// </summary>
+    /// <returns>
+    /// Due date, Document date or Transaction date.
+    /// </returns>
+    abstract protected DateTransactionDuedate getAgedBy()
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getAgingIndicatorForDate</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Returns an aging indicator for the provided transaction date.
+    /// </summary>
+    /// <param name="_transDate">
+    ///    The date to use to age the transaction.
+    /// </param>
+    /// <returns>
+    ///    A <c>CustAgingIndicator</c> enumeration value.
+    /// </returns>
+    /// <remarks>
+    ///    A <c>CustAgingIndicator::CustomColor</c> enumeration value specifies the custom color that is used.
+    ///    The enumeration value is the first element in the container and the color is the second.
+    /// </remarks>
+    public CustAgingIndicator getAgingIndicatorForDate(TransDate _transDate)
+    {
+        // Based on the transaction date, get the appropriate aging indicator
+        CustAgingIndicator agingIndicator = CustAgingIndicator::None;
+
+        select firstonly agingPeriodScaleTmp where agingPeriodScaleTmp.TransDate == _transDate;
+
+        if (agingPeriodScaleTmp)
+        {
+            return agingPeriodScaleTmp.AgingIndicator;
+        }
+        else
+        {
+            // Based on the _transDate not being found directly for that given date, the only other options that are valid are either
+            // dateMax or dateNull.
+            select firstOnly TransDate, AgingIndicator from agingPeriodScaleTmp where agingPeriodScaleTmp.TransDate > _transDate;
+
+            if (agingPeriodScaleTmp && agingPeriodScaleTmp.TransDate == dateMax())
+            {
+                return agingPeriodScaleTmp.AgingIndicator;
+            }
+            else
+            {
+                select firstOnly TransDate, AgingIndicator from agingPeriodScaleTmp where agingPeriodScaleTmp.TransDate < _transDate;
+
+                if (agingPeriodScaleTmp && agingPeriodScaleTmp.TransDate == dateNull())
+                {
+                    return agingPeriodScaleTmp.AgingIndicator;
+                }
+            }
+        }
+
+        return agingIndicator;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getBalanceByLineNum</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Retrieves the aging bucket balance based on the <c>StatRepIntervalLine</c> table line number.
+    /// </summary>
+    /// <param name="_statRepIntervalLineNum">
+    ///    The line number of the <c>StatRepIntervaleLine</c> record.
+    /// </param>
+    /// <param name="_accountNum">
+    ///     Customer or vendor required.
+    /// </param>
+    /// <returns>
+    ///    The balance amount for the aging bucket that is specified by the line number.
+    /// </returns>
+    /// <remarks>
+    ///    The amounts returned are represented as accounting currency amounts. Prior to calling this method,
+    ///    call the appropriate method prefixed with calculateDetails. Not all of these methods calculate accounting
+    ///    currency amounts, which can impact the balances shown here.
+    /// </remarks>
+    public AmountMST getBalanceByLineNum(LineNum _statRepIntervalLineNum, AccountNum _accountNum)
+    {
+        return conpeek(this.getBalances(_accountNum), lineToCounterMap.lookup(_statRepIntervalLineNum) - 1);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getBalances</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Retrieves all aging bucket balances for an account.
+    /// </summary>
+    /// <param name="_accountNum">
+    ///     A customer or vendor, required.
+    /// </param>
+    /// <returns>
+    ///    The balance amounts in a container, [Balance02, Balance03, ..., Balance07].
+    /// </returns>
+    /// <remarks>
+    ///    The amounts returned are represented as accounting currency amounts. Prior to calling this method,
+    ///    call the appropriate method prefixed with calculateDetails. Not all of these methods calculate accounting
+    ///    currency amounts, which can impact the balances shown here.
+    /// </remarks>
+    public container getBalances(AccountNum _accountNum)
+    {
+        QueryRun qr = new QueryRun(this.buildGetBalancesQuery(_accountNum));
+        qr.setCursor(tmpAccountSum as Common);
+
+        qr.next();
+
+        tmpAccountSum = qr.get(tmpAccountSum.TableId);
+
+        Array balanceList = this.buildBalanceListForAccount(tmpAccountSum);
+        container balances;
+
+        for (int i = 1; i <= balanceList.lastIndex(); i++)
+        {
+            balances += balanceList.value(i);
+        }
+
+        return balances;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buildBalanceListForAccount</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Builds the list of balance field values ordered from [Balance02, Balance03,..., Balance07]
+    /// </summary>
+    /// <param name = "_tmpAccountSum">The map containing the summed balance values.</param>
+    /// <returns>An array of the balance values.</returns>
+    protected Array buildBalanceListForAccount(ETG_AccountSumMap _tmpAccountSum)
+    {
+        Array balances = new Array(Types::Real);
+        balances.value(1, _tmpAccountSum.Balance02);
+        balances.value(2, _tmpAccountSum.Balance03);
+        balances.value(3, _tmpAccountSum.Balance04);
+        balances.value(4, _tmpAccountSum.Balance05);
+        balances.value(5, _tmpAccountSum.Balance06);
+        balances.value(6, _tmpAccountSum.Balance07);
+        balances.value(7, _tmpAccountSum.Balance08);
+        balances.value(8, _tmpAccountSum.Balance09);
+        balances.value(9, _tmpAccountSum.Balance10);
+
+        return balances;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buildGetBalancesQuery</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Builds the query used to sum balances for an account.
+    /// </summary>
+    /// <param name = "_accountNum">The filtering account.</param>
+    /// <returns>The query.</returns>
+    protected Query buildGetBalancesQuery(AccountNum _accountNum)
+    {
+        Query q = new Query();
+
+        QueryBuildDataSource qbds = q.addDataSource(tmpAccountSum.TableId);
+        qbds.addRange(fieldName2Id(tmpAccountSum.TableId, fieldStr(ETG_AccountSumMap, AccountNum))).value(queryValue(_accountNum));
+
+        qbds.fields().clearFieldList();
+
+        qbds.addSelectionField(fieldName2Id(tmpAccountSum.TableId, fieldStr(ETG_AccountSumMap, Balance02)), SelectionField::Sum);
+        qbds.addSelectionField(fieldName2Id(tmpAccountSum.TableId, fieldStr(ETG_AccountSumMap, Balance03)), SelectionField::Sum);
+        qbds.addSelectionField(fieldName2Id(tmpAccountSum.TableId, fieldStr(ETG_AccountSumMap, Balance04)), SelectionField::Sum);
+        qbds.addSelectionField(fieldName2Id(tmpAccountSum.TableId, fieldStr(ETG_AccountSumMap, Balance05)), SelectionField::Sum);
+        qbds.addSelectionField(fieldName2Id(tmpAccountSum.TableId, fieldStr(ETG_AccountSumMap, Balance06)), SelectionField::Sum);
+        qbds.addSelectionField(fieldName2Id(tmpAccountSum.TableId, fieldStr(ETG_AccountSumMap, Balance07)), SelectionField::Sum);
+        qbds.addSelectionField(fieldName2Id(tmpAccountSum.TableId, fieldStr(ETG_AccountSumMap, Balance08)), SelectionField::Sum);
+        qbds.addSelectionField(fieldName2Id(tmpAccountSum.TableId, fieldStr(ETG_AccountSumMap, Balance09)), SelectionField::Sum);
+        qbds.addSelectionField(fieldName2Id(tmpAccountSum.TableId, fieldStr(ETG_AccountSumMap, Balance10)), SelectionField::Sum);
+
+        return q;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getCustVendTransAging</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the <c>CustVendTransAging</c> buffer.
+    /// </summary>
+    /// <returns>
+    /// The <c>CustVendTransAging</c> buffer with customers or vendors that will be aged.
+    /// </returns>
+    Public CustVendTransAging getCustVendTransAging()
+    {
+        return agingCalculation.getCustVendTransAging();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getDescription</Name>
+				<Source><![CDATA[
+    Description getDescription(Counter _counter)
+    {
+        Description description;
+
+        if (_counter)
+        {
+            if (direction == ForwardBackwardPrinting::Backward)
+            {
+                _counter = agingBucketCount - _counter + 1;
+            }
+            else
+            {
+                _counter -= 1;
+            }
+
+            select firstOnly BucketDescription from agingPeriodScaleTmp
+                where agingPeriodScaleTmp.BucketNumber == _counter;
+
+            description = agingPeriodScaleTmp.BucketDescription;
+        }
+
+        return description;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getLineNum</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Retrieves the <c>StatRepIntervalLine</c> table line number that relates to the specified aging
+    ///    bucket.
+    /// </summary>
+    /// <param name="_counter">
+    ///    The aging bucket.
+    /// </param>
+    /// <returns>
+    ///    The <c>StatRepIntervalLine</c> table line number that is related to the specified aging bucket;
+    ///    otherwise, zero.
+    /// </returns>
+    /// <remarks>
+    ///    This can be used to provide a correlation between the aging bucket information and the actual aging
+    ///    bucket used in the <c>StatRepIntervalLine</c> table. This is helpful when trying to
+    ///    programmatically determine how the buckets relate to the aging bucket definitions.
+    /// </remarks>
+    public LineNum getLineNum(Counter _counter)
+    {
+        var enumerator = lineToCounterMap.getEnumerator();
+
+        while (enumerator.moveNext())
+        {
+            if (_counter == enumerator.currentValue())
+            {
+                return enumerator.currentKey();
+            }
+        }
+
+        return 0;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getPositionByLineNum</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Retrieves the aging bucket position based on the <c>StatRepIntervalLine</c> table line number.
+    /// </summary>
+    /// <param name="_statRepIntervalLineNum">
+    ///    The line number of the record in the <c>StatRepIntervaleLine</c> table.
+    /// </param>
+    /// <returns>
+    ///    The position of the specified aging bucket.
+    /// </returns>
+    public CustAgingLinePosition getPositionByLineNum(LineNum _statRepIntervalLineNum)
+    {
+        // The first entry in the lineToCounterMap map is reserved for a running total of
+        // all open transactions so we need to remove that "offset".
+        return lineToCounterMap.lookup(_statRepIntervalLineNum) - 1;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initTmpAccountSum</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Returns the first record of the <c>AccountSumMap</c> table buffer ordered by transaction date.
+    /// </summary>
+    /// <returns>
+    ///    The first record of the <c>AccountSumMap</c> table buffer ordered by transaction date.
+    /// </returns>
+    /// <remarks>
+    ///    Prior to calling this method, call the appropriate method prefixed with calculateDetails to create data in the
+    ///    <c>AccountSumMap</c> table buffer. These methods don't necessarily calculate accounting currency and
+    ///    transaction currency amounts in every case, so that needs to be considered when using the amounts
+    ///    from the buffer.
+    /// </remarks>
+    public ETG_AccountSumMap initTmpAccountSum()
+    {
+        select tmpAccountSum order by TransDate;
+        return tmpAccountSum;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertAgingBucket</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Inserts data about a specified aging period definition.
+    /// </summary>
+    /// <param name="_agingBucket">
+    /// The aging period definition.
+    /// </param>
+    /// <remarks>
+    /// Assigns an integer to each aging bucket.
+    /// </remarks>
+    void insertAgingBucket(CustVendReportName _agingBucket)
+    {
+        StatRepIntervalLine line;
+        Counter counter = 2;
+
+        while select LineNum from line
+            order by LineNum desc
+            where line.Name == _agingBucket
+        {
+            lineToCounterMap.insert(line.LineNum, counter);
+            counter++;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertIntoTmpAccountSum</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Translates output from <c>CustVendAgingCalculatedTmp</c> to <c>CustTmpAccountSum</c> or <c>VendTmpAccountSum</c>
+    /// </summary>
+    /// <param name="_agingCalculation">
+    /// An instance of <c>CustVendAgingCalculation</c>.
+    /// </param>
+    /// <param name="_withAmountCur">
+    /// Translate amounts in transaction currency?
+    /// </param>
+    /// <param name="_withAmountMST">
+    /// Translate amounts in accounting currency?
+    /// </param>
+    /// <param name="_toCustVendTable">
+    /// A <c>CustVendTable</c> table buffer for the customer or vendor to associate the aging with.
+    /// </param>
+    /// <remarks>
+    /// If _toCustVendTable is missing the results are recorded under the original customer/vendor. The _toCustVendTable is used for
+    /// cross-company calculations where the aging for multiple customers/vendors in different companies are accumulated to one
+    /// customer/vendor. When used for cross-company aging, only one customer/vendor can be aged at a time.
+    /// </remarks>
+    [SysObsolete('The insertIntoTmpAccountSum method is obsolete. Use the insertIntoTmpAccountSumV2 method instead.', false, 30\6\2020)]
+    protected abstract void insertIntoTmpAccountSum(CustVendAgingCalculation _agingCalculation, boolean _withAmountCur = true, boolean _withAmountMST = true, CustVendTable _toCustVendTable = null)
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertIntoTmpAccountSumV2</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Translates output from the <c>CustVendAgingCalculatedTmp</c> table to the <c>CustTmpAccountSum</c> table or the <c>VendTmpAccountSum</c> table.
+    /// </summary>
+    /// <param name="_agingCalculation">
+    /// An instance of <c>CustVendAgingCalculation</c> class.
+    /// </param>
+    /// <param name="_withAmountCur">
+    /// Translate amounts in transaction currency?
+    /// </param>
+    /// <param name="_withAmountMST">
+    /// Translate amounts in accounting currency?
+    /// </param>
+    /// <param name="_withAmountMSTSecondary">
+    /// Translate amounts in reporting currency?
+    /// </param>
+    /// <param name="_toCustVendTable">
+    /// A <c>CustVendTable</c> table buffer for the customer or vendor to associate the aging with.
+    /// </param>
+    /// <remarks>
+    /// If _toCustVendTable is missing the results are recorded under the original customer/vendor. The _toCustVendTable is used for
+    /// cross-company calculations where the aging for multiple customers/vendors in different companies are accumulated to one
+    /// customer/vendor. When used for cross-company aging, only one customer/vendor can be aged at a time.
+    /// </remarks>
+    protected void insertIntoTmpAccountSumV2(CustVendAgingCalculation _agingCalculation, boolean _withAmountCur = true, boolean _withAmountMST = true, boolean _withAmountMSTSecondary = true, CustVendTable _toCustVendTable = null)
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>new</Name>
+				<Source><![CDATA[
+    void new(
+            PositiveDays _interval,
+            TransDate _transactionDate = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()),
+            TransDate _zeroDate = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()),
+            NoYes _payments = NoYes::Yes,
+            DayMonth _period = DayMonth::Day,
+            ForwardBackwardPrinting _direction = ForwardBackwardPrinting::Backward,
+            CustVendReportName _agingBucket = '',
+            NoYes _printReversed = NoYes::No,
+            NoYes _details = NoYes::Yes,
+            NoYes _excludeZeroBalance = NoYes::No,
+            NoYes _excludeNegativeBalance = NoYes::No,
+            boolean _updateCollectionsStatus = true)
+    {
+        transactionDate = _transactionDate;
+        payments = _payments;
+        printReversed = _printReversed;
+        details = _details;
+        agingBucket = _agingBucket;
+        direction = _direction;
+        excludeZeroBalance = _excludeZeroBalance;
+        excludeNegativeBalance = _excludeNegativeBalance;
+        updateCollectionsStatus = _updateCollectionsStatus;
+        agingDate = _zeroDate;
+
+        lineToCounterMap = new Map(Types::Real, Types::Integer);
+
+        if (agingBucket)
+        {
+            agingPeriodScaleTmp = CustVendAgingPeriodScaleTmp::calcFromAgingPeriodDefinition(agingBucket, _zeroDate);
+            // filling in description and aging indicator
+            this.insertAgingBucket(agingBucket);
+        }
+        else
+        {
+            agingPeriodScaleTmp = CustVendAgingPeriodScaleTmp::calcFromStartDateAndInterval(_interval, _zeroDate, _period, direction);
+        }
+
+        agingBucketCount = CustVendAgingPeriodScaleTmp::getBucketCount(agingPeriodScaleTmp) + 1;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmTmpAccountSum</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Gets or sets <c>AccountSumMap</c> table buffer.
+    /// </summary>
+    /// <param name="_tmpAccountSum">
+    ///    The <c>AccountSumMap</c> table buffer used to set.
+    /// </param>
+    /// <param name="_returnAmountMST">
+    ///    A boolean value which indicates that amounts in accounting currency need to be returned.
+    /// </param>
+    /// <returns>
+    ///    The <c>AccountSumMap</c> table buffer.
+    /// </returns>
+    /// <remarks>
+    ///    Prior to calling this method, call the appropriate method prefixed with calculateDetails to create data in the
+    ///    <c>AccountSumMap</c> table buffer. These methods don't necessarily calculate accounting currency and
+    ///    transaction currency amounts in every case, so that needs to be considered when using the amounts
+    ///    from the buffer.
+    /// </remarks>
+    public abstract ETG_AccountSumMap parmTmpAccountSum(ETG_AccountSumMap _tmpAccountSum, boolean _returnAmountMST = true)
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>resetTmpAccountSum</Name>
+				<Source><![CDATA[
+    public void resetTmpAccountSum()
+    {
+        tmpAccountSum = null;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>startdate</Name>
+				<Source><![CDATA[
+    TransDate startdate(Counter _counter)
+    {
+        TransDate startdate;
+
+        if (_counter)
+        {
+            if (direction == ForwardBackwardPrinting::Backward)
+            {
+                _counter = agingBucketCount - _counter + 1;
+            }
+            else
+            {
+                _counter = _counter - 1;
+            }
+
+            select minOf(TransDate) from agingPeriodScaleTmp
+                where agingPeriodScaleTmp.BucketNumber == _counter;
+
+            startdate = agingPeriodScaleTmp.TransDate;
+        }
+        return startdate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static ETG_CustVendBalanceList construct(SysModule _sysModule,
+                                                DateTransactionDuedate _dateTransactionDuedate,
+                                                PositiveDays _range,
+                                                TransDate _transActionDate = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()),
+                                                TransDate _zeroDate = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()),
+                                                NoYes _payments = NoYes::Yes, // Places payment in the usual column
+                                                DayMonth _period = DayMonth::Day,
+                                                ForwardBackwardPrinting _direction = ForwardBackwardPrinting::Backward,
+                                                CustVendReportName _agingBucket = '',
+                                                NoYes _printReversed = NoYes::Yes,
+                                                NoYes _details = NoYes::Yes,
+                                                List _billingClass = null,
+                                                NoYes _inclTransWithNoBillingClass = NoYes::No,
+                                                NoYes _excludeZeroBalance = NoYes::No,
+                                                NoYes _excludeNegativeBalance = NoYes::No,
+                                                boolean _updateCollectionsStatus = true)
+    {
+        ETG_CustVendBalanceList balanceList;
+
+        switch (_sysModule)
+        {
+            case SysModule::Cust :
+                switch (_dateTransactionDuedate)
+                {
+                    case DateTransactionDuedate::DocumentDate :
+                            balanceList = new ETG_CustBalancelistDocumentDate(
+                                _range,
+                                    _transActionDate,
+                                    _zeroDate,
+                                    _payments,
+                                    _period,
+                                    _direction,
+                                    _agingBucket,
+                                    _printReversed,
+                                    _details,
+                                    _excludeZeroBalance,
+                                    _excludeNegativeBalance
+                                    );
+                            break;
+
+                    case DateTransactionDuedate::TransactionDate :
+                            balanceList = new ETG_CustBalancelistTransactionDate(
+                                _range,
+                                    _transActionDate,
+                                    _zeroDate,
+                                    _payments,
+                                    _period,
+                                    _direction,
+                                    _agingBucket,
+                                    _printReversed,
+                                    _details,
+                                    _excludeZeroBalance,
+                                    _excludeNegativeBalance
+                                    );
+                            break;
+
+                    default :
+                            balanceList = new ETG_CustBalanceList(
+                                _range,
+                                    _transActionDate,
+                                    _zeroDate,
+                                    _payments,
+                                    _period,
+                                    _direction,
+                                    _agingBucket,
+                                    _printReversed,
+                                    _details,
+                                    _excludeZeroBalance,
+                                    _excludeNegativeBalance
+                                   );
+                            break;
+                }
+                break;
+
+            case SysModule::Vend :
+                switch (_dateTransactionDuedate)
+                {
+                    case DateTransactionDuedate::DocumentDate :
+                        balanceList = new ETG_VendBalancelistDocumentdate(
+                                _range,
+                                _transActionDate,
+                                _zeroDate,
+                                _payments,
+                                _period,
+                                _direction,
+                                _agingBucket,
+                                _printReversed,
+                                _details,
+                                _excludeZeroBalance,
+                                _excludeNegativeBalance);
+                        break;
+
+                    case DateTransactionDuedate::TransactionDate :
+                        balanceList = new ETG_VendBalancelistTransactionDate(
+                                _range,
+                                _transActionDate,
+                                _zeroDate,
+                                _payments,
+                                _period,
+                                _direction,
+                                _agingBucket,
+                                _printReversed,
+                                _details,
+                                _excludeZeroBalance,
+                                _excludeNegativeBalance);
+                        break;
+
+                    default:
+                        balanceList = new ETG_VendbalanceList(
+                                _range,
+                                _transActionDate,
+                                _zeroDate,
+                                _payments,
+                                _period,
+                                _direction,
+                                _agingBucket,
+                                _printReversed,
+                                _details,
+                                _excludeZeroBalance,
+                                _excludeNegativeBalance);
+                }
+                break;
+
+            default :
+                throw error(Error::wrongUseOfFunction(funcName()));
+        }
+
+        return balanceList;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>description</Name>
+				<Source><![CDATA[
+    public static ClassDescription description()
+    {
+        return "@SYS26168";
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>numOfBalanceAge</Name>
+				<Source><![CDATA[
+    public static Counter numOfBalanceAge()
+    {
+        const Counter MaximumNumberOfAgingBalances = 9;
+        return MaximumNumberOfAgingBalances;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateAgingPeriodDefinition</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Validates the aging period definition and corresponding aging periods.
+    /// </summary>
+    /// <param name="_agingPeriodDefinition">
+    /// The aging period definition to validate.
+    /// </param>
+    /// <param name="_throwError">
+    /// true if an exception should be thrown on the first error; false if multiple errors should be returned through the infolog class.
+    /// </param>
+    /// <param name="_showMessages">
+    /// true if error messages should be shown in the infolog class; otherwise, false.
+    /// </param>
+    /// <param name="_showAgingPeriodName">
+    /// true if the infolog should show what aging period definition is being validated; otherwise, false.
+    /// </param>
+    /// <returns>
+    /// true if the aging period definition is valid; otherwise, false.
+    /// </returns>
+    /// <remarks>
+    /// Validation consists of making sure the aging period definition exists and that there is at least
+    /// one to six aging periods that make up that aging period definition.
+    /// </remarks>
+    /// <exception cref="Exception::Error">
+    /// The aging period definition is not valid.
+    /// </exception>
+    public static boolean validateAgingPeriodDefinition(CustVendReportName _agingPeriodDefinition, boolean _throwError, boolean _showMessages = true, boolean _showAgingPeriodName = false)
+    {
+        var isValid = true;
+        var showedAgingPeriod = false;
+
+        if (_agingPeriodDefinition)
+        {
+            if (!StatRepInterval::exist(_agingPeriodDefinition))
+            {
+                // The specified aging period definition no longer exists.
+                isValid = ETG_CustVendBalanceList::handleError(_agingPeriodDefinition, "@SYS132604", _throwError, _showMessages, _showAgingPeriodName, showedAgingPeriod);
+                showedAgingPeriod = !showedAgingPeriod && _showAgingPeriodName;
+            }
+            else
+            {
+                var numAgingPeriods = StatRepIntervalLine::countLines(_agingPeriodDefinition);
+
+                if (!numAgingPeriods)
+                {
+                    // No aging periods found
+                    isValid = ETG_CustVendBalanceList::handleError(_agingPeriodDefinition, "@SYS90115", _throwError, _showMessages, _showAgingPeriodName, showedAgingPeriod);
+                    showedAgingPeriod = !showedAgingPeriod && _showAgingPeriodName;
+                }
+
+                if (numAgingPeriods >= ETG_CustVendBalanceList::numOfBalanceAge())
+                {
+                    // Too many aging periods found
+                    isValid = ETG_CustVendBalanceList::handleError(_agingPeriodDefinition, "@SYS90116", _throwError, _showMessages, _showAgingPeriodName, showedAgingPeriod);
+                    showedAgingPeriod = !showedAgingPeriod && _showAgingPeriodName;
+                }
+            }
+        }
+
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>handleError</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Shows and throws error messages based on the parameters
+    /// </summary>
+    /// <param name = "_agingPeriodDefinition">The aging period definition to show name of</param>
+    /// <param name = "_errorMessage">The error message</param>
+    /// <param name = "_throwError">Throw an error</param>
+    /// <param name = "_showMessages">Show the error message in info log</param>
+    /// <param name = "_showAgingPeriodName">Show the aging peroid name</param>
+    /// <param name = "_showedAgingPeriod">Have shown the aging period name</param>
+    /// <returns>False</returns>
+    private static boolean handleError(CustVendReportName _agingPeriodDefinition,
+        str _errorMessage,
+        boolean _throwError,
+        boolean _showMessages = true,
+        boolean _showAgingPeriodName = false,
+        boolean _showedAgingPeriod = false)
+    {
+        boolean isValid = true;
+        if (!_showedAgingPeriod && _showAgingPeriodName)
+        {
+            checkFailed(strFmt("@SYS137298", _agingPeriodDefinition));
+        }
+
+        if (_throwError)
+        {
+            throw error(_errorMessage);
+        }
+        else if (_showMessages)
+        {
+            isValid = checkFailed(_errorMessage);
+        }
+        else
+        {
+            isValid = false;
+        }
+
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateAgingPeriodDefinitionByCompany</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Validates the aging period definition and corresponding aging periods for a company.
+    /// </summary>
+    /// <param name="_agingPeriodDefinition">
+    /// The aging period definition to validate.
+    /// </param>
+    /// <param name="_company">The company to lookup the aging period in</param>
+    /// <param name="_throwError">
+    /// true if an exception should be thrown on the first error; false if multiple errors should be returned through the infolog class.
+    /// </param>
+    /// <param name="_showMessages">
+    /// true if error messages should be shown in the infolog class; otherwise, false.
+    /// </param>
+    /// <param name="_showAgingPeriodName">
+    /// true if the infolog should show what aging period definition is being validated; otherwise, false.
+    /// </param>
+    /// <returns>
+    /// true if the aging period definition is valid; otherwise, false.
+    /// </returns>
+    /// <remarks>
+    /// Validation consists of making sure the aging period definition exists and that there is at least
+    /// one to six aging periods that make up that aging period definition.
+    /// </remarks>
+    /// <exception cref="Exception::Error">
+    /// The aging period definition is not valid.
+    /// </exception>
+    public static boolean validateAgingPeriodDefinitionByCompany(CustVendReportName _agingPeriodDefinition, SelectableDataArea _company, boolean _throwError, boolean _showMessages = true, boolean _showAgingPeriodName = false)
+    {
+        var isValid = true;
+        var showedAgingPeriod = false;
+
+        if (_agingPeriodDefinition)
+        {
+            if (!StatRepInterval::existsInCompany(_agingPeriodDefinition, _company))
+            {
+                // The specified aging period definition no longer exists.
+                isValid = ETG_CustVendBalanceList::handleError(_agingPeriodDefinition, "@SYS132604", _throwError, _showMessages, _showAgingPeriodName, showedAgingPeriod);
+                showedAgingPeriod = !showedAgingPeriod && _showAgingPeriodName;
+            }
+            else
+            {
+                var numAgingPeriods = StatRepIntervalLine::countLinesInCompany(_agingPeriodDefinition, _company);
+
+                if (!numAgingPeriods)
+                {
+                    // No aging periods found
+                    isValid = ETG_CustVendBalanceList::handleError(_agingPeriodDefinition, "@SYS90115", _throwError, _showMessages, _showAgingPeriodName, showedAgingPeriod);
+                    showedAgingPeriod = !showedAgingPeriod && _showAgingPeriodName;
+                }
+
+                if (numAgingPeriods >= ETG_CustVendBalanceList::numOfBalanceAge())
+                {
+                    // Too many aging periods found
+                    isValid = ETG_CustVendBalanceList::handleError(_agingPeriodDefinition, "@SYS90116", _throwError, _showMessages, _showAgingPeriodName, showedAgingPeriod);
+                    showedAgingPeriod = !showedAgingPeriod && _showAgingPeriodName;
+                }
+            }
+        }
+
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getSpecificSourceCurrency</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Retrieves specific currency values for the given currency code.
+    /// </summary>
+    /// <param name = "_accountNum">Customer or vendor.</param>
+    /// <param name = "_currencyCode">The currency code.</param>
+    /// <param name = "_isSourceCurrency">Currency code is source currency.</param>
+    /// <returns>The currency amounts in a container.</returns>
+    /// <remarks> This method will use accounting currency values if <c>_isSourceCurrency</c> is true and only return balances
+    /// from using the <c>_currencyCode</c>. If source currency is false then it will return balances as ledger currency
+    /// for all currency codes other than the <c>_currencyCode</c> value.</remarks>
+    public container getSpecificSourceCurrency(AccountNum _accountNum, CurrencyCode _currencyCode, boolean _isSourceCurrency)
+    {
+        if (_isSourceCurrency)
+        {
+            select sum(Balance02Cur),
+                sum(Balance03Cur),
+                sum(Balance04Cur),
+                sum(Balance05Cur),
+                sum(Balance06Cur),
+                sum(Balance07Cur)
+            from tmpAccountSum
+            where tmpAccountSum.AccountNum == _accountNum
+                && tmpAccountSum.CurrencyCode == _currencyCode;
+
+            return [tmpAccountSum.Balance02Cur, tmpAccountSum.Balance03Cur, tmpAccountSum.Balance04Cur, tmpAccountSum.Balance05Cur, tmpAccountSum.Balance06Cur, tmpAccountSum.Balance07Cur];
+        }
+        else
+        {
+            select sum(Balance02),
+                    sum(Balance03),
+                    sum(Balance04),
+                    sum(Balance05),
+                    sum(Balance06),
+                    sum(Balance07)
+            from tmpAccountSum
+            where tmpAccountSum.AccountNum == _accountNum
+                && tmpAccountSum.CurrencyCode != _currencyCode;
+
+            return [tmpAccountSum.Balance02, tmpAccountSum.Balance03, tmpAccountSum.Balance04, tmpAccountSum.Balance05, tmpAccountSum.Balance06, tmpAccountSum.Balance07];
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getBalancesReportingCurrency</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Retrieves all aging bucket balances in reporting currency for an account.
+    /// </summary>
+    /// <param name = "_accountNum">A customer or vendor, required.</param>
+    /// <param name = "_currencyCode">The currency code.</param>
+    /// <param name = "_isSourceReportingCurrency">Currency code is source currency.</param>
+    /// <returns>The currency amounts in a container.</returns>
+    /// <remarks> This method will use reporting currency values if <c>_isSourceCurrency</c> is true and only return balances in reporting currency
+    /// from using the <c>_currencyCode</c>. If source currency is false then it will return balances as ledger currency
+    /// for all currency codes other than the <c>_currencyCode</c> value.</remarks>
+    public container getBalancesReportingCurrency(AccountNum _accountNum, CurrencyCode _currencyCode, boolean _isSourceReportingCurrency)
+    {
+        if (_isSourceReportingCurrency)
+        {
+            select sum(Balance02ReportingCurrency),
+                sum(Balance03ReportingCurrency),
+                sum(Balance04ReportingCurrency),
+                sum(Balance05ReportingCurrency),
+                sum(Balance06ReportingCurrency),
+                sum(Balance07ReportingCurrency)
+            from tmpAccountSum
+            where tmpAccountSum.AccountNum == _accountNum
+                && tmpAccountSum.CurrencyCode != _currencyCode;
+
+            return [tmpAccountSum.Balance02ReportingCurrency, tmpAccountSum.Balance03ReportingCurrency, tmpAccountSum.Balance04ReportingCurrency, tmpAccountSum.Balance05ReportingCurrency, tmpAccountSum.Balance06ReportingCurrency, tmpAccountSum.Balance07ReportingCurrency];
+        
+        }
+        else
+        {
+            select sum(Balance02Cur),
+                sum(Balance03Cur),
+                sum(Balance04Cur),
+                sum(Balance05Cur),
+                sum(Balance06Cur),
+                sum(Balance07Cur)
+            from tmpAccountSum
+            where tmpAccountSum.AccountNum == _accountNum
+                && tmpAccountSum.CurrencyCode == _currencyCode;
+
+            return [tmpAccountSum.Balance02Cur, tmpAccountSum.Balance03Cur, tmpAccountSum.Balance04Cur, tmpAccountSum.Balance05Cur, tmpAccountSum.Balance06Cur, tmpAccountSum.Balance07Cur];
+            
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getMaximumAgingBuckets</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Returns maximum number of aging bucket.
+    /// </summary>
+    /// <returns>
+    /// Maximum number of aging bucket.
+    /// </returns>
+    internal static int getMaximumAgingBuckets()
+    {
+        return ETG_CustVendBalanceList::numOfBalanceAge() - 1;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

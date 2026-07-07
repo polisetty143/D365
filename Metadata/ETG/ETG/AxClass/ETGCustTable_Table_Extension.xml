@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCustTable_Table_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This is extension class for table <c>CustTable</c>
+/// </summary>
+[ExtensionOf(tableStr(CustTable))]
+internal final class ETGCustTable_Table_Extension  
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>modifiedField</Name>
+				<Source><![CDATA[
+    public void modifiedField(FieldId _fieldId)
+    {
+        next modifiedField(_fieldId);
+
+        switch (_fieldId)
+        {
+            case fieldNum(CustTable, ETGTradeLimitSalesReal):
+                if (ETGACFParameters::find().EnableTradeLimit == NoYes::Yes)
+                {
+                    this.updateTradeLimitFields();
+                    if (this.ETGTradeLimitSalesReal > 0 && this.ETGApplicableTradeLimit == NoYes::No)
+                    {
+                        this.ETGApplicableTradeLimit = NoYes::Yes;
+                    }
+                }
+                break;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateTradeLimitFields</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///  Calculates the remaining trade limit and Updates the field ETGTradeLimitInCustomerCurrency based on currency exchange.
+    /// </summary>
+    public void updateTradeLimitFields()
+    {
+        Amount originalTradeLimit          = this.orig().ETGTradeLimitSalesReal;
+        Amount originalRemainingTradeLimit = this.orig().ETGRemainingTradeLimitSalesReal;
+        Amount newTradeLimit               = this.ETGTradeLimitSalesReal;
+
+        Amount revisedRemaining = (newTradeLimit - originalTradeLimit) + originalRemainingTradeLimit;
+
+        if (revisedRemaining >= 0)
+        {
+            this.ETGRemainingTradeLimitSalesReal = revisedRemaining;
+        }
+
+        if(this.Currency == Ledger::accountingCurrency())
+        {
+            this.ETGTradeLimitInCustomerCurrency = this.ETGTradeLimitSalesReal;
+        }
+
+        else
+        {
+            CurrencyExchangeHelper currencyExchangeHelper = CurrencyExchangeHelper::newExchangeDate(Ledger::current(), 
+                                                            DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()));
+            this.ETGTradeLimitInCustomerCurrency          = currencyExchangeHelper.calculateCurrencyToCurrency(Ledger::accountingCurrency(),
+                                                                           this.Currency, this.ETGTradeLimitSalesReal, true);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateWrite</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method will validate if Trade limit is greater than Credit limit/ credit max or Remaining trade limit or 0
+    /// </summary>
+    /// <returns></returns>
+    public boolean validateWrite()
+    {
+        boolean isValid = next validateWrite();
+
+        if(isValid && this.ETGApplicableTradeLimit == NoYes::Yes && ETGACFParameters::find().EnableTradeLimit == NoYes::Yes)
+        {
+            if(this.ETGTradeLimitSalesReal < this.CreditMax)
+            {
+                isValid = checkFailed(strFmt("@ETG_New:TradeLimitCustLimitErrorMsg", this.ETGTradeLimitSalesReal, this.CreditMax));
+            }
+            if(this.ETGTradeLimitSalesReal < this.ETGRemainingTradeLimitSalesReal)
+            {
+                isValid = checkFailed(strFmt("@ETG_New:TradeLimitRemainingTradeLimitErrorMsg", this.ETGTradeLimitSalesReal, this.ETGRemainingTradeLimitSalesReal));
+            }
+            if(this.ETGApplicableTradeLimit == NoYes::Yes && this.ETGTradeLimitSalesReal <= 0 )
+            {
+                isValid = checkFailed(strFmt("@ETG_New:TradeLimitCheckBoxLimitBlankError", this.AccountNum));
+            }
+        }
+        return isValid; 
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateField</Name>
+				<Source><![CDATA[
+    boolean validateField(FieldId _fieldId)
+    {
+        boolean ret = next validateField(_fieldId);
+
+        if (ret)
+        {
+            switch (_fieldId)
+            {
+            case fieldNum(CustTable, ETGTradeLimitSalesReal):
+            if (ETGACFParameters::find().EnableTradeLimit == NoYes::Yes)
+                {
+                        Amount newTradeLimit               = this.ETGTradeLimitSalesReal;
+                        Amount originalTradeLimit          = this.orig().ETGTradeLimitSalesReal;
+                        Amount originalRemainingTradeLimit = this.orig().ETGRemainingTradeLimitSalesReal;
+                        Amount revisedRemainingTradeLimit  = (newTradeLimit - originalTradeLimit) + originalRemainingTradeLimit;
+
+                        Amount consumed = originalTradeLimit - originalRemainingTradeLimit;
+
+                        if (revisedRemainingTradeLimit < 0)
+                        {
+                            ret = checkFailed(strFmt(
+                            "@ETG_New:RevisedRemainingTradeLimitNegativeError",
+                            consumed, newTradeLimit, consumed, revisedRemainingTradeLimit, this.AccountNum));
+                        }
+                    }
+                    break;
+            }
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

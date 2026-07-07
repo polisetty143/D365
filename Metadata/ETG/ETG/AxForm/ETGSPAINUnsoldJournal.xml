@@ -1,0 +1,1743 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxForm xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V6">
+	<Name>ETGSPAINUnsoldJournal</Name>
+	<SourceCode>
+		<Methods xmlns="">
+			<Method>
+				<Name>classDeclaration</Name>
+				<Source><![CDATA[
+/// <summary>
+/// Form class <c>ETGSPAINUnsoldJournal</c> for handling the Unsold Journal process in the ETGSPAIN module.
+/// This form manages both source and target inventory dimensions and ensures that only unposted records are editable or deletable.
+/// </summary>
+[Form]
+public class ETGSPAINUnsoldJournal extends FormRun
+{   
+    InventDimCtrl_Frm_EditDimensions inventDimFormSetup;
+    InventDimIssueReceiptFormBuilder    inventDimIssueReceiptFormBuilder;
+
+}
+]]></Source>
+			</Method>
+			<Method>
+				<Name>init</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Initializes the form.
+    /// This method is used to set up the form when it is loaded.
+    /// </summary>
+    public void init()
+    {
+        super();        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addDimensionFieldsToGrid</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adds dimension fields to the grid for managing inventory dimensions.
+    /// </summary>
+    private void addDimensionFieldsToGrid()
+    {
+        inventDimIssueReceiptFormBuilder = InventDimIssueReceiptFormBuilder::newFromParameters(
+            this.form().design().control(formControlStr(ETGSPAINUnsoldJournal, DimensionsGroup)),
+            this.form().dataSource(formDataSourceStr(ETGSPAINUnsoldJournal, InventDim)),
+            this.form().dataSource(formDataSourceStr(ETGSPAINUnsoldJournal, ToInventDim)));
+
+        inventDimIssueReceiptFormBuilder.build();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+		<DataSources xmlns="">
+			<DataSource>
+				<Name>ETGSPAINUnsoldJournalTable</Name>
+				<Methods>
+					<Method>
+						<Name>active</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// Manages the behavior of the data source when records are active, such as enabling or disabling fields based on the posting status.
+        /// </summary>
+        public int active()
+        {
+            int ret;
+        
+            ret = super();
+
+            ETGSPAINUnsoldJournalTable_DS.allowEdit(ETGSPAINUnsoldJournalTable.Posted   == NoYes::No);
+            ETGSPAINUnsoldJournalTable_DS.allowDelete(ETGSPAINUnsoldJournalTable.Posted == NoYes::No);
+
+            ETGSPAINUnsoldJournalCheckPostController.enabled(ETGSPAINUnsoldJournalTable.RecId && ETGSPAINUnsoldJournalTable.Posted == NoYes::No);
+            ETGSPAINUnsoldJournalImportLogController.enabled(ETGSPAINUnsoldJournalTable.RecId && ETGSPAINUnsoldJournalTable.Posted == NoYes::No);
+            ETGSPAINUnsoldJournalImportLogTable.enabled(ETGSPAINUnsoldJournalTable.hasETGSPAINUnsoldJournalImportLogTable());
+
+            ETGSPAINUnsoldJournalTrans_DS.allowCreate(ETGSPAINUnsoldJournalTable.Posted == NoYes::No);
+            ETGSPAINUnsoldJournalTrans_DS.allowEdit(ETGSPAINUnsoldJournalTable.Posted   == NoYes::No);
+            ETGSPAINUnsoldJournalTrans_DS.allowDelete(ETGSPAINUnsoldJournalTable.Posted == NoYes::No);
+
+            InventDim_DS.allowCreate(ETGSPAINUnsoldJournalTable.Posted == NoYes::No);
+            InventDim_DS.allowEdit(ETGSPAINUnsoldJournalTable.Posted   == NoYes::No);
+            ToInventDim_DS.allowCreate(ETGSPAINUnsoldJournalTable.Posted == NoYes::No);
+            ToInventDim_DS.allowEdit(ETGSPAINUnsoldJournalTable.Posted   == NoYes::No);
+        
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields />
+			</DataSource>
+			<DataSource>
+				<Name>ETGSPAINUnsoldJournalTrans</Name>
+				<Methods>
+					<Method>
+						<Name>initValue</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// Initializes the transaction record from the Unsold Journal table.
+        /// </summary>
+        public void initValue()
+        {
+            super();
+
+            ETGSPAINUnsoldJournalTrans.initFromETGSPAINUnsoldJournalTable(ETGSPAINUnsoldJournalTable);
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>validateWrite</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// Validates and writes the inventory dimension and transaction data before saving the record.
+        /// </summary>
+        public boolean validateWrite()
+        {
+            boolean ret;
+
+            ETGSPAINUnsoldJournalTrans.InventDimId = InventDim::findOrCreate(InventDim_ds.cursor()).InventDimId;
+            ETGSPAINUnsoldJournalTrans.ToInventDimId = InventDim::findOrCreate(ToInventDim_ds.cursor()).InventDimId;
+
+            ret = super();
+
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields />
+			</DataSource>
+			<DataSource>
+				<Name>InventDim</Name>
+				<Methods>
+					<Method>
+						<Name>validateWrite</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// Validates and writes the inventory dimension for the current record.
+        /// </summary>
+        public boolean validateWrite()
+        {
+            boolean ret;
+    
+            ret = super();
+
+            ETGSPAINUnsoldJournalTrans.InventDimId = InventDim::findOrCreate(InventDim_ds.cursor()).InventDimId;
+            ETGSPAINUnsoldJournalTrans.write();
+
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields />
+			</DataSource>
+			<DataSource>
+				<Name>ToInventDim</Name>
+				<Methods>
+					<Method>
+						<Name>init</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// Initializes the destination inventory dimension link for transactions.
+        /// </summary>
+        void init()
+        {
+            QueryBuildDataSource qb;
+
+            super();
+
+            qb = this.query().dataSourceName("ToInventDim");
+            qb.clearLinks();
+            qb.addLink(fieldNum(ETGSPAINUnsoldJournalTrans, ToInventDimId),fieldNum(InventDim,InventDimId));
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>validateWrite</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// Validates and writes the destination inventory dimension for the current record.
+        /// </summary>
+        public boolean validateWrite()
+        {
+            boolean ret;
+    
+            ret = super();
+
+            ETGSPAINUnsoldJournalTrans.ToInventDimId = InventDim::findOrCreate(ToInventDim_ds.cursor()).InventDimId;
+            ETGSPAINUnsoldJournalTrans.write();
+
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields />
+			</DataSource>
+		</DataSources>
+		<DataControls xmlns="" />
+		<Members xmlns="" />
+	</SourceCode>
+	<DataSources>
+		<AxFormDataSource xmlns="">
+			<Name>ETGSPAINUnsoldJournalTable</Name>
+			<Table>ETGSPAINUnsoldJournalTable</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Description</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>JournalId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>NumOfLines</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Posted</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<AllowEdit>No</AllowEdit>
+			<InsertIfEmpty>No</InsertIfEmpty>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+		<AxFormDataSource xmlns="">
+			<Name>ETGSPAINUnsoldJournalTrans</Name>
+			<Table>ETGSPAINUnsoldJournalTrans</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ItemId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>JournalId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LineNum</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>MaxUnsoldQty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ModifiedBy</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ModifiedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TransDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Unit</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>UnsoldQty</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<JoinSource>ETGSPAINUnsoldJournalTable</JoinSource>
+			<LinkType>Active</LinkType>
+			<CounterField>LineNum</CounterField>
+			<Index>LineIdx</Index>
+			<InsertIfEmpty>No</InsertIfEmpty>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+		<AxFormDataSource xmlns="">
+			<Name>InventDim</Name>
+			<Table>inventdim</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>configId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CreatedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventBatchId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventColorId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension1</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension10</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension11</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension12</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension2</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension3</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension4</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension5</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension6</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension7</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension8</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension9</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventDimId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventGtdId_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventLocationId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventOwnerId_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventProfileId_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventSerialId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventSiteId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventSizeId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventStatusId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventStyleId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventVersionId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LicensePlateId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ModifiedBy</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ModifiedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SHA1HashHex</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SHA3HashHex</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>wMSLocationId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>wMSPalletId</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<DelayActive>No</DelayActive>
+			<JoinSource>ETGSPAINUnsoldJournalTrans</JoinSource>
+			<LinkType>InnerJoin</LinkType>
+			<AllowCheck>No</AllowCheck>
+			<AllowCreate>No</AllowCreate>
+			<AllowDelete>No</AllowDelete>
+			<AllowEdit>No</AllowEdit>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+		<AxFormDataSource xmlns="">
+			<Name>ToInventDim</Name>
+			<Table>InventDim</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>configId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CreatedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventBatchId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventColorId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension1</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension10</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension11</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension12</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension2</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension3</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension4</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension5</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension6</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension7</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension8</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventDimension9</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventDimId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventGtdId_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventLocationId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventOwnerId_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventProfileId_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>inventSerialId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventSiteId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventSizeId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventStatusId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventStyleId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventVersionId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LicensePlateId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ModifiedBy</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ModifiedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SHA1HashHex</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SHA3HashHex</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>wMSLocationId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>wMSPalletId</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<JoinSource>ETGSPAINUnsoldJournalTrans</JoinSource>
+			<LinkType>InnerJoin</LinkType>
+			<AllowCheck>No</AllowCheck>
+			<AllowCreate>No</AllowCreate>
+			<AllowDelete>No</AllowDelete>
+			<AllowEdit>No</AllowEdit>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+	</DataSources>
+	<Design>
+		<Caption xmlns="">@ETGSPAINLabels:ETGSPAINUnsoldJournalTable</Caption>
+		<DataSource xmlns="">ETGSPAINUnsoldJournalTable</DataSource>
+		<HideIfEmpty xmlns="">No</HideIfEmpty>
+		<Pattern xmlns="">DetailsTransaction</Pattern>
+		<PatternVersion xmlns="">1.4</PatternVersion>
+		<Style xmlns="">DetailsFormTransaction</Style>
+		<TitleDataSource xmlns="">ETGSPAINUnsoldJournalTable</TitleDataSource>
+		<Controls xmlns="">
+			<AxFormControl xmlns=""
+				i:type="AxFormActionPaneControl">
+				<Name>ActionPane</Name>
+				<Type>ActionPane</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormActionPaneTabControl">
+						<Name>Actions</Name>
+						<Type>ActionPaneTab</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonGroupControl">
+								<Name>PostButtonGroup</Name>
+								<Type>ButtonGroup</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormMenuFunctionButtonControl">
+										<Name>ETGSPAINUnsoldJournalCheckPostController</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>MenuFunctionButton</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<AutoRefreshData>Yes</AutoRefreshData>
+										<DataSource>ETGSPAINUnsoldJournalTable</DataSource>
+										<MenuItemName>ETGSPAINUnsoldJournalCheckPostController</MenuItemName>
+										<MenuItemType>Action</MenuItemType>
+										<MultiSelect>No</MultiSelect>
+										<NeedsRecord>Yes</NeedsRecord>
+										<Text>@ETGSPAINLabels:ETGSPAINUnsoldJournalCheckPostController</Text>
+									</AxFormControl>
+								</Controls>
+								<Caption>@ETGSPAINLabels:Post</Caption>
+								<DataSource>ETGSPAINUnsoldJournalTable</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonGroupControl">
+								<Name>ImportButtonGroup</Name>
+								<Type>ButtonGroup</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormMenuFunctionButtonControl">
+										<Name>ETGSPAINUnsoldJournalImportLogController</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>MenuFunctionButton</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<AutoRefreshData>Yes</AutoRefreshData>
+										<DataSource>ETGSPAINUnsoldJournalTable</DataSource>
+										<MenuItemName>ETGSPAINUnsoldJournalImportLogController</MenuItemName>
+										<MenuItemType>Action</MenuItemType>
+										<MultiSelect>No</MultiSelect>
+										<NeedsRecord>Yes</NeedsRecord>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormMenuFunctionButtonControl">
+										<Name>ETGSPAINUnsoldJournalImportLogTable</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>MenuFunctionButton</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataSource>ETGSPAINUnsoldJournalTable</DataSource>
+										<MenuItemName>ETGSPAINUnsoldJournalImportLogTable</MenuItemName>
+										<MultiSelect>No</MultiSelect>
+										<NeedsRecord>Yes</NeedsRecord>
+									</AxFormControl>
+								</Controls>
+								<Caption>@ETGSPAINLabels:Import</Caption>
+								<DataSource>ETGSPAINUnsoldJournalTable</DataSource>
+							</AxFormControl>
+						</Controls>
+						<Caption>@SYS69656</Caption>
+					</AxFormControl>
+				</Controls>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGroupControl">
+				<Name>NavigationList</Name>
+				<HeightMode>SizeToAvailable</HeightMode>
+				<Type>Group</Type>
+				<Visible>No</Visible>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl>
+						<Name>HeaderFilter</Name>
+						<WidthMode>SizeToAvailable</WidthMode>
+						<FormControlExtension>
+							<Name>QuickFilterControl</Name>
+							<ExtensionComponents />
+							<ExtensionProperties>
+								<AxFormControlExtensionProperty>
+									<Name>targetControlName</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>placeholderText</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>defaultColumnName</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+							</ExtensionProperties>
+						</FormControlExtension>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormGridControl">
+						<Name>gridOverview</Name>
+						<AllowEdit>No</AllowEdit>
+						<Type>Grid</Type>
+						<WidthMode>SizeToContent</WidthMode>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>ETGSPAINUnsoldJournalTable_JournalId_gridOverview</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>JournalId</DataField>
+								<DataSource>ETGSPAINUnsoldJournalTable</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>ETGSPAINUnsoldJournalTable_Description_gridOverview</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>Description</DataField>
+								<DataSource>ETGSPAINUnsoldJournalTable</DataSource>
+							</AxFormControl>
+						</Controls>
+						<MultiSelect>No</MultiSelect>
+						<ShowRowLabels>No</ShowRowLabels>
+						<Style>List</Style>
+					</AxFormControl>
+				</Controls>
+				<FrameType>None</FrameType>
+				<Style>SidePanel</Style>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormTabControl">
+				<Name>PanelTab</Name>
+				<Type>Tab</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>DetailsTab</Name>
+						<AutoDeclaration>Yes</AutoDeclaration>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormGroupControl">
+								<Name>Titlegroup</Name>
+								<Type>Group</Type>
+								<WidthMode>SizeToAvailable</WidthMode>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>Header</Name>
+										<Skip>Yes</Skip>
+										<Type>String</Type>
+										<WidthMode>SizeToAvailable</WidthMode>
+										<FormControlExtension
+											i:nil="true" />
+										<DataMethod>titleFields</DataMethod>
+										<DataSource>ETGSPAINUnsoldJournalTable</DataSource>
+										<ShowLabel>No</ShowLabel>
+										<Style>TitleField</Style>
+									</AxFormControl>
+								</Controls>
+								<ArrangeMethod>HorizontalLeft</ArrangeMethod>
+								<FrameType>None</FrameType>
+								<Style>DetailTitleContainer</Style>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormTabControl">
+								<Name>Tab</Name>
+								<Type>Tab</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormTabPageControl">
+										<Name>Lines</Name>
+										<Type>TabPage</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<Controls>
+											<AxFormControl xmlns=""
+												i:type="AxFormTabControl">
+												<Name>LineView</Name>
+												<Type>Tab</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<Controls>
+													<AxFormControl xmlns=""
+														i:type="AxFormTabPageControl">
+														<Name>HeaderDetails</Name>
+														<Pattern>FieldsFieldGroups</Pattern>
+														<PatternVersion>1.1</PatternVersion>
+														<Type>TabPage</Type>
+														<FormControlExtension
+															i:nil="true" />
+														<Controls>
+															<AxFormControl xmlns=""
+																i:type="AxFormStringControl">
+																<Name>ETGSPAINUnsoldJournalTable_JournalId_HeaderDetails</Name>
+																<Type>String</Type>
+																<FormControlExtension
+																	i:nil="true" />
+																<DataField>JournalId</DataField>
+																<DataSource>ETGSPAINUnsoldJournalTable</DataSource>
+															</AxFormControl>
+															<AxFormControl xmlns=""
+																i:type="AxFormStringControl">
+																<Name>ETGSPAINUnsoldJournalTable_Description_HeaderDetails</Name>
+																<Type>String</Type>
+																<FormControlExtension
+																	i:nil="true" />
+																<DataField>Description</DataField>
+																<DataSource>ETGSPAINUnsoldJournalTable</DataSource>
+															</AxFormControl>
+															<AxFormControl xmlns=""
+																i:type="AxFormCheckBoxControl">
+																<Name>ETGSPAINUnsoldJournalTable_Posted_HeaderDetails</Name>
+																<Type>CheckBox</Type>
+																<FormControlExtension
+																	i:nil="true" />
+																<DataField>Posted</DataField>
+																<DataSource>ETGSPAINUnsoldJournalTable</DataSource>
+															</AxFormControl>
+														</Controls>
+														<ColumnsMode>Fill</ColumnsMode>
+														<Caption>@SCM:InventJournalHeaderDetails</Caption>
+													</AxFormControl>
+													<AxFormControl xmlns=""
+														i:type="AxFormTabPageControl">
+														<Name>LinesView</Name>
+														<HeightMode>SizeToAvailable</HeightMode>
+														<Type>TabPage</Type>
+														<FormControlExtension
+															i:nil="true" />
+														<Controls>
+															<AxFormControl xmlns=""
+																i:type="AxFormActionPaneControl">
+																<Name>LinesActionPane</Name>
+																<Type>ActionPane</Type>
+																<FormControlExtension
+																	i:nil="true" />
+																<Controls>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormButtonGroupControl">
+																		<Name>NewDeleteGroup</Name>
+																		<Type>ButtonGroup</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<Controls>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormCommandButtonControl">
+																				<Name>NewLine</Name>
+																				<Type>CommandButton</Type>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<ButtonDisplay>TextWithImageLeft</ButtonDisplay>
+																				<Command>New</Command>
+																				<NormalImage>Add</NormalImage>
+																			</AxFormControl>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormCommandButtonControl">
+																				<Name>RemoveLine</Name>
+																				<Type>CommandButton</Type>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<ButtonDisplay>TextWithImageLeft</ButtonDisplay>
+																				<Command>DeleteRecord</Command>
+																				<NormalImage>Delete</NormalImage>
+																			</AxFormControl>
+																		</Controls>
+																		<DataSource>ETGSPAINUnsoldJournalTrans</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormButtonGroupControl">
+																		<Name>LineActions</Name>
+																		<AutoDeclaration>Yes</AutoDeclaration>
+																		<ElementPosition>1610612733</ElementPosition>
+																		<FilterExpression>%1</FilterExpression>
+																		<HeightMode>Auto</HeightMode>
+																		<Left>0</Left>
+																		<Type>ButtonGroup</Type>
+																		<VerticalSpacing>-1</VerticalSpacing>
+																		<WidthMode>Auto</WidthMode>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<Controls>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormMenuFunctionButtonControl">
+																				<Name>InventDimParmFixed</Name>
+																				<ElementPosition>1994091957</ElementPosition>
+																				<FilterExpression>%1</FilterExpression>
+																				<HeightMode>Auto</HeightMode>
+																				<Type>MenuFunctionButton</Type>
+																				<VerticalSpacing>-1</VerticalSpacing>
+																				<Visible>No</Visible>
+																				<WidthMode>Auto</WidthMode>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<ButtonDisplay>TextOnly</ButtonDisplay>
+																				<MenuItemName>InventDimParmFixed</MenuItemName>
+																				<SaveRecord>No</SaveRecord>
+																			</AxFormControl>
+																		</Controls>
+																		<ArrangeMethod>Vertical</ArrangeMethod>
+																	</AxFormControl>
+																</Controls>
+																<DataSource>ETGSPAINUnsoldJournalTrans</DataSource>
+																<Style>Strip</Style>
+															</AxFormControl>
+															<AxFormControl xmlns=""
+																i:type="AxFormGridControl">
+																<Name>Grid</Name>
+																<Type>Grid</Type>
+																<FormControlExtension
+																	i:nil="true" />
+																<Controls>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormRealControl">
+																		<Name>ETGSPAINUnsoldJournalTrans_LineNum</Name>
+																		<Type>Real</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>LineNum</DataField>
+																		<DataSource>ETGSPAINUnsoldJournalTrans</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormDateControl">
+																		<Name>ETGSPAINUnsoldJournalTrans_TransDate</Name>
+																		<Type>Date</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>TransDate</DataField>
+																		<DataSource>ETGSPAINUnsoldJournalTrans</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormStringControl">
+																		<Name>ETGSPAINUnsoldJournalTrans_ItemId</Name>
+																		<Type>String</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>ItemId</DataField>
+																		<DataSource>ETGSPAINUnsoldJournalTrans</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormRealControl">
+																		<Name>ETGSPAINUnsoldJournalTrans_UnsoldQty</Name>
+																		<Type>Real</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>UnsoldQty</DataField>
+																		<DataSource>ETGSPAINUnsoldJournalTrans</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormStringControl">
+																		<Name>ETGSPAINUnsoldJournalTrans_Unit</Name>
+																		<Type>String</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>Unit</DataField>
+																		<DataSource>ETGSPAINUnsoldJournalTrans</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormGroupControl">
+																		<Name>DimensionsGroup</Name>
+																		<Type>Group</Type>
+																		<Visible>No</Visible>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<Controls>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormStringControl">
+																				<Name>InventDim_InventSiteId</Name>
+																				<Type>String</Type>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<DataField>InventSiteId</DataField>
+																				<DataSource>InventDim</DataSource>
+																			</AxFormControl>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormStringControl">
+																				<Name>ToInventDim_InventSiteId</Name>
+																				<Type>String</Type>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<DataField>InventSiteId</DataField>
+																				<DataSource>ToInventDim</DataSource>
+																			</AxFormControl>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormStringControl">
+																				<Name>InventDim_InventLocationId</Name>
+																				<Type>String</Type>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<DataField>InventLocationId</DataField>
+																				<DataSource>InventDim</DataSource>
+																			</AxFormControl>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormStringControl">
+																				<Name>ToInventDim_InventLocationId</Name>
+																				<Type>String</Type>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<DataField>InventLocationId</DataField>
+																				<DataSource>ToInventDim</DataSource>
+																			</AxFormControl>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormStringControl">
+																				<Name>InventDim_inventBatchId</Name>
+																				<Type>String</Type>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<DataField>inventBatchId</DataField>
+																				<DataSource>InventDim</DataSource>
+																			</AxFormControl>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormStringControl">
+																				<Name>ToInventDim_inventBatchId</Name>
+																				<Type>String</Type>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<DataField>inventBatchId</DataField>
+																				<DataSource>ToInventDim</DataSource>
+																			</AxFormControl>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormStringControl">
+																				<Name>InventDim_inventSerialId</Name>
+																				<Type>String</Type>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<DataField>inventSerialId</DataField>
+																				<DataSource>InventDim</DataSource>
+																			</AxFormControl>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormStringControl">
+																				<Name>ToInventDim_inventSerialId</Name>
+																				<Type>String</Type>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<DataField>inventSerialId</DataField>
+																				<DataSource>ToInventDim</DataSource>
+																			</AxFormControl>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormStringControl">
+																				<Name>InventDim_InventDimension1</Name>
+																				<Type>String</Type>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<DataField>InventDimension1</DataField>
+																				<DataSource>InventDim</DataSource>
+																			</AxFormControl>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormStringControl">
+																				<Name>ToInventDim_InventDimension1</Name>
+																				<Type>String</Type>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<DataField>InventDimension1</DataField>
+																				<DataSource>ToInventDim</DataSource>
+																			</AxFormControl>
+																		</Controls>
+																	</AxFormControl>
+																</Controls>
+																<DataSource>ETGSPAINUnsoldJournalTrans</DataSource>
+																<Style>Tabular</Style>
+																<VisibleRows>5</VisibleRows>
+																<VisibleRowsMode>Fixed</VisibleRowsMode>
+															</AxFormControl>
+														</Controls>
+														<Caption>@SYS24841</Caption>
+														<FastTabExpanded>Always</FastTabExpanded>
+													</AxFormControl>
+													<AxFormControl xmlns=""
+														i:type="AxFormTabPageControl">
+														<Name>LinesDetails</Name>
+														<Type>TabPage</Type>
+														<FormControlExtension
+															i:nil="true" />
+														<Controls>
+															<AxFormControl xmlns=""
+																i:type="AxFormTabControl">
+																<Name>LineDetailsTab</Name>
+																<Type>Tab</Type>
+																<FormControlExtension
+																	i:nil="true" />
+																<Controls>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormTabPageControl">
+																		<Name>GeneralTabPage</Name>
+																		<Pattern>FieldsFieldGroups</Pattern>
+																		<PatternVersion>1.1</PatternVersion>
+																		<Type>TabPage</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<Controls>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormGroupControl">
+																				<Name>GeneralGroup</Name>
+																				<Type>Group</Type>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<Controls>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>ETGSPAINUnsoldJournalTrans_LineNumCopy1</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>LineNum</DataField>
+																						<DataSource>ETGSPAINUnsoldJournalTrans</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormDateControl">
+																						<Name>ETGSPAINUnsoldJournalTrans_TransDateCopy1</Name>
+																						<Type>Date</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>TransDate</DataField>
+																						<DataSource>ETGSPAINUnsoldJournalTrans</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>ETGSPAINUnsoldJournalTrans_ItemIdCopy1</Name>
+																						<Type>String</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>ItemId</DataField>
+																						<DataSource>ETGSPAINUnsoldJournalTrans</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>ETGSPAINUnsoldJournalTrans_UnsoldQtyCopy1</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>UnsoldQty</DataField>
+																						<DataSource>ETGSPAINUnsoldJournalTrans</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>ETGSPAINUnsoldJournalTrans_UnitCopy1</Name>
+																						<Type>String</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Unit</DataField>
+																						<DataSource>ETGSPAINUnsoldJournalTrans</DataSource>
+																					</AxFormControl>
+																				</Controls>
+																				<Caption>@SYS2952</Caption>
+																			</AxFormControl>
+																		</Controls>
+																		<ColumnsMode>Fill</ColumnsMode>
+																		<Caption>@SYS2952</Caption>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormTabPageControl">
+																		<Name>InventoryDimensionTabPage</Name>
+																		<ElementPosition>2013265918</ElementPosition>
+																		<FilterExpression>%1</FilterExpression>
+																		<HeightMode>Auto</HeightMode>
+																		<Pattern>FieldsFieldGroups</Pattern>
+																		<PatternVersion>1.1</PatternVersion>
+																		<Type>TabPage</Type>
+																		<VerticalSpacing>-1</VerticalSpacing>
+																		<WidthMode>Auto</WidthMode>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<Controls>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormGroupControl">
+																				<Name>FromInventoryDimensionsGroup</Name>
+																				<ElementPosition>1073741822</ElementPosition>
+																				<FilterExpression>%1</FilterExpression>
+																				<Type>Group</Type>
+																				<VerticalSpacing>-1</VerticalSpacing>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<Controls>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>FromInventoryDimensionsGroup_configId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>configId</DataField>
+																						<DataSource>InventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>FromInventoryDimensionsGroup_InventSizeId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InventSizeId</DataField>
+																						<DataSource>InventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>FromInventoryDimensionsGroup_InventColorId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InventColorId</DataField>
+																						<DataSource>InventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>FromInventoryDimensionsGroup_InventStyleId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InventStyleId</DataField>
+																						<DataSource>InventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>FromInventoryDimensionsGroup_InventVersionId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InventVersionId</DataField>
+																						<DataSource>InventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>FromInventoryDimensionsGroup_InventSiteId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InventSiteId</DataField>
+																						<DataSource>InventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>FromInventoryDimensionsGroup_InventLocationId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InventLocationId</DataField>
+																						<DataSource>InventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>FromInventoryDimensionsGroup_inventBatchId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<HelpText>@FieldDescriptions_InventoryManagement:InventJournalTransfer_FromInventoryDimensionsGroup_inventBatchId</HelpText>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>inventBatchId</DataField>
+																						<DataSource>InventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>FromInventoryDimensionsGroup_wMSLocationId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<HelpText>@FieldDescriptions_InventoryManagement:InventJournalTransfer_FromInventoryDimensionsGroup_wMSLocationId</HelpText>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>wMSLocationId</DataField>
+																						<DataSource>InventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>FromInventoryDimensionsGroup_inventSerialId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<HelpText>@FieldDescriptions_InventoryManagement:InventJournalTransfer_FromInventoryDimensionsGroup_inventSerialId</HelpText>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>inventSerialId</DataField>
+																						<DataSource>InventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>FromInventoryDimensionsGroup_InventStatusId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InventStatusId</DataField>
+																						<DataSource>InventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>FromInventoryDimensionsGroup_LicensePlateId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>LicensePlateId</DataField>
+																						<DataSource>InventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>FromInventoryDimensionsGroup_InventOwnerId_RU</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InventOwnerId_RU</DataField>
+																						<DataSource>InventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>FromInventoryDimensionsGroup_InventProfileId_RU</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InventProfileId_RU</DataField>
+																						<DataSource>InventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>FromInventoryDimensionsGroup_InventGtdId_RU</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InventGtdId_RU</DataField>
+																						<DataSource>InventDim</DataSource>
+																					</AxFormControl>
+																				</Controls>
+																				<Caption>@SYS54671</Caption>
+																				<DataGroup>InventoryDimensions</DataGroup>
+																				<DataSource>InventDim</DataSource>
+																			</AxFormControl>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormGroupControl">
+																				<Name>ToInventoryDimensionsGroup</Name>
+																				<ElementPosition>1610612733</ElementPosition>
+																				<FilterExpression>%1</FilterExpression>
+																				<Type>Group</Type>
+																				<VerticalSpacing>-1</VerticalSpacing>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<Controls>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>ToInventoryDimensionsGroup_configId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>configId</DataField>
+																						<DataSource>ToInventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>ToInventoryDimensionsGroup_InventSizeId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InventSizeId</DataField>
+																						<DataSource>ToInventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>ToInventoryDimensionsGroup_InventColorId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InventColorId</DataField>
+																						<DataSource>ToInventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>ToInventoryDimensionsGroup_InventStyleId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InventStyleId</DataField>
+																						<DataSource>ToInventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>ToInventoryDimensionsGroup_InventVersionId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InventVersionId</DataField>
+																						<DataSource>ToInventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>ToInventoryDimensionsGroup_InventSiteId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InventSiteId</DataField>
+																						<DataSource>ToInventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>ToInventoryDimensionsGroup_InventLocationId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InventLocationId</DataField>
+																						<DataSource>ToInventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>ToInventoryDimensionsGroup_inventBatchId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<HelpText>@FieldDescriptions_InventoryManagement:InventJournalTransfer_ToInventoryDimensionsGroup_inventBatchId</HelpText>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>inventBatchId</DataField>
+																						<DataSource>ToInventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>ToInventoryDimensionsGroup_wMSLocationId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<HelpText>@FieldDescriptions_InventoryManagement:InventJournalTransfer_ToInventoryDimensionsGroup_wMSLocationId</HelpText>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>wMSLocationId</DataField>
+																						<DataSource>ToInventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>ToInventoryDimensionsGroup_inventSerialId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<HelpText>@FieldDescriptions_InventoryManagement:InventJournalTransfer_ToInventoryDimensionsGroup_inventSerialId</HelpText>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>inventSerialId</DataField>
+																						<DataSource>ToInventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>ToInventoryDimensionsGroup_InventStatusId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InventStatusId</DataField>
+																						<DataSource>ToInventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>ToInventoryDimensionsGroup_LicensePlateId</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>LicensePlateId</DataField>
+																						<DataSource>ToInventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>ToInventoryDimensionsGroup_InventOwnerId_RU</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InventOwnerId_RU</DataField>
+																						<DataSource>ToInventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>ToInventoryDimensionsGroup_InventProfileId_RU</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InventProfileId_RU</DataField>
+																						<DataSource>ToInventDim</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>ToInventoryDimensionsGroup_InventGtdId_RU</Name>
+																						<FilterExpression>%1</FilterExpression>
+																						<Type>String</Type>
+																						<VerticalSpacing>-1</VerticalSpacing>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InventGtdId_RU</DataField>
+																						<DataSource>ToInventDim</DataSource>
+																					</AxFormControl>
+																				</Controls>
+																				<Caption>@SYS54670</Caption>
+																				<DataGroup>InventoryDimensions</DataGroup>
+																				<DataSource>ToInventDim</DataSource>
+																			</AxFormControl>
+																		</Controls>
+																		<ColumnsMode>Fill</ColumnsMode>
+																		<Caption>@SYS53627</Caption>
+																		<Scrollbars>Auto</Scrollbars>
+																	</AxFormControl>
+																</Controls>
+																<ArrangeMethod>Vertical</ArrangeMethod>
+															</AxFormControl>
+														</Controls>
+														<Caption>@SYS23823</Caption>
+														<DataSource>ETGSPAINUnsoldJournalTrans</DataSource>
+													</AxFormControl>
+												</Controls>
+												<Style>FastTabs</Style>
+											</AxFormControl>
+										</Controls>
+										<PanelStyle>DetailsLine</PanelStyle>
+										<Style>DetailsFormDetails</Style>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormTabPageControl">
+										<Name>HeaderPanel</Name>
+										<Type>TabPage</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<Controls>
+											<AxFormControl xmlns=""
+												i:type="AxFormTabControl">
+												<Name>HeaderView</Name>
+												<Type>Tab</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<Controls>
+													<AxFormControl xmlns=""
+														i:type="AxFormTabPageControl">
+														<Name>GeneralTab</Name>
+														<AutoDeclaration>Yes</AutoDeclaration>
+														<Pattern>FieldsFieldGroups</Pattern>
+														<PatternVersion>1.1</PatternVersion>
+														<Type>TabPage</Type>
+														<FormControlExtension
+															i:nil="true" />
+														<Controls>
+															<AxFormControl xmlns=""
+																i:type="AxFormGroupControl">
+																<Name>FormGroupControl2</Name>
+																<Type>Group</Type>
+																<FormControlExtension
+																	i:nil="true" />
+																<Controls>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormStringControl">
+																		<Name>ETGSPAINUnsoldJournalTable_JournalId</Name>
+																		<Type>String</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>JournalId</DataField>
+																		<DataSource>ETGSPAINUnsoldJournalTable</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormStringControl">
+																		<Name>ETGSPAINUnsoldJournalTable_Description</Name>
+																		<Type>String</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>Description</DataField>
+																		<DataSource>ETGSPAINUnsoldJournalTable</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormCheckBoxControl">
+																		<Name>ETGSPAINUnsoldJournalTable_Posted</Name>
+																		<Type>CheckBox</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>Posted</DataField>
+																		<DataSource>ETGSPAINUnsoldJournalTable</DataSource>
+																	</AxFormControl>
+																</Controls>
+															</AxFormControl>
+														</Controls>
+														<ColumnsMode>Fill</ColumnsMode>
+														<Caption>@SYS2952</Caption>
+													</AxFormControl>
+												</Controls>
+												<Style>FastTabs</Style>
+											</AxFormControl>
+										</Controls>
+										<PanelStyle>DetailsHeader</PanelStyle>
+										<Style>DetailsFormDetails</Style>
+									</AxFormControl>
+								</Controls>
+								<ShowTabs>No</ShowTabs>
+							</AxFormControl>
+						</Controls>
+						<PanelStyle>Details</PanelStyle>
+						<Style>DetailsFormDetails</Style>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>GridPanel</Name>
+						<AutoDeclaration>Yes</AutoDeclaration>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormGroupControl">
+								<Name>FilterGroup</Name>
+								<Pattern>CustomAndQuickFilters</Pattern>
+								<PatternVersion>1.1</PatternVersion>
+								<Type>Group</Type>
+								<WidthMode>SizeToAvailable</WidthMode>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl>
+										<Name>OverviewFilter</Name>
+										<FormControlExtension>
+											<Name>QuickFilterControl</Name>
+											<ExtensionComponents />
+											<ExtensionProperties>
+												<AxFormControlExtensionProperty>
+													<Name>targetControlName</Name>
+													<Type>String</Type>
+													<Value>gridOverviewDetails</Value>
+												</AxFormControlExtensionProperty>
+												<AxFormControlExtensionProperty>
+													<Name>placeholderText</Name>
+													<Type>String</Type>
+												</AxFormControlExtensionProperty>
+												<AxFormControlExtensionProperty>
+													<Name>defaultColumnName</Name>
+													<Type>String</Type>
+												</AxFormControlExtensionProperty>
+											</ExtensionProperties>
+										</FormControlExtension>
+									</AxFormControl>
+								</Controls>
+								<ArrangeMethod>HorizontalLeft</ArrangeMethod>
+								<FrameType>None</FrameType>
+								<Style>CustomFilter</Style>
+								<ViewEditMode>Edit</ViewEditMode>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormGridControl">
+								<Name>gridOverviewDetails</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<Type>Grid</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ctrlGridJournalId1</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<FilterExpression>%1</FilterExpression>
+										<HeightMode>Auto</HeightMode>
+										<Type>String</Type>
+										<WidthMode>Auto</WidthMode>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>JournalId</DataField>
+										<DataSource>ETGSPAINUnsoldJournalTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSPAINUnsoldJournalTable_Description_grid</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Description</DataField>
+										<DataSource>ETGSPAINUnsoldJournalTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormIntegerControl">
+										<Name>ETGSPAINUnsoldJournalTable_NumOfLines_grid</Name>
+										<Type>Integer</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>NumOfLines</DataField>
+										<DataSource>ETGSPAINUnsoldJournalTable</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormCheckBoxControl">
+										<Name>ETGSPAINUnsoldJournalTable_Posted_grid</Name>
+										<Type>CheckBox</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Posted</DataField>
+										<DataSource>ETGSPAINUnsoldJournalTable</DataSource>
+									</AxFormControl>
+								</Controls>
+								<DataSource>ETGSPAINUnsoldJournalTable</DataSource>
+								<DefaultAction>DetailsViewCommand</DefaultAction>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormCommandButtonControl">
+								<Name>DetailsViewCommand</Name>
+								<Type>CommandButton</Type>
+								<Visible>No</Visible>
+								<FormControlExtension
+									i:nil="true" />
+								<Command>DetailsView</Command>
+							</AxFormControl>
+						</Controls>
+						<PanelStyle>Grid</PanelStyle>
+						<Style>DetailsFormGrid</Style>
+					</AxFormControl>
+				</Controls>
+				<ShowTabs>No</ShowTabs>
+			</AxFormControl>
+		</Controls>
+	</Design>
+	<Parts />
+</AxForm>

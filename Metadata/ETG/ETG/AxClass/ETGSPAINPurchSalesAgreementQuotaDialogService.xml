@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSPAINPurchSalesAgreementQuotaDialogService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Contract class for the quota contract line generation process for the ETGSPAIN model.
+/// </summary>
+class ETGSPAINPurchSalesAgreementQuotaDialogService extends SysOperationServiceBase
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>process</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method to generate agreement lines based on quotas.
+    /// </summary>
+    /// <param name = "_contract">ETGSPAINPurchSalesAgreementQuotaDialogContract containing the agreement parameters.</param>
+    public void process(ETGSPAINPurchSalesAgreementQuotaDialogContract _contract)
+    {
+        AgreementHeader                 agreementHeader;
+        AgreementLine                   agreementLine;
+        AgreementLineQuantityCommitment agreementLineQuantityCommitment;
+        AgreementLineQuantityCommitment agreementLineQuantityCommitmentNew;
+        TmpFrmVirtual                   tmpFrmVirtual;
+        Counter                         i;
+        Qty                             newQty;
+        real                            maxNumberLine;
+        real                            daysPerPeriod;
+        TransDate                       expirationDate;
+        TransDate                       expirationDateLast;
+        TransDate                       effectiveDate;
+
+        RefRecId                        agreementHeaderRecId           = _contract.parmAgreementHeaderRecId();
+        ETGSPAINPurchAgreementQuotaPeriods   ETGSPAINPurchAgreementQuotaPeriods  = _contract.parmQuotaPeriods();
+        ETGSPAINPurchAgreementQuotaFromDate  ETGSPAINPurchAgreementQuotaFromDate = _contract.parmQuotaFromDate();
+        ETGSPAINPurchAgreementQuotaToDate    ETGSPAINPurchAgreementQuotaToDate   = _contract.parmQuotaToDate();
+        
+        agreementHeader = AgreementHeader::find(agreementHeaderRecId, true);
+
+        if (agreementHeader)
+        {
+            if (!agreementHeader.ETGSPAINPurchHasAgreementQuotas && this.isValidAgreement(agreementHeader))
+            {
+                ttsbegin;
+            
+                // Actualizamos cabecera del Acuerdo con los datos.
+                agreementHeader.ETGSPAINPurchHasAgreementQuotas     = NoYes::Yes;
+                agreementHeader.ETGSPAINPurchAgreementQuotaPeriods  = ETGSPAINPurchAgreementQuotaPeriods;
+                agreementHeader.ETGSPAINPurchAgreementQuotaFromDate = ETGSPAINPurchAgreementQuotaFromDate;            
+                agreementHeader.ETGSPAINPurchAgreementQuotaToDate   = ETGSPAINPurchAgreementQuotaToDate;
+                agreementHeader.update();
+
+                select maxof(LineNumber) from  agreementLineQuantityCommitment
+                    where agreementLineQuantityCommitment.Agreement == agreementHeader.RecId;
+
+                maxNumberLine = agreementLineQuantityCommitment.LineNumber;
+
+                // Calcular días por periodo
+                daysPerPeriod = ETGSPAINPurchAgreementQuotaToDate - ETGSPAINPurchAgreementQuotaFromDate;
+                daysPerPeriod = daysPerPeriod / ETGSPAINPurchAgreementQuotaPeriods;
+
+                // Generamos proceso de división de la línea del acuerdo por el número de periodos indicado.
+                while select agreementLineQuantityCommitment
+                    where agreementLineQuantityCommitment.Agreement                 == agreementHeader.RecId
+                        && agreementLineQuantityCommitment.ETGSPAINLineCreatedByQuota    == NoYes::No
+                {
+                    // Almacenamos la línea original para luego borrarla al finalizar el proceso.
+                    tmpFrmVirtual.clear();
+                    tmpFrmVirtual.initValue();
+                    tmpFrmVirtual.RefRecId = agreementLineQuantityCommitment.RecId;
+                    tmpFrmVirtual.insert();
+
+                    // Nueva cantidad                
+                    newQty = agreementLineQuantityCommitment.CommitedQuantity / ETGSPAINPurchAgreementQuotaPeriods;
+
+                    // Creamos una línea por número de periodos
+                    for (i = 1 ; i <= ETGSPAINPurchAgreementQuotaPeriods ; i++)
+                    {
+                        maxNumberLine = maxNumberLine + i;
+
+                        if (i == 1)
+                        {
+                            effectiveDate  = ETGSPAINPurchAgreementQuotaFromDate;                                         
+                        }
+                        else
+                        {
+                            effectiveDate  = expirationDate + 1;
+                        }
+
+                        expirationDate = endMth(effectiveDate);                        
+
+                        // Creamos las nuevas líneas
+                        agreementLineQuantityCommitmentNew.clear();
+                        agreementLineQuantityCommitmentNew.initValue();
+                        agreementLineQuantityCommitmentNew.data(agreementLineQuantityCommitment);
+                        agreementLineQuantityCommitmentNew.LineNumber                   = maxNumberLine;
+                        agreementLineQuantityCommitmentNew.CommitedQuantity             = newQty;
+                        agreementLineQuantityCommitmentNew.ETGSPAINPurchExecutionFromDate    = effectiveDate;           
+                        agreementLineQuantityCommitmentNew.ETGSPAINPurchExecutionDueDate     = expirationDate;
+                        agreementLineQuantityCommitmentNew.ExpirationDate               = agreementHeader.ETGSPAINPurchExecutionDueDate;
+                        agreementLineQuantityCommitmentNew.ETGSPAINLineCreatedByQuota        = NoYes::Yes;
+                        agreementLineQuantityCommitmentNew.insert();
+                    }
+                }
+
+                // Borramos las líneas originales
+                while select tmpFrmVirtual
+                {
+                    agreementLine = AgreementLine::find(tmpFrmVirtual.RefRecId, true);
+                    agreementLine.delete();
+                }
+
+                // Regeneramos los códigos de líneas
+                agreementHeader.ETGSPAINregenerateAgreementLineCode();
+
+                // Actualizamos el valor de la dimensión Contrato con el Código de Línea.
+                InventDim       inventDim;
+                InventSerial    inventSerial;
+
+                while select forupdate agreementLine
+                    where agreementLine.Agreement               == agreementHeader.RecId
+                        && agreementLine.ETGSPAINLineCreatedByQuota  == NoYes::Yes
+                {
+                    inventSerial = InventSerial::findOrCreate(agreementLine.ETGSPAINLineCode, agreementLine.ItemId);
+
+                    // Actualizamos el valor de Contrato.
+                    inventDim                  = agreementLine.inventDim();
+                    inventDim.inventSerialId   = inventSerial.InventSerialId;
+                    inventDim                  = InventDim::findOrCreate(inventDim);
+                    agreementLine.InventDimId  = inventDim.inventDimId;
+
+                    agreementLine.update();
+                }
+
+                ttscommit;
+            }
+            else
+            {
+                // Reseteamos los valores de Cupos
+                ttsbegin;
+                agreementHeader.ETGSPAINresetAgreementQuota();
+                agreementHeader.update();
+                ttscommit;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>isValidAgreement</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method to validate if the agreement header is valid.
+    /// </summary>
+    /// <param name = "_agreementHeader">AgreementHeader to be validated.</param>
+    /// <returns>Returns true if the validation is successful, otherwise false.</returns>
+    public boolean isValidAgreement(AgreementHeader _agreementHeader)
+    {
+        AgreementLine   agreementLine;
+
+        // Comprobamos que tenga alguna línea en el acuerdo de compra/venta
+        select firstonly agreementLine
+            where        agreementLine.Agreement == _agreementHeader.RecId;
+
+        if (!agreementLine)
+        {
+            return checkFailed("@ETGSPAINLabels:ActivateQuotaContractErrorNoLine");
+        }
+
+        return true;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

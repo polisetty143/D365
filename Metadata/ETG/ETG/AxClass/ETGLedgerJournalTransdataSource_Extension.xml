@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerJournalTransdataSource_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formDataSourceStr(LedgerJournalTransDaily, LedgerJournalTrans))]
+final class ETGLedgerJournalTransdataSource_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {
+        int ret;
+        ret = next active();
+
+        if(ETGACFParameters::find().EnableIntercompanyTransactions)
+        {
+            LedgerJournalTrans ledgerJournalTrans = this.cursor();
+
+            if(ledgerJournalTrans.ETGICDestinationEntity)
+            {
+                changecompany(ledgerJournalTrans.ETGICDestinationEntity)
+                {
+                    LedgerJournalTable ledgerJournalTableloc;
+
+                    select firstonly ledgerJournalTableloc
+                where ledgerJournalTableloc.JournalNum == ledgerJournalTrans.JournalNum;
+
+                    if(ledgerJournalTableloc.Posted == NoYes::Yes)
+                    {
+                        this.allowCreate(false);
+                    }
+                }
+            }
+        }
+
+        if(ETGACFParameters::find().EnablePTBFContractsSales)
+        {
+            LedgerJournalTrans ledgerJournalTrans = this.cursor();
+            LedgerJournalTable ledgerJournalTable = LedgerJournalTable::find(ledgerJournalTrans.JournalNum);
+
+            if(ledgerJournalTable.ETGIsCrDeJournal)
+            {
+                this.formRun().design().controlName("PostJournal").enabled(false);
+            }
+            else
+            {
+                this.formRun().design().controlName("PostJournal").enabled(true);
+
+            }
+           
+        }
+        
+        if(ETGACFParameters::find().EnableIntercompanyTransactions == NoYes::Yes)
+        {
+            LedgerJournalTrans ledgerJournalTransLoc = this.cursor();
+            LedgerJournalTable ledgerJournalTableLoc = LedgerJournalTable::find(ledgerJournalTransLoc.JournalNum);
+
+            this.formRun().design().controlName("ETGCreateIntercompanyJV").enabled(true);
+            
+            if(ledgerJournalTableLoc.ETGIsICJournalCreated == NoYes::Yes && ledgerJournalTableLoc.ETGICDestiJournalPosted == NoYes::No)
+            {
+                this.formRun().design().controlName("PostJournal").enabled(false);
+                this.formRun().design().controlName("PostJournalBatch").enabled(false);
+                
+            }
+            else
+            {
+                this.formRun().design().controlName("PostJournal").enabled(true);
+                this.formRun().design().controlName("PostJournalBatch").enabled(true);
+            }
+        }
+        //CS Rajat Dubey 09/05/2025
+        if(ETGACFParameters::find().MainAccountForGeneralJournal)
+        {
+            LedgerJournalTrans      ledgerJournalTrans   = this.cursor();
+            MainAccountNum          ledgerMainAccountId, offsetMainAccountId;
+            str                     mainAccountId = ETGACFParameters::find().MainAccountForGeneralJournal;
+            int                     i = 0,j = 0;
+
+            ledgerMainAccountId = LedgerDimensionFacade::getMainAccountFromLedgerDimension(ledgerJournalTrans.LedgerDimension).MainAccountId;
+            offsetMainAccountId = LedgerDimensionFacade::getMainAccountFromLedgerDimension(ledgerJournalTrans.OffsetLedgerDimension).MainAccountId;
+            i = strScan(mainAccountId,ledgerMainAccountId,1,strLen(mainAccountId));
+            j = strScan(mainAccountId,offsetMainAccountId,1,strLen(mainAccountId));
+
+            if(i>0||j>0)
+            {
+                this.formRun().design().controlName("PostJournal").enabled(false);
+                this.formRun().design().controlName("PostJournalBatch").enabled(false);
+            }
+            else
+            {
+                this.formRun().design().controlName("PostJournal").enabled(true);
+                this.formRun().design().controlName("PostJournalBatch").enabled(true);
+            }
+        }
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGVendTrans_Table_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tableStr(VendTrans))]
+internal final class ETGVendTrans_Table_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initFromVendInvoiceInfoTableApproval</Name>
+				<Source><![CDATA[
+    public void initFromVendInvoiceInfoTableApproval(VendInvoiceInfoTable _vendInvoiceInfoTable)
+    {
+        next initFromVendInvoiceInfoTableApproval(_vendInvoiceInfoTable);
+
+        this.ETGTERMONumber          = _vendInvoiceInfoTable.ETGTERMONumber;
+        this.ETGMotherTERMOReference = _vendInvoiceInfoTable.ETGMotherTERMOReference;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insert</Name>
+				<Source><![CDATA[
+    public void insert()
+    {
+        this.updateTermoNumRef();
+
+        next insert();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateDocumentDateFromLedgerJournal</Name>
+				<Source><![CDATA[
+    public void updateDocumentDateFromLedgerJournal()
+    {
+        
+        if (curext() != 'O025')
+        {
+            return;
+        }
+        
+        if (this.Voucher && this.JournalNum)
+        {
+            LedgerJournalTrans ledgerJournalTrans;
+            select firstonly ETGDocumentDate from ledgerJournalTrans
+                where ledgerJournalTrans.Voucher == this.Voucher
+                && ledgerJournalTrans.JournalNum == this.JournalNum
+                && ledgerJournalTrans.TransDate == this.TransDate
+                && ledgerJournalTrans.AccountType == LedgerJournalACType::Vend
+                && ledgerJournalTrans.ETGDocumentDate != dateNull();
+            if (ledgerJournalTrans.ETGDocumentDate)
+            {
+                this.DocumentDate = ledgerJournalTrans.ETGDocumentDate;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>update</Name>
+				<Source><![CDATA[
+    public void update()
+    {
+        next update();
+
+        this.updateChildTermoPostSettlement();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateTermoNumRef</Name>
+				<Source><![CDATA[
+    public void updateTermoNumRef()
+    {
+        if(this.Voucher && VendParameters::find().ETGEnableTermoNumberFeature == NoYes::Yes)
+        {
+            VendInvoiceJour    vendInvJour;
+            LedgerJournalTrans ledgerJournalTrans;
+            ETGTERMONumber     termoNumber;
+
+            if(this.JournalNum && this.Prepayment)
+            {
+                select firstonly ETGTERMONumber from ledgerJournalTrans
+                where ledgerJournalTrans.Voucher == this.Voucher
+                    && ledgerJournalTrans.JournalNum == this.JournalNum
+                    && ledgerJournalTrans.TransDate == this.TransDate;
+
+                termoNumber = ledgerJournalTrans.ETGTERMONumber;
+            }
+            else
+            {
+                select firstonly ETGTERMONumber from vendInvJour
+                where vendInvJour.LedgerVoucher == this.Voucher
+                    && vendInvJour.InvoiceAccount == this.AccountNum
+                    && vendInvJour.InvoiceDate == this.TransDate;
+
+                termoNumber = vendInvJour.ETGTERMONumber;
+            }
+
+            this.ETGTERMONumber          = termoNumber;
+            this.ETGMotherTERMOReference = ETGTERMONumberTable::findFromTermoNumber(termoNumber).MotherTERMOReference;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateChildTermoPostSettlement</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// close child termo after posting vendor transactions settlement
+    /// </summary>
+    public void updateChildTermoPostSettlement()
+    {
+        if(VendParameters::find().ETGEnableTermoNumberFeature)
+        {
+            if(this.LastSettleVoucher && this.Invoice && this.ETGTERMONumber)
+            {
+                ETGTERMONumberTable termoNumberTable, termoNumberTableChild, termoNumberTableMother;
+                termoNumberTable = ETGTERMONumberTable::findFromTermoNumber(this.ETGTERMONumber, true);
+                if(termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Child)
+                {
+                    ttsbegin;
+                    termoNumberTable.TERMONumberStatus = ETGTERMONumberStatus::Close;
+                    termoNumberTable.ClosedDate        = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+                    termoNumberTable.doUpdate();
+
+                    select firstonly RecId from termoNumberTableChild
+                        where termoNumberTableChild.MotherTERMOReference == termoNumberTable.MotherTERMOReference
+                        && termoNumberTableChild.TERMONumberStatus != ETGTERMONumberStatus::Close
+                        && termoNumberTableChild.TERMONumber != termoNumberTable.TERMONumber;
+
+                    if(termoNumberTableChild.RecId == 0)
+                    {
+                        termoNumberTableMother = ETGTERMONumberTable::findFromTermoNumber(termoNumberTable.MotherTERMOReference, true);
+                        if(termoNumberTableMother.RemainingClosedTERMOValueReal == 0 && termoNumberTableMother.RemainingTermoValueReal == 0)
+                        {
+                            termoNumberTableMother.TERMONumberStatus = ETGTERMONumberStatus::Close;
+                            termoNumberTableMother.ClosedDate        = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+                            termoNumberTableMother.update();
+                        }
+                    }
+                    ttscommit;
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

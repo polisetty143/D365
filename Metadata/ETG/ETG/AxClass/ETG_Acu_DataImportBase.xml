@@ -1,0 +1,320 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_Acu_DataImportBase</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Base class for all imports
+/// </summary>
+public class ETG_Acu_DataImportBase extends RunBase
+{
+    StreamIO            file;
+    System.IO.Stream    fileStream;
+    DialogRunbase       baseDialog;
+    FileUploadBuild     dialogFileUpload;
+    FileUpload          fileUpload;
+    Filename            filename;
+    Counter             currentLine;
+
+    DimensionParameters     dimensionParameters = DimensionParameters::find();
+
+    protected   CommaStreamIo importFile;
+    protected   boolean processOK;
+
+    private const str delimiterEnter = '\r\n';
+    private const str delimiterComma = ',';
+
+    private const str OkButtonName = 'OkButton';
+    private const str FileUploadName = 'FileUpload';
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>dialog</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Returns a class that contains the methods that are described by the <c>RunBaseDialogable</c>
+    ///    interface.
+    /// </summary>
+    /// <returns>
+    ///    A class that contains the methods that are described by the <c>RunBaseDialogable</c> interface.
+    /// </returns>
+    /// <remarks>
+    ///    A dialog can be built by using the <c>Dialog</c> class or by using a class that is created in the
+    ///    Application Object Tree (AOT).
+    /// </remarks>
+    public Object dialog()
+    {
+        DialogGroup dialogGroup;
+        FormBuildControl formBuildControl;
+
+        baseDialog = super();
+        dialogGroup = baseDialog.addGroup(this.fileUploadGroupName());
+
+        formBuildControl = baseDialog.formBuildDesign().control(dialogGroup.name());
+        dialogFileUpload = formBuildControl.addControlEx(classstr(FileUpload), 'FileUpload');
+        dialogFileUpload.style(FileUploadStyle::MinimalWithFilename);
+        dialogFileUpload.baseFileUploadStrategyClassName(classstr(PaymentFileTemporaryStorageStrategy));
+        dialogFileUpload.fileNameLabel("@SYS308842");
+        dialogFileUpload.fileTypesAccepted('.csv');
+
+        return baseDialog;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>fileUploadGroupName</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Returns the label for the file upload group.
+    /// </summary>
+    /// <returns>
+    /// The label for the file upload group.
+    /// </returns>
+    protected str fileUploadGroupName()
+    {
+        return "@SYS309953";
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dialogPostRun</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Disables the dialog Ok button until the file upload is complete.
+    /// </summary>
+    /// <param name="_dialog">The <c>Runbase</c> dialog object.</param>
+    public void dialogPostRun(DialogRunbase _dialog)
+    {
+        fileUpload = _dialog.formRun().control(_dialog.formRun().controlId('FileUpload'));
+        fileUpload.notifyUploadCompleted += eventhandler(this.uploadCompleted);
+        this.setDialogOkButtonEnabled(_dialog, false);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>uploadCompleted</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// After the file has been uploaded, the Ok button is enabled.
+    /// </summary>
+    protected void uploadCompleted()
+    {
+        FileUpload fileUploadControl = this.getFormControl(baseDialog, FileUploadName);
+        
+        FileUploadTemporaryStorageResult uploadResult = fileUploadControl.getFileUploadResult();
+
+        if (uploadResult.getUploadStatus())
+        {
+            fileUpload.notifyUploadCompleted -= eventhandler(this.UploadCompleted);
+            filename = fileUpload.fileName();
+            this.setDialogOkButtonEnabled(baseDialog, true);
+        }
+        else
+        {
+            warning(uploadResult.getLogMessage());
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getFormControl</Name>
+				<Source><![CDATA[
+    protected FormControl getFormControl(DialogRunbase _dialog, str _controlName)
+    {
+        return _dialog.formRun().control(_dialog.formRun().controlId(_controlName));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setDialogOkButtonEnabled</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Enables or disables the dialog Ok button.
+    /// </summary>
+    /// <param name = "_dialog">The <c>Runbase</c> dialog object.</param>
+    /// <param name = "_isEnabled">Indicates to enable or disable the Ok button.</param>
+    protected void setDialogOkButtonEnabled(DialogRunbase _dialog, boolean _isEnabled)
+    {
+        FormControl okButtonControl = this.getFormControl(_dialog, OkButtonName);
+
+        if (okButtonControl)
+        {
+            okButtonControl.enabled(_isEnabled);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>canRunInNewSession</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Describes whether the class is designed for execution in a new session.
+    /// </summary>
+    /// <returns>
+    /// true if the class is designed for execution the operation in a new session; otherwise, false.
+    /// </returns>
+    protected boolean canRunInNewSession()
+    {
+        return false;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Contains the code that does the actual job of the class.
+    /// </summary>
+    public void run()
+    {
+        FileUpload fileUploadControl = this.getFormControl(baseDialog, FileUploadName);
+
+        /*FileUploadTemporaryStorageResult fileUploadResult = fileUploadControl.getFileUploadResult();
+
+        if (fileUploadResult != null && fileUploadResult.getUploadStatus())
+        {
+            fileID = fileUploadResult.getFileId();
+        }
+
+
+        DataFileImportExportUtils_W::importDataFromFileToAX(fileID, definitionGroupName, tableStr(InventOperationalSiteV2Entity), false);
+        }*/
+
+        fileStream = fileUploadControl.getUploadedFile(true);
+
+        #OCCRetryCount
+        try
+        {
+            ttsbegin;
+            this.readFile();
+            ttscommit;
+        }
+        catch (Exception::Deadlock)
+        {
+            retry;
+        }
+        catch (Exception::UpdateConflict)
+        {
+            if (appl.ttsLevel() == 0)
+            {
+                if (xSession::currentRetryCount() >= #RetryNum)
+                {
+                    throw Exception::UpdateConflictNotRecovered;
+                }
+                else
+                {
+                    retry;
+                }
+            }
+            else
+            {
+                throw Exception::UpdateConflict;
+            }
+        }
+        catch
+        {
+            throw Error(strFmt("@ETG_ENG_Labels:DMError", currentLine));
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>openFile</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Opens the file
+    /// </summary>
+    protected void  openFile()
+    {
+        // Windows 1252
+        importFile = CommaStreamIo::constructForRead(fileStream);
+
+        if (importFile == null || importFile.status() != IO_Status::Ok)
+        {
+            throw error("@SYS52680");
+        }
+
+        importFile.inFieldDelimiter(delimiterComma);
+        importFile.inRecordDelimiter(delimiterEnter);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>readFile</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Reads the file
+    /// </summary>
+    protected void readFile()
+    {
+        container con;
+
+        boolean header = true;
+
+        this.openFile();
+
+        while ((importFile.status() == IO_Status::Ok))
+        {
+            currentLine++;
+
+            con = importFile.read();
+
+            if (conLen(con))
+            {
+                if (header)
+                {
+                    header = false;
+                    continue;
+                }
+
+                this.processData(con);
+            }
+        }
+
+        info("@SYS112337");
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processData</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Actual method that performs the job
+    /// </summary>
+    /// <param name = "_con">Container with data</param>
+    protected void processData(container _con)
+    {
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caption</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///Import inventory site
+    /// </summary>
+    /// <returns>Caption</returns>
+    public ClassDescription caption()
+    {
+        return '';
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

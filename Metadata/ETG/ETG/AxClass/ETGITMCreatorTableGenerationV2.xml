@@ -1,0 +1,432 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGITMCreatorTableGenerationV2</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// extension class for class <c>ETGITMCreatorTableGeneration</c>
+/// </summary>
+public class ETGITMCreatorTableGenerationV2 extends ETGITMCreatorTableGeneration
+{
+    private Map purchTableMap;
+    private Map inventTransferTableMap;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>buildQuery</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// build query to fetch outbound orders lines
+    /// </summary>
+    /// <returns>Query</returns>
+    public Query buildQuery()
+    {
+        Query query = super();
+
+        ITMCreatorOptions    shipCreatorOptionsLocal = this.parmShipCreatorOptions();
+        QueryBuildDataSource qbd_InventTrans = query.dataSourceTable(tableNum(InventTrans));
+        QueryBuildDataSource qbd_InventDim = query.dataSourceTable(tableNum(InventDim));
+        QueryBuildDataSource qbd_InventTransOrigin = query.dataSourceTable(tableNum(InventTransOrigin));
+
+        qbd_InventTrans.addSelectionField(fieldNum(InventTrans, Qty), SelectionField::Sum);
+        qbd_InventTrans.addGroupByField(fieldNum(InventTrans, InventDimId));
+        qbd_InventTrans.addGroupByField(fieldNum(InventTrans, ItemId));
+        qbd_InventDim.addGroupByField(fieldNum(InventDim, InventSiteId));
+        qbd_InventDim.addGroupByField(fieldNum(InventDim, InventLocationId));
+        qbd_InventTransOrigin.addGroupByField(fieldNum(InventTransOrigin, InventTransId));
+
+        if (this.includeSalesLineInQuery(shipCreatorOptionsLocal))
+        {
+            QueryBuildDataSource qbd_PurchLine = qbd_InventTransOrigin.addDataSource(tableNum(SalesLine));
+            qbd_PurchLine.addLink(fieldNum(InventTransOrigin, InventTransId), fieldNum(SalesLine, InventTransId));
+            qbd_PurchLine.joinMode(JoinMode::OuterJoin);
+            qbd_PurchLine.addGroupByField(fieldNum(SalesLine, InventTransId));
+            qbd_PurchLine.addGroupByField(fieldNum(SalesLine, SalesUnit));
+            qbd_PurchLine.fetchMode(QueryFetchMode::One2One);
+        }
+
+        if (this.includInventTransferLineInQuery(shipCreatorOptionsLocal))
+        {
+            QueryBuildDataSource qbd_InventTransferLine = qbd_InventTransOrigin.addDataSource(tableNum(InventTransferLine));
+            qbd_InventTransferLine.addLink(fieldNum(InventTransOrigin, InventTransId), fieldNum(InventTransferLine, InventTransId));
+            qbd_InventTransferLine.addGroupByField(fieldNum(InventTransferLine, InventTransId));
+            qbd_InventTransferLine.addGroupByField(fieldNum(InventTransferLine, UnitId));
+            qbd_InventTransferLine.joinMode(JoinMode::OuterJoin);
+            qbd_InventTransferLine.fetchMode(QueryFetchMode::One2One);
+        }
+
+        return query;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>includeSalesLineInQuery</Name>
+				<Source><![CDATA[
+    public boolean includeSalesLineInQuery(ITMCreatorOptions _creatorOptions)
+    {
+        return true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>includInventTransferLineInQuery</Name>
+				<Source><![CDATA[
+    public boolean includInventTransferLineInQuery(ITMCreatorOptions _creatorOptions)
+    {
+        return true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>fillTables</Name>
+				<Source><![CDATA[
+    protected void fillTables()
+    {
+        ttsBegin;
+    
+        this.storeBucketRecord();
+
+        ITMTmpCreatorTable tmpShipCreatorTableLocal;
+        ITMTmpCreatorLine tmpShipCreatorLineLocal;    
+        tmpShipCreatorTableLocal.setTmpData(this.parmTmpShipCreatorTable());
+        tmpShipCreatorLineLocal.setTmpData(this.parmTmpShipCreatorLine());
+        
+        delete_from tmpShipCreatorTableLocal;
+        delete_from tmpShipCreatorLineLocal;
+    
+        Query query = this.buildQuery();
+
+        QueryRun queryRun = new QueryRun(query);
+        
+        purchTableMap = new Map(Types::String, Types::Record);
+        inventTransferTableMap = new Map(Types::String, Types::Record);
+
+        Set existsTmpShipCreatorTable = new Set(Types::Container);
+        SalesUnit salesUnit;
+
+        while (queryRun.next())
+        {
+            InventTrans inventTrans = queryRun.get(tableNum(InventTrans));
+            InventTransOrigin InventTransOrigin = queryRun.get(tableNum(inventTransOrigin));
+            changeCompany (inventTrans.dataAreaId)
+            {
+                if (this.includeReference(inventTransOrigin.ReferenceCategory, inventTransOrigin.ReferenceId))
+                {
+                    InventDim inventDim = queryRun.get(tableNum(InventDim));
+                    salesUnit = this.getSalesUnit(queryRun);
+                    if (!salesUnit)
+                    {
+                        continue;
+                    }
+
+                    tmpShipCreatorLineLocal.clear();
+                    tmpShipCreatorLineLocal.PurchUnit = salesUnit;
+                    tmpShipCreatorLineLocal.InventTransId = inventTransOrigin.InventTransId;
+                    tmpShipCreatorLineLocal.InventTransType = inventTransOrigin.ReferenceCategory;
+                    tmpShipCreatorLineLocal.InventTransRefId = inventTransOrigin.ReferenceId;
+                    tmpShipCreatorLineLocal.DateStatus = inventTrans.DateExpected;
+                    tmpShipCreatorLineLocal.InventDimId = inventTrans.InventDimId;
+                    tmpShipCreatorLineLocal.InventSiteId = inventDim.InventSiteId;
+                    tmpShipCreatorLineLocal.InventLocationId = inventDim.InventLocationId;
+                    tmpShipCreatorLineLocal.InventQty = abs(inventTrans.Qty);
+                    tmpShipCreatorLineLocal.ShipDataArea = inventTrans.dataAreaId;
+                    this.initLineValues(tmpShipCreatorLineLocal, inventTrans.ItemId, tmpShipCreatorLineLocal.InventQty);
+                    tmpShipCreatorLineLocal.insert();
+
+                    container values;
+                    if (ETGOTMCreatorNoSplitHeaderByWarehouseFlight::instance().isEnabled())
+                    {
+                        values = [inventTrans.DateExpected, inventTransOrigin.ReferenceCategory, inventTransOrigin.ReferenceId];
+                    }
+                    else
+                    {
+                        values = [inventTrans.DateExpected, inventTransOrigin.ReferenceCategory, inventTransOrigin.ReferenceId, inventDim.InventSiteId, inventDim.InventLocationId];
+                    }
+
+                    if (!existsTmpShipCreatorTable.in(values))
+                    {
+                        existsTmpShipCreatorTable.add(values);
+                        tmpShipCreatorTableLocal.clear();
+                        this.initTableValues(tmpShipCreatorTableLocal,
+                                             inventTrans.DateExpected,
+                                             inventTransOrigin.ReferenceCategory,
+                                             inventTransOrigin.ReferenceId,
+                                             inventDim.InventSiteId,
+                                             inventDim.InventLocationId);
+                        tmpShipCreatorTableLocal.insert();
+                    }
+                }
+            }
+        }
+
+        this.updateBucket();
+
+        this.updateOverviewInformation();
+    
+        ttsCommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>fillTablesOutboundETG</Name>
+				<Source><![CDATA[
+    protected void fillTablesOutboundETG()
+    {
+        ttsBegin;
+    
+        this.storeBucketRecord();
+
+        ITMTmpCreatorTable tmpShipCreatorTableLocal;
+        ITMTmpCreatorLine tmpShipCreatorLineLocal;
+        tmpShipCreatorTableLocal.setTmpData(this.parmTmpShipCreatorTable());
+        tmpShipCreatorLineLocal.setTmpData(this.parmTmpShipCreatorLine());
+        
+        delete_from tmpShipCreatorTableLocal;
+        delete_from tmpShipCreatorLineLocal;
+    
+        Query query = this.buildQuery();
+
+        QueryRun queryRun = new QueryRun(query);
+        
+        purchTableMap = new Map(Types::String, Types::Record);
+        inventTransferTableMap = new Map(Types::String, Types::Record);
+
+        Set existsTmpShipCreatorTable = new Set(Types::Container);
+        SalesUnit salesUnit;
+
+        while (queryRun.next())
+        {
+            InventTrans inventTrans = queryRun.get(tableNum(InventTrans));
+            InventTransOrigin InventTransOrigin = queryRun.get(tableNum(inventTransOrigin));
+            changeCompany (inventTrans.dataAreaId)
+            {
+                if (this.includeReference(inventTransOrigin.ReferenceCategory, inventTransOrigin.ReferenceId))
+                {
+                    InventDim inventDim = queryRun.get(tableNum(InventDim));
+                    salesUnit = this.getSalesUnit(queryRun);
+                    if (!salesUnit)
+                    {
+                        continue;
+                    }
+
+                    tmpShipCreatorLineLocal.clear();
+                    tmpShipCreatorLineLocal.PurchUnit = salesUnit;
+                    tmpShipCreatorLineLocal.InventTransId = inventTransOrigin.InventTransId;
+                    tmpShipCreatorLineLocal.InventTransType = inventTransOrigin.ReferenceCategory;
+                    tmpShipCreatorLineLocal.InventTransRefId = inventTransOrigin.ReferenceId;
+                    tmpShipCreatorLineLocal.DateStatus = inventTrans.DateExpected;
+                    tmpShipCreatorLineLocal.InventDimId = inventTrans.InventDimId;
+                    tmpShipCreatorLineLocal.InventSiteId = inventDim.InventSiteId;
+                    tmpShipCreatorLineLocal.InventLocationId = inventDim.InventLocationId;
+                    tmpShipCreatorLineLocal.InventQty = abs(inventTrans.Qty);
+                    tmpShipCreatorLineLocal.ShipDataArea = inventTrans.dataAreaId;
+                    this.initLineValues(tmpShipCreatorLineLocal, inventTrans.ItemId, tmpShipCreatorLineLocal.InventQty);
+                    tmpShipCreatorLineLocal.insert();
+
+                    container values;
+                    if (ETGOTMCreatorNoSplitHeaderByWarehouseFlight::instance().isEnabled())
+                    {
+                        values = [inventTrans.DateExpected, inventTransOrigin.ReferenceCategory, inventTransOrigin.ReferenceId];
+                    }
+                    else
+                    {
+                        values = [inventTrans.DateExpected, inventTransOrigin.ReferenceCategory, inventTransOrigin.ReferenceId, inventDim.InventSiteId, inventDim.InventLocationId];
+                    }
+
+                    if (!existsTmpShipCreatorTable.in(values))
+                    {
+                        existsTmpShipCreatorTable.add(values);
+                        tmpShipCreatorTableLocal.clear();
+                        this.initTableValues(tmpShipCreatorTableLocal,
+                                             inventTrans.DateExpected,
+                                             inventTransOrigin.ReferenceCategory,
+                                             inventTransOrigin.ReferenceId,
+                                             inventDim.InventSiteId,
+                                             inventDim.InventLocationId);
+                        tmpShipCreatorTableLocal.insert();
+                    }
+                }
+            }
+        }
+
+        this.updateBucket();
+
+        this.updateOverviewInformation();
+    
+        ttsCommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getSalesUnit</Name>
+				<Source><![CDATA[
+    public SalesUnit getSalesUnit(QueryRun _queryRun)
+    {
+        InventTransOrigin InventTransOrigin = _queryRun.get(tableNum(inventTransOrigin));
+        SalesUnit ret = '';
+
+        if (inventTransOrigin.ReferenceCategory == InventTransType::Sales)
+        {
+            SalesLine salesLineLocal = _queryRun.get(tableNum(SalesLine));
+            ret = salesLineLocal.SalesUnit;
+        }
+        else if (inventTransOrigin.ReferenceCategory == InventTransType::TransferOrderShip)
+        {
+            InventTransferLine transferLineLocal = _queryRun.get(tableNum(InventTransferLine));
+            ret = transferLineLocal.UnitId;
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>includeReference</Name>
+				<Source><![CDATA[
+    public NoYes includeReference(
+        InventTransType _inventTransType,
+        InventTransRefId _inventTransRefId)
+    {
+    
+        ITMCreatorOptions shipCreatorOptionsLocal = this.parmShipCreatorOptions();
+        this.parmInventTransRefBuffer(null);
+    
+        switch (_inventTransType)
+        {
+            case InventTransType::Sales:
+                SalesTable salesTable;
+
+                if (purchTableMap.exists(salesTable.DataAreaId + _inventTransRefId))
+                {
+                    salesTable = purchTableMap.lookup(salesTable.DataAreaId + _inventTransRefId);
+                }
+
+                if (shipCreatorOptionsLocal.parmDlvModeId())
+                {
+                    if (!salesTable)
+                    {
+                        salesTable = SalesTable::find(_inventTransRefId);
+                        purchTableMap.insert(salesTable.DataAreaId + salesTable.SalesId, salesTable);
+                    }
+
+                    this.parmInventTransRefBuffer(salesTable);
+                    if (shipCreatorOptionsLocal.parmDlvModeId() != salesTable.DlvMode)
+                    {
+                        return NoYes::No;
+                    }
+                }
+
+                if (shipCreatorOptionsLocal.parmVendRef())
+                {
+                    if (!salesTable)
+                    {
+                        salesTable = salesTable::find(_inventTransRefId);
+                        purchTableMap.insert(salesTable.DataAreaId + salesTable.SalesId, salesTable);
+                    }
+                    this.parmInventTransRefBuffer(salesTable);
+                    if (shipCreatorOptionsLocal.parmVendRef() != salesTable.CustomerRef)
+                    {
+                        return NoYes::No;
+                    }
+                }
+
+                break;
+    
+            case InventTransType::TransferOrderShip:
+
+                if (shipCreatorOptionsLocal.parmVendRef())
+                {
+                    return NoYes::No;
+                }
+
+                if (shipCreatorOptionsLocal.parmDlvModeId())
+                {
+                    InventTransferTable inventTransferTable;
+
+                    if (inventTransferTableMap.exists(inventTransferTable.DataAreaId + _inventTransRefId))
+                    {
+                        inventTransferTable = inventTransferTableMap.lookup(inventTransferTable.DataAreaId + _inventTransRefId);
+                    }
+                    else
+                    {
+                        inventTransferTable = InventTransferTable::find(_inventTransRefId);
+                    }
+
+                    this.parmInventTransRefBuffer(inventTransferTable);
+                    if (shipCreatorOptionsLocal.parmDlvModeId() != inventTransferTable.DlvModeId)
+                    {
+                        return NoYes::No;
+                    }
+                }
+
+                break;
+        }
+    
+        return NoYes::Yes;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initLineValues</Name>
+				<Source><![CDATA[
+    public void initLineValues(ITMTmpCreatorLine _tmpShipCreatorLine, ItemId _itemId, InventQty _qty)
+    {
+        EcoResProductUnitConverter productUnitConverter;
+        InventTable inventTable = InventTable::find(_itemId);
+        Weight weight = inventTable.grossWeight();
+        
+        _tmpShipCreatorLine.ItemId = _itemId;
+    
+        _tmpShipCreatorLine.Volume = _qty * inventTable.grossVolume();
+
+        if (!_tmpShipCreatorLine.Volume)
+        {
+            _tmpShipCreatorLine.VolumeMissing = NoYes::Yes;
+        }
+    
+        _tmpShipCreatorLine.Weight = _qty * weight;
+
+        if (!weight)
+        {
+            _tmpShipCreatorLine.WeightMissing = NoYes::Yes;
+        }
+    
+        if (_tmpShipCreatorLine.InventTransType == InventTransType::TransferOrderReceive)
+        {
+            _tmpShipCreatorLine.PurchQty = _qty;
+        }
+        else
+        {
+            InventUnitId inventUnitId= inventTable.inventUnitId();
+
+            if (inventUnitId == _tmpShipCreatorLine.PurchUnit)
+            {
+                _tmpShipCreatorLine.PurchQty = _qty;
+            }
+            else
+            {
+                productUnitConverter = EcoResProductUnitConverter::newGivenUnitSymbolsForReleasedProduct(
+                                                    _tmpShipCreatorLine.ItemId,
+                                                    _tmpShipCreatorLine.InventDimId,
+                                                    inventUnitId,
+                                                    _tmpShipCreatorLine.PurchUnit,
+                                                    NoYes::Yes);
+                _tmpShipCreatorLine.PurchQty = productUnitConverter.convertValue(_qty);
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

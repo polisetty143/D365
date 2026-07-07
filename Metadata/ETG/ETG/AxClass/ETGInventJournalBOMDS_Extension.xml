@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGInventJournalBOMDS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formDataSourceStr(InventJournalBOM, InventJournalTrans))]
+internal final class ETGInventJournalBOMDS_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {
+        int ret = next active();
+
+        // Get parameter
+        ETGCanadaParameters parameters = ETGCanadaParameters::find();
+        if (!parameters.EnableBOMJournal)
+        {
+            return ret;
+        }
+
+        InventJournalTrans  currentTrans = this.cursor();
+        InventJournalTrans  trans;
+        FormRun             formRun = this.formRun();
+        FormControl         fetchItemsBtn =formRun.design().controlName(formControlStr(InventJournalBOM, ETGFetchItems));
+        int                 recordCount;
+       
+
+        select count(RecId) from trans
+            where trans.JournalId == currentTrans.JournalId;
+
+        recordCount = trans.RecId;
+
+        if ((currentTrans.BOMLine == NoYes::No && recordCount <= 1) || (currentTrans.BOMLine == NoYes::Yes))
+        {
+            this.allowEdit(true);
+        }
+        else
+        {
+            this.allowEdit(false);
+        }
+
+        if((currentTrans.BOMLine == NoYes::No && recordCount > 1) || currentTrans.BOMLine == NoYes::Yes)
+        {
+            fetchItemsBtn.enabled(false);
+        }
+        else
+        {
+            fetchItemsBtn.enabled(true);
+        }
+
+        InventJournalTable journalTable = InventJournalTable::find(currentTrans.JournalId);
+        FormRealControl unitqtycntl     = this.formRun().design().controlName('InventJournalTrans_UnitQty');
+
+        //make quantity and unitquantity non-editable in parent enitity
+        
+        if(journalTable.ETGProductionEntityBOMJournal)
+        {
+            this.object(fieldNum(InventJournalTrans, Qty)).allowEdit(false);
+            unitqtycntl.allowEdit(false);
+        }
+        else
+        {
+            this.object(fieldNum(InventJournalTrans, Qty)).allowEdit(true);
+            unitqtycntl.allowEdit(true);
+            
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>selectionChanged</Name>
+				<Source><![CDATA[
+    public void selectionChanged()
+    {
+        next selectionChanged();
+        FormRealControl unitqtycntl     = this.formRun().design().controlName('InventJournalTrans_UnitQty');
+        InventJournalTrans currentTrans = this.cursor();
+        InventJournalTable journalTable = InventJournalTable::find(currentTrans.JournalId);
+
+        if(journalTable.ETGProductionEntityBOMJournal)
+        {
+
+            this.object(fieldNum(InventJournalTrans, Qty)).allowEdit(false);
+            unitqtycntl.allowEdit(false);
+           
+        }
+        else
+        {
+            this.object(fieldNum(InventJournalTrans, Qty)).allowEdit(true);
+            unitqtycntl.allowEdit(true);
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateWrite</Name>
+				<Source><![CDATA[
+    public boolean validateWrite()
+    {
+        boolean ret = next validateWrite();
+       
+        ETGCanadaParameters parameters = ETGCanadaParameters::find();
+
+        
+        if (!parameters.EnableBOMJournal)
+        {
+            return ret;
+        }
+
+        InventJournalTrans      locCurrentTrans = this.cursor();
+
+        if (locCurrentTrans.BOMLine == NoYes::Yes)
+        {
+            if (locCurrentTrans.Qty > 0 )
+            {
+                checkFailed("Quantity must always be negative.");
+                ret = false;
+            }
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

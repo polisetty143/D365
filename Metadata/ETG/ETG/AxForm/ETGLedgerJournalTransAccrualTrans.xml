@@ -1,0 +1,588 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxForm xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V6">
+	<Name>ETGLedgerJournalTransAccrualTrans</Name>
+	<SourceCode>
+		<Methods xmlns="">
+			<Method>
+				<Name>classDeclaration</Name>
+				<Source><![CDATA[
+[Form]
+public class ETGLedgerJournalTransAccrualTrans extends FormRun
+{
+    QueryBuildRange criteriaPosted;
+
+}
+]]></Source>
+			</Method>
+			<Method>
+				<Name>init</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    public void init()
+    {
+        super();
+
+        if (element.args().menuItemName() == menuItemDisplayStr(ETGLedgerJournalTransAccrualTrans))
+        {
+            TopFields.visible(false);
+            Posted.visible(false);
+            JournalNumSource.visible(false);
+            JournalNumPosted.visible(false);
+        }
+
+        AllOpenPostedField.selection(AllOpenPosted::Open);
+
+        ETGLedgerJournalTransAccrualTrans_ds.allowEdit(!ETGLedgerJournalTransAccrualTrans.Posted);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>valueAllOpenPosted</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Returns a query range value for the journal status to filter on.
+    /// </summary>
+    /// <returns>A string with query range value.</returns>
+    protected str valueAllOpenPosted()
+    {
+        switch (AllOpenPostedField.selection())
+        {
+            case AllOpenPosted::All     : 
+                ETGLedgerJournalTransAccrualTrans_ds.allowDelete(false);
+                return SysQuery::valueUnlimited();
+            case AllOpenPosted::Open    : 
+                ETGLedgerJournalTransAccrualTrans_ds.allowDelete(true);
+                return enum2Value(NoYes::No);
+            case AllOpenPosted::Posted  :
+                ETGLedgerJournalTransAccrualTrans_ds.allowDelete(false);
+                return enum2Value(NoYes::Yes);
+
+            default: return SysQuery::valueUnlimited();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+		<DataSources xmlns="">
+			<DataSource>
+				<Name>ETGLedgerJournalTransAccrualTrans</Name>
+				<Methods>
+					<Method>
+						<Name>init</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void init()
+        {
+            super();
+
+            criteriaPosted = ETGLedgerJournalTransAccrualTrans_ds.query().dataSourceTable(tableNum(ETGLedgerJournalTransAccrualTrans)).addRange(fieldNum(ETGLedgerJournalTransAccrualTrans,Posted));
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>executeQuery</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void executeQuery()
+        {
+            criteriaPosted.value(element.valueAllOpenPosted());
+
+            ETGLedgerJournalTransAccrualTrans_ds.query().dataSourceTable(tableNum(ETGLedgerJournalTransAccrualTrans)).clearRange(fieldNum(ETGLedgerJournalTransAccrualTrans, AccrualId));
+
+            if (AccrualId.valueStr())
+            {                
+                ETGLedgerJournalTransAccrualTrans_ds.query().dataSourceTable(tableNum(ETGLedgerJournalTransAccrualTrans)).addRange(fieldNum(ETGLedgerJournalTransAccrualTrans, AccrualId)).value(AccrualId.valueStr());
+            }
+
+       //     ETGLedgerJournalTransAccrualTrans_ds..queryBuildDataSource().addSortField(fieldNum(SysDataBaseLog,CreatedDateTime),SortOrder::Descending);
+       ETGLedgerJournalTransAccrualTrans_ds.query().dataSourceTable(tableNum(ETGLedgerJournalTransAccrualTrans)).addSortField(fieldNum(ETGLedgerJournalTransAccrualTrans, TransDate), SortOrder::Ascending);
+
+            super();
+
+            ETGLedgerJournalTransAccrualTrans_ds.allowEdit(!ETGLedgerJournalTransAccrualTrans.Posted);
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>deleteMarked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void deleteMarked()
+        {
+            RefRecId refRecId;
+            TransDate transDate;
+            int counter = 0;
+
+            MultiSelectionHelper helper = MultiSelectionHelper::construct();
+
+            helper.parmDatasource(this);
+
+            ETGLedgerJournalTransAccrualTrans eTGLedgerJournalTransAccrualTransLoc = helper.getFirst();
+
+            refRecId = eTGLedgerJournalTransAccrualTransLoc.RefRecid;
+            transDate = eTGLedgerJournalTransAccrualTransLoc.TransDate;
+
+            eTGLedgerJournalTransAccrualTransLoc = helper.getNext();
+
+            if (eTGLedgerJournalTransAccrualTransLoc && !eTGLedgerJournalTransAccrualTransLoc.Posted)
+            {
+                if (!(refRecId == eTGLedgerJournalTransAccrualTransLoc.RefRecid) ||
+                    !(transDate == eTGLedgerJournalTransAccrualTransLoc.TransDate))
+                {
+                    throw error('Selected records cannot be deleted. Please select related records with same trans date and refrecid');
+                }
+                else
+                {
+                    eTGLedgerJournalTransAccrualTransLoc = helper.getNext();
+
+                    if (eTGLedgerJournalTransAccrualTransLoc)
+                    {
+                        throw error('Records can be deleted only in pair');
+                    }
+                }
+            }
+            else
+            {
+                throw error('Records can be deleted only in pair');
+            }
+
+            super();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields />
+			</DataSource>
+		</DataSources>
+		<DataControls xmlns="">
+			<Control>
+				<Name>AllOpenPostedField</Name>
+				<Type>ComboBox</Type>
+				<Methods>
+					<Method>
+						<Name>modified</Name>
+						<Source><![CDATA[
+        public boolean modified()
+        {
+            boolean ret;
+
+            ret = super();
+
+            ETGLedgerJournalTransAccrualTrans_ds.executeQuery();
+
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>AccrualId</Name>
+				<Type>String</Type>
+				<Methods>
+					<Method>
+						<Name>modified</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        /// <returns></returns>
+        public boolean modified()
+        {
+            boolean ret;
+        
+            ret = super();
+
+            ETGLedgerJournalTransAccrualTrans_ds.executeQuery();
+        
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+		</DataControls>
+		<Members xmlns="" />
+	</SourceCode>
+	<DataSources>
+		<AxFormDataSource xmlns="">
+			<Name>ETGLedgerJournalTransAccrualTrans</Name>
+			<Table>ETGLedgerJournalTransAccrualTrans</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>AccrualId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>AmountCur</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CurrencyCode</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CurrentVoucher</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DocumentDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>IsTaxInCostPrice</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>JournalNumPosted</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>JournalNumSource</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LedgerDimension</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>OriginalVoucher</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Posted</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RefRecid</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RefTableid</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TransDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TransTxt</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Voucher</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<AllowCreate>No</AllowCreate>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+	</DataSources>
+	<Design>
+		<Caption xmlns="">@SYS78068</Caption>
+		<Pattern xmlns="">Task</Pattern>
+		<PatternVersion xmlns="">1.2</PatternVersion>
+		<TitleDataSource xmlns="">ETGLedgerJournalTransAccrualTrans</TitleDataSource>
+		<Controls xmlns="">
+			<AxFormControl xmlns=""
+				i:type="AxFormActionPaneControl">
+				<Name>ActionPane</Name>
+				<ElementPosition>536870911</ElementPosition>
+				<FilterExpression>%1</FilterExpression>
+				<HeightMode>Auto</HeightMode>
+				<Type>ActionPane</Type>
+				<VerticalSpacing>-1</VerticalSpacing>
+				<Width>0</Width>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormButtonGroupControl">
+						<Name>FormButtonGroupControl1</Name>
+						<Type>ButtonGroup</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormMenuFunctionButtonControl">
+								<Name>ETGLedgerAccrualJouralCreatePost</Name>
+								<Type>MenuFunctionButton</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<MenuItemName>ETGLedgerAccrualJouralCreatePost</MenuItemName>
+								<MenuItemType>Action</MenuItemType>
+							</AxFormControl>
+						</Controls>
+					</AxFormControl>
+				</Controls>
+				<AlignChild>No</AlignChild>
+				<AlignChildren>No</AlignChildren>
+				<ArrangeMethod>Vertical</ArrangeMethod>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGroupControl">
+				<Name>TopFields</Name>
+				<AutoDeclaration>Yes</AutoDeclaration>
+				<ElementPosition>1073741822</ElementPosition>
+				<FilterExpression>%1</FilterExpression>
+				<Pattern>CustomFilters</Pattern>
+				<PatternVersion>1.1</PatternVersion>
+				<Type>Group</Type>
+				<VerticalSpacing>-1</VerticalSpacing>
+				<WidthMode>SizeToAvailable</WidthMode>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormComboBoxControl">
+						<Name>AllOpenPostedField</Name>
+						<AutoDeclaration>Yes</AutoDeclaration>
+						<ElementPosition>1073741822</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<Type>ComboBox</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<FormControlExtension
+							i:nil="true" />
+						<EnumType>AllOpenPosted</EnumType>
+						<Selection>255</Selection>
+						<Items />
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>AccrualId</Name>
+						<AutoDeclaration>Yes</AutoDeclaration>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<ExtendedDataType>LedgerAccrualId</ExtendedDataType>
+					</AxFormControl>
+				</Controls>
+				<ArrangeMethod>HorizontalLeft</ArrangeMethod>
+				<FrameType>None</FrameType>
+				<Style>CustomFilter</Style>
+				<ViewEditMode>Edit</ViewEditMode>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormTabControl">
+				<Name>Tab</Name>
+				<Type>Tab</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>Overview</Name>
+						<Pattern>ToolbarList</Pattern>
+						<PatternVersion>1.2</PatternVersion>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormGridControl">
+								<Name>Grid</Name>
+								<ElementPosition>1431655764</ElementPosition>
+								<FilterExpression>%1</FilterExpression>
+								<Type>Grid</Type>
+								<VerticalSpacing>-1</VerticalSpacing>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormDateControl">
+										<Name>TransDate</Name>
+										<AllowEdit>No</AllowEdit>
+										<ElementPosition>477218588</ElementPosition>
+										<FilterExpression>%1</FilterExpression>
+										<HeightMode>Auto</HeightMode>
+										<Type>Date</Type>
+										<VerticalSpacing>-1</VerticalSpacing>
+										<WidthMode>Auto</WidthMode>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>TransDate</DataField>
+										<DataSource>ETGLedgerJournalTransAccrualTrans</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormSegmentedEntryControl">
+										<Name>LedgerAccount</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<ElementPosition>1431655764</ElementPosition>
+										<FilterExpression>%1</FilterExpression>
+										<HeightMode>Auto</HeightMode>
+										<HelpText>@FieldDescriptions_GeneralLedger:LedgerJournalTransAccrualTrans_LedgerAccount</HelpText>
+										<Type>SegmentedEntry</Type>
+										<WidthMode>Auto</WidthMode>
+										<FormControlExtension>
+											<Name>SegmentedEntryControl</Name>
+											<ExtensionComponents />
+											<ExtensionProperties>
+												<AxFormControlExtensionProperty>
+													<Name>parmControllerClassName</Name>
+													<Type>String</Type>
+													<Value>LedgerDimensionAccountController</Value>
+												</AxFormControlExtensionProperty>
+												<AxFormControlExtensionProperty>
+													<Name>parmAccountTypeEnumName</Name>
+													<Type>String</Type>
+												</AxFormControlExtensionProperty>
+												<AxFormControlExtensionProperty>
+													<Name>parmIsDefaultAccount</Name>
+													<Type>Enum</Type>
+													<TypeName>boolean</TypeName>
+													<Value>False</Value>
+												</AxFormControlExtensionProperty>
+												<AxFormControlExtensionProperty>
+													<Name>parmValidateBlockedForManualEntry</Name>
+													<Type>Enum</Type>
+													<TypeName>NoYes</TypeName>
+												</AxFormControlExtensionProperty>
+												<AxFormControlExtensionProperty>
+													<Name>parmLockMainAccountSegment</Name>
+													<Type>Enum</Type>
+													<TypeName>NoYes</TypeName>
+												</AxFormControlExtensionProperty>
+												<AxFormControlExtensionProperty>
+													<Name>parmPostingType</Name>
+													<Type>Enum</Type>
+													<TypeName>LedgerPostingType</TypeName>
+												</AxFormControlExtensionProperty>
+												<AxFormControlExtensionProperty>
+													<Name>parmIncludeTotalAccounts</Name>
+													<Type>Enum</Type>
+													<TypeName>NoYes</TypeName>
+												</AxFormControlExtensionProperty>
+												<AxFormControlExtensionProperty>
+													<Name>parmIncludeFinancialAccounts</Name>
+													<Type>Enum</Type>
+													<TypeName>NoYes</TypeName>
+												</AxFormControlExtensionProperty>
+											</ExtensionProperties>
+										</FormControlExtension>
+										<DataSource>ETGLedgerJournalTransAccrualTrans</DataSource>
+										<ReferenceField>LedgerDimension</ReferenceField>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>TransTxt</Name>
+										<ElementPosition>1670265058</ElementPosition>
+										<FilterExpression>%1</FilterExpression>
+										<HeightMode>Auto</HeightMode>
+										<Type>String</Type>
+										<VerticalSpacing>-1</VerticalSpacing>
+										<WidthMode>Auto</WidthMode>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>TransTxt</DataField>
+										<DataSource>ETGLedgerJournalTransAccrualTrans</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>AmountCur</Name>
+										<AllowEdit>No</AllowEdit>
+										<ElementPosition>1908874352</ElementPosition>
+										<FilterExpression>%1</FilterExpression>
+										<HeightMode>Auto</HeightMode>
+										<Type>Real</Type>
+										<VerticalSpacing>-1</VerticalSpacing>
+										<WidthMode>Auto</WidthMode>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>AmountCur</DataField>
+										<DataSource>ETGLedgerJournalTransAccrualTrans</DataSource>
+										<NoOfDecimals>-1</NoOfDecimals>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormCheckBoxControl">
+										<Name>Posted</Name>
+										<AllowEdit>No</AllowEdit>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>CheckBox</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>Posted</DataField>
+										<DataSource>ETGLedgerJournalTransAccrualTrans</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>JournalNumSource</Name>
+										<AllowEdit>No</AllowEdit>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>JournalNumSource</DataField>
+										<DataSource>ETGLedgerJournalTransAccrualTrans</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>JournalNumPosted</Name>
+										<AllowEdit>No</AllowEdit>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>JournalNumPosted</DataField>
+										<DataSource>ETGLedgerJournalTransAccrualTrans</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGLedgerJournalTransAccrualTrans_AccrualId</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>AccrualId</DataField>
+										<DataSource>ETGLedgerJournalTransAccrualTrans</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGLedgerJournalTransAccrualTrans_CurrencyCode</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>CurrencyCode</DataField>
+										<DataSource>ETGLedgerJournalTransAccrualTrans</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGLedgerJournalTransAccrualTrans_Voucher</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>OriginalVoucher</DataField>
+										<DataSource>ETGLedgerJournalTransAccrualTrans</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGLedgerJournalTransAccrualTrans_CurrentVoucher</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>CurrentVoucher</DataField>
+										<DataSource>ETGLedgerJournalTransAccrualTrans</DataSource>
+									</AxFormControl>
+								</Controls>
+								<DataSource>ETGLedgerJournalTransAccrualTrans</DataSource>
+							</AxFormControl>
+						</Controls>
+						<Caption>@SYS9039</Caption>
+					</AxFormControl>
+				</Controls>
+			</AxFormControl>
+		</Controls>
+	</Design>
+	<Parts />
+</AxForm>

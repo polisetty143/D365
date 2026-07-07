@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_InventTransferUpdShip_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(InventTransferUpdShip))]
+final class ETG_InventTransferUpdShip_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>postTax</Name>
+				<Source><![CDATA[
+    protected void  postTax(boolean _post)
+    {
+        next postTax(_post);
+      //  this.postMarkup();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postMarkup</Name>
+				<Source><![CDATA[
+    protected void  postMarkup()
+    {
+        Markup markup = new Markup(Ledger::accountingCurrency());
+        InventTransferLine inventTransferLine;
+        InventTransferJourLine inventTransferJourLine;
+
+        InventTransferTotals inventTransferTotals = InventTransferTotals::construct(this.inventTransferJour);
+
+        inventTransferTotals.setUpdateType(InventTransferUpdateType::Shipment);
+        
+        inventTransferTotals.calc();
+
+        markup.setTax(inventTransferTotals.tax());
+       
+        while select inventTransferLine 
+            where inventTransferLine.TransferId == inventTransferTable.TransferId
+        {
+            InventTable item = InventTable::find(inventTransferLine.ItemId);
+
+            select * from inventTransferJourLine
+                where inventTransferJourLine.InventTransId == inventTransferLine.InventTransId &&
+                        inventTransferJourLine.TransferId == inventTransferLine.TransferId;
+
+            markup.postInvoice(inventTransferLine.QtyTransfer, inventTransferLine.NetAmount, inventTransferLine, ledgerVoucher, item.DefaultDimension,inventTransferJourLine);
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

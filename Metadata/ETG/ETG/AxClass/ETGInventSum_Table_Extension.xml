@@ -1,0 +1,310 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGInventSum_Table_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// extension class for table <c>InventSum</c>
+/// </summary>
+[ExtensionOf(tableStr(InventSum))]
+final class ETGInventSum_Table_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getAlternateUnitETG</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// display alternate unit on InventOnHand list page
+    /// </summary>
+    /// <param name = "_inventSum">InventSum _inventSum</param>
+    /// <returns>UnitIDBase</returns>
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display UnitIDBase getAlternateUnitETG(InventSum _inventSum)
+    {
+        UnitOfMeasureConversion  unitOfMeasureConversion;
+        InventTable              inventTable    = InventTable::find(_inventSum.ItemId);
+        UnitOfMeasureRecId       fromUnitId     = UnitOfMeasure::unitOfMeasureIdBySymbol(inventTable.inventUnitId());
+        select firstonly ToUnitOfMeasure from  unitOfMeasureConversion
+                   where      unitOfMeasureConversion.Product           == inventTable.Product
+                   &&         unitOfMeasureConversion.FromUnitOfMeasure == fromUnitId;
+
+        if(!unitOfMeasureConversion || unitOfMeasureConversion.ToUnitOfMeasure == 0)
+        {
+            return '';
+        }
+
+        return UnitOfMeasure::find(unitOfMeasureConversion.ToUnitOfMeasure).Symbol;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getAlternateQuantityETG</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// display alternate qty on InventOnHand list page
+    /// </summary>
+    /// <param name = "_inventSum">InventSum _inventSum</param>
+    /// <returns>Qty</returns>
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display Qty getAlternateQuantityETG(InventSum _inventSum)
+    {
+        UnitOfMeasureConversion  unitOfMeasureConversion;
+        InventTable              inventTable    = InventTable::find(_inventSum.ItemId);
+        UnitOfMeasureRecId       fromUnitId     = UnitOfMeasure::unitOfMeasureIdBySymbol(inventTable.inventUnitId());
+        select firstonly Factor from  unitOfMeasureConversion
+                   where      unitOfMeasureConversion.Product           == inventTable.Product
+                   &&         unitOfMeasureConversion.FromUnitOfMeasure == fromUnitId;
+
+        if(!unitOfMeasureConversion || !unitOfMeasureConversion.Factor)
+        {
+            return 0;
+        }
+
+        return _inventSum.AvailOrdered * unitOfMeasureConversion.Factor;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getMT</Name>
+				<Source><![CDATA[
+    //NS, DLT ,11/03/2025  UOM we required along with MT & LBS, KGS AT closing Stock level
+    /// <summary>
+    /// display UOM  MT on InventOnHand list page
+    /// </summary>
+    /// <param name = "_inventSum">InventSum _inventSum</param>
+    /// <returns>returnMT</returns>
+
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display InventQtyAvailPhysical getMT(InventSum _inventSum)
+    {
+
+        
+        InventQtyAvailPhysical   returnMT;
+        str                      fromUnit,toUnit;
+        UnitOfMeasureConversion  unitOfMeasureConversion;
+        UnitOfMeasure            fromUnitOfMeasure;
+        boolean                  isMT;
+        InventTable              inventTable        = InventTable::find(_inventSum.ItemId);
+        InventTableModule        inventTableModule  = InventTableModule::find(inventTable.ItemId,ModuleInventPurchSales::Invent);
+
+        fromUnit           = inventTableModule.UnitId;
+        fromUnitOfMeasure  = UnitOfMeasure::findBySymbol(fromUnit);
+
+        if(ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+        {
+
+            while  select  unitOfMeasureConversion
+                      where   unitOfMeasureConversion.FromUnitOfMeasure  == fromUnitOfMeasure.RecId
+
+            {
+               
+                toUnit   = UnitOfMeasure::find(unitOfMeasureConversion.ToUnitOfMeasure).Symbol;
+                // toUnit   = "MT";
+
+                if(unitOfMeasureConversion.FromUnitOfMeasure  == fromUnitOfMeasure.RecId && unitOfMeasureConversion.Product ==0)
+                {
+                    if(fromUnit == toUnit && toUnit == "@ETG_New:MT")
+                    {
+                        returnMT  = _inventSum.AvailPhysical;
+                        isMT = true;
+                    }
+                    else if(fromUnit && toUnit == "@ETG_New:MT")
+                    {
+                        returnMT = unitOfMeasureConversion.Factor *_inventSum.AvailPhysical;
+                        isMT = true;
+                    }
+                }
+                else
+                {
+                    if(!isMT)
+                    {
+                        select firstonly  unitOfMeasureConversion
+                           where  unitOfMeasureConversion.Product  == inventTable.Product
+                               && unitOfMeasureConversion.FromUnitOfMeasure == fromUnitOfMeasure.RecId;
+
+                        if(fromUnit == toUnit && toUnit == "@ETG_New:MT")
+                        {
+                            returnMT  = _inventSum.AvailPhysical;
+                        }
+                        else if(fromUnit && toUnit == "@ETG_New:MT")
+                        {
+                            returnMT = unitOfMeasureConversion.Factor *_inventSum.AvailPhysical;
+                        }
+                    }
+                }
+                if(returnMT== 0 && fromUnit == "MT")
+                {
+                    returnMT  = _inventSum.AvailPhysical;
+                }
+            }
+            
+        }
+        
+        return returnMT;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getKG</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// display  UOM KT on InventOnHand list page
+    /// </summary>
+    /// <param name = "_inventSum">InventSum _inventSum</param>
+    /// <returns>returnKG</returns>
+
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display InventQtyAvailPhysical getKG(InventSum _inventSum)
+    {
+        InventQtyAvailPhysical   returnKG;
+        str                      fromUnit,toUnit;
+        UnitOfMeasureConversion  unitOfMeasureConversion;
+        UnitOfMeasure            fromUnitOfMeasure, toUnitOfMeasure;
+        boolean                  iskg;
+
+        InventTable              inventTable        = InventTable::find(_inventSum.ItemId);
+        InventTableModule        inventTableModule  = InventTableModule::find(inventTable.ItemId,ModuleInventPurchSales::Invent);
+
+        fromUnit           = inventTableModule.UnitId;
+        fromUnitOfMeasure  = UnitOfMeasure::findBySymbol(fromUnit);
+
+        if(ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+        {
+            while select  unitOfMeasureConversion
+                where     unitOfMeasureConversion.FromUnitOfMeasure  == fromUnitOfMeasure.RecId
+            {
+                toUnit   = UnitOfMeasure::find(unitOfMeasureConversion.ToUnitOfMeasure).Symbol;
+              
+                if(unitOfMeasureConversion.FromUnitOfMeasure  == fromUnitOfMeasure.RecId && unitOfMeasureConversion.Product ==0)
+                {
+                    if(fromUnit == toUnit && toUnit == "@ETG_New:KG")
+                    {
+                        returnKG  = _inventSum.AvailPhysical;
+                        iskg = true;
+                    }
+                    else if(fromUnit && toUnit == "@ETG_New:KG")
+                    {
+                        returnKG =unitOfMeasureConversion.Factor * _inventSum.AvailPhysical;
+                        iskg = true;
+                    }
+                }
+                else
+                {
+                    if(!iskg)
+                    {
+                        select firstonly  unitOfMeasureConversion
+                           where  unitOfMeasureConversion.Product  == inventTable.Product
+                               && unitOfMeasureConversion.FromUnitOfMeasure == fromUnitOfMeasure.RecId;
+
+                        if(fromUnit == toUnit && toUnit == "@ETG_New:KG")
+                        {
+                            returnKG  = _inventSum.AvailPhysical;
+                        }
+                        else if(fromUnit && toUnit == "@ETG_New:KG")
+                        {
+                            returnKG =unitOfMeasureConversion.Factor * _inventSum.AvailPhysical;
+                        }
+                    }
+                }
+                if(returnKG==0 && fromUnit =="KG")
+                {
+                    returnKG  = _inventSum.AvailPhysical;
+                }
+            }
+          
+        }
+        return returnKG;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getLBS</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// display UOM LBS on InventOnHand list page
+    /// </summary>
+    /// <param name = "_inventSum">InventSum _inventSum</param>
+    /// <returns>returnLBS</returns>
+
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display InventQtyAvailPhysical getLBS(InventSum _inventSum)
+    {
+        InventQtyAvailPhysical   returnLBS;
+        str                      fromUnit,toUnit;
+        UnitOfMeasureConversion  unitOfMeasureConversion;
+        InventTableModule        inventTableModule;
+        UnitOfMeasure            fromUnitOfMeasure, toUnitOfMeasure;
+        boolean                  isLBS;
+
+
+        InventTable              inventTable    = InventTable::find(_inventSum.ItemId);
+        inventTableModule                       = InventTableModule::find(inventTable.ItemId,ModuleInventPurchSales::Invent);
+
+        fromUnit         = inventTableModule.UnitId;
+        fromUnitOfMeasure = UnitOfMeasure::findBySymbol(fromUnit);
+        if(ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+        {
+          
+
+            while  select unitOfMeasureConversion
+                where unitOfMeasureConversion.FromUnitOfMeasure  == fromUnitOfMeasure.RecId
+            {
+                toUnit    = UnitOfMeasure::find(unitOfMeasureConversion.ToUnitOfMeasure).Symbol;
+                //toUnit = "LBS";
+
+                if(unitOfMeasureConversion.FromUnitOfMeasure  == fromUnitOfMeasure.RecId && unitOfMeasureConversion.Product ==0)
+                {
+                    if(fromUnit == toUnit && toUnit == "@ETG_New:LBS")
+                    {
+                        returnLBS = _inventSum.AvailPhysical;
+                        isLBS = true;
+                    }
+                    else if(fromUnit && toUnit == "@ETG_New:LBS")
+                    {
+                        returnLBS =unitOfMeasureConversion.Factor *_inventSum.AvailPhysical;
+                        isLBS = true;
+
+                    }
+           
+                }
+                else
+                {
+                    if(!isLBS)
+                    {
+                        select firstonly  unitOfMeasureConversion
+                               where  unitOfMeasureConversion.Product  == inventTable.Product
+                                   && unitOfMeasureConversion.FromUnitOfMeasure == fromUnitOfMeasure.RecId;
+
+                        if(fromUnit == toUnit && toUnit == "@ETG_New:LBS")
+                        {
+                            returnLBS = _inventSum.AvailPhysical;
+                        }
+                        else if(fromUnit && toUnit == "@ETG_New:LBS")
+                        {
+                            returnLBS =unitOfMeasureConversion.Factor *_inventSum.AvailPhysical;
+                        }
+                    }
+                }
+                if(returnLBS == 0 && fromUnit == "LBS")
+                {
+                    returnLBS = _inventSum.AvailPhysical;
+                }
+            }
+            
+        }
+        
+        return returnLBS;
+    }
+    //NE, DLT ,11/03/2025  UOM we required along with MT & LBS, KGS AT closing Stock level
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_AgreementConfirm_Purch_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(AgreementConfirm_Purch))]
+final class ETG_AgreementConfirm_Purch_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>startConfirm</Name>
+				<Source><![CDATA[
+    public void startConfirm()
+    {
+        RefRecId defDimension;
+        AgreementLine agreementLineLoc;
+        AgreementHeader headerLoc;
+        PurchAgreementHeader    purchAgreementHeader;
+
+        headerLoc = this.parmAgreementHeader();
+        defDimension = headerLoc.DefaultDimension;
+        next startConfirm();
+        update_recordset agreementLineLoc setting DefaultDimension = defDimension where agreementLineLoc.Agreement == headerLoc.RecId;
+
+
+        select firstonly purchAgreementHeader where purchAgreementHeader.RecId == headerLoc.RecId;
+
+        // Update remaining trade limit if workflow is disabled
+
+        if (ETGACFParameters::find().EnableTradeLimit == NoYes::Yes)
+        {
+            AgreementHeaderHistory       agreementHeaderHistory;
+
+            select firstonly agreementHeaderHistory
+            order by RecId desc
+            where agreementHeaderHistory.AgreementHeader == purchAgreementHeader.RecId;
+
+            if(agreementHeaderHistory.ConfirmationNumber == "1"
+                && purchAgreementHeader && purchAgreementHeader.vendTable().ETGApplicableTradeLimit == NoYes::Yes
+                && ETGACFParameters::find().EnablePurchaseAgreementWF == NoYes::No)
+            {
+                ETGACFTradeLimitHelper::processTradeLimitPurch(purchAgreementHeader);
+            }
+        }
+
+        // Update remaining trade limit if workflow is disabled
+
+        //DMF Intergreations..*/
+
+        if (ETGACFParameters::find().EnableDMSIntegration
+            && BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGDMSReverePurchAgreementIntegrationEventClass)))
+        {
+            AgreementHeaderHistory       agreementHeaderHistory;
+            select firstonly agreementHeaderHistory
+                    order by RecId desc
+                    where agreementHeaderHistory.AgreementHeader == purchAgreementHeader.RecId;
+
+            str confirmationnumber  = strFmt("%1-%2", purchAgreementHeader.PurchNumberSequence, agreementHeaderHistory.ConfirmationNumber);
+            str formattedDateTime = DateTimeUtil::toStr(agreementHeaderHistory.CreatedDateTime);
+            str effectiveDate = DateTimeUtil::toStr(purchAgreementHeader.DefaultAgreementLineEffectiveDate);
+
+            ETGDMSReverePurchAgreementIntegrationContract contract = new ETGDMSReverePurchAgreementIntegrationContract();
+
+            contract.parmDealNumber(purchAgreementHeader.ETGDMSDealNumbers);
+            contract.parmDataAreaId(curExt());
+            contract.parmOperationType("Confirmation");
+            contract.parmActivityName("Purchase Agreement Confirmation");
+            contract.parmDocumentNumber(confirmationnumber);
+            contract.parmDocumentDate(formattedDateTime);
+            contract.parmActivityOwner(purchAgreementHeader.CreatedBy);
+            contract.parmActivityRemarks(strFmt("The Purchase agreement %1 is confirmed",purchAgreementHeader.PurchNumberSequence));
+            contract.parmEffectiveDate(effectiveDate);
+
+            ETGDMSReverePurchAgreementIntegrationEventClass eventClass = ETGDMSReverePurchAgreementIntegrationEventClass::newFromContract(contract);
+            eventClass.send();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

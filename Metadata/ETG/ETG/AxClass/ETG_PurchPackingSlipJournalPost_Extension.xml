@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_PurchPackingSlipJournalPost_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(PurchPackingSlipJournalPost))]
+final class ETG_PurchPackingSlipJournalPost_Extension
+{
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>endLedgerVoucher</Name>
+				<Source><![CDATA[
+    protected void endLedgerVoucher()
+    {
+
+        PurchParmLine               purchParmLineloc = purchParmLine;
+        PurchLine                   purchLineloc = purchLine;
+        PurchTable                  purchTableloc = purchTable;
+        PurchFormLetter purchFormLetter;
+        VendPackingSlipJour         vendPackingSlipJourloc = vendPackingSlipJour;
+        VendPackingSlipTrans        vendPackingSlipTransloc = vendPackingSlipTrans;
+        PurchLine                   purchline = purchParmLineloc.purchline();
+        next endLedgerVoucher();
+
+        VendPackingSlipJour::inserMarkupTrans(purchParmLineloc);
+
+        ttsbegin;
+        purchFormLetter = PurchFormLetter::construct(DocumentStatus::PurchaseOrder);
+        purchFormLetter.update(purchTableloc,'');
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>endPost</Name>
+				<Source><![CDATA[
+    //NS--04-04-2025 --BL insert the records in ETGBlNumber table.
+    protected void endPost()
+    {
+        next endPost();
+ 
+        if (ETGACFParameters::find().BLNumberAutomation)
+        {
+            PurchParmLine purchParmLineloc = purchParmLine;
+            EcoResProduct ecoResProduct    = EcoResProduct::find(InventTable::find(purchParmLineloc.ItemId).Product);
+ 
+            if(ecoResProduct.ProductType == EcoResProductType::Item)
+            {
+                this.createBlnumber();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createBlnumber</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// insert the records in ETGBlNumber table.
+    /// </summary>
+    private void createBlnumber()
+    {
+
+        VendPackingSlipTrans vendPackingSlipTrans;
+        ETGBlNumber          eTGBlNumber;
+        InventDim            inventDim;
+        InventTrans          inventTrans;
+        VendPackingSlipJour  vendPackingSlipJourloc = vendPackingSlipJour;
+
+
+        while select ItemId,Qty,PackingSlipId,OrigPurchid,InventDimId, LineNum from vendPackingSlipTrans
+              where  vendPackingSlipTrans.VendPackingSlipJour == vendPackingSlipJour.RecId
+        {
+
+            inventDim                           =  InventDim::find(vendPackingSlipTrans.InventDimId);
+            eTGBlNumber.clear();
+            eTGBlNumber.ItemNumber              = vendPackingSlipTrans.ItemId;
+            eTGBlNumber.Qty                     = vendPackingSlipTrans.Qty;
+            eTGBlNumber.ProductReceiptNumber    = vendPackingSlipJourloc.PackingSlipId;
+            eTGBlNumber.BatchNumber             = inventDim.inventBatchId;
+            eTGBlNumber.SerialNumber            = inventDim.inventSerialId;
+            eTGBlNumber.PurchId                 = vendPackingSlipTrans.OrigPurchid;
+            eTGBlNumber.insert();
+
+        
+        }
+
+    }
+   
+    
+    //NE--04-04-2025 --BL insert the records in ETGBlNumber table.
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

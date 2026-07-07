@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_PurchaseContractTrackingDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[
+SRSReportParameterAttribute(classStr(ETG_PurchaseContractTrackingContract))
+]
+public class ETG_PurchaseContractTrackingDP extends SRSReportDataProviderBase
+{
+    
+    Tbl_PurchaseContractStatusTmp     tbl_TmpContractStatusTmp;
+   
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getTbl_PurchaseContractStatusTmp</Name>
+				<Source><![CDATA[
+    [
+        SRSReportDataSetAttribute(tableStr(Tbl_PurchaseContractStatusTmp))
+    ]
+    public Tbl_PurchaseContractStatusTmp getTbl_PurchaseContractStatusTmp()
+    {
+        select * from tbl_TmpContractStatusTmp;
+        return tbl_TmpContractStatusTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETG_PurchaseContractTrackingContract            contract = this.parmDataContract() as ETG_PurchaseContractTrackingContract;
+        
+        TransDate                               fromDate, toDate;
+        AgreementHeader                         agreementHeader;
+        AgreementLineQuantityCommitment         agreementline;
+        PurchAgreementHeader                    purchAgreementHeader;
+        AgreementHeaderDefault                  agreementHeaderDefault;
+        ETG_PurchaseAgreementHeader             eTG_PurchaseAgreementHeader;
+        VendInvoiceJour                         vendInvoiceJour;
+       // ETG_BillOfLading                        eTG_BillOfLading;
+        PurchTable                              purchTable;
+        PurchLine                               purchLine;
+        VendPackingSlipJour                     vendPackingSlipJour;
+        InventDim                               inventDim;
+
+        str bussinessunit = "BusinessUnit";
+        str costcenter = "CostCenter";
+        str country = "Country";
+        str entity = "Entity";
+        str Item = "Item";
+        str Locations = "Locations";
+        str ProfitCenter = "ProfitCenter";
+        str SubRegion = "SubRegion";
+        str Vertical = "Vertical";
+        str SubCommodity = "SubCommodity";
+        
+      
+        
+        fromDate = contract.parmFromDate();
+        toDate = contract.parmToDate();
+
+        while select purchAgreementHeader
+            where purchAgreementHeader.VendorDataAreaId == curExt()
+               && purchAgreementHeader.DefaultAgreementLineEffectiveDate >= fromDate
+               && purchAgreementHeader.DefaultAgreementLineEffectiveDate <= toDate
+        {
+            
+            tbl_TmpContractStatusTmp.clear();
+            
+            // Main contract data assignment
+            tbl_TmpContractStatusTmp.ContractNum    = purchAgreementHeader.PurchNumberSequence;
+            tbl_TmpContractStatusTmp.ContractDate   = purchAgreementHeader.DefaultAgreementLineEffectiveDate;
+            tbl_TmpContractStatusTmp.CurrencyCode   = purchAgreementHeader.Currency;
+            tbl_TmpContractStatusTmp.Contarctstatus = purchAgreementHeader.AgreementState;
+            tbl_TmpContractStatusTmp.Customer       = purchAgreementHeader.VendAccount;
+            tbl_TmpContractStatusTmp.Name           = purchAgreementHeader.vendName();
+            
+            
+            select agreementHeaderDefault
+                where agreementHeaderDefault.AgreementHeader == purchAgreementHeader.RecId;
+            if (agreementHeaderDefault)
+            {
+                tbl_TmpContractStatusTmp.DlvModeId = agreementHeaderDefault.DeliveryMode;
+                tbl_TmpContractStatusTmp.DlvTermId = agreementHeaderDefault.DeliveryTerm;
+                tbl_TmpContractStatusTmp.PaymTermId = agreementHeaderDefault.PaymentTerms;
+            }
+            
+            
+            select eTG_PurchaseAgreementHeader
+                where eTG_PurchaseAgreementHeader.PurchAgreementId == purchAgreementHeader.PurchNumberSequence;
+            if (eTG_PurchaseAgreementHeader)
+            {
+                tbl_TmpContractStatusTmp.VesselName = eTG_PurchaseAgreementHeader.VESSELNAMEVOYAGE;
+                tbl_TmpContractStatusTmp.Tbl_portofDischarge = eTG_PurchaseAgreementHeader.PortOfDischargeDesc;
+                tbl_TmpContractStatusTmp.Tbl_PortofLoad = eTG_PurchaseAgreementHeader.PortOfLoadingDesc;
+                tbl_TmpContractStatusTmp.Through = eTG_PurchaseAgreementHeader.Through;
+                tbl_TmpContractStatusTmp.FromDate = eTG_PurchaseAgreementHeader.FromDatePort;
+                tbl_TmpContractStatusTmp.ToDate = eTG_PurchaseAgreementHeader.ToDatePort;
+            }
+            
+            
+            while select agreementline
+                where agreementline.Agreement == purchAgreementHeader.RecId
+            {
+                tbl_TmpContractStatusTmp.ItemId = agreementline.ItemId;
+                tbl_TmpContractStatusTmp.Qty = agreementline.CommitedQuantity;
+                tbl_TmpContractStatusTmp.UnitId = agreementline.ProductUnitOfMeasure;
+                tbl_TmpContractStatusTmp.Price = agreementline.ETG_PriceType;
+                tbl_TmpContractStatusTmp.PremiumPrice = agreementline.PricePerUnit;
+                tbl_TmpContractStatusTmp.Futureprice = agreementline.ETGFuturePrice;
+                tbl_TmpContractStatusTmp.ETGUnitPrice = agreementline.PricePerUnit;
+                tbl_TmpContractStatusTmp.ETGFinalPlaceOfDelivery = agreementline.ETGFinalPlaceOfDelivery;
+                tbl_TmpContractStatusTmp.MainCommodity = agreementline.ETGMainCommodity;
+
+                // Dimension assignments
+                tbl_TmpContractStatusTmp.SubVertical      = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension, bussinessunit);
+                tbl_TmpContractStatusTmp.CostCenter         = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension, costcenter);
+                tbl_TmpContractStatusTmp.Country            = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension, country);
+                tbl_TmpContractStatusTmp.Entity             = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension, entity);
+                tbl_TmpContractStatusTmp.Item               = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension, Item);
+                tbl_TmpContractStatusTmp.Location           = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension, Locations);
+                tbl_TmpContractStatusTmp.ProfitCenter       = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension, ProfitCenter);
+                tbl_TmpContractStatusTmp.SubRegion          = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension, SubRegion);
+                tbl_TmpContractStatusTmp.Vertical           = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension, Vertical);
+                tbl_TmpContractStatusTmp.SubCommodity           = ETG_Dimension_Class::getDimensionDisplayValue(agreementline.DefaultDimension,SubCommodity);
+            }
+
+            
+            select purchTable
+                where purchTable.MatchingAgreement == purchAgreementHeader.RecId;
+            if (purchTable)
+            {
+                tbl_TmpContractStatusTmp.InvoiceAccount = purchTable.InvoiceAccount;
+                
+                
+          //      select eTG_BillOfLading
+          //          where eTG_BillOfLading.SalesId == salesTable.SalesId;
+           //     if (eTG_BillOfLading)
+           //     {
+             //       tbl_TmpContractStatusTmp.ETGBags = eTG_BillOfLading.NumberOfBags;
+             //       tbl_TmpContractStatusTmp.DueDate = eTG_BillOfLading.DueDate;
+            //    }
+
+               
+                select vendPackingSlipJour
+                where vendPackingSlipJour.PurchId == purchTable.PurchId;
+                if (vendPackingSlipJour)
+                {
+                    tbl_TmpContractStatusTmp.PackingSlipId = vendPackingSlipJour.PackingSlipId;
+                }
+                
+                
+                while select purchLine
+                    where purchLine.PurchId == purchTable.PurchId
+                {
+                    select inventDim
+                        where inventDim.InventDimId == purchLine.inventDimId;
+                    if (inventDim)
+                    {
+                        tbl_TmpContractStatusTmp.configId = inventDim.configId;
+                        tbl_TmpContractStatusTmp.InventLocationId = inventDim.InventLocationId;
+                        tbl_TmpContractStatusTmp.InventSiteId = inventDim.InventSiteId;
+                        tbl_TmpContractStatusTmp.InventSizeId = inventDim.InventSizeId;
+                        tbl_TmpContractStatusTmp.InventColorId = inventDim.InventColorId;
+                        tbl_TmpContractStatusTmp.InventSerialId = inventDim.inventSerialId;
+                    }
+                    
+                    
+                    select vendInvoiceJour
+                        where vendInvoiceJour.PurchId == purchTable.PurchId;
+                    if (vendInvoiceJour)
+                    {
+                        tbl_TmpContractStatusTmp.InvoiceId = vendInvoiceJour.InvoiceId;
+                        tbl_TmpContractStatusTmp.InvocieDate = vendInvoiceJour.InvoiceDate;
+                        tbl_TmpContractStatusTmp.INVAmount = vendInvoiceJour.InvoiceAmount;
+                        tbl_TmpContractStatusTmp.BOLNum = vendInvoiceJour.ETG_BLnumber;
+                        tbl_TmpContractStatusTmp.BOLDate = vendInvoiceJour.ETG_BLDate;
+                        tbl_TmpContractStatusTmp.OrderId = vendInvoiceJour.PurchId;
+                    }
+                }
+            }
+            
+            
+            tbl_TmpContractStatusTmp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_CustOpeningBalanceDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[
+SRSReportParameterAttribute(classStr(ETG_CustOpeningBalanceContract))
+]
+    public class ETG_CustOpeningBalanceDP extends SRSReportDataProviderBase
+{
+    
+    ETG_CustOpeningBalanceTmp     eTG_CustOpeningBalanceTmp;
+   
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETG_CustOpeningBalanceTmp</Name>
+				<Source><![CDATA[
+     [
+        SRSReportDataSetAttribute(tableStr(ETG_CustOpeningBalanceTmp))
+    ]
+    public ETG_CustOpeningBalanceTmp getETG_CustOpeningBalanceTmp()
+    {
+        select * from eTG_CustOpeningBalanceTmp;
+        return eTG_CustOpeningBalanceTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETG_CustOpeningBalanceContract            contract = this.parmDataContract() as ETG_CustOpeningBalanceContract;
+        
+        TransDate       asonDate = contract.parmAsOnDate();
+      //  TransDate       toDate   = contract.parmToDate();
+        CustAccount     customerAccount = contract.parmCustomerAccount();
+        CustTable       custtable;
+        AmountCur    openingdebit,openingcredit;
+        AmountMST    openingdebitlocal,openingcreditlocal;
+        DirPartyTable       dirPartyTable; 
+        CustTrans  custTrans,custtranslocal,custtranscurency;
+        Map   map,mapAll;
+        MapEnumerator           mapEnum, mapEnumAll;
+        mapAll          = new Map(Types::String, Types::Real);
+        CurrencyCode            currency, currency_1;
+
+       
+        map     = this.getCurrencies(customerAccount);
+
+         mapEnum = map.getEnumerator();
+
+         while (mapEnum.moveNext())
+         {
+            currency_1 = mapEnum.currentValue();
+
+            select sum(AmountCur),sum(AmountMST),AccountNum,CurrencyCode from custtrans
+             group by custTrans.AccountNum,custTrans.CurrencyCode
+            where custTrans.AccountNum == customerAccount
+                && custTrans.CurrencyCode  == currency_1
+                && custTrans.TransDate < asonDate
+                && custTrans.AmountCur > 0;
+
+            if(custTrans)
+            {
+                openingdebit         = custTrans.AmountCur;                                      // Trans Debit
+                openingdebitlocal    = custTrans.AmountMST;                               // Local Debit
+            
+              
+            }
+            select sum(AmountCur),sum(AmountMST),AccountNum,CurrencyCode from custtranslocal
+             group by custtranslocal.AccountNum,custtranslocal.CurrencyCode
+            where custtranslocal.AccountNum == customerAccount
+                && custtranslocal.CurrencyCode  == currency_1
+               && custtranslocal.TransDate < asonDate
+                && custtranslocal.AmountCur < 0;
+            if(custtranslocal)
+            {
+                openingcredit     = custtranslocal.AmountCur;                                 // Trans Credit
+                openingcreditlocal  = custtranslocal.AmountMST;                               //  Local Credit
+            
+             
+            }
+            eTG_CustOpeningBalanceTmp.CustCode  =  customerAccount;
+            eTG_CustOpeningBalanceTmp.CustName  =  custtable::find(customerAccount).name();
+
+            eTG_CustOpeningBalanceTmp.TransactionCurrencyCredit  = abs(openingcredit);// Trans Credit
+            eTG_CustOpeningBalanceTmp.LocalCurrencyCredit  =  abs(openingcreditlocal);//  Local Credit
+
+            eTG_CustOpeningBalanceTmp.LocalCurrencyDebit  =  abs(openingdebitlocal);// Local Debit
+            eTG_CustOpeningBalanceTmp.TransactionCurrencyDebit  =  abs(openingdebit);// Trans Debit
+            
+            eTG_CustOpeningBalanceTmp.Currency             =  currency_1;
+
+           
+            
+            
+            eTG_CustOpeningBalanceTmp.insert();
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getCurrencies</Name>
+				<Source><![CDATA[
+    Map getCurrencies(AccountNum   _accountId)
+    {
+        CustTrans   custTransmap;
+        Map         mapCurrency = new Map(Types::String, Types::String);
+        ;
+        while select custTransmap group by CurrencyCode where custTransmap.AccountNum == _accountId
+        {
+            mapCurrency.insert(custTransmap.CurrencyCode, custTransmap.CurrencyCode);
+        }
+
+        return mapCurrency;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

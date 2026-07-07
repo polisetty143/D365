@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>FreeTextInvoiceDP_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(FreeTextInvoiceDP))]
+final class FreeTextInvoiceDP_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        
+        next processReport();
+
+       
+        if (curExt() != 'e016')
+        {
+            return;
+        }
+
+        FreeTextInvoiceHeaderFooterTmp headerFooterTmp = this.freeTextInvoiceHeaderFooterTmp;
+        
+        CustTable         custTable;
+        DirPartyTable     dirPartyTableCust;
+        DirPartyLocation  dirPartyLocationCust;
+        TaxRegistration   taxRegistrationCust;
+        TransDate         today = systemDateGet();
+
+        
+        ttsbegin;
+        while select forupdate headerFooterTmp
+        {
+            
+            custTable.clear();
+            dirPartyTableCust.clear();
+            dirPartyLocationCust.clear();
+            taxRegistrationCust.clear();
+
+            
+            select firstOnly custTable
+                where custTable.AccountNum == headerFooterTmp.InvoiceAccount
+                join dirPartyTableCust
+                where dirPartyTableCust.RecId == custTable.Party
+                join dirPartyLocationCust
+                where dirPartyLocationCust.Party == dirPartyTableCust.RecId
+                   && dirPartyLocationCust.IsPrimary == NoYes::Yes
+                join RegistrationNumber from taxRegistrationCust
+                where taxRegistrationCust.DirPartyLocation == dirPartyLocationCust.RecId
+                   && (taxRegistrationCust.ValidTo >= today || taxRegistrationCust.ValidTo == dateNull()); // Added dateNull check in case it never expires
+
+            
+            if (taxRegistrationCust.RegistrationNumber)
+            {
+                
+                headerFooterTmp.ETGCompanyVat = taxRegistrationCust.RegistrationNumber;
+                headerFooterTmp.update();
+            }
+        }
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

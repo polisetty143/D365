@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesLine_SiblingAgreement_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tablestr(SalesLine))]
+final class ETGSalesLine_SiblingAgreement_Extension
+{
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>modifiedField</Name>
+				<Source><![CDATA[
+    /// </summary>
+    public void modifiedField(FieldId _fieldId)
+    {
+        next modifiedField(_fieldId);
+
+        if (this.DataAreaId != 'o001')
+        {
+            return;
+        }
+
+        if (_fieldId == fieldNum(SalesLine, SalesPrice)
+         || _fieldId == fieldNum(SalesLine, PriceUnit)
+         || _fieldId == fieldNum(SalesLine, LineAmount)
+         || _fieldId == fieldNum(SalesLine, LinePercent)
+         || _fieldId == fieldNum(SalesLine, LineDisc))
+        {
+            ETGSalesLinePriceEditRegistry::mark(this.RecId);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateWrite</Name>
+				<Source><![CDATA[
+    /// sibling agreement commitment line. O001 only.
+    /// </summary>
+    public boolean validateWrite(boolean _checkCues)
+    {
+        boolean ret = next validateWrite(_checkCues);
+
+        if (this.DataAreaId == 'o001')
+        {
+            this.etgPreserveAgreementLineMatch();
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>etgPreserveAgreementLineMatch</Name>
+				<Source><![CDATA[
+    /// </summary>
+    public void etgPreserveAgreementLineMatch()
+    {
+        if (this.RecId == 0)
+        {
+            return;
+        }
+
+        SalesLine orig = this.orig();
+
+      
+        // actually released, instead of the sibling same-item line.
+        if (orig.MatchingAgreementLine != 0
+            && this.MatchingAgreementLine != orig.MatchingAgreementLine)
+        {
+            this.MatchingAgreementLine = orig.MatchingAgreementLine;
+        }
+
+        // Not agreement-linked -> nothing else to do.
+        if (this.MatchingAgreementLine == 0)
+        {
+            return;
+        }
+
+        // ---- 2. Preserve the price (unless the user intentionally edited it) ----
+        if (ETGSalesLinePriceEditRegistry::isMarked(this.RecId))
+        {
+            ETGSalesLinePriceEditRegistry::clear(this.RecId);
+            return;
+        }
+
+        if (orig.SalesPrice != 0
+            && this.SalesPrice != orig.SalesPrice)
+        {
+            this.SalesPrice  = orig.SalesPrice;
+            this.LinePercent = orig.LinePercent;
+            this.LineDisc    = orig.LineDisc;
+            this.LineAmount  = orig.LineAmount != 0 ? orig.LineAmount : this.calcLineAmount();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

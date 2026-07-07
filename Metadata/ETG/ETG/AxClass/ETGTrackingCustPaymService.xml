@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGTrackingCustPaymService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This Class is used for creation of Customer payment Journal.
+/// </summary>
+class ETGTrackingCustPaymService extends SysOperationServiceBase
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>process</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This process method is used for calling the logic to create the customer payment journal.
+    /// </summary>
+    public void process()
+    {
+        SalesLine               salesLine;
+        SalesTable              salesTable;
+        CustInvoiceJour         custInvoiceJour;
+        CustInvoiceTrans        custInvoiceTrans;
+        InvoiceId               invoiceId;
+        JournalId               journalId;
+
+        ETGTrackingCustPaymService etgCustPaym = new ETGTrackingCustPaymService();
+
+        throw Error("@ETG_New:CylinderTrackingFeature");
+
+        //if(SalesParameters::find().ETGEnablecylindertracking == NoYes::No)
+        //{
+        //    throw Error("@ETG_New:CylinderTrackingFeature");
+        //}
+        
+        //this process is not in used . commented for future use if required
+        //ttsbegin;
+
+        //while select custInvoiceTrans order by custInvoiceTrans.InvoiceId
+        //    where custInvoiceTrans.ETGCylinderTrackPaymJourCreated == NoYes::No
+        //join custInvoiceJour
+        //    where custInvoiceTrans.InvoiceId == custInvoiceJour.InvoiceId
+        //        && custInvoiceTrans.SalesId == custInvoiceJour.SalesId
+        //        && custInvoiceTrans.InvoiceDate == custInvoiceJour.InvoiceDate
+        //exists join salesLine
+        //    where salesLine.InventTransId == custInvoiceTrans.InventTransId
+        //        && salesLine.ETGDepositRate > 0
+        //        && (salesLine.ETGConnectionType    == ETGConnectionType::NewConnectionorCylinder
+        //        ||  salesLine.ETGConnectionType    == ETGConnectionType::Surrenderofcylinders)
+        //exists join salesTable
+        //    where salesTable.SalesId == custInvoiceJour.SalesId
+        //        &&  (salesTable.ETGBusinessSegment == ETGBusinessSegment::Domestic
+        //        ||   salesTable.ETGBusinessSegment == ETGBusinessSegment::Commercial
+        //    || salesTable.ETGBusinessSegment == ETGBusinessSegment::Industrial
+        //    || salesTable.ETGBusinessSegment == ETGBusinessSegment::Distributor)
+        //{
+        //    if(invoiceId == "" || invoiceId != custInvoiceTrans.InvoiceId)
+        //    {
+        //        journalId = etgCustPaym.createJournalHeader();
+        //        invoiceId = custInvoiceTrans.InvoiceId;
+        //        Info(strFmt("@ETG_New:CustomerPaymentJournalCreation", journalId));
+        //    }
+        //    etgCustPaym.createJournalLine(custInvoiceJour, custInvoiceTrans, journalId);
+        //}
+        //ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createJournalHeader</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Journal header is created by using this new method
+    /// </summary>
+    /// <returns>JournalId.</returns>
+    public JournalId createJournalHeader()
+    {
+        LedgerJournalTable  ledgerJournalTable;
+
+        ledgerJournalTable.clear();
+        ledgerJournalTable.JournalName          = SalesParameters::find().ETGJournalName;
+        ledgerJournalTable.initfromLedgerJournalName();
+        ledgerJournalTable.journalNum           = JournalTableData::newTable(ledgerJournalTable).nextJournalId();
+        ledgerJournalTable.JournalType          = LedgerJournalType::CustPayment;
+        ledgerJournalTable.insert();
+
+        return ledgerJournalTable.JournalNum;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createJournalLine</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates Journal lines by using this new method.
+    /// </summary>
+    /// <param name = "custInvoiceJour">CustInvoiceJour</param>
+    /// <param name = "custInvoiceTrans">CustInvoiceTrans</param>
+    /// <param name = "journalId">JournalId</param>
+    public void createJournalLine(CustInvoiceJour custInvoiceJour, CustInvoiceTrans custInvoiceTrans, JournalId journalId)
+    {
+        LedgerJournalTrans  ledgerJournalTrans;
+        NumberSeq           numberSeq;
+
+        numberSeq                               = NumberSeq::newGetVoucherFromId(LedgerJournalName::find(SalesParameters::find().ETGJournalName).NumberSequenceTable);
+        LedgerjournalTrans.Voucher              = numberSeq.voucher();
+        ledgerJournalTrans.initValue();
+        ledgerJournalTrans.JournalNum           = journalId;
+        ledgerJournalTrans.TransDate            = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+        ledgerJournalTrans.AccountType          = LedgerJournalACType::Cust;
+        ledgerJournalTrans.Txt                  = custInvoiceJour.InvoicingName;
+        ledgerJournalTrans.OffsetAccountType    = LedgerJournalACType::Bank;
+        ledgerJournalTrans.CurrencyCode         = custInvoiceTrans.CurrencyCode;
+        ledgerJournalTrans.TransactionType      = LedgerTransType::Payment;
+        ledgerJournalTrans.parmAccount(custInvoiceJour.InvoiceAccount, ledgerJournalTrans.AccountType);
+        ledgerJournalTrans.AmountCurCredit      = custInvoiceTrans.ETGDepositAmount;
+        ledgerJournalTrans.MarkedInvoice        = custInvoiceJour.InvoiceId;
+        ledgerJournalTrans.insert();
+
+        custInvoiceTrans.selectForUpdate(true);
+        custInvoiceTrans.ETGCylinderTrackPaymJourCreated = NoYes::Yes;
+        custInvoiceTrans.doUpdate();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

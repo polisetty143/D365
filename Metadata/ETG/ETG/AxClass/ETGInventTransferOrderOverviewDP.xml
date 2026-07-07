@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGInventTransferOrderOverviewDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///    The <c>InventTransferOrderOverviewDP</c> class is the Report Data Provider class for the
+///    <c>InventTransferOrderOverview</c> report.
+/// </summary>
+[
+    SRSReportQueryAttribute(queryStr(ETGInventTransferOrderOverview))    
+]
+public class  ETGInventTransferOrderOverviewDP extends InventTransferOrderDPBase
+{
+    ETGInventTransferOrderOverviewTmp  inventTransferOrderOverviewTmp;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getInventTransferOrderOverviewtmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets data from the <c>InventTransferOrderOverviewTmp</c> temporary table.
+    /// </summary>
+    /// <returns>
+    /// The data from the <c>InventTransferOrderOverviewTmp</c> temporary table.
+    /// </returns>
+    [
+        SRSReportDataSetAttribute(tableStr(ETGInventTransferOrderOverviewTmp))
+    ]
+    public ETGInventTransferOrderOverviewTmp getInventTransferOrderOverviewtmp()
+    {
+        select  inventTransferOrderOverviewTmp;
+        return  inventTransferOrderOverviewTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Processes the report business logic.
+    /// </summary>
+    /// <remarks>
+    /// Provides the ability to write the report business logic. This method will be called by  at runtime.
+    /// The method should compute data and populate the data tables that will be returned to .
+    /// </remarks>
+    public void processReport()
+    {
+        InventDim               inventDim;
+        InventTrans             inventTrans;
+        RecId                   currentHeaderRecId;
+        InventTransferJourLine _inventTransferJourLine;
+        InventTransferJour _inventTransferJour;
+        InventTransferTable  _inventTransferTable, _inventTransferTableOrg;
+        InventTransferLine   _inventTransferLine, _inventTransferLineOrg;
+        ETG_TransferBillOfLading billOfLading;
+        InventTransferParmTable inventTransferParmTable;
+        ETG_TransferBillOfLadingHistory transferBillOfLadingHistory, _transferBillOfLadingHistory;
+        int noOfDays;
+       // ETGInventTransferOrderOverviewContract contract = this.parmDataContract() as ETGInventTransferOrderOverviewContract;
+
+        QueryRun queryRun = new QueryRun(this.parmQuery());
+        while (queryRun.next())
+        {
+            InventTransferJourLine inventTransferJourLine = queryRun.get(tableNum(InventTransferJourLine));
+
+            if (inventTransferJourLine.TableId == tableNum(InventTransferJourLine))
+            {
+                InventTransferJour inventTransferJour = queryRun.get(tableNum(InventTransferJour));
+                                       
+                if(inventTransferJour.UpdateType == InventTransferUpdateType::Shipment)
+                {
+                    inventTransferOrderOverviewTmp.TransferId = inventTransferJour.TransferId;
+                    inventTransferOrderOverviewTmp.TrackingId = inventTransferJour.TrackingId;
+                    inventTransferOrderOverviewTmp.ItemId = inventTransferJourLine.ItemId;                    
+                    inventTransferOrderOverviewTmp.InventLocationIdFrom = inventTransferJour.InventLocationIdFrom;
+                    inventTransferOrderOverviewTmp.Quantity             = inventTrans.Qty;
+                    
+                    inventTransferOrderOverviewTmp.ItemName             = inventTransferJourLine.itemName();
+                    inventTransferOrderOverviewTmp.LineNum              = inventTransferJourLine.LineNum;
+                    inventTransferOrderOverviewTmp.QtyShipped           = inventTransferJourLine.QtyShipped;                    
+                    inventTransferOrderOverviewTmp.TransferStatus = inventTransferJour.UpdateType;
+                    inventTransferOrderOverviewTmp.ShipDate       = inventTransferJour.TransDate;                    
+
+                    select * from transferBillOfLadingHistory
+                        where transferBillOfLadingHistory.TransferId == inventTransferJour.TransferId
+                        && transferBillOfLadingHistory.VoucherId == inventTransferJour.VoucherId;
+                    if(transferBillOfLadingHistory)
+                    {
+                        inventTransferOrderOverviewTmp.ETGShippedGrossWeight = transferBillOfLadingHistory.GrossWeight;
+                        inventTransferOrderOverviewTmp.ETGShippedNetWeight = transferBillOfLadingHistory.NetWeight;
+                    }
+                    select * from _inventTransferJour
+                            where _inventTransferJour.TransferId == inventTransferOrderOverviewTmp.TransferId
+                               && _inventTransferJour.TrackingId == inventTransferOrderOverviewTmp.TrackingId
+                                && _inventTransferJour.UpdateType == InventTransferUpdateType::Receive;
+
+                    if(_inventTransferJour)
+                    {
+                        select * from _transferBillOfLadingHistory
+                            where _transferBillOfLadingHistory.TransferId == _inventTransferJour.TransferId
+                            && _transferBillOfLadingHistory.VoucherId == _inventTransferJour.VoucherId;
+                        if(_transferBillOfLadingHistory)
+                        {
+                            inventTransferOrderOverviewTmp.ETGReceivedGrossWeight = _transferBillOfLadingHistory.GrossWeight;
+                            inventTransferOrderOverviewTmp.ETGReceivedNetWeight = _transferBillOfLadingHistory.NetWeight;
+                        }
+                        inventTransferOrderOverviewTmp.ReceiveDate          = _inventTransferJour.TransDate;
+                        inventTransferOrderOverviewTmp.TransferStatus = _inventTransferJour.UpdateType;
+                        
+
+                        select * from _inventTransferJourLine
+                            where _inventTransferJourLine.TransferId == _inventTransferJour.TransferId
+                            && _inventTransferJourLine.VoucherId == _inventTransferJour.VoucherId;
+                        if(_inventTransferJourLine)
+                        {                            
+                            inventTransferOrderOverviewTmp.QtyReceived          = _inventTransferJourLine.QtyReceived;//this is for received qty //
+                            inventTransferOrderOverviewTmp.TransitLoss          = _inventTransferJourLine.QtyScrapped;
+                        }                      
+                        
+                    }
+                    else
+                    {
+                        InventTransferUpdateType updateType;
+                        inventTransferOrderOverviewTmp.QtyReceived = 0.00;                        
+                        inventTransferOrderOverviewTmp.ETGReceivedGrossWeight = 0.00;
+                        inventTransferOrderOverviewTmp.ETGReceivedNetWeight = 0.00;
+                        inventTransferOrderOverviewTmp.TransferStatus = str2Enum(updateType, "");
+                        inventTransferOrderOverviewTmp.ReceiveDate = dateNull();
+                    }
+                    select * from _inventTransferTable
+                        where _inventTransferTable.TransferId == inventTransferJour.TransferId;
+                    // && _inventTransferTable.TransferStatus == InventTransferStatus::Received; //shipped
+                    if(_inventTransferTable)
+                    {
+                        inventTransferOrderOverviewTmp.InventLocationIdTo   = inventTransferJour.InventLocationIdTo;                                             
+                        inventTransferOrderOverviewTmp.LocationNameFrom     = _inventTransferTable.locationNameFrom();
+                        inventTransferOrderOverviewTmp.LocationNameTo       = _inventTransferTable.locationNameTo();
+                    }
+                    select * from _inventTransferLine
+                        where _inventTransferLine.TransferId ==  _inventTransferTable.TransferId;
+                    //&& _inventTransferLine.VoucherId == inventTransferJour.VoucherId;
+                    if(_inventTransferLine)
+                    {                        
+                        inventTransferOrderOverviewTmp.LineShipDate         = _inventTransferLine.ShipDate;
+                        inventTransferOrderOverviewTmp.QtyTransfer         = _inventTransferLine.QtyTransfer;                        
+                        inventTransferOrderOverviewTmp.UnitPrice             = _inventTransferLine.UnitPrice;
+                        inventTransferOrderOverviewTmp.ETGUnitId   = _inventTransferLine.UnitId;
+                        inventTransferOrderOverviewTmp.NetAmount = _inventTransferLine.NetAmount;
+                    }
+                        
+                    inventTransferOrderOverviewTmp.ShowLine             = showLine;
+
+                    inventDim = _inventTransferLine.inventDim();
+                    inventTransferOrderOverviewTmp.FromAddress = _inventTransferTable.fromAddress();
+                    inventTransferOrderOverviewTmp.ToAddress = _inventTransferTable.toAddress();
+                    inventTransferOrderOverviewTmp.FromAddressName = _inventTransferTable.FromAddressName;
+                    inventTransferOrderOverviewTmp.ToAddressName = _inventTransferTable.ToAddressName;
+                       
+                    inventTransferOrderOverviewTmp.FromCountryRegionId =
+                        LogisticsPostalAddress::findRecId(_inventTransferTable.FromPostalAddress).CountryRegionId;
+                    inventTransferOrderOverviewTmp.ToCountryRegionId =
+                        LogisticsPostalAddress::findRecId(_inventTransferTable.ToPostalAddress).CountryRegionId;
+                    inventTransferOrderOverviewTmp.FromRegistrationNumber = fromRegistrationNumber;
+                    inventTransferOrderOverviewTmp.ToRegistrationNumber = toRegistrationNumber;
+                    inventTransferOrderOverviewTmp.ShipmentNetAmount = shipmentTaxBaseAmount;
+                    inventTransferOrderOverviewTmp.ShipmentSumTax = shipmentTaxAmount;
+                    inventTransferOrderOverviewTmp.ShipmentCurrencyCode = shipmentCurrencyCode;
+                    inventTransferOrderOverviewTmp.ReceiptNetAmount = receiptTaxBaseAmount;
+                    inventTransferOrderOverviewTmp.ReceiptSumTax = receiptTaxAmount;
+                    inventTransferOrderOverviewTmp.ReceiptCurrencyCode = receiptCurrencyCode;
+                    inventTransferOrderOverviewTmp.PrintCode = taxWriteCode;
+                    inventTransferOrderOverviewTmp.TaxExemptDescription = exemptDescription;
+                    inventTransferOrderOverviewTmp.ShowTaxTrans = showTaxTrans;
+                    inventTransferOrderOverviewTmp.JournalName = taxCodeSource;
+
+                    inventTransferOrderOverviewTmp.ETGFromSite = InventLocation::findInLegalEntity(_inventTransferTable.InventLocationIdFrom, _inventTransferTable.DataAreaId).InventSiteId;
+                    inventTransferOrderOverviewTmp.ETGToSite = InventLocation::findInLegalEntity(_inventTransferTable.InventLocationIdTo, _inventTransferTable.DataAreaId).InventSiteId;
+                    inventTransferOrderOverviewTmp.ETG_TrackingID = _inventTransferTable.ETG_TrackingID;
+                    inventTransferOrderOverviewTmp.ETG_DONumber = _inventTransferTable.ETG_DOnumber;
+                    inventTransferOrderOverviewTmp.ETG_TrailerNumber = _inventTransferTable.ETG_Trailernumber;
+        
+                    inventTransferOrderOverviewTmp.TransitDays = date2Num(_inventTransferTable.ReceiveDate) - date2Num(_inventTransferTable.ShipDate);
+
+                    inventTransferOrderOverviewTmp.InventDimFieldsMap::initAllDimensionsFrom(inventDim);
+
+                    if (inventDim != null && inventDim.InventDimId != InventDim::inventDimIdBlank())
+                    {
+                        InventDimParm inventDimParm;
+                        inventDimParm.initFromInventDim(inventDim);
+                        inventTransferOrderOverviewTmp.InventDimPrint   = FormLetter::inventDimReport(inventDim, inventDimParm.selectedDimFields().pack(), currentUserLanguage());
+                    }
+                        
+                    inventTransferOrderOverviewTmp.insert();
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

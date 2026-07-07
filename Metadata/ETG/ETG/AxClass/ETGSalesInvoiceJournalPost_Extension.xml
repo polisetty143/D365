@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesInvoiceJournalPost_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///     Extension class for class <c>SalesInvoiceJournalPost</c>
+/// </summary>
+[ExtensionOf(classStr(SalesInvoiceJournalPost))]
+internal final class ETGSalesInvoiceJournalPost_Extension
+{
+   
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>endPost</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method updates various TERMO details after Sales invoice is posted
+    /// </summary>
+    protected void endPost()
+    {
+        next endPost();
+
+        if(VendParameters::find().ETGEnableTermoNumberFeature)
+        {
+            ETGTermoNumberHelper termoHelper = ETGTermoNumberHelper::construct();
+            termoHelper.parmCustInvoiceJour(custInvoiceJour);
+            termoHelper.processCustomerInvoice();
+        }
+
+        //CS - Abhinav 28-01-2025
+
+        if(ETGACFParameters::find().EnablePTBFContractsSales)
+        {
+            SalesLine saleslineloc;
+        
+            LedgerJournalTable LedgerjournalTable;
+        
+            ETGsaleseditlines etgsaleseditlines;
+
+            while select saleslineloc
+            where saleslineloc.SalesId == custInvoiceJour.salesid
+            join etgsaleseditlines
+            where etgsaleseditlines.salesid == custInvoiceJour.salesid
+            && etgsaleseditlines.ETGRefDefaultDimension == saleslineloc.DefaultDimension
+            && etgsaleseditlines.WorkflowStatus == ETGSalesEditLinesWorkflow::Approved
+                && etgsaleseditlines.IsCrDeJournalCreated == NoYes::Yes
+                && etgsaleseditlines.CrDeJournalPosted == NoYes::No
+            {
+                select firstonly LedgerjournalTable
+                    where LedgerjournalTable.JournalNum == saleslineloc.CrDeJournalNum;
+        
+            
+                if(LedgerjournalTable)
+                {
+                
+                    LedgerJournalCheckPost jourPost;
+
+                    jourPost = LedgerJournalCheckPost::newLedgerJournalTable(LedgerjournalTable, NoYes::Yes,NoYes::Yes);
+                   
+                    if( jourPost.validate())
+                    {
+                        jourPost.runOperation();
+                    }
+                    else
+                    {
+                        throw Error("@ETG_New:ETGCrDeJournalValidation");
+                    }
+               
+
+                    ttsbegin;
+                    
+                    etgsaleseditlines.selectForUpdate(true);
+                    etgsaleseditlines.CrDeJournalPosted = NoYes::Yes;
+                    etgsaleseditlines.update();
+
+                
+                    saleslineloc.selectForUpdate(true);
+                    saleslineloc.CrDeJournalPosted = NoYes::Yes;
+                    saleslineloc.update();
+
+                    CustInvoiceTrans custInvoicTranseUpd;
+
+                    select forupdate custInvoicTranseUpd
+                    where custInvoicTranseUpd.SalesId == custInvoiceJour.SalesId
+                    && custInvoicTranseUpd.DefaultDimension == etgsaleseditlines.ETGRefDefaultDimension;
+
+
+                    custInvoicTranseUpd.IsCrDeJournalCreated = NoYes::Yes;
+                    custInvoicTranseUpd.ActualUnitPrice = etgsaleseditlines.ActualUnitPrice;
+                    custInvoicTranseUpd.CrDeJournalAmount = etgsaleseditlines.CrDeJournalAmount;
+                    custInvoicTranseUpd.CrDeJournalNum = etgsaleseditlines.CrDeJournalNum;
+                    custInvoicTranseUpd.CrDeJournalPosted = etgsaleseditlines.CrDeJournalPosted;
+                    custInvoicTranseUpd.update();
+
+                    ttscommit;
+                
+                }
+            }
+        }
+        //CE - Abhinav 28012025
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

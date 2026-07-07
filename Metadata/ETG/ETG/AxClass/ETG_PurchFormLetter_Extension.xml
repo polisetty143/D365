@@ -1,0 +1,244 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_PurchFormLetter_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[Extensionof(classStr(PurchFormLetter))]
+final class ETG_PurchFormLetter_Extension
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>prePromptInit</Name>
+				<Source><![CDATA[
+    public void prePromptInit()
+    {
+        PurchTable          purchTable;
+        CustInvoiceTrans    custInvoiceTrans;
+
+        if(contract.parmCallerTable().TableId == tableNum(PurchTable)
+           &&( this.documentStatus() == DocumentStatus::PackingSlip
+            || this.documentStatus() == DocumentStatus::Invoice))
+        {
+            purchTable = contract.parmCallerTable();
+            ETG_Parameters       parameters;
+            select firstonly parameters;
+            select firstonly crosscompany custInvoiceTrans
+                where custInvoiceTrans.OrigSalesId == purchTable.InterCompanySalesId;
+
+            if ((purchTable.InterCompanySalesId) && (parameters.InterCompany == NoYes::Yes))
+            {
+               // if(purchTable.interCompanySalesTable().SalesStatus !=  SalesStatus::Invoiced)
+                if(!custInvoiceTrans)
+                {
+                    throw error("@ETG:InterCompanyValidationProductReceiptMsg");
+                }
+            }           
+        }
+
+
+        next prePromptInit();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    public void run()
+    {
+        if(ETGACFParameters::find().BLNumberAutomation)
+        {
+            this.registerInventory();
+        }
+
+        next run();
+
+        if(this.documentStatus() == DocumentStatus::PackingSlip)
+        {
+            ETG_Parameters       parameters;
+            select firstonly parameters;
+            if((this.parmJournalRecord().TableId == tableNum(VendPackingSlipJour)) && (parameters.Intercompanygoodsintransitjournalposting == NoYes::Yes))
+            {
+                ETG_CreatePostLedgerJournal::CreateGeneralJournalPO(this.parmJournalRecord());
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validate</Name>
+				<Source><![CDATA[
+    public boolean  validate(Object _calledFrom)
+    {
+        DefaultDimensionView            defaultDimView;
+        //DimensionHierarchyView      dimensionHierarchy;
+        DimensionHierarchy          dimensionHierarchy;
+        DimensionHierarchyLevel         dimensionHierarchyLevel;
+        DimensionAttribute              dimAttribute;
+        Description255                  emptyDimension;
+
+        boolean                         ret = true;     
+
+        ret = next  validate(_calledFrom);
+
+        if(this.purchTable().DocumentState == VersioningDocumentState::Approved  && 
+            ETG_Parameters::find().ETGIsDimensionValidationRequired == NoYes::Yes)
+        {
+            //select firstonly RecId from dimensionHierarchy
+            //    where dimensionHierarchy.StructureType == DimensionHierarchyType::AccountStructure
+            //        && dimensionHierarchy.Status == DimensionHierarchyConstraintStatus::Active
+            //        && dimensionHierarchy.UserLanguageId == CompanyInfo::languageId();
+
+            select firstonly RecId from dimensionHierarchy
+                where dimensionHierarchy.StructureType == DimensionHierarchyType::AccountStructure
+                     && dimensionHierarchy.IsDraft == NoYes::No;
+
+
+            while select DimensionAttribute from dimensionHierarchyLevel
+                where dimensionHierarchyLevel.DimensionHierarchy == dimensionHierarchy.RecId
+            join dimAttribute
+                where dimAttribute.RecId == dimensionHierarchyLevel.DimensionAttribute
+                   && dimAttribute.Type != DimensionAttributeType::MainAccount
+            notexists join defaultDimView
+                where defaultDimView.Name ==  dimAttribute.Name
+                    && defaultDimView.DefaultDimension == this.purchTable().DefaultDimension
+            {
+                if(emptyDimension)
+                {
+                    emptyDimension = emptyDimension + ',' + dimAttribute.Name;
+                }
+                else
+                {
+                    emptyDimension = dimAttribute.Name;
+                }
+            }
+
+            if(emptyDimension)
+            {
+                if(Box::yesNoAxaptaForm(strFmt('Financial dimensions - %1 are not filled in. Do you want to update? ',emptyDimension), DialogButton::Yes) == DialogButton::Yes)
+                {
+                    ret = false;
+                }
+            }
+        } 
+
+        //CS - Abhinav - Validation for Purchase line Qty and BIN available Qty
+        if(ret && this.purchTable().DocumentState == VersioningDocumentState::Confirmed  &&
+            ETGCanadaParameters::find().EnableBINValidation == NoYes::Yes)
+        {
+            PurchLine               PurchLineLoc;
+            InventDim               inventdim;
+            PurchParmTable          purchParmTable;
+            PurchParmLine           purchParmLine;
+            PurchParmUpdate         purchParmUpdate     = this.purchParmUpdate();
+            InventTable             inventTable;
+
+            select  purchParmTable where purchParmTable.ParmId == purchParmUpdate.ParmId;
+
+             while select sum(ReceiveNow) from purchParmLine
+                group by inventdim.InventLocationId,inventdim.wMSLocationId
+                where purchParmLine.ParmId  == purchParmTable.ParmId
+            join inventdim
+                where inventdim.inventDimId == purchParmLine.InventDimId
+            join inventTable
+                    where inventTable.ItemId == purchParmLine.ItemId
+                       && inventTable.GrossDepth > 0
+                       && inventTable.grossHeight > 0
+                       && inventTable.grossWidth > 0
+            {
+                WMSLocation wmsLocation = WMSLocation::find(inventdim.WmsLocationid ,inventdim.inventLocationId);
+
+                if(purchParmLine.ReceiveNow * inventTable.UnitVolume > wmsLocation.freeVolume())
+                {
+                    throw Error(strFmt("@ETG_New:BinQtyValidation",inventdim.wMSLocationId));
+                }
+            }
+        }
+        //CE - Abhinav
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>registerInventory</Name>
+				<Source><![CDATA[
+    private void registerInventory()
+    {
+        InventDim               inventDim,inventBatchCheck,inventDimlocal;
+        InventTransWMS_Register inventTransWMS_register;
+        TmpInventTransWMS       tmpInventTransWMS;
+        InventTrans             inventTranslocal, inventTransCheck;
+        PurchParmLine           purchParmLine;
+        PurchParmTable          purchParmTable;
+        PurchTable             purchTable;
+
+        PurchParmUpdate purchParmUpdate     = this.purchParmUpdate();
+
+        select  purchParmTable where purchParmTable.ParmId == purchParmUpdate.ParmId;
+
+
+
+        while select purchParmLine where purchParmLine.ParmId  == purchParmTable.ParmId
+        {
+            inventDim                           =  InventDim::find(purchParmLine.InventDimId);
+
+            EcoResProduct     ecoResProduct = EcoResProduct::find(InventTable::find(purchParmLine.ItemId).Product);
+
+            if(ecoResProduct.ProductType == EcoResProductType::Item)
+            {
+
+                inventTranslocal = InventTrans::findTransId(purchParmLine.InventTransId, true);
+
+                inventDimlocal   = inventTranslocal.inventDim();
+
+                inventDimlocal.inventBatchId    = inventDim.inventBatchId;
+                inventDimlocal.InventLocationId = inventDim.InventLocationId;
+                inventDimlocal.InventSiteId     = inventDim.inventSiteId;
+                inventDimlocal.inventSerialId   = inventDim.inventSerialId;
+                inventDimlocal                  = InventDim::findOrCreate(inventDimlocal);
+                inventTransWMS_register         = inventTransWMS_register::newStandard(tmpInventTransWMS);
+
+                inventTranslocal.inventDimId    = inventDimlocal.inventDimId;
+
+                select firstonly RecId from inventTransCheck
+                    where inventTransCheck.ItemId == purchParmLine.ItemId
+                        && inventTransCheck.StatusReceipt == StatusReceipt::Registered
+                        && inventTransCheck.DataAreaId == purchParmLine.DataAreaId
+                        && inventTransCheck.inventDimId == inventDimlocal.inventDimId
+                        && inventTransCheck.Qty >= purchParmLine.ReceiveNow;
+
+                if(!inventTransCheck.RecId)
+                {
+                    tmpInventTransWMS.clear();
+                    tmpInventTransWMS.initFromInventTrans(inventTranslocal);
+                    tmpInventTransWMS.ItemId    = inventTranslocal.ItemId;
+                    tmpInventTransWMS.InventQty = purchParmLine.ReceiveNow;
+                    tmpInventTransWMS.insert();
+                    inventTransWMS_register.writeTmpInventTransWMS(tmpInventTransWMS, inventTranslocal, inventDimlocal);
+                    inventTransWMS_register.updateInvent(inventTranslocal);
+
+                    if(purchParmLine.purchLine().OverDeliveryPct && purchParmLine.RemainBefore != purchParmLine.ReceiveNow && (purchParmLine.RemainBefore < purchParmLine.ReceiveNow))
+                    {
+                        ttsbegin;
+                        purchParmLine.selectForUpdate(true);
+                        purchParmLine.RemainBefore       = purchParmLine.ReceiveNow;
+                        purchParmLine.RemainBeforeInvent = purchParmLine.ReceiveNow;
+                        purchParmLine.doUpdate();
+                        ttscommit;
+                    }
+                }
+            }
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

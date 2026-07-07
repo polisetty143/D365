@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchInvoiceJournalPost_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension class for class <c>PurchInvoiceJournalPost</c>
+/// </summary>
+[ExtensionOf(classStr(PurchInvoiceJournalPost))]
+internal final class ETGPurchInvoiceJournalPost_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>endPost</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method updates various TERMO details after Vend invoice is posted
+    /// </summary>
+    protected void endPost()
+    {
+        next endPost();
+
+        //NS process termo logic if termo number tracking feature is enabled, DLT, 16-09-2024
+        if(VendParameters::find().ETGEnableTermoNumberFeature)
+        {
+            ETGTermoNumberHelper termoHelper = ETGTermoNumberHelper::construct();
+            termoHelper.parmVendInvoiceJour(vendInvoiceJour);
+            termoHelper.processVendorInvoice();
+        }
+        //NE process termo logic if termo number tracking feature is enabled, DLT, 16-09-2024
+
+        if(AssetParameters::find().ETGCapexApprovalIdFeature == NoYes::Yes && VendInvoiceJour.ledgerVoucher)
+        {
+            GeneralJournalEntry             generalJournalEntry;
+            GeneralJournalAccountEntry      generalJournalAccountEntry;
+            PurchLine                       purchLine;
+
+            select firstonly RecId from generalJournalEntry
+               where generalJournalEntry.SubledgerVoucher == VendInvoiceJour.LedgerVoucher
+                &&   generalJournalEntry.SubledgerVoucherDataAreaId == VendInvoiceJour.dataAreaId;
+
+            if(generalJournalEntry.RecId)
+            {
+                select firstonly ETGCapexApprovalId from purchLine
+                    where purchLine.PurchId     == VendInvoiceJour.PurchId
+                     &&   purchLine.DataAreaId  == VendInvoiceJour.DataAreaId;
+
+                ttsbegin;
+                update_recordset generalJournalAccountEntry
+                    setting ETGCapexApprovalId = purchLine.ETGCapexApprovalId
+                    where generalJournalAccountEntry.GeneralJournalEntry == generalJournalEntry.RecId;
+                ttscommit;
+            }
+        }
+       
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

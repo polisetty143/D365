@@ -1,0 +1,539 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGVendInvoiceJournalCreate</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// create vendor invoice journal for brokerages charges
+/// </summary>
+public final class ETGVendInvoiceJournalCreate
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>createVendInvJournal</Name>
+				<Source><![CDATA[
+    public static void createVendInvJournal(VendInvoiceJour vendInvoiceJour)
+    {
+        MCRLedgerJournal                    journalTable;
+        LedgerJournalTable                  ledgerJournalTable,ledgerJournalTableUpd;
+        LedgerJournalTrans                  ledgerJournalTransupd;
+        ETGACFParameters                    acfParameters;
+        AmountMST                           amountcredit;
+        LedgerDimensionAccount              ledgerAccount,offsetAccount;
+        ETG_PurchaseAgreementHeader         purchaseAgreementHeader;
+        VendInvoiceTrans                    vendInvoiceTrans;
+
+        select firstonly acfParameters;
+
+        if(acfParameters.EnableBrokeragesMainAccount == "")
+        {
+            warning("@ETG_New:MainAccountBrokPurchError");
+            return;
+        }
+        if(acfParameters.EnableBrokeragesJournalName == "")
+        {
+            warning("@ETG_New:JournalNameBrokPurchError");
+            return;
+        }
+
+        purchaseAgreementHeader = ETGVendInvoiceJournalCreate::getBrokerageRecordPurch(vendInvoiceJour);
+
+        if(!purchaseAgreementHeader 
+            || purchaseAgreementHeader.BrokerageCommissionValue == 0 
+            || purchaseAgreementHeader.Through == "")
+        {
+            return;
+        }
+
+        if(purchaseAgreementHeader.BrokerageCommissionType == ETGBrokerageCommissionType::Percent || purchaseAgreementHeader.BrokerageCommissionType == ETGBrokerageCommissionType::Quantity)
+        {
+            ttsbegin;
+
+            journalTable       = new MCRLedgerJournal_VendInvoiceRegister(LedgerJournalType::VendInvoiceRegister, acfParameters.EnableBrokeragesJournalName);
+            ledgerJournalTable = journalTable.createLedgerJournalTable(acfParameters.EnableBrokeragesJournalName);
+
+            ledgerJournalTable.DefaultDimension = vendInvoiceJour.DefaultDimension;
+            journalTable.parmLedgerJournalTable(ledgerJournalTable);
+            journalTable.parmMCRCCGeneralLedgerId();
+            journalTable.parmLedgerAccountType(LedgerJournalACType::Vend);
+            journalTable.parmLedgerOffsetAccountType(LedgerJournalACType::Ledger);
+            journalTable.parmCurrencyCode(vendInvoiceJour.CurrencyCode);
+            journalTable.parmLineNum();
+            ledgerJournalTable.Approver = HcmWorkerLookup::currentWorker();
+            ledgerAccount               = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(purchaseAgreementHeader.Through, LedgerJournalACType::Vend);
+
+            RecId ledgerDimension = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(acfParameters.EnableBrokeragesMainAccount,
+            LedgerJournalACType::Ledger);
+            offsetAccount = LedgerDimensionFacade::serviceCreateLedgerDimension(ledgerDimension, vendInvoiceJour.DefaultDimension);
+            
+            journalTable.parmLedgerAccount(ledgerAccount);
+            journalTable.parmledgerOffsetAccount(offsetAccount);
+            journalTable.parmTransTxt(strFmt("@ETG_New:BrokeragesJournalCreationMsg", vendInvoiceJour.InvoiceId));
+            journalTable.parmInvoice(vendInvoiceJour.InvoiceId);
+
+            if(purchaseAgreementHeader.BrokerageCommissionType == ETGBrokerageCommissionType::Percent)
+            {
+                amountcredit = (vendInvoiceJour.InvoiceAmount * purchaseAgreementHeader.BrokerageCommissionValue) / 100;
+            }
+            else
+            {
+                select sum(Qty) from vendInvoiceTrans
+            where vendInvoiceTrans.InvoiceId == vendInvoiceJour.InvoiceId
+            && vendInvoiceTrans.DataAreaId == vendInvoiceJour.DataAreaId;
+
+                amountcredit = vendInvoiceTrans.Qty * purchaseAgreementHeader.BrokerageCommissionValue;
+            }
+            journalTable.parmTransDate(vendInvoiceJour.InvoiceDate);
+            journalTable.parmDocumentDate(vendInvoiceJour.InvoiceDate);
+            journalTable.createLedgerJournalTrans(abs(amountcredit), abs(0), LedgerJournalACType::Ledger);
+       
+            ttscommit;
+
+            if(acfParameters.EnableBrokeragesJournalAutoPost == NoYes::Yes)
+            {
+                journalTable.post(ledgerJournalTable);
+            }
+
+            Info(strFmt("@ETG_New:VendorInvoiceJournalCreated", ledgerJournalTable.JournalNum));
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getBrokerageRecordPurch</Name>
+				<Source><![CDATA[
+    public static ETG_PurchaseAgreementHeader getBrokerageRecordPurch(vendInvoiceJour vendInvoiceJourETG)
+    {
+        ETG_PurchaseAgreementHeader etgPurchAgreementHeader;
+        PurchAgreementHeader     purchAgreementHeader;
+        VendInvoiceTrans         vendInvoiceTrans;
+        Amount brokeargeAmt;
+        PurchLine  purchLine;
+        AgreementLine agreementLine;
+        
+        select firstonly vendInvoiceTrans 
+            where vendInvoiceTrans.InvoiceId == vendInvoiceJourETG.InvoiceId
+            && vendInvoiceTrans.DataAreaId == vendInvoiceJourETG.DataAreaId;
+
+        purchLine = vendInvoiceTrans.purchLine();
+
+        if(purchLine && purchLine.MatchingAgreementLine)
+        {
+            select firstonly Agreement from agreementLine
+            where agreementLine.RecId == purchLine.MatchingAgreementLine;
+
+            select firstonly PurchNumberSequence from purchAgreementHeader
+            where purchAgreementHeader.RecId == agreementLine.Agreement;
+
+            select firstonly etgPurchAgreementHeader
+            where etgPurchAgreementHeader.PurchAgreementId == purchAgreementHeader.PurchNumberSequence;
+        }
+
+        return etgPurchAgreementHeader;
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getBrokerageRecordSales</Name>
+				<Source><![CDATA[
+    public static ETG_SalesAgreementHeader getBrokerageRecordSales(CustInvoiceJour custInvoiceJourETG)
+    {
+        ETG_SalesAgreementHeader etgSalesAgreementHeader;
+        SalesAgreementHeader     salesAgreementHeader;
+        CustInvoiceTrans         custInvoiceTrans;
+        SalesLine                salesLine;
+        AgreementLine            agreementLine;
+        
+        select firstonly custInvoiceTrans
+            where custInvoiceTrans.InvoiceId == custInvoiceJourETG.InvoiceId
+            && custInvoiceTrans.DataAreaId == custInvoiceJourETG.DataAreaId;
+
+        salesLine = custInvoiceTrans.salesLine();
+
+        if(salesLine && salesLine.MatchingAgreementLine)
+        {
+            select firstonly Agreement from agreementLine
+            where agreementLine.RecId == salesLine.MatchingAgreementLine;
+
+            select firstonly SalesNumberSequence from salesAgreementHeader
+            where salesAgreementHeader.RecId == agreementLine.Agreement;
+
+            select firstonly etgSalesAgreementHeader
+            where etgSalesAgreementHeader.SalesAgreementId == salesAgreementHeader.SalesNumberSequence;
+        }
+
+        return etgSalesAgreementHeader;
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createCustInvJournal</Name>
+				<Source><![CDATA[
+    public static void createCustInvJournal(CustInvoiceJour custInvoiceJour)
+    {
+        MCRLedgerJournal                    journalTable;
+        LedgerJournalTable                  ledgerJournalTable,ledgerJournalTableUpd;
+        LedgerJournalTrans                  ledgerJournalTransupd;
+        ETGACFParameters                    acfParameters;
+        AmountMST                           amount;
+        LedgerDimensionAccount              ledgerAccount,offsetAccount;
+        ETG_SalesAgreementHeader            salesAgreementHeader;
+        CustInvoiceTrans                    custInvoiceTrans;
+
+        select firstonly acfParameters;
+
+        if(acfParameters.EnableBrokeragesMainAccountSales == "")
+        {
+            warning("@ETG_New:MainAccountBrokPurchError");
+            return;
+        }
+        if(acfParameters.EnableBrokeragesJournalName == "")
+        {
+            warning("@ETG_New:JournalNameBrokPurchError");
+            return;
+        }
+
+        salesAgreementHeader = ETGVendInvoiceJournalCreate::getBrokerageRecordSales(custInvoiceJour);
+
+        if(!salesAgreementHeader || salesAgreementHeader.BrokerageCommissionValue == 0 || salesAgreementHeader.Through == "")
+        {
+            return;
+        }
+
+        if(salesAgreementHeader.BrokerageCommissionType == ETGBrokerageCommissionType::Percent || salesAgreementHeader.BrokerageCommissionType == ETGBrokerageCommissionType::Quantity)
+        {
+            ttsbegin;
+
+            journalTable       = new MCRLedgerJournal_VendInvoiceRegister(LedgerJournalType::VendInvoiceRegister, acfParameters.EnableBrokeragesJournalName);
+            ledgerJournalTable = journalTable.createLedgerJournalTable(acfParameters.EnableBrokeragesJournalName);
+            ledgerJournalTable.DefaultDimension = custInvoiceJour.DefaultDimension;
+            journalTable.parmLedgerJournalTable(ledgerJournalTable);
+            journalTable.parmMCRCCGeneralLedgerId();
+            journalTable.parmLedgerAccountType(LedgerJournalACType::Vend);
+            journalTable.parmLedgerOffsetAccountType(LedgerJournalACType::Ledger);
+            journalTable.parmCurrencyCode(custInvoiceJour.CurrencyCode);
+            journalTable.parmLineNum();
+            ledgerJournalTable.Approver = HcmWorkerLookup::currentWorker();
+
+
+            ledgerAccount = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(salesAgreementHeader.Through, LedgerJournalACType::Vend);
+            RecId ledgerDimension = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(acfParameters.EnableBrokeragesMainAccountSales,
+            LedgerJournalACType::Ledger);
+            offsetAccount = LedgerDimensionFacade::serviceCreateLedgerDimension(ledgerDimension, custInvoiceJour.DefaultDimension);
+       
+            journalTable.parmLedgerAccount(ledgerAccount);
+            journalTable.parmledgerOffsetAccount(offsetAccount);
+            journalTable.parmTransTxt(strFmt("@ETG_New:BrokeragesJournalCreationMsg", custInvoiceJour.InvoiceId));
+            journalTable.parmInvoice(custInvoiceJour.InvoiceId);
+
+            if(salesAgreementHeader.BrokerageCommissionType == ETGBrokerageCommissionType::Percent)
+            {
+                amount = (custInvoiceJour.InvoiceAmount * salesAgreementHeader.BrokerageCommissionValue) / 100;
+            }
+            else
+            {
+                select sum(Qty) from custInvoiceTrans
+            where custInvoiceTrans.InvoiceId == custInvoiceJour.InvoiceId
+            && custInvoiceTrans.DataAreaId == custInvoiceJour.DataAreaId;
+
+                amount = custInvoiceTrans.Qty * salesAgreementHeader.BrokerageCommissionValue;
+            }
+            journalTable.parmTransDate(custInvoiceJour.InvoiceDate);
+            journalTable.parmDocumentDate(custInvoiceJour.InvoiceDate);
+            //CS Rajat Dubey 13/05/25
+            if(amount>0)
+            {
+                journalTable.createLedgerJournalTrans(abs(amount), abs(0), LedgerJournalACType::Ledger);
+                //journalTable.createLedgerJournalTrans(abs(0), abs(amount), LedgerJournalACType::Ledger);
+            }
+            else
+            {
+                journalTable.createLedgerJournalTrans(abs(0), abs(amount), LedgerJournalACType::Ledger);
+               // journalTable.createLedgerJournalTrans(abs(amount), abs(0), LedgerJournalACType::Ledger);
+            }
+            //CE Rajat Dubey 13/05/25
+            ttscommit;
+
+            if(acfParameters.EnableBrokeragesJournalAutoPost == NoYes::Yes)
+            {
+                journalTable.post(ledgerJournalTable);
+            }
+
+
+            Info(strFmt("@ETG_New:VendorInvoiceJournalCreated", ledgerJournalTable.JournalNum));
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createVendInvJournalReversal</Name>
+				<Source><![CDATA[
+    //CS Rajat Dubey 13/05/25
+    public static void createVendInvJournalReversal(VendInvoiceJour vendInvoiceJour)
+    {
+        MCRLedgerJournal                    journalTable;
+        LedgerJournalTable                  ledgerJournalTable,ledgerJournalTableUpd;
+        LedgerJournalTrans                  ledgerJournalTransupd;
+        ETGACFParameters                    acfParameters;
+        AmountMST                           amountDebit;
+        LedgerDimensionAccount              ledgerAccount,offsetAccount;
+        ETG_PurchaseAgreementHeader         purchaseAgreementHeader;
+        VendInvoiceTrans                    vendInvoiceTrans;
+
+        select firstonly acfParameters;
+
+        if(acfParameters.EnableBrokeragesMainAccount == "")
+        {
+            warning("@ETG_New:MainAccountBrokPurchError");
+            return;
+        }
+        if(acfParameters.EnableBrokeragesJournalName == "")
+        {
+            warning("@ETG_New:JournalNameBrokPurchError");
+            return;
+        }
+
+        purchaseAgreementHeader = ETGVendInvoiceJournalCreate::getBrokerageRecordPurchReversal(vendInvoiceJour);
+
+        if(!purchaseAgreementHeader
+            || purchaseAgreementHeader.BrokerageCommissionValue == 0
+            || purchaseAgreementHeader.Through == "")
+        {
+            return;
+        }
+
+        if(purchaseAgreementHeader.BrokerageCommissionType == ETGBrokerageCommissionType::Percent || purchaseAgreementHeader.BrokerageCommissionType == ETGBrokerageCommissionType::Quantity)
+        {
+            ttsbegin;
+
+            journalTable       = new MCRLedgerJournal_VendInvoiceRegister(LedgerJournalType::VendInvoiceRegister, acfParameters.EnableBrokeragesJournalName);
+            ledgerJournalTable = journalTable.createLedgerJournalTable(acfParameters.EnableBrokeragesJournalName);
+
+            ledgerJournalTable.DefaultDimension = vendInvoiceJour.DefaultDimension;
+            journalTable.parmLedgerJournalTable(ledgerJournalTable);
+            journalTable.parmMCRCCGeneralLedgerId();
+            journalTable.parmLedgerAccountType(LedgerJournalACType::Vend);
+            journalTable.parmLedgerOffsetAccountType(LedgerJournalACType::Ledger);
+            journalTable.parmCurrencyCode(vendInvoiceJour.CurrencyCode);
+            journalTable.parmLineNum();
+            ledgerJournalTable.Approver = HcmWorkerLookup::currentWorker();
+            ledgerAccount               = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(purchaseAgreementHeader.Through, LedgerJournalACType::Vend);
+
+            RecId ledgerDimension = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(acfParameters.EnableBrokeragesMainAccount,
+            LedgerJournalACType::Ledger);
+            offsetAccount = LedgerDimensionFacade::serviceCreateLedgerDimension(ledgerDimension, vendInvoiceJour.DefaultDimension);
+            
+            journalTable.parmLedgerAccount(ledgerAccount);
+            journalTable.parmledgerOffsetAccount(offsetAccount);
+            journalTable.parmTransTxt(strFmt("@ETG_New:BrokeragesJournalCreationMsg", vendInvoiceJour.InvoiceId));
+            journalTable.parmInvoice(vendInvoiceJour.InvoiceId);
+
+            if(purchaseAgreementHeader.BrokerageCommissionType == ETGBrokerageCommissionType::Percent)
+            {
+                amountDebit = (vendInvoiceJour.InvoiceAmount * purchaseAgreementHeader.BrokerageCommissionValue) / 100;
+            }
+            else
+            {
+                select sum(Qty) from vendInvoiceTrans
+            where vendInvoiceTrans.InvoiceId == vendInvoiceJour.InvoiceId
+            && vendInvoiceTrans.DataAreaId == vendInvoiceJour.DataAreaId;
+
+                amountDebit = vendInvoiceTrans.Qty * purchaseAgreementHeader.BrokerageCommissionValue;
+            }
+            journalTable.parmTransDate(vendInvoiceJour.InvoiceDate);
+            journalTable.parmDocumentDate(vendInvoiceJour.InvoiceDate);
+            journalTable.createLedgerJournalTrans(abs(0), abs(amountDebit), LedgerJournalACType::Ledger);
+       
+            ttscommit;
+
+            if(acfParameters.EnableBrokeragesJournalAutoPost == NoYes::Yes)
+            {
+                journalTable.post(ledgerJournalTable);
+            }
+
+            Info(strFmt("@ETG_New:VendorInvoiceJournalCreated", ledgerJournalTable.JournalNum));
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createCustInvJournalReversal</Name>
+				<Source><![CDATA[
+    public static void createCustInvJournalReversal(CustInvoiceJour custInvoiceJour)
+    {
+        MCRLedgerJournal                    journalTable;
+        LedgerJournalTable                  ledgerJournalTable,ledgerJournalTableUpd;
+        LedgerJournalTrans                  ledgerJournalTransupd;
+        ETGACFParameters                    acfParameters;
+        AmountMST                           amountDebit;
+        LedgerDimensionAccount              ledgerAccount,offsetAccount;
+        ETG_SalesAgreementHeader            salesAgreementHeader;
+        CustInvoiceTrans                    custInvoiceTrans;
+
+        select firstonly acfParameters;
+
+        if(acfParameters.EnableBrokeragesMainAccount == "")
+        {
+            warning("@ETG_New:MainAccountBrokPurchError");
+            return;
+        }
+        if(acfParameters.EnableBrokeragesJournalName == "")
+        {
+            warning("@ETG_New:JournalNameBrokPurchError");
+            return;
+        }
+
+        salesAgreementHeader = ETGVendInvoiceJournalCreate::getBrokerageRecordSalesReversal(custInvoiceJour);
+
+        if(!salesAgreementHeader
+            || salesAgreementHeader.BrokerageCommissionValue == 0
+            || salesAgreementHeader.Through == "")
+        {
+            return;
+        }
+
+        if(salesAgreementHeader.BrokerageCommissionType == ETGBrokerageCommissionType::Percent || salesAgreementHeader.BrokerageCommissionType == ETGBrokerageCommissionType::Quantity)
+        {
+            ttsbegin;
+
+            journalTable       = new MCRLedgerJournal_VendInvoiceRegister(LedgerJournalType::VendInvoiceRegister, acfParameters.EnableBrokeragesJournalName);
+            ledgerJournalTable = journalTable.createLedgerJournalTable(acfParameters.EnableBrokeragesJournalName);
+
+            ledgerJournalTable.DefaultDimension = custInvoiceJour.DefaultDimension;
+            journalTable.parmLedgerJournalTable(ledgerJournalTable);
+            journalTable.parmMCRCCGeneralLedgerId();
+            journalTable.parmLedgerAccountType(LedgerJournalACType::Vend);
+            journalTable.parmLedgerOffsetAccountType(LedgerJournalACType::Ledger);
+            journalTable.parmCurrencyCode(custInvoiceJour.CurrencyCode);
+            journalTable.parmLineNum();
+            ledgerJournalTable.Approver = HcmWorkerLookup::currentWorker();
+            ledgerAccount               = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(salesAgreementHeader.Through, LedgerJournalACType::Vend);
+
+            RecId ledgerDimension = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(acfParameters.EnableBrokeragesMainAccount,
+            LedgerJournalACType::Ledger);
+            offsetAccount = LedgerDimensionFacade::serviceCreateLedgerDimension(ledgerDimension, custInvoiceJour.DefaultDimension);
+            
+            journalTable.parmLedgerAccount(ledgerAccount);
+            journalTable.parmledgerOffsetAccount(offsetAccount);
+            journalTable.parmTransTxt(strFmt("@ETG_New:BrokeragesJournalCreationMsg", custInvoiceJour.InvoiceId));
+            journalTable.parmInvoice(custInvoiceJour.InvoiceId);
+
+            if(salesAgreementHeader.BrokerageCommissionType == ETGBrokerageCommissionType::Percent)
+            {
+                amountDebit = (custInvoiceJour.InvoiceAmount * salesAgreementHeader.BrokerageCommissionValue) / 100;
+            }
+            else
+            {
+                select sum(Qty) from custInvoiceTrans
+            where custInvoiceTrans.InvoiceId == custInvoiceJour.InvoiceId
+            && custInvoiceTrans.DataAreaId == custInvoiceJour.DataAreaId;
+
+                amountDebit = custInvoiceTrans.Qty * salesAgreementHeader.BrokerageCommissionValue;
+            }
+            journalTable.parmTransDate(custInvoiceJour.InvoiceDate);
+            journalTable.parmDocumentDate(custInvoiceJour.InvoiceDate);
+            journalTable.createLedgerJournalTrans(abs(0), abs(amountDebit), LedgerJournalACType::Ledger);
+       
+            ttscommit;
+
+            if(acfParameters.EnableBrokeragesJournalAutoPost == NoYes::Yes)
+            {
+                journalTable.post(ledgerJournalTable);
+            }
+
+            Info(strFmt("@ETG_New:VendorInvoiceJournalCreated", ledgerJournalTable.JournalNum));
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getBrokerageRecordPurchReversal</Name>
+				<Source><![CDATA[
+    public static ETG_PurchaseAgreementHeader getBrokerageRecordPurchReversal(vendInvoiceJour vendInvoiceJourETG)
+    {
+        ETG_PurchaseAgreementHeader etgPurchAgreementHeader;
+        PurchAgreementHeader     purchAgreementHeader;
+        VendInvoiceTrans         vendInvoiceTrans;
+        Amount brokeargeAmt;
+        PurchLine  purchLine;
+        AgreementLine agreementLine;
+        
+        select firstonly vendInvoiceTrans
+            where vendInvoiceTrans.InvoiceId == vendInvoiceJourETG.InvoiceId
+            && vendInvoiceTrans.DataAreaId == vendInvoiceJourETG.DataAreaId;
+
+        purchLine = vendInvoiceTrans.purchLine();
+
+        if(purchLine && purchLine.InventRefId)
+        {
+            select firstonly Agreement from agreementLine
+                where agreementLine.RecId == PurchLine::find(purchLine.InventRefId).MatchingAgreementLine;
+
+            select firstonly PurchNumberSequence from purchAgreementHeader
+            where purchAgreementHeader.RecId == agreementLine.Agreement;
+
+            select firstonly etgPurchAgreementHeader
+            where etgPurchAgreementHeader.PurchAgreementId == purchAgreementHeader.PurchNumberSequence;
+        }
+
+        return etgPurchAgreementHeader;
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getBrokerageRecordSalesReversal</Name>
+				<Source><![CDATA[
+    //CE Rajat Dubey 13/05/25
+
+    public static ETG_SalesAgreementHeader getBrokerageRecordSalesReversal(custInvoiceJour custInvoiceJourETG)
+    {
+        ETG_SalesAgreementHeader etgSalesAgreementHeader;
+        SalesAgreementHeader     salesAgreementHeader;
+        CustInvoiceTrans         custInvoiceTrans;
+        Amount brokeargeAmt;
+        SalesLine  salesLine;
+        AgreementLine agreementLine;
+        
+        select firstonly custInvoiceTrans
+            where custInvoiceTrans.InvoiceId == custInvoiceJourETG.InvoiceId
+            && custInvoiceTrans.DataAreaId == custInvoiceJourETG.DataAreaId;
+
+        salesLine = custInvoiceTrans.salesLine();
+
+        if(salesLine && salesLine.InventRefId)
+        {
+            select firstonly Agreement from agreementLine
+                where agreementLine.RecId == SalesLine::find(salesLine.InventRefId).MatchingAgreementLine;
+
+            select firstonly SalesNumberSequence from salesAgreementHeader
+            where salesAgreementHeader.RecId == agreementLine.Agreement;
+
+            select firstonly etgSalesAgreementHeader
+            where etgSalesAgreementHeader.SalesAgreementId == salesAgreementHeader.SalesNumberSequence;
+        }
+
+        return etgSalesAgreementHeader;
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

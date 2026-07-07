@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesEditLines_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The class <c>ETG_SalesEditLines_Extension</c> is used to handle the COC methods related to <c>SalesEditLines</c> form.
+/// </summary>
+[ExtensionOf(formstr(SalesEditLines))]
+final class ETG_SalesEditLines_Extension
+{
+
+  
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>init</Name>
+				<Source><![CDATA[
+    void  init()
+    {
+        FormRun             formRun = this as  FormRun;
+       
+        next init();
+        ETG_PostPackingQualityGrp   productReceiptQualityGrp;
+        InventParameters            inventParameters;
+      
+        ttsbegin;
+        update_recordset productReceiptQualityGrp
+            setting ResultValue = 0
+            where productReceiptQualityGrp.SalesId ==  salesFormLetter.salesTable().SalesId;
+        ttscommit;
+
+        select firstonly inventParameters;
+        if (documentStatus == DocumentStatus::PackingSlip )
+        {
+            ETG_BLnumber.visible(false);
+            ETG_BLDate.visible(false);
+            ETG_BillOfLading.visible(true);
+            Cocoa.visible(false);
+            Cashew.visible(false);
+        }
+        else if(documentStatus == DocumentStatus::Invoice )
+        {
+            /* ETG_BLnumber.visible(true);
+            ETG_BLDate.visible(true);
+            ETG_BillOfLading.visible(false);*/
+            if(inventParameters.ETGEnableQualityParameter == NoYes::Yes)
+            {
+                Cocoa.visible(true);
+                Cashew.visible(true);
+            }
+        }
+        else
+        {
+            ETG_BLnumber.visible(false);
+            ETG_BLDate.visible(false);
+            ETG_BillOfLading.visible(false);
+            Cocoa.visible(false);
+            Cashew.visible(false);
+        }
+     
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>closeOk</Name>
+				<Source><![CDATA[
+    void closeOk()
+    {
+        FormRun             formRun = this as  FormRun;
+        NoYes   BOlValidation =  ETG_Parameters::find().ETG_BLValidations;
+
+        if (documentStatus == DocumentStatus::PackingSlip && BOlValidation)
+        {
+            FormDataSource      ETG_BillOfLading_ds = formRun.datasource(FormDatasourceStr(SalesEditLines, ETG_BillOfLading));
+            ETG_BillOfLading    bol                 = ETG_BillOfLading_ds.Cursor();
+       
+            if(!bol.BOLNo)
+            {
+                throw error("@ETG:BOLNoValidationMsg");
+            }
+
+            if(!bol.BOLDate)
+            {
+                throw error("@ETG:BOLDateValidationMsg");
+            }
+
+            if(!bol.CarrierCode || !bol.CarrierId || !bol.PackageAppearanceText || !bol.PackageAppearanceText || !bol.NumberOfContainers || !bol.CreditDays ||
+                  !bol.DueDate || !bol.ImportPermitNumber || !bol.ImportDate || !bol.CargoInTransitTo || !bol.ContainerNumber || !bol.AgentSealNum || !bol.NetWeight || !bol.GrossWeight || !bol.NumberOfBags)
+            {
+                if(!( Box::yesNo("@ETG:ShippingDetValidationMsg" , DialogButton::Yes) == DialogButton::Yes))
+                {
+                    throw error("@ETG:PostingCancelMsg");
+                }
+            }
+        }
+        /*else if(documentStatus == DocumentStatus::Invoice && BOlValidation)
+        {
+            FormDataSource      SalesParmTable_ds = formRun.dataSource(FormDatasourceStr(SalesEditLines, SalesParmTable));
+            SalesParmTable      parmtable         = SalesParmTable_ds.cursor();
+
+            if(!parmtable.ETG_BLnumber)
+            {
+                throw error("@ETG:BOLNoValidationMsg");
+            }
+        }*/
+
+        if(ETGACFParameters::find().EnableSalesInvoiceWorkflow == NoYes::Yes)
+        {
+            FormDataSource      SalesParmLineDS = formRun.datasource(FormDatasourceStr(SalesEditLines,SalesParmLine));
+
+            SalesParmLine SalesParmLineLoc = SalesParmLineDS.cursor();
+
+            SalesParmUpdate  SalesParmUpdateloc = this.SalesParmUpdate;
+
+            if(SalesParmLineLoc && SalesParmUpdateloc.SpecQty == SalesUpdate::PackingSlip)
+            {
+                ETGSalesEditLines ETGSalesEditLinesLocal;
+                
+                select firstonly ETGSalesEditLinesLocal
+                    where ETGSalesEditLinesLocal.PackingSlipId == SalesParmLineLoc.packingSlipId(SalesParmLineLoc)
+                    && ETGSalesEditLinesLocal.WorkflowStatus != ETGSalesEditLinesWorkflow::Approved;
+
+                if(ETGSalesEditLinesLocal)
+                {
+                    throw error("@ETG_New:ETGPackingSlipNotApproved");
+                }
+              
+            }
+
+        }
+        infolog.clear();
+
+        next closeOk();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>canClose</Name>
+				<Source><![CDATA[
+    public boolean canClose()
+    {
+        boolean canClose = next canClose(); // Call base method first
+
+        if (canClose)
+        {
+            FormRun formRun = this as FormRun;
+
+            // Fetch SalesParmTable Data
+            FormDataSource salesParmTableDS = formRun.dataSource(formDataSourceStr(SalesEditLines, SalesParmTable));
+            SalesParmTable salesParmTable = salesParmTableDS.cursor();
+
+            // Fetch ETG_BillOfLading DataSource
+            FormDataSource billOfLadingDS = formRun.dataSource(formDataSourceStr(SalesEditLines, ETG_BillOfLading));
+            ETG_BillOfLading billLading = billOfLadingDS.cursor();
+
+            
+            ETG_BOLCarrierTable     carrierTable;
+            CustPackingSlipJour     packingslipjour;
+            CustPackingSlipTrans    packingsliptrans;
+
+                //ttsBegin;
+
+
+
+                //   while select forUpdate carrierTable
+                //    where carrierTable.SalesId == salesParmTable.SalesId 
+
+                //    if (carrierTable)
+                //    {
+                //        //carrierTable.PackingSlipId = packingSlipId;
+                //        carrierTable.BOLId         = billLading.BOLNo;
+                //        carrierTable.ParmId        = salesParmTable.ParmId;
+                //        carrierTable.doUpdate();
+                //    }
+                //ttsCommit;
+        }
+
+        return canClose; 
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETG_BLnumber_OnModified</Name>
+				<Source><![CDATA[
+    [FormDataFieldEventHandler(formDataFieldStr(SalesEditLines, SalesParmTable, ETG_BLnumber), FormDataFieldEventType::Modified)]
+    public static void ETG_BLnumber_OnModified(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        /*ETG_BillOfLading    billlading        = sender.datasource().formRun().dataSource('ETG_BillOfLading').cursor();
+        FormDataSource      SalesParmTable_ds = sender.datasource().formRun().dataSource('SalesParmTable');
+        SalesParmTable      parmtable         = SalesParmTable_ds.cursor();
+        SalesParmUpdate     salesParmUpdate   = sender.datasource().formRun().dataSource("SalesParmUpdate").cursor();
+        FormRun             formrun = sender.datasource().formRun().dataSource("SalesParmTable").formRun();
+        Args                args    = new Args();
+        FormRun             formRunSelectJour;
+        CustInvoiceJour     custinvoicejour;
+        ETG_BillOfLading    billlandingloc ;
+        
+        if (parmtable.Ordering == DocumentStatus::Invoice)
+        {
+            billlading.delete();
+
+            select firstonly RecId,boldate,bolno from billlandingloc
+                where billlandingloc.bolno == parmtable.ETG_BLnumber
+                    && billlandingloc.InvoiceId == "";
+           
+            if(!billlandingloc)
+            {
+                throw error("Selected BOL number is invalid or posted already");
+            }
+
+            else
+            {
+                args.record(salesParmUpdate);
+                args.caller(formrun);
+                args.name(formstr(SalesJournalSelect_PackingSlip));
+                formRunSelectJour = ClassFactory.formRunClass(args);
+                formRunSelectJour.run();
+                formRunSelectJour.wait();
+
+               // formRunSelectJour.closeOk();
+                parmtable.etg_blnumber  = billlandingloc.bolno;
+                parmtable.etg_bldate    = billlandingloc.boldate;
+            }
+        }*/
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

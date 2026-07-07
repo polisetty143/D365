@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesOrderUploaderService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+using System.IO;
+using OfficeOpenXml;
+using OfficeOpenXml.ExcelPackage;
+using OfficeOpenXml.ExcelRange;
+public final class ETGSalesOrderUploaderService extends SysOperationServiceBase
+{
+    System.IO.Stream                 stream;
+    FileUploadTemporaryStorageResult fileUploadResult;
+    ExcelSpreadsheetName             sheeet;
+    Filename                         filename;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>updateItemcoverage</Name>
+				<Source><![CDATA[
+    public void updateItemcoverage(ETGSalesOrderUploaderContract  _contract)
+    {
+       
+        ReqItemTable                    reqItemTable,reqItemTableDim;
+        InventDim                       inventDim;
+        InventTable                     inventTable;
+
+        if (_contract.parmStorageResult() != conNull())
+        {
+            FileUploadTemporaryStorageResult fileUploadResultLoc = new FileUploadTemporaryStorageResult();
+            fileUploadResultLoc.unpack(_contract.parmStorageResult());
+            
+            if (fileUploadResultLoc != null && fileUploadResultLoc.getUploadStatus())
+            {
+                stream = fileUploadResultLoc.openResult();
+
+                using (ExcelPackage Package = new ExcelPackage(stream))
+                {
+                    int                         rowCount, i,columncount,j;
+                    Package.Load(stream);
+                    ExcelWorksheet              worksheet   = package.get_Workbook().get_Worksheets().get_Item(1);
+                    OfficeOpenXml.ExcelRange    range       = worksheet.Cells;
+                    rowCount                                = (worksheet.Dimension.End.Row) - (worksheet.Dimension.Start.Row)  + 1;
+                    columncount                             = (worksheet.Dimension.End.Column);
+        
+                    try
+                    {
+                        for (i = 2; i<= rowCount; i++)
+                        {
+                            SalesId     salesId         = range.get_Item(i, 1).value;
+                            TransDate   postingDate     = range.get_Item(i, 2).value;
+                            try
+                            {
+                                ETGSalesOrderUploaderService::postSalesOrder(salesId,postingDate);
+                            }
+                            catch
+                            {
+                                warning(ETGSalesOrderUploaderService::getError());
+                                continue;
+                            }
+                        }
+                    }
+                    catch(Exception::Error)
+                    {
+                        warning("Error during upload");
+                    }
+                }
+            }
+            else
+            {
+                throw error(strfmt("@SYS62207",filename));
+            }
+        }
+           
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getError</Name>
+				<Source><![CDATA[
+    public static str getError()
+    {
+        SysInfologEnumerator    sysInfologEnumerator;
+        SysInfologMessageStruct infoMessageStruct;
+        str                     logMessage;
+        str                           logString;
+        str                          ret;
+        int                          i;
+        #Define.NewLine('\n')
+        sysInfologEnumerator = SysInfologEnumerator::newData(infolog.infologData());
+        while (sysInfologEnumerator.moveNext())
+        {
+            i = 1;
+            if (logMessage)
+            {
+                logMessage += #Newline;
+            }
+            infoMessageStruct = SysInfologMessageStruct::construct(sysInfologEnumerator.currentMessage());
+
+            while (i <= infoMessageStruct.prefixDepth())
+            {
+                logString = logString + infoMessageStruct.preFixTextElement(i) + '. ';
+                i++;
+            }
+
+            logString = logString + infoMessageStruct.message();
+            logMessage = logMessage + infoMessageStruct.message();
+        }
+
+        infolog().clear();
+
+        return logMessage;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postSalesOrder</Name>
+				<Source><![CDATA[
+    public static void postSalesOrder(SalesId   _salesId,TransDate  _postingDate)
+    {
+        SalesFormLetter_PackingSlip         salesFormLetter_PackingSlip;
+        salesFormletterParmData             salesFormLetterParmData;
+        SalesParmTable                      salesParmTable;
+        salesParmUpdate                     salesParmUpdate;
+        SalesTable                          salesTable = SalesTable::find(_salesId, true);
+        SalesLine                           salesLine;
+        TransDate                           PackingSlipDate;
+        SalesParmLine                       salesParmLine;
+        SalesFormLetter                     salesFormLetter;
+
+        if (salesTable && salesTable.SalesStatus == SalesStatus::Backorder)
+        {
+            ttsbegin;
+            salesFormLetterParmData = salesFormletterParmData::newData(DocumentStatus::PackingSlip, VersioningUpdateType::Initial);
+            salesFormLetterParmData.parmOnlyCreateParmUpdate(true);
+            salesFormLetterParmData.createData(false);
+            salesParmUpdate = salesFormLetterParmData.parmParmUpdate();
+
+            salesParmTable.clear();
+            salesParmTable.TransDate                = _postingDate;
+            salesParmTable.Ordering                 = DocumentStatus::PackingSlip;
+            salesParmTable.ParmJobStatus            = ParmJobStatus::Waiting;
+            salesParmTable.salesId                  = salesTable.salesId;
+            salesParmTable.salesName                = salesTable.salesName;
+            salesParmTable.DeliveryName             = salesTable.DeliveryName;
+            salesParmTable.DeliveryPostalAddress    = salesTable.DeliveryPostalAddress;
+            salesParmTable.CustAccount              = salesTable.CustAccount;
+            salesParmTable.CurrencyCode             = salesTable.CurrencyCode;
+            salesParmTable.InvoiceAccount           = salesTable.InvoiceAccount;
+            salesParmTable.ParmId                   = salesParmUpdate.ParmId;
+            salesParmTable.insert();
+
+            while select salesLine
+                        where salesLine.SalesId == salesTable.SalesId
+            {
+                salesParmLine.Clear();
+                salesParmLine.InitFromsalesLine(salesline);
+                salesParmLine.DeliverNow    = salesline.RemainSalesPhysical;
+                salesParmLine.ParmId        = salesParmTable.ParmId;
+                salesParmLine.TableRefId    = salesParmTable.TableRefId;
+                salesParmLine.setQty(DocumentStatus::PackingSlip, false, true);
+                salesParmLine.setLineAmount(salesline);
+                salesParmLine.closed        = NoYes::No;
+                salesParmLine.insert();
+            }
+            salesFormLetter_PackingSlip = SalesFormLetter::construct(DocumentStatus::PackingSlip);
+            salesFormLetter_PackingSlip.transDate(_postingDate);
+            salesFormLetter_PackingSlip.proforma(NoYes::No);
+            salesFormLetter_PackingSlip.specQty(salesUpdate::PackingSlip);
+            salesFormLetter_PackingSlip.salesTable(salesTable);
+            salesFormLetter_PackingSlip.parmId(salesParmTable.ParmId);
+            salesFormLetter_PackingSlip.salesParmUpdate(salesFormLetterParmData.parmParmUpdate());
+            salesFormLetter_PackingSlip.run();
+
+            salesFormLetter = SalesFormLetter::construct(DocumentStatus::Invoice);
+            salesFormLetter.transDate(_postingDate);
+            salesFormLetter.update(salesTable);
+            ttscommit;
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

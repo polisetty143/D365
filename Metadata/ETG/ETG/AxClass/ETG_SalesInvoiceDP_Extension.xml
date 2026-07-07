@@ -1,0 +1,566 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesInvoiceDP_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(SalesInvoiceDP))]
+final class ETG_SalesInvoiceDP_Extension
+{
+
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>SalesInvoiceHeaderFooterTmp_onInserting</Name>
+				<Source><![CDATA[
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [DataEventHandler(tableStr(SalesInvoiceHeaderFooterTmp), DataEventType::Inserting)]
+    public static void SalesInvoiceHeaderFooterTmp_onInserting(Common sender, DataEventArgs e)
+    {
+        CustInvoiceJour                 custInvoiceJour;
+        ETG_SalesTableTrade             salesTableTrade;
+        SalesAgreementHeader            salesAgreementHeader;
+        AgreementHeader                 agreementHeader;
+        SalesTable                      salesTable, salesTableOrg;
+        CustInvoiceTrans                custInvoiceTransLoc, custInvoiceTransLoc1;
+        ETG_QualitySubGrpView           qualitysubGrpview;
+        CompanyInfo                     companyInfoLoc = CompanyInfo::find();
+        LogisticsElectronicAddress      electronicAddress;
+        Name                            AmountinTxt;
+        DirPartyTable                   dirPartyTable;
+        DirPartyLocation                dirPartyLocation, dirPartyLocationLoc;
+        TaxRegistration                 taxRegistration, taxRegistrationLoc;
+        Name                            TeleFax;
+        ETG_BillOfLading                ETGBilloflading, billOfLading;
+        SalesLine                       salesLine, salesLineTax, salesLineAmount;
+        InventDim                       inventDim;
+        MarkupTrans                     markuptrans,markuptransloc, markuptransloc1;
+        MarkupValue                     markupValue;        
+        CustPackingSlipJour             custPackingSlipJour;
+        ETG_CustPackingQualityGrp       custPackingQualityGrpOrg;
+        TaxTrans                        taxTrans;
+        Description1000                 chargecodetxt,chargecodevalue,valuetxt,txtdesc;
+        real                            chargeV, chargeI = 0;
+        CustTable                       custTableOrg;
+        chargecodetxt='';
+        chargecodevalue='';
+
+        electronicAddress = DirParty::primaryElectronicAddress(companyInfoLoc.RecId, LogisticsElectronicAddressMethodType::Phone);
+        salesInvoiceHeaderFooterTmp  salesInvoiceHeaderFooterTmp = sender as SalesInvoiceHeaderFooterTmp;
+        custInvoiceJour = CustInvoiceJour::findRecId(salesInvoiceHeaderFooterTmp.JournalRecId);
+        select firstonly salesTableTrade
+        where salesTableTrade.SalesId       == custInvoiceJour.SalesId;
+        salesAgreementHeader                 = SalesAgreementHeader::find(custInvoiceJour.salesTable().MatchingAgreement);
+        agreementHeader                      = AgreementHeader::find(salesTable.MatchingAgreement);
+        select firstonly RegistrationNumber from taxRegistration
+               exists join dirPartyLocation
+               where dirPartyLocation.RecId  == taxRegistration.DirPartyLocation
+               exists join dirPartyTable
+               where dirPartyTable.RecId     == dirPartyLocation.Party;
+
+        select firstonly ETGBilloflading
+            where ETGBilloflading.SalesId   ==  custInvoiceJour.SalesId;
+
+        select firstonly salesLine
+            where salesLine.SalesId        ==  custInvoiceJour.SalesId;
+        select firstonly inventDim
+            where inventDim.inventDimId == salesLine.InventDimId;
+        select firstonly salesTable
+            where salesTable.SalesId == custInvoiceJour.SalesId;
+        select sum(Value) from markuptransloc
+            where markuptransloc.Voucher == custInvoiceJour.LedgerVoucher;
+           // &&  markuptransloc.TransTableId == salesTable.TableId;
+        while select markuptrans
+            where markuptrans.Voucher == custInvoiceJour.LedgerVoucher
+              //&&  markuptrans.TransTableId == salesTable.TableId
+        {
+            chargecodetxt = chargecodetxt +'\n' + strFmt('%1', markuptrans.txt);
+            chargecodevalue = chargecodevalue +'\n' + strFmt('%1',markuptrans.Value);
+
+        }
+        chargecodetxt                                           = subStr(chargecodetxt,1, strLen(chargecodetxt));
+
+        salesInvoiceHeaderFooterTmp.ETGTxt                      = chargecodetxt;
+        salesInvoiceHeaderFooterTmp.ETGChargeValue              = chargecodevalue;
+        salesInvoiceHeaderFooterTmp.CompanyCoRegNum             = taxRegistration.RegistrationNumber;
+        
+        salesInvoiceHeaderFooterTmp.Notifytodifferentparty      = salesTableTrade.Notifytodifferentparty;
+
+        if(curExt() == "C003")
+        {
+            if(salesInvoiceHeaderFooterTmp.Notifytodifferentparty)
+            {
+                salesInvoiceHeaderFooterTmp.InvoicingName       = salesTableTrade.Name;
+                salesInvoiceHeaderFooterTmp.InvoicingAddress    = salesTableTrade.Address;
+            }
+            else
+            {
+                salesInvoiceHeaderFooterTmp.InvoicingName       = custInvoiceJour.InvoicingName;
+                salesInvoiceHeaderFooterTmp.InvoicingAddress    = custInvoiceJour.salesTable().custTable_InvoiceAccount().invoiceAddress().Address;               
+            }
+        }
+        else if(curExt() == "S004")
+        {
+            salesInvoiceHeaderFooterTmp.InvoicingName       = custInvoiceJour.DeliveryName;
+            salesInvoiceHeaderFooterTmp.InvoicingAddress    = custInvoiceJour.deliveryAddress();
+        }
+        else if(curExt() == "O025")
+        {
+            salesInvoiceHeaderFooterTmp.InvoicingName       = custInvoiceJour.DeliveryName;
+            salesInvoiceHeaderFooterTmp.InvoicingAddress    = custInvoiceJour.deliveryAddress();
+        }
+        else
+        {
+            salesInvoiceHeaderFooterTmp.InvoicingName           = custInvoiceJour.InvoicingName;
+            salesInvoiceHeaderFooterTmp.InvoicingAddress        = custInvoiceJour.salesTable().custTable_InvoiceAccount().invoiceAddress().Address;
+        }
+        
+        if(curExt() == "S004")
+        {
+            salesInvoiceHeaderFooterTmp.BuyerAddress                = custInvoiceJour.salesTable().custTable_CustAccount().postalAddress().Address;
+            salesInvoiceHeaderFooterTmp.BuyerName                   = custInvoiceJour.salesTable().custTable_CustAccount().name();
+        }
+        else if(curExt() == "O025")
+        {
+            salesInvoiceHeaderFooterTmp.BuyerAddress                = custInvoiceJour.salesTable().custTable_CustAccount().postalAddress().Address;
+            salesInvoiceHeaderFooterTmp.BuyerName                   = custInvoiceJour.salesTable().custTable_CustAccount().name();
+        }
+        else
+        {
+            salesInvoiceHeaderFooterTmp.BuyerAddress                = custInvoiceJour.salesTable().custTable_CustAccount().postalAddress().Address;
+            salesInvoiceHeaderFooterTmp.BuyerName                   = custInvoiceJour.DeliveryName;
+        }
+
+        if(curExt() == "S004")
+        {
+            salesInvoiceHeaderFooterTmp.ETGVesselName           = salesTableTrade.VesselName;
+        }
+        else if(curExt() == "C003")
+        {
+            salesInvoiceHeaderFooterTmp.ETGVesselName           = salesTableTrade.VesselName;
+        }
+        else
+        {
+            salesInvoiceHeaderFooterTmp.ETGVesselName           = ETGBilloflading.CarrierCode;
+        }
+        salesInvoiceHeaderFooterTmp.ETGVesselNameVoyageNo       = ETGBilloflading.CarrierId;
+        salesInvoiceHeaderFooterTmp.ETGCountryOriginGoods       = inventDim.InventColorId;
+        salesInvoiceHeaderFooterTmp.ETGCountryFinaldestination  = salesTableTrade.CountryOfFinalDestination;
+        salesInvoiceHeaderFooterTmp.ETGDeclaration              = salesTableTrade.Declaration;
+        salesInvoiceHeaderFooterTmp.ETGRemarks                  = salesTableTrade.Remarks;
+        salesInvoiceHeaderFooterTmp.ETGDlvMode                  = custInvoiceJour.salesTable().DlvMode;
+        salesInvoiceHeaderFooterTmp.ETGBillLadingNo             = custInvoiceJour.ETG_BLnumber;
+        salesInvoiceHeaderFooterTmp.ETGBillLadingDate           = custInvoiceJour.ETG_BLDate;
+        salesInvoiceHeaderFooterTmp.ETGNumberOfBags             = ETGBilloflading.NumberOfBags;
+        salesInvoiceHeaderFooterTmp.ETGNumberOfContainers       = ETGBilloflading.NumberOfContainers;
+        salesInvoiceHeaderFooterTmp.ETGPortPlaceLading          = salesTableTrade.PortOfLoadingDesc;
+        salesInvoiceHeaderFooterTmp.ETGPortPlaceDischarge       = salesTableTrade.PortOfDischargeDesc;
+        salesInvoiceHeaderFooterTmp.ETGPaymterm                 = custInvoiceJour.salesTable().Payment;
+        salesInvoiceHeaderFooterTmp.ETGContractNo               = salesAgreementHeader.SalesNumberSequence;
+        salesInvoiceHeaderFooterTmp.ETGContarctDate             = salesAgreementHeader.DefaultAgreementLineEffectiveDate;
+        salesInvoiceHeaderFooterTmp.InvoiceId                   = custInvoiceJour.InvoiceId;
+        salesInvoiceHeaderFooterTmp.ETGSpecification            = qualitysubGrpview.SubGroupDescription;
+        if(curExt() == "C003")
+        {
+            TeleFax                                             =  'Tel : ' + CompanyInfo::find().phone();
+            salesInvoiceHeaderFooterTmp.CompanyEmail            =  CompanyInfo::find().email();
+        }
+        else if(curExt() == "S004")
+        {
+            TeleFax                                             =  'Tel : ' + CompanyInfo::find().phone();
+            salesInvoiceHeaderFooterTmp.CompanyEmail            =  CompanyInfo::find().email();
+        }
+        else
+        {
+            TeleFax                                             =  'Tel : ' + CompanyInfo::find().phone() + '   Fax ' + CompanyInfo::find().teleFax();
+        }
+        salesInvoiceHeaderFooterTmp.ETGTeleFax                  =  TeleFax;
+        salesInvoiceHeaderFooterTmp.ETGCurrencyCode             =  salesTable.CurrencyCode;
+        salesInvoiceHeaderFooterTmp.DlvTerm                     =  salesTable.DlvTerm;
+        salesInvoiceHeaderFooterTmp.CompanyAddress              =  CompanyInfo::find().postalAddress().Address;
+        salesInvoiceHeaderFooterTmp.CompanyAddress              =  strReplace(salesInvoiceHeaderFooterTmp.CompanyAddress,'\n',' ');
+        salesInvoiceHeaderFooterTmp.CompanyName                 =  CompanyInfo::find().Name;
+        salesInvoiceHeaderFooterTmp.ETGCompanyCoRegNum          = strFmt('Reg No : %1   GST Reg No : %2',companyInfoLoc.Giro,companyInfoLoc.CoRegNum);
+        
+        if(curExt() == "O014")
+        {
+            salesInvoiceHeaderFooterTmp.CompanyLogo             = FormLetter::companyLogo();
+        }
+        //salesInvoiceHeaderFooterTmp.ETGTotal                    = markuptransloc.Value + custInvoicejour.InvoiceAmount;
+        // Code added by Datta - 26/9/2024 - requirement from H011 - Start
+        salesInvoiceHeaderFooterTmp.ETGWaybillNumber            = custInvoicejour.ETGWaybillNumber;
+        salesInvoiceHeaderFooterTmp.ETGWaybillDate              = custInvoicejour.ETGWaybillDate;
+        salesInvoiceHeaderFooterTmp.ETGLPONumber                = custInvoicejour.ETGLPONumber;
+        salesInvoiceHeaderFooterTmp.ETGLPODate                  = custInvoicejour.ETGLPODate;
+        salesInvoiceHeaderFooterTmp.ETGVehicleNumber            = custInvoicejour.ETGVehicleNumber;
+        salesInvoiceHeaderFooterTmp.ETGInclTax                  = salesTable.InclTax;
+
+        salesInvoiceHeaderFooterTmp.ETGNameOfCust               = salesTableTrade.ETGNameOfCust;
+        salesInvoiceHeaderFooterTmp.ETGMobileNumberOfCust       = salesTableTrade.ETGMobileNumberOfCust;
+        salesInvoiceHeaderFooterTmp.ETGAddressOfCust            = salesTableTrade.ETGAddressOfCust;
+        salesInvoiceHeaderFooterTmp.ETGPaymMode                 = salesTable.PaymMode;
+
+        select * from salesTableOrg
+            where salesTableOrg.SalesId == salesInvoiceHeaderFooterTmp.SalesId;
+
+        salesInvoiceHeaderFooterTmp.ETGInventLocationId = salesTableOrg.InventLocationId;
+        salesInvoiceHeaderFooterTmp.ETGInventSiteId = salesTableOrg.InventSiteId;
+        if(salesTableOrg.FixedExchRate != 0)
+        {
+            salesInvoiceHeaderFooterTmp.ETGFixedExchRate = salesTableOrg.FixedExchRate/100;
+        }
+        else
+        {
+            salesInvoiceHeaderFooterTmp.ETGFixedExchRate = custInvoicejour.InvoiceAmountMST / custInvoicejour.InvoiceAmount;
+        }
+        salesInvoiceHeaderFooterTmp.ETGCustRef = salesTableOrg.CustomerRef;
+        
+        //while select salesLineTax 
+        //    where salesLineTax.SalesId == salesInvoiceHeaderFooterTmp.SalesId
+         
+        BankAccountTable bankAccountTable = BankAccountTable::find(salesTableTrade.SellerBank);
+
+        salesInvoiceHeaderFooterTmp.ETGBankName                 = bankAccountTable.Name;
+        salesInvoiceHeaderFooterTmp.ETGNairaAccountNumber       = bankAccountTable.AccountNum;
+        salesInvoiceHeaderFooterTmp.ETGBankSortCode             = bankAccountTable.BankSortCode;
+        salesInvoiceHeaderFooterTmp.ETGSellerBankSWIFTNo        = bankAccountTable.SWIFTNo;
+        salesInvoiceHeaderFooterTmp.ETGSellerBankIBAN           = bankAccountTable.IBAN;
+        salesInvoiceHeaderFooterTmp.ETGDeliveryCharges          = custInvoicejour.SumMarkup;
+        salesInvoiceHeaderFooterTmp.ETGVATValue                 = custInvoicejour.SumTax;
+
+        if(curExt() == "C003" || curExt() == "S004")
+        {
+            salesInvoiceHeaderFooterTmp.ETGTaxGroup                 = custInvoicejour.TaxGroup;
+        }
+        else if(curExt() == "O025")
+        {
+            salesInvoiceHeaderFooterTmp.ETGTaxGroup                 = custInvoicejour.TaxGroup;
+        }
+        else
+        {
+            salesInvoiceHeaderFooterTmp.ETGTaxGroup                 = strFmt('Sales tax : %1', custInvoicejour.TaxGroup);
+        }
+
+        if(salesInvoiceHeaderFooterTmp.ETGVATValue != 0)
+        {
+            salesInvoiceHeaderFooterTmp.ETGReportName = "TAX INVOICE";
+        }
+        else
+        {
+            salesInvoiceHeaderFooterTmp.ETGReportName = "COMMERCIAL INVOICE";
+        }
+        if(curExt() == "O025")
+        {
+            if(salesInvoiceHeaderFooterTmp.ETGCurrencyCode == "MZN")
+            {
+                salesInvoiceHeaderFooterTmp.ETGReportName = "INVOICE";
+            }
+            else
+            {
+                salesInvoiceHeaderFooterTmp.ETGReportName = "COMMERCIAL INVOICE";
+            }
+        }
+        if(!custInvoicejour.TaxGroup)
+        {
+            select * from taxTrans where taxTrans.Voucher == custInvoicejour.LedgerVoucher;
+
+            if(curExt() == "C003" || curExt() == "S004")
+            {
+                salesInvoiceHeaderFooterTmp.ETGTaxGroup             = taxTrans.TaxGroup;
+            }
+            else if(curExt() == "O025")
+            {
+                salesInvoiceHeaderFooterTmp.ETGTaxGroup             = taxTrans.TaxGroup;
+            }
+            else
+            {
+                salesInvoiceHeaderFooterTmp.ETGTaxGroup             = strFmt('Sales tax : %1', taxTrans.TaxGroup);
+            }
+        }
+       // salesInvoiceHeaderFooterTmp.ETGAmountInWordsNI          = strReplace( numeralsToTxt(custInvoicejour.SalesBalanceMST + custInvoicejour.SumTax + custInvoicejour.SumMarkup),'***',' ');
+       
+        if(curExt() == "H011")
+        {
+            Addressing address = salesInvoiceHeaderFooterTmp.CompanyAddress;
+            str rcnumber = subStr(address, 1, 15);
+            str address1 = subStr(address, 17, strLen(address));
+
+            salesInvoiceHeaderFooterTmp.CompanyAddress = rcnumber + "\n"+ strFmt('%1', address1);
+        }
+        // Code added by Datta - 26/9/2024 - requirement from H011 - End
+
+        //S3- 10-03-2022 (Request ID	# 5916) (Total amount inclusive of Incoterm like TOTAL DeliveryTerm PortOfDischarge-CountryFinalDestination at Sales invoice)
+        if(salesLine.ItemId == 'Rice' && salesLine.DataAreaId == "O003")
+        {
+            salesInvoiceHeaderFooterTmp.TotalIncotermValue          =   salesTable.DlvTerm + ' ' +  salesTableTrade.PortOfDischargeDesc  + '-' + salesTableTrade.CountryOfFinalDestination;
+            
+        }
+
+        select sum(LineAmount),sum(LineAmountTax),RecId from custInvoiceTransLoc
+        where  custInvoiceTransLoc.SalesId                      == custInvoiceJour.SalesId
+            && custInvoiceTransLoc.InvoiceId                    == custInvoiceJour.InvoiceId
+            && custInvoiceTransLoc.InvoiceDate                  == custInvoiceJour.InvoiceDate
+            && custInvoiceTransLoc.NumberSequenceGroup          == custInvoiceJour.NumberSequenceGroup;
+
+        //salesInvoiceHeaderFooterTmp.ETGTotal                   = (custInvoiceTransLoc.LineAmount + custInvoiceTransLoc.LineAmountTax + markuptransloc.Value);
+        salesInvoiceHeaderFooterTmp.ETGTotal                   = (custInvoiceTransLoc.LineAmount + markuptransloc.Value);
+        AmountinTxt                                       = numeralsToTxt_EN(custInvoiceJour.InvoiceAmount);
+        AmountinTxt                                       = strReplace(AmountinTxt,'***',' ');
+       
+        ETGAmountInWordsConverts amountInWord = new ETGAmountInWordsConverts();
+        str METICAIS, CENTAVOS, dollar, cent;
+        METICAIS = "Meticais";
+        CENTAVOS = "Centavos";
+        dollar = "Dollar";
+        cent = "Cent";
+
+        if(curExt() == "N004")
+        {
+            int depositeAmount1;
+            while select * from salesLineAmount where salesLineAmount.SalesId == salesInvoiceHeaderFooterTmp.SalesId
+
+            depositeAmount1 += salesLineAmount.ETGDepositAmount;
+
+        salesInvoiceHeaderFooterTmp.ETGAmountInwords      = strReplace( numeralsToTxt(custInvoiceJour.InvoiceAmount + depositeAmount1),'***',' ');
+        }
+        else if(curExt() == "S004")
+        {
+            if(custInvoiceJour.CurrencyCode == "MZN")
+            {
+                salesInvoiceHeaderFooterTmp.ETGAmountInwords = amountInWord.convertAmountInWords(custInvoiceJour.InvoiceAmount, METICAIS, CENTAVOS);
+            }
+            else if(custInvoiceJour.CurrencyCode == "USD")
+            {
+                salesInvoiceHeaderFooterTmp.ETGAmountInwords = amountInWord.convertAmountInWords(custInvoiceJour.InvoiceAmount, dollar, cent);
+            }
+            else
+            {
+                salesInvoiceHeaderFooterTmp.ETGAmountInwords = strReplace( Global::numeralsToTxt_EN(custInvoiceJour.InvoiceAmount),'***',' ');
+            }
+        }
+        else if(curExt() == "C003")
+        {
+            if(custInvoiceJour.CurrencyCode == "MZN")
+            {
+                salesInvoiceHeaderFooterTmp.ETGAmountInwords = amountInWord.convertAmountInWords(custInvoiceJour.InvoiceAmount, METICAIS, CENTAVOS);
+            }
+            else if(custInvoiceJour.CurrencyCode == "USD")
+            {
+                salesInvoiceHeaderFooterTmp.ETGAmountInwords = amountInWord.convertAmountInWords(custInvoiceJour.InvoiceAmount, dollar, cent);
+            }
+            else
+            {
+                salesInvoiceHeaderFooterTmp.ETGAmountInwords = strReplace( Global::numeralsToTxt_EN(custInvoiceJour.InvoiceAmount),'***',' ');
+            }
+        }
+        else if(curExt() == "O014")
+        {
+            salesInvoiceHeaderFooterTmp.ETGAmountInwords = strReplace( Global::numeralsToTxt_EN(custInvoiceJour.InvoiceAmount),'***',' ');
+        }
+        else if(curExt() == "O025")
+        {
+            salesInvoiceHeaderFooterTmp.ETGAmountInwords = strReplace( Global::numeralsToTxt_EN(custInvoiceJour.InvoiceAmount),'***',' ');
+        }
+        else
+        {
+            salesInvoiceHeaderFooterTmp.ETGAmountInwords      = strReplace( numeralsToTxt(custInvoiceTransLoc.LineAmount + custInvoiceTransLoc.LineAmountTax + markuptransloc.Value),'***',' ');
+            //salesInvoiceHeaderFooterTmp.ETGAmountInwords      = strReplace(salesInvoiceHeaderFooterTmp.ETGAmountInwords,'and 00/100','');
+        }
+
+        real amountNairaKobo = custInvoiceTransLoc.LineAmount + custInvoiceTransLoc.LineAmountTax + salesInvoiceHeaderFooterTmp.ETGVATValue + salesInvoiceHeaderFooterTmp.ETGDeliveryCharges;
+        str ETGNaira, ETGKobo;
+        ETGNaira = "Naira";
+        ETGKobo = "Kobo";
+        salesInvoiceHeaderFooterTmp.ETGAmountInWordsNI  = amountInWord.convertAmountInWords(amountNairaKobo, ETGNaira, ETGKobo);
+
+        if(curExt() == "O025")
+        {
+            while select custInvoiceTransLoc1
+        where  custInvoiceTransLoc1.SalesId                      == custInvoiceJour.SalesId
+            && custInvoiceTransLoc1.InvoiceId                    == custInvoiceJour.InvoiceId
+            && custInvoiceTransLoc1.InvoiceDate                  == custInvoiceJour.InvoiceDate
+            && custInvoiceTransLoc1.NumberSequenceGroup          == custInvoiceJour.NumberSequenceGroup
+            {
+                while select markuptransloc1
+            where markuptransloc1.TransRecId  == custInvoiceTransLoc1.RecId
+               && markuptransloc1.TransTableId == custInvoiceTransLoc1.TableId
+                {
+                    if (markuptransloc1.Txt == "FREIGHT SEA")
+                    {
+                        chargeV += markuptransloc1.Value;
+                    }
+                    if (markuptransloc1.Txt == "INSURANCE CHARGES")
+                    {
+                        chargeI += markuptransloc1.Value;
+                    }
+                }
+            }
+
+            if (chargeV != 0)
+            {
+                salesInvoiceHeaderFooterTmp.Txt      = "FREIGHT SEA";
+                salesInvoiceHeaderFooterTmp.ETGValue = chargeV;
+            }
+            if (chargeI != 0)
+            {                
+                salesInvoiceHeaderFooterTmp.TxtInsu      = "INSURANCE CHARGES";
+                salesInvoiceHeaderFooterTmp.ETGValueInsu = chargeI;
+            }
+            
+        }
+        if(curExt() == "C003" || curExt() == "S004")
+        {
+            salesInvoiceHeaderFooterTmp.ETGNuitNumber = strFmt('NUIT : %1', companyInfoLoc.ETGNuitNumber);
+
+            salesInvoiceHeaderFooterTmp.ETGCompanyAddress = companyInfoLoc.postalAddress().Street;
+            salesInvoiceHeaderFooterTmp.ETGCompanyBranchAddress = companyInfoLoc.invoiceAddress().Street;
+        }
+        else if(curExt() == "O025")
+        {
+            salesInvoiceHeaderFooterTmp.ETGNuitNumber = strFmt('NUIT : %1', companyInfoLoc.ETGNuitNumber);
+        }
+        else
+        {
+            salesInvoiceHeaderFooterTmp.ETGNuitNumber = strFmt('NUIT Number : %1', companyInfoLoc.ETGNuitNumber);
+        }
+        select * from custPackingSlipJour where custPackingSlipJour.SalesId == salesInvoiceHeaderFooterTmp.SalesId;
+
+        select * from billOfLading where billOfLading.SalesId == custPackingSlipJour.SalesId;
+
+        if(billOfLading.ETGDeliveryOrderNo != "")
+        {
+            salesInvoiceHeaderFooterTmp.ETGDeliveryOrderNo = billOfLading.ETGDeliveryOrderNo;
+        }
+        else if(!salesInvoiceHeaderFooterTmp.ETGDeliveryOrderNo)
+        {
+            while select billOfLading where billOfLading.SalesId == custPackingSlipJour.SalesId
+            {
+                //if(billOfLading.ETGDeliveryOrderNo != "")
+                {
+                    salesInvoiceHeaderFooterTmp.ETGDeliveryOrderNo = billOfLading.ETGDeliveryOrderNo;
+                }
+            }
+        }
+
+        select * from custTableOrg 
+            where custTableOrg.AccountNum == custPackingSlipJour.OrderAccount;
+
+        salesInvoiceHeaderFooterTmp.TAXID = custTableOrg.TAXID;
+
+        select * from custPackingQualityGrpOrg where custPackingQualityGrpOrg.CustPackingSlipTransRefRecId == custPackingSlipJour.RecId;
+
+        salesInvoiceHeaderFooterTmp.ETGSingleSpecification = custPackingQualityGrpOrg.SubGroupDescription;
+
+        CustTable custTable;
+        TaxRegistrationTypeApplicabilityRule taxRegistrationRule;
+        TaxRegistrationType taxRegistrationType;
+
+        select firstonly taxRegistrationLoc
+         join taxRegistrationRule
+         where taxRegistrationRule.RecId ==  taxRegistrationLoc.TaxRegistrationTypeApplicabilityRule
+          join taxRegistrationType
+          where taxRegistrationType.RecId == taxRegistrationRule.TaxRegistrationType
+          && taxRegistrationType.TaxRegstrationType == 'TPIN'
+          join dirPartyLocationLoc where taxRegistrationLoc.dirPartyLocation == dirPartyLocationLoc.RecId
+          join custTable where  custTable.Party == dirPartyLocationLoc.Party
+          && custTable.AccountNum == salesTable.CustAccount;
+
+        salesInvoiceHeaderFooterTmp.ETGTPIN = taxRegistrationLoc.RegistrationNumber;
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>populateSalesInvoiceTmp</Name>
+				<Source><![CDATA[
+    /// </summary>
+    /// <param name="_custInvoiceJour">
+    /// The <c>CustInvoiceJour</c> record that has the invoice header information.
+    /// </param>
+    /// <param name="_custInvoiceTrans">
+    /// The <c>CustInvoiceTrans</c> record that has the invoice details information.
+    /// </param>
+    /// <param name="_taxSpec">
+    /// The <c>TaxSpec</c> class instance that has the taxes information.
+    /// </param>
+    /// <param name="_custPaymSchedLine">
+    /// The <c>CustPaymSchedLine</c> record that has the payment schedules information.
+    /// </param>
+    /// <param name="_prepaymentCustTrans">
+    /// The <c>CustTrans</c> record that has the prepayment information.
+    /// </param>
+    /// <param name="_prepaymentTaxTrans">
+    /// The <c>TaxTrans</c> record that has the prepayment taxes information.
+    /// </param>
+    protected void populateSalesInvoiceTmp(CustInvoiceJour _custInvoiceJour,
+        CustInvoiceTrans     _custInvoiceTrans,
+        TaxSpec              _taxSpec,
+        CustPaymSchedLine    _custPaymSchedLine,
+        CustTrans            _prepaymentCustTrans,
+        TaxTrans             _prepaymentTaxTrans)
+
+    {
+
+        Description1000             specifications;
+        InventTrans                 inventTrans;
+        InventTransOrigin           inventTransOrigin;
+        CustPackingSlipTrans        custPackingSlipTrans;
+        ETG_CustPackingQualityGrp   custPackingQualityGrp;
+        MarkupTrans                     markuptrans;
+        CustPackingSlipJour          custPackingSlipJour;
+        next populateSalesInvoiceTmp(_custInvoiceJour, _custInvoiceTrans, _taxSpec, _custPaymSchedLine, _prepaymentCustTrans, _prepaymentTaxTrans);
+        salesInvoiceTmp.CustInvoiceTrans    = _custInvoiceTrans.RecId;
+        salesInvoiceTmp.SalesLine           = SalesLine::findInventTransId(_custInvoiceTrans.InventTransId).RecId;
+        salesInvoiceTmp.ETGDescription      = SalesLine::findInventTransId(_custInvoiceTrans.InventTransId).Name;
+        //salesInvoiceTmp.ETGProductName      = SalesLine::findInventTransId(_custInvoiceTrans.InventTransId).Name;
+        specifications  ='';
+        
+        if (_custInvoiceTrans.isStocked())
+        {
+            while select custPackingQualityGrp
+                  group by SubGroupDescription
+                  exists join custPackingSlipTrans
+                  where custPackingSlipTrans.InventTransId    == custPackingQualityGrp.InventTransId
+                  && custPackingSlipTrans.InventTransId       == _custInvoiceTrans.InventTransId
+                  exists join inventTransOrigin
+                  where inventTransOrigin.InventTransId       == custPackingSlipTrans.InventTransId
+                  exists join inventTrans
+                  where inventTrans.InventTransOrigin         == inventTransOrigin.RecId &&
+                  inventTrans.PackingSlipId                   == custPackingSlipTrans.PackingSlipId &&
+                  inventTrans.InvoiceId                       == _custInvoiceJour.InvoiceId
+            {
+                specifications = specifications + '\n' + strFmt('%1', custPackingQualityGrp.SubGroupDescription);
+            }
+        }
+        else
+        {
+            CustPackingSlipSalesLink                           custPackingSlipSalesLink;
+            CustInvoiceTrans                                   custInvoiceTrans;
+            while select custPackingQualityGrp
+                  group by SubGroupDescription
+                  exists join custPackingSlipTrans
+                  where custPackingSlipTrans.InventTransId  == custPackingQualityGrp.InventTransId
+                  && custPackingSlipTrans.InventTransId     == _custInvoiceTrans.InventTransId
+                  exists join custPackingSlipSalesLink
+                  where custPackingSlipTrans.PackingSlipId  == custPackingSlipSalesLink.PackingSlipId
+                  notexists join custInvoiceTrans
+                  where custInvoiceTrans.RecId              == custPackingSlipTrans.InvoiceTransRefRecId
+            {
+                specifications = specifications + '\n' + strFmt('%1', custPackingQualityGrp.SubGroupDescription);
+            }
+        }
+       
+            specifications                      = subStr(specifications,1, strLen(specifications));
+            salesInvoiceTmp.Specifications      = specifications;
+            specifications                      ='';
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

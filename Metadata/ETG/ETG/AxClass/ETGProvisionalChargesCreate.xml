@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGProvisionalChargesCreate</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGProvisionalChargesCreate
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>createChargesPurch</Name>
+				<Source><![CDATA[
+    public static void createChargesPurch(PurchAgreementHeader purchAgreementHeader)
+    {
+        InventTable				    inventTable;
+        PurchAgreementHeader        purchAgreementHeaderUpd;
+        ETG_ChargeCodes		        chargecodes, chargeCodesCheck;
+        MarkupTable                 markupTable;
+        CurrencyExchangeHelper           currencyExchangeRateCur;
+        ETGProvisionalChargesTable  provisionalChargesTable;
+        AgreementHeaderDefault agreementHeaderDefault, agreementHeaderDefaultSales;
+        SalesAgreementHeader salesAgreementHeaderTP;
+        ETGSubVertical                subVertical;
+        AgreementLineQuantityCommitment aLine;
+        int counter;
+
+        if(purchAgreementHeader)
+        {
+            agreementHeaderDefault = AgreementHeaderDefault::findAgreementHeader(purchAgreementHeader.RecId);
+        }
+       
+        if(purchAgreementHeader)
+        {
+            try
+            {
+                select firstonly RecId from chargeCodesCheck
+                    where chargeCodesCheck.PurchNumberSequence == purchAgreementHeader.PurchNumberSequence;
+
+                if(chargeCodesCheck.RecId)
+                {
+                    return;
+                }
+                subVertical = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(purchAgreementHeader.DefaultDimension, ETGACFParameters::find().SubVertical);
+                select firstonly provisionalChargesTable
+                        where provisionalChargesTable.SubVertical == subVertical
+                            && provisionalChargesTable.DlvTermIdPurch == agreementHeaderDefault.DeliveryTerm
+                            && provisionalChargesTable.DlvTermIdSales == agreementHeaderDefault.ETGDeliveryTermSales;
+
+                if(!provisionalChargesTable || provisionalChargesTable.ChargeCodePurch == "")
+                {
+                    warning("Provisional charges setup does not exist.");
+                    return;
+                }
+                select sum(CommitedQuantity) from aLine where aLine.Agreement == purchAgreementHeader.RecId;
+                container conChargeCode  = str2con(provisionalChargesTable.ChargeCodePurch, ";");
+                for(int i = 1; i <= conLen(conChargeCode); i++)
+                {
+                    String30 chargeCode = conPeek(conChargeCode, i);
+                    chargecodes.clear();
+                    chargecodes.IncoTerms      = NoYes::Yes;
+                    chargecodes.ETG_Estimation = NumberSeq::newGetNum(PurchParameters::numReEstimstion()).num();
+                    if(purchAgreementHeader)
+                    {
+                        chargecodes.PurchNumberSequence = purchAgreementHeader.PurchNumberSequence;
+                    }
+                   
+                    chargecodes.MarkupCode = chargeCode;
+
+                    select firstonly Txt from markupTable  
+                        where markupTable.MarkupCode  ==  chargeCode
+                            && markupTable.ModuleType == MarkupModuleType::Vend;
+
+                    chargecodes.TransTxt                 = markupTable.Txt;
+                    chargecodes.ETG_MarkupCategory       = ETG_MarkupCategory::Fixed;
+                    chargecodes.CurrencyCode             = purchAgreementHeader.Currency;
+                    chargecodes.Qty                      = aLine.CommitedQuantity;
+                    currencyExchangeRateCur              = CurrencyExchangeHelper::newExchangeDate(Ledger::current(), systemDateGet());
+                    chargecodes.ExchangeRate             = currencyExchangeRateCur.calculateCurrencyToCurrency(chargecodes.CurrencyCode, Ledger::accountingCurrency(), 1, true);
+                    currencyExchangeRateCur              = CurrencyExchangeHelper::newExchangeDate(Ledger::current(), systemDateGet());
+                    chargecodes.ReportingExchangeRate    = currencyExchangeRateCur.calculateCurrencyToCurrency(chargecodes.CurrencyCode, Ledger::reportingCurrency(), 1, true);
+                    if(chargecodes.validateWrite())
+                    {
+                        chargecodes.insert();
+                    }
+                    counter++;
+                }
+            }
+            catch(Exception::Error)
+            {
+                ttsabort;
+            }
+
+            if(counter > 0)
+            {
+                info("Charges has been created as per incoterms");
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createChargesSales</Name>
+				<Source><![CDATA[
+    public static void createChargesSales(SalesAgreementHeader salesAgreementHeader)
+    {
+        InventTable				    inventTable;
+        SalesAgreementId            salesAgreementId;
+        ETG_ChargeCodes		        chargecodes, chargeCodesCheck;
+        MarkupTable                 markupTable;
+        CurrencyExchangeHelper           currencyExchangeRateCur;
+        ETGProvisionalChargesTable provisionalChargesTable;
+        AgreementHeaderDefault agreementHeaderDefault, agreementHeaderDefaultPurch;
+        SalesAgreementHeader purchAgreementHeaderTP;
+        int counter;
+        ETGSubVertical subVertical;
+        AgreementLineQuantityCommitment aLine;
+
+        if(salesAgreementHeader)
+        {
+            agreementHeaderDefault = AgreementHeaderDefault::findAgreementHeader(salesAgreementHeader.RecId);
+        }
+
+        if(salesAgreementHeader)
+        {
+            try
+            {
+                select firstonly RecId from chargeCodesCheck where chargeCodesCheck.PurchNumberSequence == salesAgreementHeader.SalesNumberSequence;
+
+                if(chargeCodesCheck.RecId)
+                {
+                    return;
+                }
+
+                subVertical = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(salesAgreementHeader.DefaultDimension, ETGACFParameters::find().SubVertical);
+                select firstonly provisionalChargesTable
+                        where provisionalChargesTable.SubVertical == subVertical
+                            && provisionalChargesTable.DlvTermIdSales == agreementHeaderDefault.DeliveryTerm
+                            && provisionalChargesTable.DlvTermIdPurch == agreementHeaderDefault.ETGDeliveryTermSales;
+
+                if(!provisionalChargesTable || provisionalChargesTable.ChargeCodeSales == "" )
+                {
+                    return;
+                }
+
+                select sum(CommitedQuantity) from aLine where aLine.Agreement == salesAgreementHeader.RecId;
+                container conChargeCode  = str2con(provisionalChargesTable.ChargeCodeSales, ";");
+                for(int i = 1; i <= conLen(conChargeCode); i++)
+                {
+                    String30 chargeCode = conPeek(conChargeCode, i);
+                    chargecodes.clear();
+                    chargecodes.IncoTerms      = NoYes::Yes;
+                    chargecodes.ETG_Estimation = NumberSeq::newGetNum(SalesParameters::numReEstimstion()).num();
+                    if(salesAgreementHeader)
+                    {
+                        chargecodes.PurchNumberSequence = salesAgreementHeader.SalesNumberSequence;
+                    }
+                   
+                    chargecodes.MarkupCode = chargeCode;
+
+                    select firstonly Txt from markupTable  
+                        where markupTable.MarkupCode  ==  chargeCode
+                        && markupTable.ModuleType == MarkupModuleType::Cust;
+
+                    chargecodes.TransTxt                 = markupTable.Txt;
+                    chargecodes.ETG_MarkupCategory       = ETG_MarkupCategory::Fixed;
+                    chargecodes.CurrencyCode             = salesAgreementHeader.Currency;
+                    chargecodes.Qty                      = aLine.CommitedQuantity;
+                    currencyExchangeRateCur              = CurrencyExchangeHelper::newExchangeDate(Ledger::current(), systemDateGet());
+                    chargecodes.ExchangeRate             = currencyExchangeRateCur.calculateCurrencyToCurrency(chargecodes.CurrencyCode, Ledger::accountingCurrency(), 1, true);
+                    currencyExchangeRateCur              = CurrencyExchangeHelper::newExchangeDate(Ledger::current(), systemDateGet());
+                    chargecodes.ReportingExchangeRate    = currencyExchangeRateCur.calculateCurrencyToCurrency(chargecodes.CurrencyCode, Ledger::reportingCurrency(), 1, true);
+                    if(chargecodes.validateWrite())
+                    {
+                        chargecodes.insert();
+                    }
+                    counter++;
+                }
+            }
+            catch(Exception::Error)
+            {
+                ttsabort;
+            }
+
+            if(counter > 0)
+            {
+                info("Charges has been created as per incoterms");
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

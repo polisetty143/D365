@@ -1,0 +1,334 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesAccountStatementDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[
+SRSReportParameterAttribute(classStr(ETG_SalesAccountStatementContract))
+]
+public class ETG_SalesAccountStatementDP extends SRSReportDataProviderBase
+{
+    ETG_SalesAccountStatementTmp     eTG_SalesAccountStatementTmp;
+   
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETG_SalesAccountStatementTmp</Name>
+				<Source><![CDATA[
+    [
+        SRSReportDataSetAttribute(tableStr(ETG_SalesAccountStatementTmp))
+    ]
+    public ETG_SalesAccountStatementTmp getETG_SalesAccountStatementTmp()
+    {
+        select * from eTG_SalesAccountStatementTmp;
+        return eTG_SalesAccountStatementTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETG_SalesAccountStatementContract  contract = this.parmDataContract() as ETG_SalesAccountStatementContract;
+        
+        TransDate       fromDate = contract.parmFromDate();
+        TransDate       toDate   = contract.parmToDate();
+        CustAccount     customerAccount = contract.parmCustomerAccount();
+        CustTable       custtable = CustTable::find(customerAccount);
+        CustTrans       custTrans;
+        CustTransOpen   custTransOpen; // Added for Outstanding Invoices
+        CustInvoiceJour custInvoiceJour;
+        AmountCur       debit, credit, debitlocal, creditlocal;
+
+        str SubCommodity = "SubCommodity";
+        str Vertical     = "Vertical";
+
+        Map map;
+        MapEnumerator mapEnum;
+        CurrencyCode currency_1;
+        AmountCur openingdebit, openingcredit;
+        AmountMST openingdebitlocal, openingcreditlocal;
+        CustTrans custTransSumDebit, custTransSumCredit;
+
+        AmountMST globalAccumulatedTotal = 0;
+
+        // Get all currencies for opening balances
+        map = this.getCurrencies(customerAccount, fromDate);
+        mapEnum = map.getEnumerator();
+
+        // STEP 1: Process Opening Balances
+        while (mapEnum.moveNext())
+        {
+            currency_1 = mapEnum.currentValue();
+        
+            select sum(AmountCur), sum(AmountMST), AccountNum, CurrencyCode from custTransSumDebit
+             group by custTransSumDebit.AccountNum, custTransSumDebit.CurrencyCode
+             where custTransSumDebit.AccountNum == customerAccount
+                && custTransSumDebit.CurrencyCode == currency_1
+                && custTransSumDebit.TransDate < fromDate
+                && custTransSumDebit.AmountMST > 0;
+
+            if (custTransSumDebit)
+            {
+                openingdebit = custTransSumDebit.AmountCur;
+                openingdebitlocal = custTransSumDebit.AmountMST;
+            }
+            else
+            {
+                openingdebit = 0;
+                openingdebitlocal = 0;
+            }
+
+            select sum(AmountCur), sum(AmountMST), AccountNum, CurrencyCode from custTransSumCredit
+             group by custTransSumCredit.AccountNum, custTransSumCredit.CurrencyCode
+             where custTransSumCredit.AccountNum == customerAccount
+                && custTransSumCredit.CurrencyCode == currency_1
+                && custTransSumCredit.TransDate < fromDate
+                && custTransSumCredit.AmountMST < 0;
+
+            if (custTransSumCredit)
+            {
+                openingcredit = custTransSumCredit.AmountCur;
+                openingcreditlocal = custTransSumCredit.AmountMST;
+            }
+            else
+            {
+                openingcredit = 0;
+                openingcreditlocal = 0;
+            }
+
+            AmountMST openingNetBalance = abs(openingdebitlocal) - abs(openingcreditlocal);
+            globalAccumulatedTotal += openingNetBalance;
+            
+            eTG_SalesAccountStatementTmp.clear();
+            eTG_SalesAccountStatementTmp.CustCode = customerAccount;
+            eTG_SalesAccountStatementTmp.CustName = custtable.name();
+            eTG_SalesAccountStatementTmp.Currency = currency_1;
+            eTG_SalesAccountStatementTmp.TransactionDate = fromDate;
+            eTG_SalesAccountStatementTmp.Vocher = "";
+            eTG_SalesAccountStatementTmp.InvoiceNumber = "";
+            eTG_SalesAccountStatementTmp.TransactionText = "Opening Balance";
+            eTG_SalesAccountStatementTmp.AmountDebit = abs(openingdebit);
+            eTG_SalesAccountStatementTmp.AmountCredit = abs(openingcredit);
+            eTG_SalesAccountStatementTmp.Total = eTG_SalesAccountStatementTmp.AmountDebit - eTG_SalesAccountStatementTmp.AmountCredit;
+            eTG_SalesAccountStatementTmp.Amount = abs(openingdebitlocal);
+            eTG_SalesAccountStatementTmp.AccumulatedBalance = abs(openingcreditlocal);
+            eTG_SalesAccountStatementTmp.AccumulatedTotal = globalAccumulatedTotal;
+            eTG_SalesAccountStatementTmp.BOLNumber = "";
+            eTG_SalesAccountStatementTmp.Commodity = "";
+            eTG_SalesAccountStatementTmp.Quantity = 0;
+            eTG_SalesAccountStatementTmp.BusinessUnit = "";
+            eTG_SalesAccountStatementTmp.insert();
+        }
+        
+        // STEP 2: Process Transactions
+        while select custTrans order by TransDate, RecId
+            where custTrans.AccountNum == customerAccount
+               && (custTrans.TransDate >= fromDate && custTrans.TransDate <= toDate)
+            outer join custInvoiceJour
+            where custInvoiceJour.LedgerVoucher == custTrans.Voucher
+               && custInvoiceJour.InvoiceAccount == custTrans.AccountNum
+        {
+            debit = 0.00;
+            credit = 0.00;
+            debitlocal = 0.00;
+            creditlocal = 0.00;
+        
+            if(custTrans.AmountMST > 0)
+            {
+                debit = custTrans.AmountCur;
+                debitlocal = custTrans.AmountMST;
+                globalAccumulatedTotal += abs(debitlocal);
+            }
+            else if(custTrans.AmountMST < 0)
+            {
+                credit = custTrans.AmountCur;
+                creditlocal = custTrans.AmountMST;
+                globalAccumulatedTotal -= abs(creditlocal);
+            }
+
+            eTG_SalesAccountStatementTmp.clear();
+            eTG_SalesAccountStatementTmp.CustCode = custTrans.AccountNum;
+            eTG_SalesAccountStatementTmp.CustName = custTrans.custTableName();
+            eTG_SalesAccountStatementTmp.Currency = custTrans.CurrencyCode;
+            eTG_SalesAccountStatementTmp.TransactionDate = custTrans.TransDate;
+            eTG_SalesAccountStatementTmp.Vocher = custTrans.Voucher;
+            eTG_SalesAccountStatementTmp.InvoiceNumber = custTrans.Invoice;
+            eTG_SalesAccountStatementTmp.TransactionText = custTrans.Txt;
+            eTG_SalesAccountStatementTmp.AmountDebit = abs(debit);
+            eTG_SalesAccountStatementTmp.AmountCredit = abs(credit);
+            eTG_SalesAccountStatementTmp.Total = 0;
+            eTG_SalesAccountStatementTmp.Amount = abs(debitlocal);
+            eTG_SalesAccountStatementTmp.AccumulatedBalance = abs(creditlocal);
+            eTG_SalesAccountStatementTmp.AccumulatedTotal = globalAccumulatedTotal;
+
+            eTG_SalesAccountStatementTmp.BOLNumber = custInvoiceJour.ETG_BLnumber;
+            eTG_SalesAccountStatementTmp.Commodity = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, SubCommodity);
+            eTG_SalesAccountStatementTmp.Quantity = custInvoiceJour.Qty;
+            eTG_SalesAccountStatementTmp.BusinessUnit = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, Vertical);
+            
+            eTG_SalesAccountStatementTmp.insert();
+        }
+        
+        // STEP 3: Process Closing Balances
+        map = this.getCurrenciesForClosing(customerAccount, toDate);
+        mapEnum = map.getEnumerator();
+        
+        while (mapEnum.moveNext())
+        {
+            currency_1 = mapEnum.currentValue();
+
+            select sum(AmountCur), sum(AmountMST), AccountNum, CurrencyCode from custTransSumDebit
+             group by custTransSumDebit.AccountNum, custTransSumDebit.CurrencyCode
+             where custTransSumDebit.AccountNum == customerAccount
+                && custTransSumDebit.CurrencyCode == currency_1
+                && custTransSumDebit.TransDate <= toDate
+                && custTransSumDebit.AmountMST > 0;
+
+            if (custTransSumDebit)
+            {
+                openingdebit = custTransSumDebit.AmountCur;
+                openingdebitlocal = custTransSumDebit.AmountMST;
+            }
+            else
+            {
+                openingdebit = 0;
+                openingdebitlocal = 0;
+            }
+
+            select sum(AmountCur), sum(AmountMST), AccountNum, CurrencyCode from custTransSumCredit
+             group by custTransSumCredit.AccountNum, custTransSumCredit.CurrencyCode
+             where custTransSumCredit.AccountNum == customerAccount
+                && custTransSumCredit.CurrencyCode == currency_1
+                && custTransSumCredit.TransDate <= toDate
+                && custTransSumCredit.AmountMST < 0;
+
+            if (custTransSumCredit)
+            {
+                openingcredit = custTransSumCredit.AmountCur;
+                openingcreditlocal = custTransSumCredit.AmountMST;
+            }
+            else
+            {
+                openingcredit = 0;
+                openingcreditlocal = 0;
+            }
+            
+            AmountMST closingNetBalance = abs(openingdebitlocal) - abs(openingcreditlocal);
+            
+            eTG_SalesAccountStatementTmp.clear();
+            eTG_SalesAccountStatementTmp.CustCode = customerAccount;
+            eTG_SalesAccountStatementTmp.CustName = custtable.name();
+            eTG_SalesAccountStatementTmp.Currency = currency_1;
+            eTG_SalesAccountStatementTmp.TransactionDate = toDate;
+            eTG_SalesAccountStatementTmp.Vocher = "";
+            eTG_SalesAccountStatementTmp.InvoiceNumber = "";
+            eTG_SalesAccountStatementTmp.TransactionText = "Closing Balance";
+            eTG_SalesAccountStatementTmp.AmountDebit = abs(openingdebit);
+            eTG_SalesAccountStatementTmp.AmountCredit = abs(openingcredit);
+            eTG_SalesAccountStatementTmp.Total = eTG_SalesAccountStatementTmp.AmountDebit - eTG_SalesAccountStatementTmp.AmountCredit;
+            eTG_SalesAccountStatementTmp.Amount = abs(openingdebitlocal);
+            eTG_SalesAccountStatementTmp.AccumulatedBalance = abs(openingcreditlocal);
+            eTG_SalesAccountStatementTmp.AccumulatedTotal = closingNetBalance;
+            eTG_SalesAccountStatementTmp.BOLNumber = "";
+            eTG_SalesAccountStatementTmp.Commodity = "";
+            eTG_SalesAccountStatementTmp.Quantity = 0;
+            eTG_SalesAccountStatementTmp.BusinessUnit = "";
+            eTG_SalesAccountStatementTmp.insert();
+        }
+
+        // Process Outstanding Invoices
+        
+        if (curExt() == 'o014')
+        {
+            
+            while select custTrans
+                order by custTrans.TransDate
+                where custTrans.AccountNum == customerAccount
+                   && custTrans.TransDate <= toDate 
+                join custTransOpen
+                where custTransOpen.RefRecId == custTrans.RecId
+                   && custTransOpen.AccountNum == custTrans.AccountNum
+            {
+                eTG_SalesAccountStatementTmp.clear();
+                eTG_SalesAccountStatementTmp.CustCode = custTrans.AccountNum;
+                eTG_SalesAccountStatementTmp.CustName = custtable.name();
+                eTG_SalesAccountStatementTmp.Currency = custTrans.CurrencyCode;
+                eTG_SalesAccountStatementTmp.TransactionDate = custTrans.TransDate; // Invoice Date
+                
+                eTG_SalesAccountStatementTmp.Vocher = custTrans.Voucher;
+                eTG_SalesAccountStatementTmp.InvoiceNumber = custTrans.Invoice;
+                
+                // We append the Due Date into the TransactionText so it can be distinguished in the report.
+                
+                eTG_SalesAccountStatementTmp.TransactionText = "Outstanding Invoice | Due: " + date2Str(custTransOpen.DueDate, 123, DateDay::Digits2, DateSeparator::Hyphen, DateMonth::Digits2, DateSeparator::Hyphen, DateYear::Digits4);
+                
+                
+                if (custTransOpen.AmountCur > 0)
+                {
+                    eTG_SalesAccountStatementTmp.AmountDebit = custTransOpen.AmountCur;
+                    eTG_SalesAccountStatementTmp.AmountCredit = 0;
+                }
+                else
+                {
+                    eTG_SalesAccountStatementTmp.AmountDebit = 0;
+                    eTG_SalesAccountStatementTmp.AmountCredit = abs(custTransOpen.AmountCur);
+                }
+                
+                eTG_SalesAccountStatementTmp.Amount = abs(custTransOpen.AmountMST);
+                eTG_SalesAccountStatementTmp.AccumulatedBalance = 0;
+                eTG_SalesAccountStatementTmp.AccumulatedTotal = 0; 
+                
+                eTG_SalesAccountStatementTmp.insert();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getCurrencies</Name>
+				<Source><![CDATA[
+    Map getCurrencies(AccountNum _accountId, TransDate _fromDate)
+    {
+        CustTrans custTransmap;
+        Map mapCurrency = new Map(Types::String, Types::String);
+        
+        while select custTransmap group by CurrencyCode
+         where custTransmap.AccountNum == _accountId
+            && custTransmap.TransDate < _fromDate
+        {
+            mapCurrency.insert(custTransmap.CurrencyCode, custTransmap.CurrencyCode);
+        }
+
+        return mapCurrency;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getCurrenciesForClosing</Name>
+				<Source><![CDATA[
+    Map getCurrenciesForClosing(AccountNum _accountId, TransDate _toDate)
+    {
+        CustTrans custTransmap;
+        Map mapCurrency = new Map(Types::String, Types::String);
+        
+        while select custTransmap group by CurrencyCode
+         where custTransmap.AccountNum == _accountId
+            && custTransmap.TransDate <= _toDate
+        {
+            mapCurrency.insert(custTransmap.CurrencyCode, custTransmap.CurrencyCode);
+        }
+
+        return mapCurrency;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

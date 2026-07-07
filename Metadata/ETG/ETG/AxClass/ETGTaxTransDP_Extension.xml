@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGTaxTransDP_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///    The <c>ETGTaxTransDP_Extension</c> class provides data for the <c>ETGTaxTrans</c> report.
+/// </summary>
+[ExtensionOf(classStr(TaxTransDP))]
+internal final class ETGTaxTransDP_Extension
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>insertTmpTable</Name>
+				<Source><![CDATA[
+    public void insertTmpTable()
+    {
+       
+        GeneralJournalAccountEntry  generalJournalAccountEntry;
+        MainAccount     mainAccount;
+        GeneralJournalEntry generalJournalEntry;
+       
+        
+        select * from generalJournalEntry
+            where  generalJournalEntry.RecId == subledgerVoucherGeneralJournalEntry.GeneralJournalEntry;
+
+        tmpTaxTransReport.AccountNumber = GeneralJournalEntry::counterPartyCode(generalJournalEntry);
+
+
+        select * from generalJournalAccountEntry
+            where generalJournalAccountEntry.GeneralJournalEntry == subledgerVoucherGeneralJournalEntry.GeneralJournalEntry
+                && generalJournalAccountEntry.PostingType == LedgerPostingType::Tax;
+
+        select firstonly mainAccount where mainAccount.RecId == generalJournalAccountEntry.MainAccount;
+
+        tmpTaxTransReport.GlCode = mainAccount.MainAccountId;
+        tmpTaxTransReport.GlName = mainAccount.Name;
+        
+        next insertTmpTable();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>TmpTaxTransReport_onInserting</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [DataEventHandler(tableStr(TmpTaxTransReport), DataEventType::Inserting)]
+    public static void TmpTaxTransReport_onInserting(Common sender, DataEventArgs e)
+    {
+      
+
+        TmpTaxTransReport        TmpTaxTransReport = sender;
+
+    
+        VendInvoiceJour  vendinvoicejour;
+        VendInvoiceTrans vendInvoiceTrans;
+        PurchLine          purchLine;
+        TransTaxInformation transTaxInformation;
+        TransTaxInformationRelationView  transTaxInformationRelationView;
+        SERVICEACCOUNTINGCODETABLE_IN    sERVICEACCOUNTINGCODETABLE_IN;
+        HSNCODETABLE_IN                  hSNCODETABLE_IN;
+
+
+        select firstonly  vendinvoicejour
+                where vendinvoicejour.LedgerVoucher == tmpTaxTransReport.Voucher;
+
+        
+       
+        if(vendinvoicejour)
+        {
+       
+            tmpTaxTransReport.InvoiceAmount = vendinvoicejour.InvoiceAmount;
+            tmpTaxTransReport.InvoiceAmountAccountingCurrency = vendinvoicejour.InvoiceAmountMST;
+            tmpTaxTransReport.TaxCalculateonValue  =  vendinvoicejour.SalesBalance;
+            tmpTaxTransReport.TRNNumber = VendTable::find(vendinvoicejour.OrderAccount).TRNnumber;
+        }
+
+        select * from purchLine
+            where purchLine.PurchId == vendinvoicejour.PurchId;
+
+        select * from transTaxInformationRelationView
+            where transTaxInformationRelationView.TransactionRefRecId == purchLine.RecId;
+
+        select * from transTaxInformation
+            where transTaxInformation.RecId == transTaxInformationRelationView.TransTaxInformationRefRecId;
+
+        select * from sERVICEACCOUNTINGCODETABLE_IN
+            where sERVICEACCOUNTINGCODETABLE_IN.RecId == transTaxInformation.ServiceAccountingCodeTable;
+
+        select * from hSNCODETABLE_IN
+            where hSNCODETABLE_IN.RecId == transTaxInformation.HSNCodeTable;
+
+        if(sERVICEACCOUNTINGCODETABLE_IN.SAC)
+        {
+            tmpTaxTransReport.HsnSacCode = sERVICEACCOUNTINGCODETABLE_IN.SAC;
+        }
+        else if(!tmpTaxTransReport.HsnSacCode)
+        {
+            tmpTaxTransReport.HsnSacCode = hSNCODETABLE_IN.Code;
+        }
+        
+        
+        CustInvoiceJour   custinvoicejour;
+        CustInvoiceTrans    custInvoiceTrans;
+
+        select firstonly  custinvoicejour
+            where custinvoicejour.LedgerVoucher == tmpTaxTransReport.Voucher ;
+            
+        if(custinvoicejour)
+        {
+            tmpTaxTransReport.InvoiceAmount = custinvoicejour.InvoiceAmount;
+            tmpTaxTransReport.InvoiceAmountAccountingCurrency = custinvoicejour.InvoiceAmountMST;
+            tmpTaxTransReport.TaxCalculateonValue  =  custinvoicejour.SalesBalance;
+            tmpTaxTransReport.TRNNumber = CustTable::find(custinvoicejour.OrderAccount).TRNnumber;
+        }
+        
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,280 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGTermoNumberReportDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The <c>ETGTermoNumberReportContract</c> class is the report data provider class for Termo number report
+/// </summary>
+[
+    SRSReportParameterAttribute(classStr(ETGTermoNumberReportContract))
+]
+class ETGTermoNumberReportDP extends SrsReportDataProviderPreProcessTempDB
+{
+  
+    ETGTermoNumberReportTmp         termoNumberReportTmp, termoNumberReportMotherTmp;
+    ETGTermoNumberReportContract    contract;
+    FromDate                        fromDate;
+    ToDate                          toDate;
+    InvoiceId                       invoiceId;
+    CustAccount                     custAccount;
+    String255                       companyName;
+    ModuleSalesPurch                moduleSalesPurch;
+    ETGTERMONumberTable             termoNumberTableMother;
+    String255                       reportName;
+     
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>gettermoNumberReportTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tablestr(ETGTermoNumberReportTmp))]
+    public ETGTermoNumberReportTmp gettermoNumberReportTmp()
+    {
+        select termoNumberReportTmp;
+        return termoNumberReportTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        this.initContract();
+        if(contract.parmModuleSalesPurch() == ModuleSalesPurch::Sales)
+        {
+            this.insertDataSales();
+        }
+        else if(contract.parmModuleSalesPurch() == ModuleSalesPurch::Purch)
+        {
+            this.insertDataPurchase();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initContract</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Parses the report parameters and fills the <c>ETGTermoNumberReportTmp</c>
+    ///    tables with data.
+    /// </summary>
+    public void initContract()
+    {
+        contract                = this.parmDataContract() as ETGTermoNumberReportContract;
+        fromDate                = contract.parmFromDate();
+        toDate                  = contract.parmToDate();
+        invoiceId               = contract.parmInvoiceId();
+        custAccount             = contract.parmCustAccount();
+        companyName             = CompanyInfo::find().Name;
+        moduleSalesPurch        = contract.parmModuleSalesPurch();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertDataSales</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    inserting data useing parm query
+    /// </summary>
+    public void insertDataSales()
+    {
+        Query                               query;
+        QueryRun                            queryRun;
+        QueryBuildDataSource                qbdsETGTERMONumberTable;
+        CustInvoiceJour                     custInvoiceJour;
+        CustInvoiceTrans                    custInvoiceTrans;
+        CustPackingSlipJour                 custPackingSlipJour;
+        ETGTERMONumberTable                 termoNumberTable;
+        LedgerJournalTrans                  ledgerJournalTrans;
+
+        query                   = new Query();
+        qbdsETGTERMONumberTable = query.addDataSource(tableNum(ETGTERMONumberTable));
+        qbdsETGTERMONumberTable.addSortField(fieldNum(ETGTERMONumberTable, TERMONumber), SortOrder::Ascending);
+        SysQuery::findOrCreateRange(qbdsETGTERMONumberTable, fieldNum(ETGTERMONumberTable, IssueDate)).value(queryRange(fromDate, toDate));
+        SysQuery::findOrCreateRange(qbdsETGTERMONumberTable, fieldNum(ETGTERMONumberTable, ImportOrExport)).value(queryValue(ETGImportOrExport::Export));
+
+        queryRun = new QueryRun(query);
+        while(queryRun.next())
+        {
+            termoNumberTable  = queryRun.get(tableNum(ETGTERMONumberTable));
+            select firstonly custInvoiceJour where custInvoiceJour.ETGTERMONumber == termoNumberTable.TERMONumber;
+
+            termoNumberReportTmp.clear();
+            termoNumberReportTmp.InvoiceNumber                   = termoNumberTable.PerformaInvoice;
+            termoNumberReportTmp.InvoiceDate                     = custInvoiceJour.InvoiceDate;
+            termoNumberReportTmp.CustAccount                     = termoNumberTable.Name;
+            termoNumberReportTmp.CustName                        = CustTable::find(termoNumberTable.Name).name();
+            termoNumberReportTmp.ModeOfPayment                   = termoNumberTable.ModeOfPayment;
+            termoNumberReportTmp.BankName                        = termoNumberTable.BankName;
+            termoNumberReportTmp.TypeOfTERMO                     = termoNumberTable.TypeOfTERMO;
+            termoNumberReportTmp.MotherTERMOReference            = termoNumberTable.MotherTERMOReference;
+            termoNumberReportTmp.TERMONumber                     = termoNumberTable.TERMONumber;
+            termoNumberReportTmp.UCRNumber                       = termoNumberTable.UCRNumber;
+            termoNumberReportTmp.IssueDate                       = termoNumberTable.IssueDate;
+            termoNumberReportTmp.TermoValueReal                  = termoNumberTable.TermoValueReal;
+            termoNumberReportTmp.RemainingTermoValueReal         = termoNumberTable.RemainingClosedTERMOValueReal;
+            termoNumberReportTmp.DateOfSubmissionOrignalDoc      = termoNumberTable.DateOfSubmissionOrignalDoc;
+            termoNumberReportTmp.DateOfOrignalDocReturrnReceived = termoNumberTable.DateOfOrignalDocReturrnReceived;
+            termoNumberReportTmp.CustomDeclarationNumber         = termoNumberTable.CustomDeclarationNumber;
+            termoNumberReportTmp.CustomsDeclarationDate          = termoNumberTable.CustomsDeclarationDate;
+            termoNumberReportTmp.CustomsDeclarationEndDate       = termoNumberTable.CustomsDeclarationEndDate;
+            termoNumberReportTmp.TERMONumberStatus               = termoNumberTable.TERMONumberStatus;
+
+            if(termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Mother || termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Regular)
+            {
+                select firstonly TransDate, AmountCurCredit from ledgerJournalTrans
+                    where  ledgerJournalTrans.ETGTERMONumber   == termoNumberTable.TERMONumber;
+                      //  && ledgerJournalTrans.ETGCustVendInvoiceId == custInvoiceJour.InvoiceId;
+
+                termoNumberReportTmp.FundReceiptDate = ledgerJournalTrans.TransDate;
+                termoNumberReportTmp.NetAmount       = abs(termoNumberTable.TermoValueReal - termoNumberTable.RemainingClosedTERMOValueReal);
+                termoNumberReportTmp.RemainingTermoValueReal = termoNumberTable.RemainingClosedTERMOValueReal;
+            }
+            else if(termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Child)
+            {
+                if(termoNumberTable.TERMONumberStatus == ETGTERMONumberStatus::Close)
+                {
+                    termoNumberReportTmp.FundReceiptDate = termoNumberTable.ClosedDate;
+
+                    select firstonly LineAmount from custInvoiceTrans 
+                        where custInvoiceTrans.InvoiceId == custInvoiceJour.InvoiceId
+                            && custInvoiceTrans.InvoiceDate == custInvoiceJour.InvoiceDate
+                            && custInvoiceTrans.DataAreaId == custInvoiceJour.DataAreaId;
+
+                    termoNumberReportTmp.NetAmount               = custInvoiceTrans.LineAmount;
+                    termoNumberReportTmp.RemainingTermoValueReal = 0;
+                }
+                else if((termoNumberTable.TERMONumberStatus == ETGTERMONumberStatus::Open) || (termoNumberTable.TERMONumberStatus == ETGTERMONumberStatus::Exhausted))
+                {
+                    termoNumberReportTmp.FundReceiptDate = dateNull();
+                    termoNumberReportTmp.NetAmount       = 0;
+
+                    select firstonly LineAmount from custInvoiceTrans
+                        where custInvoiceTrans.InvoiceId == custInvoiceJour.InvoiceId
+                            && custInvoiceTrans.InvoiceDate == custInvoiceJour.InvoiceDate
+                            && custInvoiceTrans.DataAreaId == custInvoiceJour.DataAreaId;
+
+                    termoNumberReportTmp.RemainingTermoValueReal = custInvoiceTrans.LineAmount;
+                }
+            }
+
+            termoNumberReportTmp.BillOfLadingNumber = custInvoiceJour.ETG_BLnumber;
+
+            //if(custInvoiceJour)
+            //{
+            //    select firstonly BOLNo from custPackingSlipJour
+            //    order by custPackingSlipJour.RecId desc
+            //    where custPackingSlipJour.SalesId == custInvoiceJour.SalesId;
+
+            //    termoNumberReportTmp.BillOfLadingNumber = custPackingSlipJour.BOLNo;
+            //}
+            termoNumberReportTmp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertDataPurchase</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    inserting data useing parm query
+    /// </summary>
+    public void insertDataPurchase()
+    {
+        Query                               query;
+        QueryRun                            queryRun;
+        QueryBuildDataSource                qbdsETGTERMONumberTable;
+        VendInvoiceJour                     vendInvoiceJour;
+        VendPackingSlipJour                 vendPackingSlipJour;
+        ETGTERMONumberTable                 termoNumberTable;
+        LedgerJournalTrans                  ledgerJournalTrans;
+        VendInvoiceTrans                    vendInvoiceTrans;
+
+        query                   = new Query();
+        qbdsETGTERMONumberTable = query.addDataSource(tableNum(ETGTERMONumberTable));
+        qbdsETGTERMONumberTable.addSortField(fieldNum(ETGTERMONumberTable, TERMONumber), SortOrder::Ascending);
+        SysQuery::findOrCreateRange(qbdsETGTERMONumberTable, fieldNum(ETGTERMONumberTable, IssueDate)).value(queryRange(fromDate, toDate));
+        SysQuery::findOrCreateRange(qbdsETGTERMONumberTable, fieldNum(ETGTERMONumberTable, ImportOrExport)).value(queryValue(ETGImportOrExport::Import));
+
+        queryRun = new QueryRun(query);
+        while(queryRun.next())
+        {
+            termoNumberTable  = queryRun.get(tableNum(ETGTERMONumberTable));
+            select firstonly vendInvoiceJour where vendInvoiceJour.ETGTERMONumber == termoNumberTable.TERMONumber;
+
+            termoNumberReportTmp.clear();
+            termoNumberReportTmp.InvoiceNumber                   = termoNumberTable.PerformaInvoice;
+            termoNumberReportTmp.InvoiceDate                     = vendInvoiceJour.InvoiceDate;
+            termoNumberReportTmp.CustAccount                     = termoNumberTable.Name;
+            termoNumberReportTmp.CustName                        = VendTable::find(termoNumberTable.Name).name();
+            termoNumberReportTmp.ModeOfPayment                   = termoNumberTable.ModeOfPayment;
+            termoNumberReportTmp.BankName                        = termoNumberTable.BankName;
+            termoNumberReportTmp.TypeOfTERMO                     = termoNumberTable.TypeOfTERMO;
+            termoNumberReportTmp.MotherTERMOReference            = termoNumberTable.MotherTERMOReference;
+            termoNumberReportTmp.TERMONumber                     = termoNumberTable.TERMONumber;
+            termoNumberReportTmp.UCRNumber                       = termoNumberTable.UCRNumber;
+            termoNumberReportTmp.IssueDate                       = termoNumberTable.IssueDate;
+            termoNumberReportTmp.TermoValueReal                  = termoNumberTable.TermoValueReal;
+            termoNumberReportTmp.RemainingTermoValueReal         = termoNumberTable.RemainingClosedTERMOValueReal;
+            termoNumberReportTmp.DateOfSubmissionOrignalDoc      = termoNumberTable.DateOfSubmissionOrignalDoc;
+            termoNumberReportTmp.DateOfOrignalDocReturrnReceived = termoNumberTable.DateOfOrignalDocReturrnReceived;
+            termoNumberReportTmp.CustomDeclarationNumber         = termoNumberTable.CustomDeclarationNumber;
+            termoNumberReportTmp.CustomsDeclarationDate          = termoNumberTable.CustomsDeclarationDate;
+            termoNumberReportTmp.CustomsDeclarationEndDate       = termoNumberTable.CustomsDeclarationEndDate;
+            termoNumberReportTmp.TERMONumberStatus               = termoNumberTable.TERMONumberStatus;
+
+            termoNumberReportTmp.BillOfLadingNumber = vendInvoiceJour.ETG_BLnumber;
+
+            if(termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Mother || termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Regular)
+            {
+                termoNumberReportTmp.NetAmount = abs(termoNumberTable.TermoValueReal - termoNumberTable.RemainingClosedTERMOValueReal);
+
+                select firstonly TransDate, AmountCurDebit from ledgerJournalTrans
+                    where  ledgerJournalTrans.ETGTERMONumber   == termoNumberTable.TERMONumber;
+
+                termoNumberReportTmp.FundReceiptDate         = ledgerJournalTrans.TransDate;
+                termoNumberReportTmp.RemainingTermoValueReal = termoNumberTable.RemainingClosedTERMOValueReal;
+            }
+            else if(termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Child)
+            {
+                if(termoNumberTable.TERMONumberStatus == ETGTERMONumberStatus::Open || termoNumberTable.TERMONumberStatus == ETGTERMONumberStatus::Exhausted)
+                {
+                    termoNumberReportTmp.NetAmount = 0;
+                    termoNumberReportTmp.FundReceiptDate = dateNull();
+                    select firstonly LineAmount from vendInvoiceTrans
+                        where vendInvoiceTrans.InvoiceId == vendInvoiceJour.InvoiceId
+                            && vendInvoiceTrans.InvoiceDate == vendInvoiceJour.InvoiceDate
+                            && vendInvoiceTrans.DataAreaId == vendInvoiceJour.DataAreaId;
+                    termoNumberReportTmp.RemainingTermoValueReal = vendInvoiceTrans.LineAmount;
+                }
+                else if(termoNumberTable.TERMONumberStatus == ETGTERMONumberStatus::Close)
+                {
+                    select firstonly LineAmount from vendInvoiceTrans 
+                        where vendInvoiceTrans.InvoiceId == vendInvoiceJour.InvoiceId
+                            && vendInvoiceTrans.InvoiceDate == vendInvoiceJour.InvoiceDate
+                            && vendInvoiceTrans.DataAreaId == vendInvoiceJour.DataAreaId;
+
+                    termoNumberReportTmp.NetAmount       = vendInvoiceTrans.LineAmount;
+                    termoNumberReportTmp.FundReceiptDate = termoNumberTable.ClosedDate;
+                    termoNumberReportTmp.RemainingTermoValueReal = 0;
+                }
+
+            }
+
+            termoNumberReportTmp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

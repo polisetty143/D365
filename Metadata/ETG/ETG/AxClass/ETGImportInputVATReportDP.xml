@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGImportInputVATReportDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This is an DP class for ImportInputVATreport report.
+/// </summary>
+[SRSReportParameterAttribute(classStr(ETGImportInputVATReportContract))]
+internal final class ETGImportInputVATReportDP extends SRSReportDataProviderBase
+{
+    ETGImportInputVATReportContract  etgImportInputReportVATContract;
+    FromDate                         fromDate;
+    ToDate                           toDate;
+    ETGImportInputVATReportTmp       etgImportInputVATReportTmp;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getTmpTable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the temporary table
+    /// </summary>
+    /// <returns>ETGImportInputVATReportTmp temporary table</returns>
+    [SrsReportDataSetAttribute(tableStr(ETGImportInputVATReportTmp))]
+    public ETGImportInputVATReportTmp getTmpTable()
+    {
+        select * from etgImportInputVATReportTmp;
+        return etgImportInputVATReportTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Processess the business logic for the report
+    /// </summary>
+    public void processReport()
+    {
+        Query                               query;
+        QueryRun                            queryRun;
+        QueryBuildDataSource                queryBuildDataSourceVendJour, queryBuildDataSourceVendTrans;
+        QueryBuildRange                     queryBuildRange;
+        VendPackingSlipJour                 vendPackingSlipJour;
+        VendPackingSlipTrans                vendPackingSlipTrans;
+        DirPartyLocation                    dirPartyLocation;
+        TaxTrans                            taxTrans;
+        VendAccount                         vendAccount;
+        LogisticsElectronicAddress          electronicAddress;
+        VendTable                           vendTable;
+        VendInvoiceTrans                    vendInvoiceTrans;
+
+        CompanyInfo   companyInfo = CompanyInfo::find();
+
+        electronicAddress         = DirParty::primaryElectronicAddress(companyInfo.RecId, LogisticsElectronicAddressMethodType::Phone);
+
+        etgImportInputReportVATContract = new ETGImportInputVATReportContract();
+        etgImportInputReportVATContract = this.parmDataContract() as ETGImportInputVATReportContract;
+
+        fromDate    = etgImportInputReportVATContract.parmFromDate();
+        toDate      = etgImportInputReportVATContract.parmToDate();
+        vendAccount = etgImportInputReportVATContract.parmVendAccount();
+
+        etgImportInputVATReportTmp.CompanyLogo             = FormLetter::companyLogo();
+        etgImportInputVATReportTmp.CompanyPhone            = electronicAddress.LocatorExtension + ' ' + electronicAddress.Locator;
+        electronicAddress                                  = DirParty::primaryElectronicAddress(companyInfo.RecId, LogisticsElectronicAddressMethodType::Fax);
+        etgImportInputVATReportTmp.CompanyTeleFax          = strFmt('@ETG_New:TelFax',CompanyInfo::find().phone(),CompanyInfo::find().teleFax());
+        etgImportInputVATReportTmp.CompanyAddress          = companyInfo.postalAddress().Address;
+        etgImportInputVATReportTmp.CompanyAddress          = strReplace(etgImportInputVATReportTmp.CompanyAddress,'\n',' ');
+        etgImportInputVATReportTmp.CompanyName             = companyInfo.Name;
+        etgImportInputVATReportTmp.ETGCompanyCoRegNum      = strFmt('@ETG_New:RegNoGstNo',companyInfo.Giro,companyInfo.CoRegNum);
+
+        query = new Query();
+        queryBuildDataSourceVendJour  = query.addDataSource(tableNum(VendPackingSlipJour));
+        queryBuildDataSourceVendTrans = queryBuildDataSourceVendJour.addDataSource(tableNum(VendPackingSlipTrans));
+        queryBuildDataSourceVendJour.addSortField(fieldNum(VendPackingSlipJour, PurchId), SortOrder::Ascending);
+
+        queryBuildDataSourceVendTrans.joinMode(JoinMode::InnerJoin);
+        queryBuildDataSourceVendTrans.relations(true);
+        queryBuildDataSourceVendTrans.addLink(fieldNum(VendPackingSlipJour, RecId), fieldNum(VendPackingSlipTrans, VendPackingSlipJour));
+
+        query.dataSourceTable(tableNum(VendPackingSlipJour)).addRange(fieldNum(VendPackingSlipJour, ETGDateofEntry)).value(queryRange(fromDate, toDate));
+        queryBuildRange = queryBuildDataSourceVendJour.addRange(fieldNum(VendPackingSlipJour, OrderAccount));
+        queryBuildRange.value(vendAccount);
+
+        queryRun = new QueryRun(query);
+        while(queryRun.next())
+        {
+            vendPackingSlipJour  = queryRun.get(tableNum(VendPackingSlipJour));
+            vendPackingSlipTrans = queryRun.get(tableNum(VendPackingSlipTrans));
+
+            etgImportInputVATReportTmp.ETGDateofEntry               = vendPackingSlipJour.ETGDateofEntry;
+            etgImportInputVATReportTmp.ETGEntryNumber               = vendPackingSlipJour.ETGEntryNumber;
+            etgImportInputVATReportTmp.ETGPortofEntry               = vendPackingSlipJour.ETGPortofEntry;;
+            etgImportInputVATReportTmp.ETGExciseDuty                = vendPackingSlipTrans.ETGExciseDuty;
+            vendTable                                               = VendTable::find(vendPackingSlipJour.InvoiceAccount);
+            etgImportInputVATReportTmp.VendName                     = vendTable.name();
+            etgImportInputVATReportTmp.CountryofSupplier            = vendTable.countryRegionName();
+            etgImportInputVATReportTmp.ETGAssessmentValue           = vendPackingSlipTrans.ETGAssessmentValue;
+            etgImportInputVATReportTmp.ETGVATPercentage             = vendPackingSlipTrans.ETGVATPercentage;
+            etgImportInputVATReportTmp.Total                        = vendPackingSlipTrans.ETGAssessmentValue + vendPackingSlipTrans.ETGExciseDuty;
+            etgImportInputVATReportTmp.ETGVATAmount                 = etgImportInputVATReportTmp.Total * (vendPackingSlipTrans.ETGVATPercentage / 100);
+
+            select firstonly ETGDescriptionOfGoodsServices from vendInvoiceTrans 
+                    where vendInvoiceTrans.InventTransId == vendPackingSlipTrans.InventTransId;
+
+            etgImportInputVATReportTmp.DescriptionOfGoodsServices   = vendInvoiceTrans.ETGDescriptionOfGoodsServices;
+
+            etgImportInputVATReportTmp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>EtgRegisterSalesReportUIBuilder</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///    The <c>ETGPurchRegisterReportUIBuilder</c> class is the user interface builder class for the associated SQL
+///    Server Reporting Services (SSRS) report.
+/// </summary>
+class EtgRegisterSalesReportUIBuilder extends SrsReportDataContractUIBuilder
+{
+  
+    EtgRegisterSalesReportContract     contract;
+    DialogField                        invoiceId;
+    DialogField                        custAccount;
+    DialogField                        finDimSet;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>build</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    building all parameters
+    /// </summary>
+    public void build()
+    {
+        contract = this.dataContractObject();
+    
+        this.addDialogField(methodStr(EtgRegisterSalesReportContract, parmFromDate), contract);
+        this.addDialogField(methodStr(EtgRegisterSalesReportContract, parmToDate), contract);
+        this.addDialogField(methodStr(EtgRegisterSalesReportContract, parmFinancialDimSet), contract);
+        this.addDialogField(methodStr(EtgRegisterSalesReportContract, parmIsDetailReport), contract);
+        this.addDialogField(methodStr(EtgRegisterSalesReportContract, parmViewConfigId), contract);
+        this.addDialogField(methodStr(EtgRegisterSalesReportContract, parmViewInventSizeId), contract);
+        this.addDialogField(methodStr(EtgRegisterSalesReportContract, parmViewInventColorId), contract);
+        this.addDialogField(methodStr(EtgRegisterSalesReportContract, parmViewInventStyleId), contract);
+        this.addDialogField(methodStr(EtgRegisterSalesReportContract, parmViewInventSiteId), contract);
+        this.addDialogField(methodStr(EtgRegisterSalesReportContract, parmViewInventLocationId), contract);
+        this.addDialogField(methodStr(EtgRegisterSalesReportContract, parmViewWMSLocationId), contract);
+        this.addDialogField(methodStr(EtgRegisterSalesReportContract, parmViewLicensePlateId), contract);
+        this.addDialogField(methodStr(EtgRegisterSalesReportContract, parmViewInventStatus), contract);
+        this.addDialogField(methodStr(EtgRegisterSalesReportContract, parmViewInventBatchId), contract);
+        this.addDialogField(methodStr(EtgRegisterSalesReportContract, parmViewInventSerialId), contract);
+        this.addDialogField(methodStr(EtgRegisterSalesReportContract, parmViewInventOwnerId_RU), contract);
+        this.addDialogField(methodStr(EtgRegisterSalesReportContract, parmBusinessSegment), contract);
+        this.addDialogField(methodStr(EtgRegisterSalesReportContract, parmConnectionType), contract);
+        this.addDialogField(methodStr(EtgRegisterSalesReportContract, parmCustAccount), contract);
+        this.addDialogField(methodStr(EtgRegisterSalesReportContract, parmInvoiceId), contract);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postBuild</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    creating dialog fields
+    /// </summary>
+    public void postBuild()
+    {
+        Dialog dialogobj    = this.dialog();
+
+        finDimSet = this.bindInfo().getDialogField(this.dataContractObject(), methodStr(EtgRegisterSalesReportContract, parmFinancialDimSet));
+        finDimSet.registerOverrideMethod(methodStr(FormStringControl, lookup), methodStr(EtgRegisterSalesReportUIBuilder, finDimSetLookup), this);
+        custAccount = this.bindInfo().getDialogField(this.dataContractObject(), methodStr(EtgRegisterSalesReportContract, parmCustAccount));
+        custAccount.registerOverrideMethod(methodStr(FormStringControl, lookup), methodStr(EtgRegisterSalesReportUIBuilder,custAccountMultiSelectLookup),this);
+        invoiceId = this.bindInfo().getDialogField(this.dataContractObject(), methodStr(EtgRegisterSalesReportContract, parmInvoiceId));
+        invoiceId.registerOverrideMethod(methodStr(FormStringControl, lookup), methodStr(EtgRegisterSalesReportUIBuilder,InvoiceIdMultiSelectLookup ),this);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postRun</Name>
+				<Source><![CDATA[
+    public void postRun()
+    {
+        EtgRegisterSalesReportContract etgRegisterSalesReportContract = this.dataContractObject();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>finDimSetLookup</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    creating dimension sets lookup
+    /// </summary>
+    /// <param name = "_formStringControl">form string control</param>
+    public void finDimSetLookup(FormStringControl   _formStringControl)
+    {
+        Query                   query = new Query();
+        QueryBuildDataSource    qbds;
+        SysTableLookup          sysTableLookup = SysTableLookup::newParameters(tablenum(DimensionHierarchy), _formStringControl);
+
+        sysTableLookup.addLookupfield(fieldNum(DimensionHierarchy, Name));
+        sysTableLookup.addLookupfield(fieldNum(DimensionHierarchy, Description));
+
+        qbds = query.addDataSource(tableNum(DimensionHierarchy));
+        qbds.addRange(fieldNum(DimensionHierarchy, StructureType)).value(queryValue(DimensionHierarchyType::Focus));
+        qbds.addRange(fieldNum(DimensionHierarchy, IsSystemGenerated)).value(queryValue(NoYes::No));
+
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.performFormLookup();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>custAccountMultiSelectLookup</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Multiselect lookup for cust account parameter
+    /// </summary>
+    /// <param name = "_control">FormStringControl</param>
+    public void custAccountMultiSelectLookup(FormStringControl _control)
+    {
+        Query                 query = new Query();
+        QueryBuildDataSource  qbds;
+        container             conCustTable;
+
+        qbds = query.addDataSource(tableNum(CustTable));
+
+        qbds.fields().dynamic(NoYes::Yes);
+        qbds.fields().addField(fieldNum(CustTable,AccountNum));
+
+        qbds = qbds.addDataSource(tableNum(DirPartyTable));
+        qbds.fields().dynamic(NoYes::Yes);
+        qbds.fields().addField(fieldNum(DirPartyTable,Name));
+        qbds.relations(true);
+        SysLookUpMultiSelectGrid::lookup(query, _control, _control, _control,conCustTable);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>InvoiceIdMultiSelectLookup</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Multi select lookup for InvoiceId parameter
+    /// </summary>
+    /// <param name = "_control">FormStringControl</param>
+    public void InvoiceIdMultiSelectLookup(FormStringControl _control)
+    {
+        Query  query = new Query();
+        QueryBuildDataSource qbds;
+        container conInvoiceId;
+        qbds = query.addDataSource(tableNum(CustInvoiceJour));
+        qbds.addSelectionField(fieldNum(CustInvoiceJour, InvoiceId));
+        qbds.addSelectionField(fieldNum(CustInvoiceJour, SalesId));
+        qbds.addSelectionField(fieldNum(CustInvoiceJour, InvoiceAccount));
+        SysLookUpMultiSelectGrid::lookup(query, _control, _control, _control,conInvoiceId);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

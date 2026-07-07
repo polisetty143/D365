@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGUploaderFromStaging_Y002</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGUploaderFromStaging_Y002
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>dialog</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    public void dialog()
+    {
+        Dialog                       dialog;
+        RefRecId                     recId;
+        DialogField                  dialogArAPRef;
+        ;
+ 
+        dialog = new dialog("Upload");
+        dialogArAPRef = dialog.addField(extendedTypeStr(LedgerJournalId), "Create journal number from stating");
+        dialog.run();
+ 
+        if(!dialogArAPRef.value())
+        {
+            throw error("Journal number");
+        }
+        else if (dialog.run())
+        {
+            this.create(dialogArAPRef.value());
+        }
+ 
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>create</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name = "_fromdate"></param>
+    /// <param name = "_todate"></param>
+    public void create(LedgerJournalId journalID)
+    {
+        LedgerJournalId _journalID = journalID;
+        LedgerJournalTrans ledgerJournalTransOrig;
+        LedgerJournalTrans ledgerJournalTrans;
+        ledgerJournalTable ledgerJournalTable, ledgerJournalTableOrg;
+        ledgerJournalTable _ledgerJournalTableOrig;
+        LedgerJournalName ledgerJournalName;
+        LedgerJournalEngine ledgerJournalEngine;
+        CustVendPaymJournalFee custVendPaymJournalFee;
+        int numLines;
+        str jourName = "DAILY";
+        real correctedSalesTax;
+        Etg_LoaderStaging_Y002 loaderStaging, loaderStagingOrg;
+
+        select * from loaderStaging where loaderStaging.JournalNum == _journalID;
+        
+        // select * from ledgerJournalTable where ledgerJournalTable.JournalNum == _journalID;
+        select * from ledgerJournalName where ledgerJournalName.JournalName == jourName;
+
+        while select loaderStagingOrg
+    order by RecId
+            where loaderStagingOrg.JournalNum == loaderStaging.JournalNum
+        {
+            numLines++;
+            if (!ledgerJournalTable.RecId)
+            {
+                ledgerJournalTable.clear();
+                ledgerJournalTable.initValue();
+                ledgerJournalTable.JournalName = ledgerJournalName.JournalName;
+                ledgerJournalTable.initFromLedgerJournalName();
+                ledgerJournalTable.JournalNum = JournalTableData::newTable(ledgerJournalTable).nextJournalId();
+                ledgerJournalTable.Name = ledgerJournalName.Name;
+                ledgerJournalTable.insert();
+
+                info(strFmt("Journal %1 created", ledgerJournalTable.JournalNum));
+
+                ledgerJournalEngine = LedgerJournalEngine::construct(ledgerJournalTable.JournalType);
+                ledgerJournalEngine.newJournalActive(ledgerJournalTable);
+            }
+            ledgerJournalTrans.clear();
+            ledgerJournalTrans.initValue();
+            ledgerJournalEngine.initValue(ledgerJournalTrans);
+            ledgerJournalTrans.JournalNum           =   ledgerJournalTable.JournalNum;
+            ledgerJournalTrans.TransDate            =   loaderStagingOrg.TransDate;
+            ledgerJournalTrans.AccountType          =   loaderStagingOrg.AccountType;
+            ledgerJournalTrans.modifiedField(fieldNum(LedgerJournalTrans, AccountType));
+
+            ledgerJournalTrans.LedgerDimension = loaderStagingOrg.LedgerDimension;
+           
+            ledgerJournalTrans.modifiedField(fieldNum(LedgerJournalTrans, LedgerDimension));
+           
+            ledgerJournalEngine.accountModified(LedgerJournalTrans);
+            ledgerJournalTrans.OffsetAccountType = loaderStagingOrg.OffsetAccountType;
+            ledgerJournalTrans.modifiedField(fieldNum(LedgerJournalTrans, OffsetAccountType));
+            ledgerJournalTrans.OffsetLedgerDimension = loaderStagingOrg.OffsetLedgerDimension;
+            ledgerJournalTrans.modifiedField(fieldNum(LedgerJournalTrans, OffsetLedgerDimension));
+            
+            // ledgerJournalTrans.modifiedField(fieldNum(LedgerJournalTrans, OffsetDefaultDimension));
+            ledgerJournalEngine.offsetAccountModified(ledgerJournalTrans);
+
+            //amounts
+            LedgerJournalTrans.CurrencyCode         =   loaderStagingOrg.CurrencyCode;
+            ledgerJournalEngine.currencyModified(LedgerJournalTrans);
+            LedgerJournalTrans.AmountCurCredit      =   loaderStagingOrg.AmountCurCredit;
+            LedgerJournalTrans.AmountCurDebit       =   loaderStagingOrg.AmountCurDebit;
+
+          
+            if(loaderStagingOrg.Txt)
+            {
+                ledgerJournalTrans.Txt                = loaderStagingOrg.Txt;
+            }
+            else
+            {
+                ledgerJournalTrans.Txt   = ledgerJournalTable.JournalNum;
+            }
+            ledgerJournalTrans.ReverseEntry   = loaderStagingOrg.ReverseEntry;
+            ledgerJournalTrans.ReverseDate   = loaderStagingOrg.ReverseDate;
+            ledgerJournalTrans.Invoice          = loaderStagingOrg.Invoice;
+            
+            ledgerJournalTrans.Payment   = loaderStagingOrg.Payment;
+
+            ledgerJournalTrans.DefaultDimension = loaderStagingOrg.DefaultDimension;
+            ledgerJournalTrans.OffsetDefaultDimension = loaderStagingOrg.OffsetDefaultDimension;
+           
+            LedgerJournalTrans.SkipBlockedForManualEntryCheck = true;
+            ledgerJournalTrans.insert();
+
+            LedgerJournalEngine_Server::calcCashDisc(ledgerJournalTrans, 0, false);
+
+            ledgerJournalEngine.write(ledgerJournalTrans);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    public void run()
+    {
+        this.dialog();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name = "_args"></param>
+    public static void main(Args _args)
+    {
+        ETGUploaderFromStaging_Y002 uploaderFromStaging;
+ 
+        uploaderFromStaging = new ETGUploaderFromStaging_Y002();
+        uploaderFromStaging.run();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

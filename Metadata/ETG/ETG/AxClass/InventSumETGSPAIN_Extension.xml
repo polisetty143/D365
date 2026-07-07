@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>InventSumETGSPAIN_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the <c>InventSum</c> table for the ETGSPAIN model.
+/// </summary>
+[ExtensionOf(tableStr(InventSum))]
+final class InventSumETGSPAIN_Extension
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>ETGSPAINgetSalesApplicationQty</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculates the total applied quantity for Sales based on the selected dimensions.
+    /// </summary>
+    /// <param name="_inventDimParm">
+    /// Selected dimensions in the Available.
+    /// </param>
+    /// <returns>
+    /// Returns the totalized quantity.
+    /// </returns>
+    public Qty ETGSPAINgetSalesApplicationQty(InventDimParm _inventDimParm)
+    {    
+        return abs(this.ETGSPAINcalcApplicationQty(_inventDimParm, true));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSPAINgetPurchApplicationQty</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculates the total applied quantity for Purchases based on the selected dimensions.
+    /// </summary>
+    /// <param name="_inventDimParm">
+    /// Selected dimensions in the Available.
+    /// </param>
+    /// <returns>
+    /// Returns the totalized quantity.
+    /// </returns>
+    public Qty ETGSPAINgetPurchApplicationQty(InventDimParm _inventDimParm)
+    {
+        return this.ETGSPAINcalcApplicationQty(_inventDimParm, false, true);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSPAINcalcApplicationQty</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculates the total applied quantity based on the selected dimensions.
+    /// </summary>
+    /// <param name="_inventDimParm">
+    /// Selected dimensions in the Available.
+    /// </param>
+    /// <param name="_calcSales">
+    /// Parameter to determine if we should perform the calculation for Sales.
+    /// </param>
+    /// <param name="_calcPurch">
+    /// Parameter to determine if we should perform the calculation for Purchases.
+    /// </param>
+    /// <returns>
+    /// Returns the totalized quantity.
+    /// </returns>
+    public Qty ETGSPAINcalcApplicationQty(InventDimParm _inventDimParm, boolean _calcSales = false, boolean _calcPurch = false)
+    {
+        ETGSPAINInventTransApplication   ETGSPAINInventTransApplication;
+        InventDim                   inventDim;  
+        PurchTable                  purchTable;
+        SalesTable                  salesTable;
+        InventDim                   inventDimFilter = this.joinChild();        
+        Qty                         qtyPurch        = 0;
+        Qty                         qtySales        = 0;
+        
+        if (_calcPurch)
+        {
+            select      sum(PurchApplicationQty)
+                from    ETGSPAINInventTransApplication
+                index hint DimIdx
+                where   ETGSPAINInventTransApplication.ItemId == this.ItemId
+            exists join purchTable
+                where   purchTable.PurchId     == ETGSPAINInventTransApplication.PurchId
+                &&      purchTable.PurchStatus != PurchStatus::Canceled
+            #InventDimExistsJoin(ETGSPAINInventTransApplication.inventDimId, inventDim, inventDimFilter, _inventDimParm);      
+
+            qtyPurch = ETGSPAINInventTransApplication.PurchApplicationQty;
+        }
+        else if (_calcSales)
+        {
+            select      sum(SalesApplicationQty)
+                from    ETGSPAINInventTransApplication
+                index hint DimIdx
+                where   ETGSPAINInventTransApplication.ItemId == this.ItemId
+            exists join salesTable
+                where   salesTable.SalesId     == ETGSPAINInventTransApplication.SalesId
+                &&      salesTable.SalesStatus != SalesStatus::Canceled
+            #InventDimExistsJoin(ETGSPAINInventTransApplication.inventDimId, inventDim, inventDimFilter, _inventDimParm);
+       
+            qtySales = ETGSPAINInventTransApplication.SalesApplicationQty;
+        }
+
+        return qtyPurch + qtySales;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

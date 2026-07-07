@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCustTableDS_TradeLimit_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This is extension class for form <c>CustTable</c>, datasource <c>CustTable</c> and Data field <c>ETGTradeLimitSalesReal<\c>
+/// </summary>
+[ExtensionOf(formDataFieldStr(CustTable, CustTable, ETGTradeLimitSalesReal))]
+internal final class ETGCustTableDS_TradeLimit_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>modified</Name>
+				<Source><![CDATA[
+    public void modified()
+    {
+        Amount tradeLimitOriginal;
+
+        next modified();
+
+        if(ETGACFParameters::find().EnableTradeLimit == NoYes::Yes)
+        {
+            FormDataObject formDataObject = any2Object(this) as FormDataObject;
+            FormDataSource formDataSource = formDataObject.datasource();
+            CustTable      custTable      = formDataSource.cursor();
+
+            tradeLimitOriginal = custTable.orig().ETGTradeLimitSalesReal;
+
+            this.calculateTradeLimitInCustomerCurrency(custTable);
+
+            if(custTable.ETGRemainingTradeLimitSalesReal == 0 && tradeLimitOriginal ==0)
+            {
+                custTable.ETGRemainingTradeLimitSalesReal = custTable.ETGTradeLimitSalesReal;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateTradeLimitInCustomerCurrency</Name>
+				<Source><![CDATA[
+    private void calculateTradeLimitInCustomerCurrency(CustTable custTable)
+    {
+        CurrencyCode custCurrency = custTable.Currency;
+        CurrencyCode companyCurrency = Ledger::accountingCurrency();
+
+        if (!custCurrency || !companyCurrency)
+        {
+            return;
+        }
+
+        custTable.ETGTradeLimitInCustomerCurrency = this.convertAmountToCustomerCurrency(
+            custTable.ETGTradeLimitSalesReal, companyCurrency, custCurrency);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>convertAmountToCustomerCurrency</Name>
+				<Source><![CDATA[
+    private real convertAmountToCustomerCurrency(AmountCur _amount, CurrencyCode _fromCurrency, CurrencyCode _toCurrency)
+    {
+        if (_amount == 0 || !_fromCurrency || !_toCurrency)
+        {
+            return 0;
+        }
+
+        CurrencyExchangeHelper currencyExchangeHelper = CurrencyExchangeHelper::newExchangeDate(
+            Ledger::current(), systemDateGet());
+
+        AmountMst convertedAmount = currencyExchangeHelper.calculateCurrencyToCurrency(
+            _fromCurrency, _toCurrency, _amount, true);
+
+        return convertedAmount;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchAgreementCreationJob</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGPurchAgreementCreationJob
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+        /// Class entry point. The system will call this method when a designated menu
+        /// is selected or when execution starts and this class is set as the startup class.
+        /// </summary>
+        /// <param name = "_args">The specified arguments.</param>
+    public static void main(Args _args)
+    {
+        str dealNum = "O001-PD_00001";
+        // ETGPurchAgreementAPI agreementHeader; -- Make sure you actually fetch/initialize this if you need it!
+        ETGPurchAgreementLineAPI agreementLineAPI;
+        PurchAgreementHeader purchAgreementHeader;
+        VendTable vendTable;
+        AgreementHeaderDefault agreementHeaderDefault;
+        PurchAgreementHeaderDefault purchAgreementHeaderDefault;
+        PurchAgreementCertification purchAgreementCertification;
+        ETG_PurchaseAgreementHeader ETG_PurchaseAgreementHeaderNew,ETG_PurchaseAgreementHeader;
+        AgreementLineQuantityCommitment agreementLineQuantityCommitment;
+        NumberSequenceReference numberSequenceReference;
+        NumberSeq num;
+        InventDim inventDim;
+        inventTable   inventTable;
+        ttsbegin;
+ 
+        select firstonly numberSequenceReference
+            where numberSequenceReference.NumberSequenceId == PurchParameters::numRefPurchAgreementId().NumberSequenceId;
+        num = NumberSeq::newGetNum(numberSequenceReference);
+        purchAgreementHeader.initValue();
+        vendTable = VendTable::find("V_TPT_AE00143");
+        purchAgreementHeader.VendAccount = vendTable.AccountNum;
+        purchAgreementHeader.initFromVendTable(vendTable);
+        AgreementClassification agreementClassification = AgreementClassification::findPurchClassification("External agreement");
+        if (agreementClassification)
+        {
+            purchAgreementHeader.AgreementClassification = agreementClassification.RecId; // Usually you assign RecId, not a hardcoded int like 5637144576
+        }
+        purchAgreementHeader.PurchNumberSequence = num.num();
+        purchAgreementHeader.DefaultAgreementLineEffectiveDate  = systemDateGet();
+        purchAgreementHeader.DefaultAgreementLineExpirationDate = systemDateGet() + 30;
+        purchAgreementHeader.Currency = "USD";
+        purchAgreementHeader.AgreementState = AgreementState::OnHold;
+        // purchAgreementHeader.DefaultDimension = purchAgreementHeader.DefaultDimension;
+        purchAgreementHeader.insert();
+        agreementHeaderDefault.initValue();
+        agreementHeaderDefault.initFromVendTable(vendTable);
+        agreementHeaderDefault.AgreementHeader = purchAgreementHeader.RecId;
+        agreementHeaderDefault.PaymentTerms = "NETTING";
+        agreementHeaderDefault.DeliveryTerm = "FOB";
+        agreementHeaderDefault.DeliveryMode = "Sea";
+        
+        agreementHeaderDefault.insert();
+        purchAgreementHeaderDefault.clear();
+        purchAgreementHeaderDefault.initValue();
+        purchAgreementHeaderDefault.initFromVendTable(vendTable);
+        purchAgreementHeaderDefault.PurchaseAgreementHeader = purchAgreementHeader.RecId;
+        purchAgreementHeaderDefault.insert();
+        purchAgreementCertification.clear();
+        purchAgreementCertification.initValue();
+        purchAgreementCertification.PurchAgreementHeader = purchAgreementHeader.RecId;
+        purchAgreementCertification.VendTable = vendTable.AccountNum;
+        purchAgreementCertification.insert();
+
+        ETG_PurchaseAgreementHeaderNew.clear();
+        ETG_PurchaseAgreementHeaderNew.initValue();
+        ETG_PurchaseAgreementHeaderNew.PurchAgreementId = purchAgreementHeader.PurchNumberSequence;
+
+        select ETG_PurchaseAgreementHeader
+            where ETG_PurchaseAgreementHeader.PurchAgreementId == purchAgreementHeader.PurchNumberSequence;
+        if(ETG_PurchaseAgreementHeader.RecId)
+        {
+
+        ETG_PurchaseAgreementHeaderNew.PortOfLoading            = ETG_PurchaseAgreementHeader.PortOfLoading;
+        ETG_PurchaseAgreementHeaderNew.PortOfDischarge          = ETG_PurchaseAgreementHeader.PortOfDischarge;
+      // ETG_PurchaseAgreementHeaderNew          = ETG_PurchaseAgreementHeade
+        // NOTE: Ensure you actually populate these from somewhere valid.
+        // ETG_PurchaseAgreementHeaderNew.PortOfLoading   = agreementHeader.PortOfLoading;
+        // ETG_PurchaseAgreementHeaderNew.PortOfDischarge = agreementHeader.PortOfDischarge;
+        
+        ETG_PurchaseAgreementHeaderNew.insert();
+        }
+        // Ensure InventDim exists
+        inventTable = InventTable::find("01217605350001741600", true);
+
+        inventDim.clear();
+        inventDim.ConfigId          = "NA";
+        inventDim.InventSizeId      = "50 KG PP BAG";
+        inventDim.InventColorId     = "NIGERIA";
+        inventDim.InventStyleId     = "NA";
+        inventDim.InventSiteId      = "DXB";
+        inventDim.InventLocationId  = "DXB PORT";
+        inventDim                   = InventDim::findOrCreate(inventDim);
+
+        agreementLineQuantityCommitment.clear();
+        agreementLineQuantityCommitment.initValue();
+
+        agreementLineQuantityCommitment.Agreement = purchAgreementHeader.RecId;
+        agreementLineQuantityCommitment.initFromAgreementHeader(purchAgreementHeader);
+
+        agreementLineQuantityCommitment.ItemId = inventTable.ItemId;
+        agreementLineQuantityCommitment.initFromInventTable(inventTable);
+
+        agreementLineQuantityCommitment.InventDimId = inventDim.inventDimId;
+        agreementLineQuantityCommitment.CommitedQuantity = 380;
+        agreementLineQuantityCommitment.ProductUnitOfMeasure = inventTable.purchUnitId();
+        agreementLineQuantityCommitment.PricePerUnit = 100;
+        agreementLineQuantityCommitment.EffectiveDate = purchAgreementHeader.DefaultAgreementLineEffectiveDate;
+        agreementLineQuantityCommitment.ExpirationDate = purchAgreementHeader.DefaultAgreementLineExpirationDate;
+
+        agreementLineQuantityCommitment.ETGMainCommodity = "SESAME SEEDS";
+        agreementLineQuantityCommitment.ETGFinalPlaceOfDelivery = "INDIA";
+
+
+        if (agreementLineQuantityCommitment.validateWrite())
+        {
+            agreementLineQuantityCommitment.insert();
+            info(strFmt("Purch Agreement has been created %1", purchAgreementHeader.PurchNumberSequence));
+        }
+        else
+        {
+            throw error(strFmt("Agreement line validation failed for item %1", agreementLineQuantityCommitment.ItemId));
+        }
+ 
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

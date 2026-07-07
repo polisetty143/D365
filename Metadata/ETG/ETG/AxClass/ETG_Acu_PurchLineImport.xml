@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_Acu_PurchLineImport</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Purchase line import
+/// </summary>
+public class ETG_Acu_PurchLineImport extends ETG_Acu_DataImportBase
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args args)
+    {
+        ETG_Acu_PurchLineImport  purchLineimport;
+
+        purchLineimport = ETG_Acu_PurchLineImport::construct();
+
+        if (purchLineimport.prompt())
+        {
+            purchLineimport.runOperation();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static ETG_Acu_PurchLineImport construct()
+    {
+        return new ETG_Acu_PurchLineImport();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>canRunInNewSession</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Describes whether the class is designed for execution in a new session.
+    /// </summary>
+    /// <returns>
+    /// true if the class is designed for execution the operation in a new session; otherwise, false.
+    /// </returns>
+    protected boolean canRunInNewSession()
+    {
+        return false;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processData</Name>
+				<Source><![CDATA[
+    protected void processData(container _con)
+    {
+        PurchPurchaseOrderLineV2Entity          purchLine;
+        PurchPurchaseOrderHeaderV2Entity        purchTable;
+
+        purchLine.PurchaseOrderNumber                   = conpeek(_con, 1);
+        purchLine.LineNumber                            = conpeek(_con, 2);
+        purchLine.AllowedOverdeliveryPercentage         = conpeek(_con, 3);
+        purchLine.AllowedUnderdeliveryPercentage        = conpeek(_con, 4);
+        purchLine.ConfirmedDeliveryDate                 = str2Date(conpeek(_con, 5), 123);
+        //purchLine.DefaultLedgerDimensionDisplayValue    = conpeek(_con, 6);
+        /*purchLine.DeliveryAddressCountryRegionId        = conpeek(_con, 7);
+        purchLine.DeliveryAddressDescription            = conpeek(_con, 8);
+        purchLine.DeliveryAddressName                   = conpeek(_con, 9);
+        purchLine.DeliveryAddressStreet                 = conpeek(_con, 10);*/
+        purchLine.ItemNumber                            = conpeek(_con, 11);
+        purchLine.LineAmount                            = conpeek(_con, 12);
+        purchLine.LineDescription                       = conpeek(_con, 13);
+        purchLine.OrderedPurchaseQuantity               = conpeek(_con, 14);
+        purchLine.ProductColorId                        = conpeek(_con, 15);
+        purchLine.ProductConfigurationId                = conpeek(_con, 16);
+        purchLine.ProductSizeId                         = conpeek(_con, 17);
+        purchLine.ProductStyleId                        = conpeek(_con, 18);
+        purchLine.PurchasePrice                         = conpeek(_con, 20);
+        purchLine.PurchasePriceQuantity                 = conpeek(_con, 21);
+        purchLine.PurchaseUnitSymbol                    = conpeek(_con, 22);
+        purchLine.ReceivingSiteId                       = conpeek(_con, 23);
+        purchLine.ReceivingWarehouseId                  = conpeek(_con, 24);
+        purchLine.RequestedDeliveryDate                 = str2Date(conpeek(_con, 25), 123);
+        purchLine.ReceivingWarehouseLocationId          = conpeek(_con, 26);
+
+        InventDistinctProductDimensionSpecificDefaultingArgsPurchLine   inventDistinctProductDimensionSpecificDefaultingArgsPurchLine;
+
+        inventDistinctProductDimensionSpecificDefaultingArgsPurchLine = InventDistinctProductDimensionSpecificDefaultingArgsPurchLine::construct(InventTable::find(purchLine.ItemNumber));
+
+        InventDim inventDim;
+
+        inventDim.inventSiteId      = purchLine.ReceivingSiteId;
+        inventDim.InventLocationId  = purchLine.ReceivingWarehouseId;
+        inventDim.InventColorId     = purchLine.ProductColorId;
+        inventDim.configId          = purchLine.ProductConfigurationId;
+        inventDim.InventSizeId      = purchLine.ProductSizeId;
+        inventDim.InventStyleId     = purchLine.ProductStyleId;
+
+        inventDim = InventDim::findOrCreate(inventDim);
+
+        InventDimCombination variant = InventDimCombination::findByInventDim(purchLine.ItemNumber, inventDim);
+        if (variant)
+        {
+            purchLine.RetailProductVariantNumber    = variant.RetailVariantId;
+        }
+
+        select firstonly purchTable
+            where purchTable.PurchaseOrderNumber    == purchLine.PurchaseOrderNumber;
+
+        purchLine.DeliveryAddressLocationId             = purchTable.DeliveryAddressLocationId;
+
+        // BusinessUnit (27)	Contract (28)	Department (29)	Intercompany (30)	Plant_Warehouse_Office (31)	Product_Service (32)	Trader_Employee (33)
+        // |Plant_Warehouse_Office|Department|Trader_Employee|Product_Service|BusinessUnit|Intercompany|Contract
+
+        purchLine.DefaultLedgerDimensionDisplayValue  = conPeek(_con, 31) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                    + conPeek(_con, 29) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                    + conPeek(_con, 33) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                    + conPeek(_con, 32) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                    + conPeek(_con, 27) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                    + conPeek(_con, 30) + enum2Str(dimensionParameters.DimensionSegmentDelimiter)
+                                                    + conPeek(_con, 28);
+        purchLine.insert();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caption</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///Import inventory site
+    /// </summary>
+    /// <returns>Caption</returns>
+    public ClassDescription caption()
+    {
+        ClassDescription ret;
+    
+        ret = "@ETG_ENG_Labels:ImpOpnePurchLine";
+    
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

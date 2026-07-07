@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGVendTransGroupingDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[
+SRSReportParameterAttribute(classStr(ETGVendTransGroupingContract))
+]
+class ETGVendTransGroupingDP extends SRSReportDataProviderBase
+{
+    ETGVendTransGroupTmp vendTransGroupTmp;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGVendTransGroupTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETGVendTransGroupTmp))]
+    public ETGVendTransGroupTmp getETGVendTransGroupTmp()
+    {
+        select vendTransGroupTmp;
+        return vendTransGroupTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETGVendTransGroupingContract contract = this.parmDataContract() as ETGVendTransGroupingContract;
+
+        if (!contract || !contract.validate())
+        {
+            return;
+        }
+
+        delete_from vendTransGroupTmp;
+
+        this.createVendTransGroupData(contract.parmFromDate(), contract.parmToDate());
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createVendTransGroupData</Name>
+				<Source><![CDATA[
+    private void createVendTransGroupData(TransDate _fromDate, TransDate _toDate)
+    {
+        VendTrans vendTransGrouping;
+        VendTable vendTable;
+
+       
+        while select CurrencyCode, AccountNum from vendTransGrouping
+            group by CurrencyCode, AccountNum
+            where vendTransGrouping.TransDate <= _toDate
+        {
+            vendTransGroupTmp.clear();
+            vendTransGroupTmp.AccountNum   = vendTransGrouping.AccountNum;
+            vendTransGroupTmp.CurrencyCode = vendTransGrouping.CurrencyCode;
+            
+            
+            vendTransGroupTmp.ETGVendName  = VendTable::find(vendTransGrouping.AccountNum).name();
+
+            
+            vendTransGroupTmp.OpeningBalance = this.getOpeningBalance(
+                                                    vendTransGrouping.AccountNum,
+                                                    vendTransGrouping.CurrencyCode,
+                                                    _fromDate);
+
+           
+            container periodAmounts = this.getPeriodAmounts(
+                                            vendTransGrouping.AccountNum,
+                                            vendTransGrouping.CurrencyCode,
+                                            _fromDate,
+                                            _toDate);
+
+            vendTransGroupTmp.AmountDebit  = conPeek(periodAmounts, 1);
+            vendTransGroupTmp.AmountCredit = conPeek(periodAmounts, 2);
+
+         
+            vendTransGroupTmp.SumAmount = vendTransGroupTmp.OpeningBalance +
+                                          (vendTransGroupTmp.AmountDebit - vendTransGroupTmp.AmountCredit);
+
+           
+            if (vendTransGroupTmp.OpeningBalance != 0 ||
+                vendTransGroupTmp.AmountDebit    != 0 ||
+                vendTransGroupTmp.AmountCredit   != 0)
+            {
+                vendTransGroupTmp.insert();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getOpeningBalance</Name>
+				<Source><![CDATA[
+    private AmountCur getOpeningBalance(AccountNum _accountNum, CurrencyCode _currencyCode, TransDate _fromDate)
+    {
+        VendTrans vendTransSum;
+
+        select sum(AmountCur) from vendTransSum
+            where vendTransSum.AccountNum   == _accountNum
+               && vendTransSum.CurrencyCode == _currencyCode
+               && vendTransSum.TransDate    <  _fromDate;
+
+        return vendTransSum.AmountCur;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getPeriodAmounts</Name>
+				<Source><![CDATA[
+    private container getPeriodAmounts(AccountNum _accountNum, CurrencyCode _currencyCode, TransDate _fromDate, TransDate _toDate)
+    {
+        VendTrans vendTransSum;
+        AmountCur totalDebit  = 0;
+        AmountCur totalCredit = 0;
+
+   
+        select sum(AmountCur) from vendTransSum
+            where vendTransSum.AccountNum   == _accountNum
+               && vendTransSum.CurrencyCode == _currencyCode
+               && vendTransSum.TransDate    >= _fromDate
+               && vendTransSum.TransDate    <= _toDate
+               && vendTransSum.AmountCur    >  0;
+        
+        totalDebit = vendTransSum.AmountCur;
+
+       
+        select sum(AmountCur) from vendTransSum
+            where vendTransSum.AccountNum   == _accountNum
+               && vendTransSum.CurrencyCode == _currencyCode
+               && vendTransSum.TransDate    >= _fromDate
+               && vendTransSum.TransDate    <= _toDate
+               && vendTransSum.AmountCur    <  0;
+
+        
+        totalCredit = abs(vendTransSum.AmountCur);
+
+        return [totalDebit, totalCredit];
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

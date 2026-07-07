@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCustFreeInvoice_CustInvoiceLineDS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// extension of form data source <c>CustFreeInvoice, CustInvoiceLine</c>
+/// </summary>
+[ExtensionOf(formDataSourceStr(CustFreeInvoice, CustInvoiceLine))]
+internal final class ETGCustFreeInvoice_CustInvoiceLineDS_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>written</Name>
+				<Source><![CDATA[
+    public void written()
+    {
+        next written();
+
+        //NS, DLT, 07032025, Update finacial dimension from first line to header 
+        if(ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+        {
+            CustInvoiceTable custInvoiceTable;
+            CustInvoiceLine  custInvoiceLine, custInvoiceLineCheck;
+            FormDataSource   custInvoiceLineDS, custInvoiceTableDS;
+            custInvoiceLineDS = this;
+            custInvoiceLine   = custInvoiceLineDS.cursor();
+            custInvoiceTable  = custInvoiceLine.custInvoiceTable();
+
+            select firstonly RecId from custInvoiceLineCheck order by RecId asc
+                where custInvoiceLineCheck.ParentRecId == custInvoiceTable.RecId;
+
+            if(custInvoiceLineCheck.RecId == custInvoiceLine.RecId)
+            {
+                ttsbegin;
+                custInvoiceTable.selectForUpdate(true);
+                custInvoiceTable.DefaultDimension = custInvoiceLine.DefaultDimension;
+                custInvoiceTable.doUpdate();
+                ttscommit;
+
+                custInvoiceTableDS = this.formRun().dataSource(formDataSourceStr(CustFreeInvoice,CustInvoiceTable));
+                custInvoiceTableDS.research(true);
+                custInvoiceTableDS.refresh();
+                info("@ETG_New:FDUpdatedFromLIneToHeader");
+            }
+
+        }
+        //NE, DLT, 07032025, Update finacial dimension from first line to header
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesLine_DS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formdatasourcestr(SalesTable, SalesLine))]
+final class ETG_SalesLine_DS_Extension
+{   
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {
+        boolean             isAgreementOrder = false;
+        boolean             isInvoiced       = false;
+        int                 ret;
+        FormDataSource      SalesLine_ds        = any2Object(this) as FormDataSource;
+        formRun             formRun             = SalesLine_ds.formRun();
+        FormDataSource      SalesTable_DS       = formRun.dataSource(formDataSourceStr(SalesTable, SalesTable)) as FormDataSource;
+        FormDataSource      MCRSalesLine_DS     = formRun.dataSource(formDataSourceStr(SalesTable, MCRSalesLine)) as FormDataSource;
+        FormDataSource      InventDim_DS        = formRun.dataSource(formDataSourceStr(SalesTable, InventDim)) as FormDataSource;
+        SalesTable          SalesTable          = SalesTable_ds.cursor();
+        ETG_Parameters      parameter           = ETG_Parameters::find();
+
+        ret = next active();
+
+        if(parameter.ETG_FrozenValidations == NoYes::Yes
+            && parameter.ETG_FrozenValidationPurchaseOrder == NoYes::Yes
+            && SalesTable.MatchingAgreement)
+        {
+            isAgreementOrder           = true;
+
+            if (SalesTable.SalesStatus == SalesStatus::Invoiced)
+            {
+                isInvoiced  = true;
+            }
+        }
+
+        if(isInvoiced)
+        {
+            SalesLine_DS.allowCreate(false);
+            SalesLine_DS.allowDelete(false);
+            SalesLine_DS.allowEdit(false);
+            InventDim_DS.allowEdit(false);
+        }
+
+        else if(isAgreementOrder)
+        {
+            SalesLine_DS.allowCreate(false);
+            SalesLine_DS.allowDelete(false);
+            MCRSalesLine_DS.allowEdit(false);
+            allowEditFieldGroup(SalesLine_DS, tableFieldGroupStr(SalesLine_DS, AgreementFieldsEditable));
+            allowEditFieldGroup(InventDim_DS, tableFieldGroupStr(InventDim_DS, StorageDimensions));
+        }
+        else
+        {
+            SalesLine_DS.allowCreate(true);
+            SalesLine_DS.allowDelete(true);
+            SalesLine_DS.allowEdit(true);
+            MCRSalesLine_DS.allowEdit(true);
+            InventDim_DS.allowEdit(true);
+        }
+
+        //CS - Bin Qty Status - Abhinav
+        FormPartControl formpartcontrol = formRun.design().controlName("ETGBinQtyAvailable");
+        formpartcontrol.visible(ETGCanadaParameters::find().EnableBinQtyStatus);
+
+        if(ETGCanadaParameters::find().EnableBinQtyStatus)
+        {
+            InventDim inventdim = InventDim_DS.cursor();
+            ETGBinQtyVisualChartHelperClass::populateBinQtyChartData(inventdim,formpartcontrol);
+        }
+        //CE
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

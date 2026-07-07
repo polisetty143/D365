@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_ChargeCodeUploader</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+using System.IO;
+using OfficeOpenXml;
+using OfficeOpenXml.ExcelPackage;
+using OfficeOpenXml.ExcelRange;
+
+class ETG_ChargeCodeUploader
+{
+    
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Runs the class with the specified arguments.
+    /// </summary>
+    /// <param name = "_args">The specified arguments.</param>
+    public static void main(Args _args)
+    {
+        System.IO.Stream		    stream;
+        ExcelSpreadsheetName	    sheeet;
+        FileUploadBuild			    fileUpload;
+        DialogGroup				    dlgUploadGroup;
+        FileUploadBuild			    fileUploadBuild;
+        FormBuildControl		    formBuildControl;
+
+        int                         counter;
+        InventTable				    inventTable;       
+        PurchAgreementHeader        purchAgreementHeader, purchAgreementHeaderUpd;
+        SalesAgreementHeader        salesAgreementHeader;
+        PurchAgreementId            purchAgreementId;
+        SalesAgreementId            salesAgreementId;
+        ETG_ChargeCodes		        chargecodes;
+        ETG_MarkupCategory          markupCategory;
+        NoYesId                     noyes;
+        MarkupValue                 markupvalue;
+        ETG_Estimation              estimation;
+        MarkupTable                 markupTable;
+        CurrencyExchangeHelper           currencyExchangeRateCur;
+
+        
+              
+        Dialog dialog = new Dialog("Import Agreement Charge codes");
+
+        dlgUploadGroup		= dialog.addGroup("Select Excel File to Upload.");
+        formBuildControl	= dialog.formBuildDesign().control(dlgUploadGroup.name());
+        fileUploadBuild		= formBuildControl.addControlEx(classstr(FileUpload), 'Upload');
+
+        fileUploadBuild.style(FileUploadStyle::MinimalWithFilename);
+        fileUploadBuild.fileTypesAccepted('.xlsx');
+
+    
+        if (dialog.run() && dialog.closedOk())
+        {
+            FileUpload fileUploadControl					  = dialog.formRun().control(dialog.formRun().controlId('Upload'));
+            FileUploadTemporaryStorageResult fileUploadResult = fileUploadControl.getFileUploadResult();
+
+            if (fileUploadResult != null && fileUploadResult.getUploadStatus())
+            {
+                stream = fileUploadResult.openResult();
+                using (ExcelPackage Package = new ExcelPackage(stream))
+                {
+                    int rowCount, i;
+
+                    Package.Load(stream);
+                    ExcelWorksheet worksheet		= package.get_Workbook().get_Worksheets().get_Item(1);
+                    OfficeOpenXml.ExcelRange range	= worksheet.Cells;
+                    rowCount = worksheet.Dimension.End.Row - worksheet.Dimension.Start.Row + 1;
+
+                    for (i = 2; i<= rowCount; i++)
+                    {
+                        estimation               = range.get_Item(i, 1).Value;
+                        purchAgreementId         = range.get_Item(i, 3).Value;
+                        salesAgreementId         = range.get_Item(i, 4).Value;
+                        
+                        
+                        select firstonly purchAgreementHeader
+                            where purchAgreementHeader.PurchNumberSequence == purchAgreementId;
+                        
+                        select firstonly salesAgreementHeader
+                            where salesAgreementHeader.SalesNumberSequence == salesAgreementId;
+                        
+                        if(purchAgreementHeader && salesAgreementHeader)
+                        {
+                            error(strFmt('Purchase agreement %1 and Sales Agreement %2 should not give in single record', purchAgreementId, SalesAgreementId));
+                        }
+
+                        if((purchAgreementHeader && !salesAgreementHeader) || (!purchAgreementHeader && salesAgreementHeader))
+                        {
+                            chargecodes.clear();
+                          
+                            try
+                            { 
+                                chargecodes.ETG_Estimation           = range.get_Item(i, 2).Value;
+                                if(purchAgreementHeader)
+                                {
+                                    chargecodes.PurchNumberSequence      = range.get_Item(i, 3).Value;
+                                }
+                                if(salesAgreementHeader)
+                                {
+                                    chargecodes.PurchNumberSequence      = range.get_Item(i, 4).Value;
+                                }
+                                chargecodes.MarkupCode               = range.get_Item(i, 5).Value;
+
+                                select firstonly markupTable  where
+                                    markupTable.MarkupCode  ==  range.get_Item(i, 5).Value;
+
+                                chargecodes.TransTxt        = markupTable.Txt;
+
+                                chargecodes.ETG_MarkupCategory       = str2Enum(markupCategory, range.get_Item(i, 6).Value);
+                                chargecodes.CurrencyCode             = range.get_Item(i, 7).Value;
+
+                                currencyExchangeRateCur     = CurrencyExchangeHelper::newExchangeDate(Ledger::current(), systemDateGet());
+                                chargecodes.ExchangeRate = currencyExchangeRateCur.calculateCurrencyToCurrency(chargecodes.CurrencyCode, Ledger::accountingCurrency(), 1, true);
+                                
+
+                                chargecodes.Value                    = str2Num(range.get_Item(i, 8).Value);
+
+                                  
+                                ttsbegin;
+                                if(chargecodes.validateWrite())
+                                {
+                                    chargecodes.insert();
+                                }
+                                ttscommit;
+                                counter++;
+
+                            }
+                            catch(Exception::Error)
+                            {
+                                ttsabort;
+                            }
+                        }
+                        else
+                        {
+                            info(strFmt('Purchase Agreement or Sales Agreement Number must be there to insert charge codes'));
+                        }
+                    }
+                    info(strFmt('Charge codes Uploaded Sucessfully. Total Lines %1 : ',counter));
+                }
+            }
+            
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

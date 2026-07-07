@@ -1,0 +1,405 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCustAgingMMRDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(ETGCustAgingMMRContract))]
+class ETGCustAgingMMRDP extends SrsReportDataProviderPreProcessTempDB
+{
+    ETGCustAgingMMR   etgCustAgingMMR;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGCustAgingMMR</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETGCustAgingMMR))]
+    public ETGCustAgingMMR getETGCustAgingMMR()
+    {
+        select * from etgCustAgingMMR;
+        return etgCustAgingMMR;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETGCustAgingMMRContract contract = this.parmDataContract() as ETGCustAgingMMRContract;
+        
+        etgCustAgingMMR.setConnection(this.parmUserConnection());
+
+        if (contract.parmReportType() == ETGReportType::Summary)
+        {
+            this.processSummaryReport(contract);
+        }
+        else
+        {
+            this.processDetailsReport(contract);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processDetailsReport</Name>
+				<Source><![CDATA[
+    private void processDetailsReport(ETGCustAgingMMRContract _contract)
+    {
+        date            asOfDate     = _contract.parmFromDate();
+        ETGAgingBasedOn agingBasedOn = _contract.parmAgingBasedOn();
+
+        // Define dimension names
+        str Vertical               = "vertical";
+        str MAINCOMMODITY          = "MainCommodity";
+        str ContractDimName        = "Contract";
+        str COSTCENTER             = "CostCenter";
+        str DEPARTMENT             = "Department";
+        str INTERCOMPANY           = "InterCompany";
+        str LINE_OF_BUSINESSS      = "Line_Of_Business";
+        str SUBVERTICAL            = "SubVertical";
+        str TRADER_EMPLOYEE        = "Trader_Employee";
+        str BusinessUnit           = "businessUnit";
+        str Item                   = "item";
+        str Plant_Warehouse_Office = "plant_Warehouse_Office";
+        str SubCommodity           = "SubCommodity";
+        str PRODUCT_SERVICE        = "pRODUCT_SERVICE";
+
+        Query query = this.parmQuery();
+        if (!query)
+        {
+            query = new Query();
+            query.addDataSource(tableNum(CustTrans));
+        }
+
+        QueryRun qr = new QueryRun(query);
+
+        CustTrans       custTrans;
+        CustSettlement  custSettlement;
+        CustTable       custTable;
+        
+        real            balanceCur;
+        real            balanceMST;
+        real            settledCur;
+        real            settledMST;
+        int             daysPastDue;
+
+        while (qr.next())
+        {
+            if (qr.changed(tableNum(CustTrans)))
+            {
+                custTrans = qr.get(tableNum(CustTrans));
+
+                if (custTrans.TransDate > asOfDate)
+                {
+                    continue;
+                }
+
+                custTable = CustTable::find(custTrans.AccountNum);
+                
+                etgCustAgingMMR.clear();
+            
+                settledCur = 0;
+                settledMST = 0;
+
+                select sum(SettleAmountCur), sum(SettleAmountMST)
+                    from custSettlement
+                    where custSettlement.TransRecId == custTrans.RecId
+                       && custSettlement.TransDate  <= asOfDate;
+                
+                settledCur = custSettlement.SettleAmountCur;
+                settledMST = custSettlement.SettleAmountMST;
+
+                // --- FIX: Apply decRound to eliminate floating point issues ---
+                balanceCur = decRound(custTrans.AmountCur - settledCur, 2);
+                balanceMST = decRound(custTrans.AmountMST - settledMST, 2);
+
+                if (balanceCur == 0)
+                {
+                    balanceMST = 0;
+                }
+
+                if (balanceCur == 0 && balanceMST == 0)
+                {
+                    continue;
+                }
+
+                etgCustAgingMMR.CustAccount     = custTrans.AccountNum;
+                etgCustAgingMMR.CustomerName    = custTable.name();
+                etgCustAgingMMR.CustomerGroup   = custTable.CustGroup;
+                etgCustAgingMMR.Voucher         = custTrans.Voucher;
+                etgCustAgingMMR.TransactionDate = custTrans.TransDate;
+                etgCustAgingMMR.DocumentDate    = custTrans.DocumentDate;
+                etgCustAgingMMR.CurrencyCode    = custTrans.CurrencyCode;
+                etgCustAgingMMR.DueDate         = custTrans.DueDate;
+                etgCustAgingMMR.PaymTermId      = custTrans.PaymTermId;
+                etgCustAgingMMR.Invoice         = custTrans.Invoice;
+                
+                etgCustAgingMMR.OutStandingLC   = balanceMST;
+                etgCustAgingMMR.OutStandingTC   = balanceCur;
+
+                if (agingBasedOn == ETGAgingBasedOn::DueDate)
+                {
+                    daysPastDue = asOfDate - custTrans.DueDate;
+                }
+                else if (agingBasedOn == ETGAgingBasedOn::DocumentDate)
+                {
+                    daysPastDue = asOfDate - custTrans.DocumentDate;
+                }
+                else
+                {
+                    daysPastDue = asOfDate - custTrans.TransDate;
+                }
+
+                if (curExt() == "o014")
+                {
+                    if (daysPastDue <= 30)       etgCustAgingMMR.Bucket01 = balanceMST;
+                    else if (daysPastDue <= 60)  etgCustAgingMMR.Bucket02 = balanceMST;
+                    else if (daysPastDue <= 90)  etgCustAgingMMR.Bucket03 = balanceMST;
+                    else if (daysPastDue <= 120) etgCustAgingMMR.Bucket04 = balanceMST;
+                    else if (daysPastDue <= 180) etgCustAgingMMR.Bucket05 = balanceMST;
+                    else                         etgCustAgingMMR.Bucket06 = balanceMST;
+                    
+                    etgCustAgingMMR.AgingBucket = this.getAgingBucketString(daysPastDue);
+                }
+                else if (curExt() == "o025")
+                {
+                    if (daysPastDue <= 30)       etgCustAgingMMR.Bucket01 = balanceCur;
+                    else if (daysPastDue <= 45)  etgCustAgingMMR.Bucket02 = balanceCur;
+                    else if (daysPastDue <= 60)  etgCustAgingMMR.Bucket03 = balanceCur;
+                    else if (daysPastDue <= 90)  etgCustAgingMMR.Bucket04 = balanceCur;
+                    else if (daysPastDue <= 120) etgCustAgingMMR.Bucket05 = balanceCur;
+                    else if (daysPastDue <= 180) etgCustAgingMMR.Bucket06 = balanceCur;
+                    else                         etgCustAgingMMR.Bucket07 = balanceCur;
+                    
+                    etgCustAgingMMR.AgingBucket = this.getAgingBucketString(daysPastDue);
+                }
+                else
+                {
+                    if (daysPastDue <= 30)       etgCustAgingMMR.Bucket01 = balanceCur;
+                    else if (daysPastDue <= 60)  etgCustAgingMMR.Bucket02 = balanceCur;
+                    else if (daysPastDue <= 90)  etgCustAgingMMR.Bucket03 = balanceCur;
+                    else if (daysPastDue <= 120) etgCustAgingMMR.Bucket04 = balanceCur;
+                    else if (daysPastDue <= 180) etgCustAgingMMR.Bucket05 = balanceCur;
+                    else                         etgCustAgingMMR.Bucket06 = balanceCur;
+                    
+                    etgCustAgingMMR.AgingBucket = this.getAgingBucketString(daysPastDue);
+                }
+
+                etgCustAgingMMR.BusinessUnit     = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, businessUnit);
+                etgCustAgingMMR.CostCenter       = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, COSTCENTER);
+                etgCustAgingMMR.Department       = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, DEPARTMENT);
+                etgCustAgingMMR.InterCompany     = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, INTERCOMPANY);
+                etgCustAgingMMR.Item             = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, item);
+                etgCustAgingMMR.LineOfBusiness   = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, LINE_OF_BUSINESSS);
+                etgCustAgingMMR.Commodity        = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, MAINCOMMODITY);
+                etgCustAgingMMR.PlantWarehouseOffice = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, plant_Warehouse_Office);
+                etgCustAgingMMR.SubCommodity     = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(custTrans.DefaultDimension, subCommodity);
+                etgCustAgingMMR.Trader           = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, TRADER_EMPLOYEE);
+                etgCustAgingMMR.Vertical         = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, vertical);
+                etgCustAgingMMR.Product_Service  = custTrans::product_Service(custTrans);
+             
+                etgCustAgingMMR.insert();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processSummaryReport</Name>
+				<Source><![CDATA[
+    private void processSummaryReport(ETGCustAgingMMRContract _contract)
+    {
+        date            asOfDate     = _contract.parmFromDate();
+        ETGAgingBasedOn agingBasedOn = _contract.parmAgingBasedOn();
+        
+        str             BusinessUnit = "businessUnit";
+        str             businessUnitValue;
+        str             mapKey;
+
+        Query query = this.parmQuery();
+        if (!query)
+        {
+            query = new Query();
+            query.addDataSource(tableNum(CustTrans));
+        }
+
+        QueryRun qr = new QueryRun(query);
+
+        CustTrans       custTrans;
+        CustSettlement  custSettlement;
+        CustTable       custTable;
+        
+        real            balanceCur;
+        real            balanceMST;
+        real            settledCur;
+        real            settledMST;
+        int             daysPastDue;
+
+        Map             customerMap = new Map(Types::String, Types::Record);
+        ETGCustAgingMMR agingBuffer;
+
+        while (qr.next())
+        {
+            if (qr.changed(tableNum(CustTrans)))
+            {
+                custTrans = qr.get(tableNum(CustTrans));
+
+                if (custTrans.TransDate > asOfDate)
+                {
+                    continue;
+                }
+                
+                settledCur = 0;
+                settledMST = 0;
+
+                select sum(SettleAmountCur), sum(SettleAmountMST)
+                    from custSettlement
+                    where custSettlement.TransRecId == custTrans.RecId
+                       && custSettlement.TransDate  <= asOfDate;
+                
+                settledCur = custSettlement.SettleAmountCur;
+                settledMST = custSettlement.SettleAmountMST;
+
+                
+                balanceCur = decRound(custTrans.AmountCur - settledCur, 2);
+                balanceMST = decRound(custTrans.AmountMST - settledMST, 2);
+
+                if (balanceCur == 0)
+                {
+                    balanceMST = 0;
+                }
+
+                if (balanceCur == 0 && balanceMST == 0)
+                {
+                    continue;
+                }
+
+                businessUnitValue = ETG_Dimension_Class::getDimensionDisplayValue(custTrans.DefaultDimension, BusinessUnit);
+                mapKey = strFmt("%1|%2|%3", custTrans.AccountNum, businessUnitValue, custTrans.CurrencyCode);
+
+                if (customerMap.exists(mapKey))
+                {
+                    agingBuffer = customerMap.lookup(mapKey);
+                }
+                else
+                {
+                    custTable = CustTable::find(custTrans.AccountNum);
+                    
+                    agingBuffer.clear();
+                    agingBuffer.CustAccount     = custTrans.AccountNum;
+                    agingBuffer.CustomerName    = custTable.name();
+                    agingBuffer.CustomerGroup   = custTable.CustGroup;
+                    agingBuffer.CurrencyCode    = custTrans.CurrencyCode;
+                    agingBuffer.BusinessUnit    = businessUnitValue;
+                }
+
+                agingBuffer.OutStandingLC   += balanceMST;
+                agingBuffer.OutStandingTC   += balanceCur;
+
+                if (agingBasedOn == ETGAgingBasedOn::DueDate)
+                {
+                    daysPastDue = asOfDate - custTrans.DueDate;
+                }
+                else if (agingBasedOn == ETGAgingBasedOn::DocumentDate)
+                {
+                    daysPastDue = asOfDate - custTrans.DocumentDate;
+                }
+                else
+                {
+                    daysPastDue = asOfDate - custTrans.TransDate;
+                }
+
+                if (curExt() == "o014")
+                {
+                    if (daysPastDue <= 30)       agingBuffer.Bucket01 += balanceMST;
+                    else if (daysPastDue <= 60)  agingBuffer.Bucket02 += balanceMST;
+                    else if (daysPastDue <= 90)  agingBuffer.Bucket03 += balanceMST;
+                    else if (daysPastDue <= 120) agingBuffer.Bucket04 += balanceMST;
+                    else if (daysPastDue <= 180) agingBuffer.Bucket05 += balanceMST;
+                    else                         agingBuffer.Bucket06 += balanceMST;
+                }
+                else if (curExt() == "o025")
+                {
+                    if (daysPastDue <= 30)       agingBuffer.Bucket01 += balanceCur;
+                    else if (daysPastDue <= 45)  agingBuffer.Bucket02 += balanceCur;
+                    else if (daysPastDue <= 60)  agingBuffer.Bucket03 += balanceCur;
+                    else if (daysPastDue <= 90)  agingBuffer.Bucket04 += balanceCur;
+                    else if (daysPastDue <= 120) agingBuffer.Bucket05 += balanceCur;
+                    else if (daysPastDue <= 180) agingBuffer.Bucket06 += balanceCur;
+                    else                         agingBuffer.Bucket07 += balanceCur;
+                }
+                else
+                {
+                    if (daysPastDue <= 30)       agingBuffer.Bucket01 += balanceCur;
+                    else if (daysPastDue <= 60)  agingBuffer.Bucket02 += balanceCur;
+                    else if (daysPastDue <= 90)  agingBuffer.Bucket03 += balanceCur;
+                    else if (daysPastDue <= 120) agingBuffer.Bucket04 += balanceCur;
+                    else if (daysPastDue <= 180) agingBuffer.Bucket05 += balanceCur;
+                    else                         agingBuffer.Bucket06 += balanceCur;
+                }
+
+                customerMap.insert(mapKey, agingBuffer);
+            }
+        }
+
+        MapEnumerator mapEnum = customerMap.getEnumerator();
+        
+        while (mapEnum.moveNext())
+        {
+            agingBuffer = mapEnum.currentValue();
+            
+            
+            if (decRound(agingBuffer.OutStandingTC, 2) == 0)
+            {
+                agingBuffer.OutStandingLC = 0;
+            }
+
+            if (decRound(agingBuffer.OutStandingTC, 2) == 0 && decRound(agingBuffer.OutStandingLC, 2) == 0)
+            {
+                continue; // Do not insert the customer into the final report if the total net is 0
+            }
+
+            etgCustAgingMMR.clear();
+            etgCustAgingMMR.data(agingBuffer);
+            etgCustAgingMMR.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getAgingBucketString</Name>
+				<Source><![CDATA[
+    private str getAgingBucketString(int _daysPastDue)
+    {
+        if (curExt() == "o025")
+        {
+            if (_daysPastDue <= 30)       return "0-30 DAYS";
+            else if (_daysPastDue <= 45)  return "31-45 DAYS";
+            else if (_daysPastDue <= 60)  return "46-60 DAYS";
+            else if (_daysPastDue <= 90)  return "61-90 DAYS";
+            else if (_daysPastDue <= 120) return "91-120 DAYS";
+            else if (_daysPastDue <= 180) return "121-180 DAYS";
+            else                          return ">180 DAYS";
+        }
+        else
+        {
+            if (_daysPastDue <= 30)       return "0-30";
+            else if (_daysPastDue <= 60)  return "31-60";
+            else if (_daysPastDue <= 90)  return "61-90";
+            else if (_daysPastDue <= 120) return "91-120";
+            else if (_daysPastDue <= 180) return "121-180";
+            else                          return "180 Above";
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

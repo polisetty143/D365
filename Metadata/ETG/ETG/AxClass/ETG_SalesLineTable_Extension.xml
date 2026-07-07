@@ -1,0 +1,302 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesLineTable_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tableStr(SalesLine))]
+final class ETG_SalesLineTable_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>ETGITMinventTransQty</Name>
+				<Source><![CDATA[
+    Public Qty ETGITMinventTransQty()
+    {
+        InventTrans inventTrans;
+        InventTransOriginSalesLine inventTransOriginSalesLine;
+        
+        if (!this.InventTransId)
+        {
+            return 0;
+        }
+
+        select sum(Qty) from inventTrans
+            exists join inventTransOriginSalesLine
+            where inventTransOriginSalesLine.InventTransOrigin == inventTrans.InventTransOrigin
+                && inventTransOriginSalesLine.SalesLineDataAreaId == this.dataAreaId
+                && inventTransOriginSalesLine.SalesLineInventTransId == this.InventTransId;
+
+
+        return inventTrans.Qty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>receivedInTotalETG</Name>
+				<Source><![CDATA[
+    display SalesQty receivedInTotalETG()
+    {
+        if (!this.InventTransId)
+        {
+            return 0;
+        }
+
+        return this.receivedInTotalServerETG();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>receivedInTotalServerETG</Name>
+				<Source><![CDATA[
+    SalesQty receivedInTotalServerETG()
+    {
+        SalesQty   qtySales;
+
+        if (this.InventTransId)
+        {
+            qtySales   = (select sum(QtyPhysical) from custInvoiceTrans
+                            index hint TransIdIdx
+                            where custInvoiceTrans.InventTransId == this.InventTransId).QtyPhysical;
+
+            qtySales  += this.receivedOnPackingSlipInTotalETG();
+        }
+
+        return qtySales;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>unitConvertInvent2SalesETG</Name>
+				<Source><![CDATA[
+    PurchQty unitConvertInvent2SalesETG(InventQty _inventQty)
+    {
+        return EcoResProductUnitConverter::convertGivenUnitSymbolsForReleasedProduct(this.ItemId,
+                                                                                     this.InventDimId,
+                                                                                     _inventQty,
+                                                                                     this.inventTable().inventUnitId(),
+                                                                                     this.SalesUnit,
+                                                                                     NoYes::Yes);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>receivedOnPackingSlipInTotalETG</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Retrieves the quantity received on packing slips.
+    /// </summary>
+    /// <returns>
+    /// The quantity received on packing slips.
+    /// </returns>
+    public SalesQty receivedOnPackingSlipInTotalETG()
+    {
+        CustPackingSlipTrans custPackingSlipTrans;
+
+        select sum(Qty) from custPackingSlipTrans
+            where custPackingSlipTrans.InventTransId == this.InventTransId;
+
+        return custPackingSlipTrans.Qty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initFromAgreementLine</Name>
+				<Source><![CDATA[
+    public void initFromAgreementLine(AgreementLine _agreementLine)
+    {
+        ETG_SalesLineNotes      salesLineNotes;
+        ETG_AgreementLineNotes  agreementLineNotes;
+        next initFromAgreementLine(_agreementLine);
+
+        this.ETG_IsGrossWeight       = _agreementLine.ETG_IsGrossWeight;
+        this.ETG_ItemAlternativeName = _agreementLine.ETG_ItemAlternativeName;
+        this.ETG_ItemQuantityGroup   = _agreementLine.ETG_ItemQuantityGroup;
+        this.OverDeliveryPct         = _agreementLine.ETG_OverDeliveryPct;
+        this.UnderDeliveryPct        = _agreementLine.ETG_UnderDeliveryPct;
+        this.ETG_IsThirdParty        = _agreementLine.ETG_IsThirdParty;
+        this.DefaultDimension        = _agreementLine.DefaultDimension;
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insert</Name>
+				<Source><![CDATA[
+    public void insert(boolean     dropInvent,
+        boolean     findMarkup,
+        common     _childBuffer,
+        boolean     _skipCreditLimitCheck,
+        boolean     _skipWHSProcesses,
+        InventRefTransId     _interCompanyInventTransId)
+    {
+        ETG_SalesLineNotes                  salesLineNotes;
+        ETG_AgreementLineNotes              agreementLineNotes;
+        AgreementLineReference              agreementLineRef;
+        AgreementLineQuantityCommitment     agreementLineDerived;
+        PurchLine                           purchLine;
+        boolean                             isNotes = false,isSpecs = false;
+        RecordInsertList    tmpInsNotes = new RecordInsertList(tableNum(ETG_SalesLineNotes));
+        RecordInsertList    tmpInsSpecs = new RecordInsertList(tableNum(ETG_PostPackingQualityGrp));
+        ETG_SalesLineQualityGrp             salesLineQualityGrp;
+        ETG_AgreementLineQualityGrp         agreementLineQualityGrpSrc,agreementLineQualitySpec;
+        ETG_PostPackingQualityGrp           salesLineSpecification;
+        Name                                groupId;
+        ETGAgrrementQualitySpecsLine        agreementQualitySpecsLine;//QualitySpecificationBugs.,27 Jan 2021,Binay
+      
+        next insert(dropInvent ,findMarkup,_childBuffer,_skipCreditLimitCheck,_skipWHSProcesses,_interCompanyInventTransId);    
+        
+        if(this.MatchingAgreementLine)
+        {
+            while select * from agreementLineQualityGrpSrc
+                where agreementLineQualityGrpSrc.AgreementLine  == this.MatchingAgreementLine
+            {
+                salesLineQualityGrp.GroupId         = agreementLineQualityGrpSrc.GroupId;
+                salesLineQualityGrp.Value           = agreementLineQualityGrpSrc.Value;
+                salesLineQualityGrp.InventTransId   = this.InventTransId;
+                salesLineQualityGrp.insert();
+            }
+            while select * from agreementQualitySpecsLine
+                where agreementQualitySpecsLine.AgreementLineRefrecid == this.MatchingAgreementLine            
+            {
+                salesLineSpecification.GroupID               = agreementQualitySpecsLine.GroupID;
+                salesLineSpecification.MaxRange              = agreementQualitySpecsLine.MaxRange;
+                salesLineSpecification.MinRange              = agreementQualitySpecsLine.MinRange;
+                salesLineSpecification.InventTransId         = this.InventTransId;
+                salesLineSpecification.SalesId               = this.SalesId;
+                salesLineSpecification.SubGroupID            = agreementQualitySpecsLine.SubGrpId;
+                salesLineSpecification.SubGroupDescription   = agreementQualitySpecsLine.SubGroupDescription;
+                salesLineSpecification.MeasurementType       = agreementQualitySpecsLine.MeasurementType;
+                salesLineSpecification.AdjustmentType        = agreementQualitySpecsLine.AdjustmentType;
+                salesLineSpecification.Increment             = agreementQualitySpecsLine.Increment;
+                salesLineSpecification.FixedValue            = agreementQualitySpecsLine.FixedValue;               
+                tmpInsSpecs.add(salesLineSpecification);
+                isSpecs = true;
+            }
+            if(isSpecs)
+            {
+                tmpInsSpecs.insertDatabase();
+                isSpecs = false;
+            }
+
+            while select EnumNotes,Description,ItemId,PrintNotesInContract from agreementLineNotes
+                where agreementLineNotes.AgreementLine == this.MatchingAgreementLine
+            {
+                salesLineNotes.InventTransId = this.InventTransId;
+                salesLineNotes.EnumNotes     = agreementLineNotes.EnumNotes;
+                salesLineNotes.Description   = agreementLineNotes.Description;
+                salesLineNotes.ItemId        = agreementLineNotes.ItemId;
+                // salesLineNotes.PrintNotesInContract = agreementLineNotes.PrintNotesInContract;
+                tmpInsNotes.add(salesLineNotes);
+                isNotes = true;
+            }
+            if(isNotes)
+            {
+                tmpInsNotes.insertDatabase();
+                isNotes = false;
+            }
+
+            if(this.ETG_IsThirdParty && !this.ETG_TPInventTransId)
+            {
+                select firstonly * from agreementLineDerived
+                    where agreementLineDerived.ETG_DerivedTP == this.MatchingAgreementLine;
+
+                if(agreementLineDerived)
+                {
+                    purchLine =  ETG_ReleaseOrder::createPurchLine(agreementLineDerived,this);
+
+                    this.ETG_TPInventTransId = purchLine.InventTransId;
+                                
+                    //if(!this.InterCompanyInventTransId && CustParameters::find().ETGIsAutoMarking)
+                    if(!this.InterCompanyInventTransId && ETG_Parameters::find().ETGIsAutoMarking)
+                    {
+                        this.InventRefId         = purchLine.PurchId;
+                        this.InventRefTransId    = purchLine.InventTransId;
+                    }
+               
+                    this.doUpdate();
+                }
+            }
+        }
+        if(ETGACFParameters::find().EnablePortLoadingDetailsHeaderToLine == NoYes::Yes)
+        {
+            ETG_SalesLineTrade saleslineTrade;
+
+            select firstonly saleslineTrade
+                where saleslineTrade.SalesId == this.SalesId
+                && saleslineTrade.SalesLineRecId == this.RecId;
+
+            if(!saleslineTrade)
+            {
+                saleslineTrade.createFromSalesLine(this);
+            }
+
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>hasExensionTableEnabled</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Checks is there any extension table of table <C>SalesLine</C> is enabled.
+    /// </summary>
+    /// <returns>
+    /// true if there is one or more extension tables are enabled. Otherwise, return false.
+    /// </returns>
+    public static boolean hasExensionTableEnabled()
+    {
+        return SysExtensionSerializerMap::hasExensionTableEnabled(tableNum(SalesLine));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>update</Name>
+				<Source><![CDATA[
+    public void  update(boolean  _dropInvent,
+                        Common   _childBuffer,
+                        boolean  _updateOrderLineOfDeliverySchedule,
+                        boolean  _mcrAutoallocate,
+                        boolean  _cameFromCreate,
+                        boolean  _promptSuppItem
+                        )
+    {
+        
+
+        //CS, DLT, 04022025, sales order workflow changes
+        //check if sales order wf is enabled and status is approved then any changes in sales line will change the status to draft
+        if(ETGACFParameters::find().EnableSOWorkflow == NoYes::Yes)
+        {
+            SalesTable salesTableLoc = this.salesTable();
+            
+            if(salesTableLoc && salesTableLoc.ETGWorkflowStatus == VersioningDocumentState::Approved)
+            {
+                if( this.SalesQty != this.orig().SalesQty || this.SalesPrice != this.orig().SalesPrice || this.LineDisc != this.orig().Linedisc || this.LinePercent != this.orig().LinePercent)
+                {
+                    ttsbegin;
+                    salesTableLoc.selectForUpdate(true);
+                    salesTableLoc.ETGWorkflowStatus = VersioningDocumentState::Draft;
+                    salesTableLoc.doUpdate();
+                    ttscommit;
+                }
+            }
+        }
+
+        //CE, DLT, 04022025, sales order workflow changes
+        next update(_dropInvent, _childBuffer, _updateOrderLineOfDeliverySchedule, _mcrAutoallocate, _cameFromCreate, _promptSuppItem);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

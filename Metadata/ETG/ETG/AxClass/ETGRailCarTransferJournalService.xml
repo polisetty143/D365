@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGRailCarTransferJournalService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGRailCarTransferJournalService
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>createTransferJournal</Name>
+				<Source><![CDATA[
+    public static JournalId createTransferJournal(
+        ETGRailCarLoadingTable _header,
+        DataAreaId              _targetCompany)
+    {
+        ETGRailCarLoadingLineTable    lineTable;
+        ETGRailCarLoadingLineDetails  lineDetails;
+
+        DataAreaId              currentComp = curExt();
+
+        InventJournalTable     journalTable;
+        InventJournalTrans     journalTrans;
+        InventJournalName      journalName;
+        InventDim              fromDim, toDim;
+        InventSerial           serial;
+
+        InventJournalId journalId;
+
+        if (!_header.RecId)
+            throw error("@ETG_New:ETGHeadernotfound");
+
+        if (!_targetCompany)
+            throw error("@ETG_New:ETGParentCompNotsetup");
+        try
+        {
+
+            changecompany(_targetCompany)
+            {
+                ttsbegin;
+
+                // Create Journal Header       
+                InventJournalName inventJournalName;
+
+                //InventJournalNameId    inventJournalNameId = InventJournalName::standardJournalName(InventJournalType::Transfer);
+
+                select firstonly inventJournalName
+                where inventJournalName.JournalType == InventJournalType::Transfer
+                    && inventJournalName.ETGRailCarLoading  == NoYes::Yes;
+
+
+                if (!inventJournalName.RecId)
+                    throw error("@ETG_New:ETGTransferNameNotexist");
+
+                journalTable.clear();
+                journalTable.initFromInventJournalName(inventJournalName);
+                journalTable.Description =
+                    strFmt("@ETG_New:ETGRailCarTransferJour",
+                            _header.ETGRailLoadingSerialNumber);
+                journalTable.insert();
+
+                journalId = journalTable.JournalId;
+
+                while select crosscompany lineTable
+                    where lineTable.ETGRailLoadingSerialNumber ==
+                          _header.ETGRailLoadingSerialNumber
+                        && lineTable.DataAreaId == currentComp
+                    join lineDetails
+                        where lineDetails.ETGRailLoadingSerialNumber ==
+                              lineTable.ETGRailLoadingSerialNumber
+                           && lineDetails.LineNum == lineTable.LineNum
+                           && lineDetails.DataAreaId == currentComp
+                {
+                    if (!lineDetails.ETGRailLoadNumber)
+                        throw error(strFmt(
+                            "@ETG_New:ETGMissingSerialno",
+                            lineTable.LineNum));
+
+                    // Ensure Serial Exists if not then create one
+  
+                    serial = InventSerial::findorCreate(
+                                lineDetails.ETGRailLoadNumber,lineTable.ItemId);
+
+                    // Build Dimensions
+                    fromDim = InventDim::findInLegalEntity(
+                                lineTable.InventDimId, currentComp);
+
+                    fromDim = InventDim::findOrCreate(fromDim);
+
+                    toDim = fromDim;
+                    toDim.InventSerialId = serial.InventSerialId;
+
+                    toDim = InventDim::findOrCreate(toDim);
+
+                    // Insert Journal Line
+                    journalTrans.clear();
+                    journalTrans.initFromInventJournalTable(
+                        journalTable);
+
+                    journalTrans.JournalId     = journalId;
+                    journalTrans.ItemId        = lineTable.ItemId;
+                    journalTrans.TransDate     = _header.TransDate;
+                    journalTrans.Qty           = lineDetails.Qty;
+                    journalTrans.InventDimId   = fromDim.InventDimId;
+                    journalTrans.ToInventDimId = toDim.InventDimId;
+
+                    journalTrans.DefaultDimension = journalTrans.copyDimension(InventTable::find(lineTable.ItemId).DefaultDimension);
+
+                    journalTrans.insert();
+                }
+
+                InventJournalTable     journalTableUpdate       = InventJournalTable::find(journalId,true);
+                if( journalTableUpdate)
+                {
+                    journalTableUpdate.NumOfLines           = ETGRailCarTransferJournalService::getJournalLineCount(journalId,_targetCompany);
+                }
+                ttsbegin;
+                journalTableUpdate.update();
+                ttscommit;
+
+                if(journalTableUpdate)
+                {
+                    //<Post Journal>
+                    JournalCheckPost      journalCheckPost = InventJournalCheckPost::newPostJournal(journalTableUpdate);
+                    journalCheckPost.run();
+                }
+
+                ttscommit;
+            }
+        }
+        catch (Exception::Error) 
+        { 
+            // TTS is automatically aborted → no journal created 
+                journalId = '';
+            // return empty to indicate failure 
+                throw; 
+            // rethrow to show error to user 
+        }
+
+        return journalId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getJournalLineCount</Name>
+				<Source><![CDATA[
+    public static int getJournalLineCount(InventJournalId _journalId, DataAreaId    _targetComp)
+    {
+        InventJournalTrans trans;
+        int lineCount;
+
+        select count(RecId) from trans
+        where trans.JournalId == _journalId
+            && trans.DataAreaId == _targetComp;
+
+        return trans.RecId;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGVendInvoiceInfoTable_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension class for table <c>VendInvoiceInfoTable</c>
+/// </summary>
+[ExtensionOf(tableStr(VendInvoiceInfoTable))]
+internal final class ETGVendInvoiceInfoTable_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>modifiedField</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method overrides modified method to call updateTermoValueUsage() when TERMO Number is entered
+    /// </summary>
+    /// <param name = "_fieldId">FieldId</param>
+    public void modifiedField(FieldId _fieldId)
+    {
+       
+        next modifiedField(_fieldId);
+
+        switch (_fieldId)
+        {
+            case fieldNum(VendInvoiceInfoTable, ETGTERMONumber):
+                if(VendParameters::find().ETGEnableTermoNumberFeature)
+                {
+                    if(this.ETGTERMONumber)
+                    {
+                        this.ETGRemainingTermoValueReal  = ETGTERMONumberTable::findFromTermoNumber(this.ETGTERMONumber).RemainingTermoValueReal;
+                        this.ETGMotherTERMOReference     = ETGTERMONumberTable::findFromTermoNumber(this.ETGTERMONumber).MotherTERMOReference;
+                    }
+                    else
+                    {
+                        this.ETGRemainingTermoValueReal  = 0;
+                        this.ETGMotherTERMOReference = "";
+                    }
+                    this.updateTermoValueUsage();
+                }
+                break;
+            // NS, DLT , 04/03/2025 WHEN WE SELECT THE BL NUMBER THEN BL DATE SHOULD COME AUTOMATIC
+            case fieldNum(VendInvoiceInfoTable, ETG_BLnumber):
+                if (ETGACFParameters::find().BLNumberAutomation == NoYes::Yes)
+                {
+                    VendPackingSlipTrans vendPackingSlipTrans;
+                    str selectedBLNumber = this.ETG_BLnumber;
+
+                    if (selectedBLNumber)
+                    {
+                        select firstonly BOLDate from vendPackingSlipTrans
+                            where vendPackingSlipTrans.BOLNo == selectedBLNumber;
+
+                        if (vendPackingSlipTrans)
+                        {
+                            this.ETG_BLDate = vendPackingSlipTrans.BOLDate;
+                        }
+                    }
+                }
+            // NE, DLT , 04/03/2025 WHEN WE SELECT THE BL NUMBER THEN BL DATE SHOULD COME AUTOMATIC
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateTermoValueUsage</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method throws error when line amount exceeds TERMO value or Remaining TERMO value for selected TERMO number
+    /// </summary>
+    public void updateTermoValueUsage()
+    {
+        VendInvoiceInfoLine vendInvoiceInfoLine;
+        ETGTERMONumberTable termoNumberTable;
+        ETGTERMONumberTable termoNumberMother;
+        select sum(LineAmount) from vendInvoiceInfoLine
+            where vendInvoiceInfoLine.ParmId == this.ParmId
+                && vendInvoiceInfoLine.TableRefId == this.TableRefId;
+        
+        termoNumberTable = ETGTERMONumberTable::findFromTermoNumber(this.ETGTERMONumber);
+
+        if (termoNumberTable.TypeOfTERMO != ETGTypeOfTERMO::Child)
+        {
+            if((vendInvoiceInfoLine.LineAmount > termoNumberTable.RemainingTermoValueReal)
+                || (vendInvoiceInfoLine.LineAmount > termoNumberTable.TermoValueReal))
+            {
+                throw error(strFmt("@ETG_New:TERMOValueUsageValidationRemainingTERMOValue", vendInvoiceInfoLine.LineAmount, this.ETGRemainingTermoValueReal, this.ETGTERMONumber));
+            }
+        }
+
+        if (termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Child)
+        {
+            termoNumberMother = ETGTERMONumberTable::findFromTermoNumber(termoNumberTable.MotherTERMOReference, true);
+            if((vendInvoiceInfoLine.LineAmount > termoNumberMother.RemainingTermoValueReal)
+                || (vendInvoiceInfoLine.LineAmount > termoNumberMother.TermoValueReal))
+            {
+                throw error(strFmt("@ETG_New:ChildTERMOValueUsageValidationRemainingTERMOValue", vendInvoiceInfoLine.LineAmount, termoNumberMother.RemainingTermoValueReal , termoNumberMother.TERMONumber));
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>remainingTermoAmount</Name>
+				<Source><![CDATA[
+    // <summary>
+    /// this method will display the remaining TERMO amount for particular TERMO Number
+    /// </summary>
+    /// <returns>ETGRemainingTERMOValueReal</returns>
+    [SysClientCacheDataMethodAttribute(true)]
+
+    public display ETGRemainingTermoValueReal remainingTermoAmount()
+    {
+        return ETGTERMONumberTable::findFromTermoNumber(this.ETGTERMONumber).RemainingTermoValueReal;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>changeStatus</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// this will change TERMO status to Close when Remaining TERMO amount is 0
+    /// </summary>
+    /// <returns>ETGTERMONumberStatus</returns>
+    public display ETGTERMONumberStatus changeStatus()
+    {
+        return ETGTERMONumberTable::findFromTermoNumber(this.ETGTERMONumber).changeStatus();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

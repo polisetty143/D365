@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGFreeTextInvoiceDP_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The <c>FreeTextInvoiceDP</c> class is the report data provider class for the <c>FreeTextInvoice</c>
+/// report.
+/// </summary>
+[ExtensionOf(classStr(FreeTextInvoiceDP))]
+final class ETGFreeTextInvoiceDP_Extension
+{
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>populateFreeTextInvoiceHeaderFooterTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Populates the invoice header information into the <c>FreeTextInvoiceHeaderFooterTmp</c> table buffer.
+    /// </summary>
+    /// <param name="_custInvoiceJour">
+    /// The <c>CustInvoiceJour</c> record that has the invoice header information.
+    /// </param>
+    /// <param name="_companyInfo">
+    /// The <c>CompanyInfo</c> record that has the company information.
+    /// </param>
+    protected void populateFreeTextInvoiceHeaderFooterTmp(CustInvoiceJour _custInvoiceJour, CompanyInfo _companyInfo)
+    {
+        Logisticslocation           logisticslocation;
+        LogisticsPostalAddress      logisticsPostalAddress;
+        CustInvoiceTable            custInvoiceTableLoc;
+        next                        populateFreeTextInvoiceHeaderFooterTmp(_custInvoiceJour, _companyInfo);
+        LogisticsElectronicAddress  electronicAddress;
+        Description1000             AmountinTxt;
+        BankAccountTable            bankAccountTable;
+
+        electronicAddress = DirParty::primaryElectronicAddress(_companyInfo.RecId, LogisticsElectronicAddressMethodType::Phone);
+        freeTextInvoiceHeaderFooterTmp.ETGCompanyTeleFax    = strFmt('Tel : %1   Fax : %2',CompanyInfo::find().phone(),CompanyInfo::find().teleFax());
+        freeTextInvoiceHeaderFooterTmp.ETGCompanyCoRegNum   = strFmt('Reg No : %1   GST Reg No : %2',companyInfo.Giro,companyInfo.CoRegNum);
+        freeTextInvoiceHeaderFooterTmp.CompanyLogo          = FormLetter::companyLogo();
+        freeTextInvoiceHeaderFooterTmp.CompanyPhone         = electronicAddress.LocatorExtension + ' ' + electronicAddress.Locator;//_companyInfo.teleFax();
+        electronicAddress                                   = DirParty::primaryElectronicAddress(_companyInfo.RecId, LogisticsElectronicAddressMethodType::Fax);
+        freeTextInvoiceHeaderFooterTmp.CompanyAddress       = strReplace(freeTextInvoiceHeaderFooterTmp.CompanyAddress,'\n',' ');
+        freeTextInvoiceHeaderFooterTmp.ETGSalesID           = _custInvoiceJour.SalesId;
+        custInvoiceTableLoc                                 = CustInvoiceTable::findSourceDocumentHeader(_custInvoiceJour.SourceDocumentHeader);
+        freeTextInvoiceHeaderFooterTmp.ETGPort              = custInvoiceTableLoc.ETGPortOrPlaceOfDischarge;
+        freeTextInvoiceHeaderFooterTmp.ETGDocumentDate      = custInvoiceTableLoc.ETGAirWayBillDate;
+        freeTextInvoiceHeaderFooterTmp.ETGExternalInvoiceId = custInvoiceTableLoc.ETGAirWayBillNo;
+        freeTextInvoiceHeaderFooterTmp.ETGRemarks           = custInvoiceTableLoc.ETGRemarks;
+        freeTextInvoiceHeaderFooterTmp.ETGInvoiceId         = custInvoiceTableLoc.InvoiceId;
+
+        bankAccountTable                        = BankAccountTable::find(custInvoiceTableLoc.ETGBankAccountId);
+        freeTextInvoiceHeaderFooterTmp.AccountNum             = bankAccountTable.AccountNum;
+        freeTextInvoiceHeaderFooterTmp.SWIFTNo                = bankAccountTable.SWIFTNo;
+        freeTextInvoiceHeaderFooterTmp.ETGIBAN                   = bankAccountTable.IBAN;
+        freeTextInvoiceHeaderFooterTmp.CorrespondentBank      = bankAccountTable.ETGCorrespondentBank;
+        freeTextInvoiceHeaderFooterTmp.BankName               = bankAccountTable.Name;
+
+        select firstonly Logisticslocation
+        join logisticsPostalAddress
+           where Logisticslocation.recid == logisticsPostalAddress.Location
+           && logisticsPostalAddress.recid == custInvoiceTableLoc.PostalAddress;
+   
+        freeTextInvoiceHeaderFooterTmp.ETGAddressName      = Logisticslocation.Description;
+        freeTextInvoiceHeaderFooterTmp.ETGAddress          = logisticsPostalAddress.Address;
+
+        CustInvoiceTrans    custInvoiceTransLoc;
+
+        select sum(LineAmount),sum(LineAmountTax) from custInvoiceTransLoc
+            where custInvoiceTransLoc.SalesId == _custInvoiceJour.SalesId
+            && custInvoiceTransLoc.InvoiceId == _custInvoiceJour.InvoiceId
+            && custInvoiceTransLoc.InvoiceDate == _custInvoiceJour.InvoiceDate
+            && custInvoiceTransLoc.NumberSequenceGroup == _custInvoiceJour.NumberSequenceGroup;
+       
+        AmountinTxt                                        = numeralsToTxt_EN(custInvoiceTransLoc.LineAmount + custInvoiceTransLoc.LineAmountTax);
+        AmountinTxt                                        = strReplace(AmountinTxt,'***',' ');
+        AmountinTxt                                        = strReplace(AmountinTxt,'and 00/100',' ');
+        freeTextInvoiceHeaderFooterTmp.ETGAmountInWords    = AmountinTxt;
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>populateFreeTextInvoiceTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Populates the Invoice details information into the <c>FreeTextInvoiceTmp</c> table buffer.
+    /// </summary>
+    /// <param name="_custInvoiceJour">
+    /// The <c>CustInvoiceJour</c> record that has the invoice header information.
+    /// </param>
+    /// <param name="_custInvoiceTrans">
+    /// The <c>CustInvoiceTrans</c> record that has the invoice details information.
+    /// </param>
+    /// <param name="_taxSpec">
+    /// The <c>TaxSpec</c> class instance that has the taxes information.
+    /// </param>
+    /// <param name="_custPaymSchedLine">
+    /// The <c>CustPaymSchedLine</c> record that has the payment schedules information.
+    /// </param>
+    /// <param name="_prepaymentCustTrans">
+    /// The <c>CustTrans</c> record that has the prepayment information.
+    /// </param>
+    /// <param name="_prepaymentTaxTrans">
+    /// The <c>TaxTrans</c> record that has the prepayment taxes information.
+    /// </param>
+    protected void populateFreeTextInvoiceTmp(
+        CustInvoiceJour _custInvoiceJour,
+        CustInvoiceTrans _custInvoiceTrans,
+        TaxSpec _taxSpec,
+        CustPaymSchedLine _custPaymSchedLine,
+        CustTrans _prepaymentCustTrans,
+        TaxTrans _prepaymentTaxTrans)
+    {
+        next populateFreeTextInvoiceTmp(_custInvoiceJour,_custInvoiceTrans,_taxSpec,_custPaymSchedLine,_prepaymentCustTrans,_prepaymentTaxTrans);
+
+        freeTextInvoiceTmp.CurrencyCode = _custInvoiceJour.CurrencyCode;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

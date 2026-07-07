@@ -1,0 +1,432 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesAgreementVersionCompareDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(ETG_SalesAgreementVersionCompareContract))]
+class ETG_SalesAgreementVersionCompareDP extends SRSReportDataProviderBase
+{
+    ETG_SalesAgreementVersionCompareContract    contract;
+    SalesAgreementId                            agreementId,agreementIdStr;
+    str                                         confimationFirst,ConfirmationSecond;
+    ETG_SalesAgreementCompareVersionTmp         etg_SalesAgreementCompareVersionTmp;
+    List                                        versionsList;
+    AgreementConfirmationNumber                 firstVersion,secondVersion;
+    int                                         lineNumber;
+    ETG_SalesAgreementCompareVersionHeaderTmp   ETG_SalesAgreementCompareVersionHeaderTmp;
+    boolean                                     fromHeader,linesInserted;
+    InventDim                                   inventDimFirst,inventDimSecond;
+    NoYes                                       isSalesAgreement;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETG_SalesAgreementCompareVersionTmp</Name>
+				<Source><![CDATA[
+    //List            list = new List(Types::String);
+    //ListIterator    listIterator;
+    [SRSReportDataSetAttribute(tablestr(ETG_SalesAgreementCompareVersionTmp))]
+    public ETG_SalesAgreementCompareVersionTmp getETG_SalesAgreementCompareVersionTmp()
+    {
+        select etg_SalesAgreementCompareVersionTmp;
+        return etg_SalesAgreementCompareVersionTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    //[SysEntryPoint]
+    public void processReport()
+    {
+
+        contract            = this.parmDataContract() as ETG_SalesAgreementVersionCompareContract;
+        agreementId         = contract.parmAgreementId();
+        confimationFirst    = contract.parmConfirmationFirst();        
+        ConfirmationSecond  = contract.parmConfirmationSecond();
+        isSalesAgreement    = contract.parmIsSalesAgreement();
+
+        agreementIdStr  = agreementId + "-";
+        firstVersion    = strReplace(confimationFirst,agreementIdStr,"");
+        secondVersion   = strReplace(ConfirmationSecond,agreementIdStr,"");
+        delete_from etg_SalesAgreementCompareVersionTmp;
+        delete_from etg_SalesAgreementCompareVersionHeaderTmp;
+        if(isSalesAgreement == NoYes::Yes)
+        {
+            this.compareSalesAgreeement();
+        }
+        else
+        {
+            this.comparePurchAgreement();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>comparePurchAgreement</Name>
+				<Source><![CDATA[
+    public void comparePurchAgreement()
+    {
+        AgreementHeaderHistory          AgreementHeaderHistoryFirst,AgreementHeaderHistorySecond;
+        PurchAgreementHeaderHistory     purchAgreementHeaderHistoryFirst,purchAgreementHeaderHistorySecond;
+        AgreementHeaderDefaultHistory   AgreementHeaderDefaultHistoryFirst,AgreementHeaderDefaultHistorySecond;
+        PurchAgreementHeaderDefaultHistory  purchAgreementHeaderDefaultHistoryFirst,purchAgreementHeaderDefaultHistorySecond;
+        AgreementLineHistory                AgreementLineHistoryFirst,AgreementLineHistorySecond;
+        AgreementLine         AgreementLineFirst,AgreementLineSecond;
+        PurchAgreementHeader    purchAgreementHeader;
+
+        //AgreementLineHistory    AgreementLineHistoryFirst,AgreementLineHistorySecond;
+            
+        AgreementLineDefaultHistory     AgreementLineDefaultHistoryFirst,AgreementLineDefaultHistorySecond;
+        ETG_AgreementLineQualityGrpHistory  ETG_AgreementLineQualityGrpHistoryFirst,ETG_AgreementLineQualityGrpHistorySecond;
+        AgreementLineVolumeCommitmentHistory    AgreementLineVolumeCommitmentHistoryFirst,AgreementLineVolumeCommitmentHistorySecond;
+        AgreementLineQuantityCommitmentHistory  AgreementLineQuantityCommitmentHistoryFirst,AgreementLineQuantityCommitmentHistorySecond;
+
+        select purchAgreementHeaderHistoryFirst
+            where purchAgreementHeaderHistoryFirst.purchNumberSequence == agreementId
+            && purchAgreementHeaderHistoryFirst.ConfirmationNumber == firstVersion;
+        select purchAgreementHeaderHistorySecond
+            where purchAgreementHeaderHistorySecond.purchNumberSequence == agreementId
+            && purchAgreementHeaderHistorySecond.ConfirmationNumber == secondVersion;
+        this.compareData(purchAgreementHeaderHistoryFirst,purchAgreementHeaderHistorySecond,true);
+
+        select AgreementHeaderHistoryFirst
+            where AgreementHeaderHistoryFirst.RecId == purchAgreementHeaderHistoryFirst.RecId;
+        select AgreementHeaderHistorySecond
+            where AgreementHeaderHistorySecond.RecId == purchAgreementHeaderHistorySecond.RecId;
+        this.compareData(AgreementHeaderHistoryFirst,AgreementHeaderHistorySecond,true);
+
+        select AgreementHeaderDefaultHistoryFirst
+            where AgreementHeaderDefaultHistoryFirst.AgreementHeaderHistory == purchAgreementHeaderHistoryFirst.RecId;
+        select AgreementHeaderDefaultHistorySecond
+            where AgreementHeaderDefaultHistorySecond.AgreementHeaderHistory == AgreementHeaderDefaultHistorySecond.RecId;
+        this.compareData(AgreementHeaderDefaultHistoryFirst,AgreementHeaderDefaultHistoryFirst,true);
+
+        select purchAgreementHeaderDefaultHistoryFirst
+            where purchAgreementHeaderDefaultHistoryFirst.purchaseAgreementHeaderHistory == purchAgreementHeaderHistoryFirst.RecId;
+        select purchAgreementHeaderDefaultHistorySecond
+            where purchAgreementHeaderDefaultHistorySecond.purchaseAgreementHeaderHistory == purchAgreementHeaderHistorySecond.RecId;
+        this.compareData(purchAgreementHeaderDefaultHistoryFirst,purchAgreementHeaderDefaultHistorySecond,true);
+
+        // Lines
+        //select purchAgreementHeader
+        //where purchAgreementHeader.purchNumberSequence == agreementId;
+        while select AgreementLineFirst
+            where AgreementLineFirst.Agreement == AgreementHeaderHistoryFirst.AgreementHeader
+        {
+            lineNumber++;
+
+            select AgreementLineHistoryFirst
+                where AgreementLineHistoryFirst.AgreementLine == AgreementLineFirst.RecId
+                && AgreementLineHistoryFirst.ValidFrom <= purchAgreementHeaderHistoryFirst.CreatedDateTime
+                && AgreementLineHistoryFirst.ValidTo >= purchAgreementHeaderHistoryFirst.CreatedDateTime;
+            select AgreementLineDefaultHistoryFirst
+                where AgreementLineDefaultHistoryFirst.AgreementLineHistory == AgreementLineHistoryFirst.RecId;
+            select ETG_AgreementLineQualityGrpHistoryFirst
+                where ETG_AgreementLineQualityGrpHistoryFirst.AgreementLine == AgreementLineHistoryFirst.RecId;
+            select AgreementLineVolumeCommitmentHistoryFirst
+                where AgreementLineVolumeCommitmentHistoryFirst.RecId == AgreementLineHistoryFirst.RecId;
+            select AgreementLineQuantityCommitmentHistoryFirst
+                where AgreementLineQuantityCommitmentHistoryFirst.RecId == AgreementLineHistoryFirst.RecId;
+
+            select AgreementLineHistorySecond
+                where AgreementLineHistorySecond.AgreementLine == AgreementLineFirst.RecId
+                && AgreementLineHistorySecond.ValidFrom <= purchAgreementHeaderHistorySecond.CreatedDateTime
+                && AgreementLineHistorySecond.ValidTo >= purchAgreementHeaderHistorySecond.CreatedDateTime;
+            select AgreementLineDefaultHistorySecond
+                where AgreementLineDefaultHistorySecond.AgreementLineHistory == AgreementLineHistorySecond.RecId;
+            select ETG_AgreementLineQualityGrpHistorySecond
+                where ETG_AgreementLineQualityGrpHistorySecond.AgreementLine == AgreementLineHistorySecond.RecId;
+            select AgreementLineVolumeCommitmentHistorySecond
+                where AgreementLineVolumeCommitmentHistorySecond.RecId == AgreementLineHistorySecond.RecId;
+            select AgreementLineQuantityCommitmentHistorySecond
+                where AgreementLineQuantityCommitmentHistorySecond.RecId == AgreementLineHistorySecond.RecId;
+
+            this.compareData(AgreementLineHistoryFirst,AgreementLineHistorySecond,false);
+            this.compareData(AgreementLineDefaultHistoryFirst,AgreementLineDefaultHistoryFirst,false);
+            this.compareData(ETG_AgreementLineQualityGrpHistoryFirst,ETG_AgreementLineQualityGrpHistorySecond,false);
+            this.compareData(AgreementLineVolumeCommitmentHistoryFirst,AgreementLineVolumeCommitmentHistorySecond,false);
+            this.compareData(AgreementLineQuantityCommitmentHistoryFirst,AgreementLineQuantityCommitmentHistorySecond,false);
+
+            select etg_SalesAgreementCompareVersionTmp
+                where etg_SalesAgreementCompareVersionTmp.LineNumber == lineNumber;
+            if(etg_SalesAgreementCompareVersionTmp.RecId)
+            {
+                while select etg_SalesAgreementCompareVersionHeaderTmp
+                {
+                    linesInserted = true;
+                    etg_SalesAgreementCompareVersionTmp.LineNumber      = lineNumber;
+                    etg_SalesAgreementCompareVersionTmp.CompanyImage    = FormLetter::companyLogo();
+                    etg_SalesAgreementCompareVersionTmp.FieldName       = etg_SalesAgreementCompareVersionHeaderTmp.FieldName;
+                    etg_SalesAgreementCompareVersionTmp.FirstVersion    = etg_SalesAgreementCompareVersionHeaderTmp.FirstVersion;
+                    etg_SalesAgreementCompareVersionTmp.SecondVersion   = etg_SalesAgreementCompareVersionHeaderTmp.SecondVersion;
+                    etg_SalesAgreementCompareVersionTmp.insert();
+                }
+            }
+        }
+        if(!linesInserted)
+        {
+            while select etg_SalesAgreementCompareVersionHeaderTmp
+            {
+                etg_SalesAgreementCompareVersionTmp.LineNumber      = 1;
+                etg_SalesAgreementCompareVersionTmp.CompanyImage    = FormLetter::companyLogo();
+                etg_SalesAgreementCompareVersionTmp.FieldName       = etg_SalesAgreementCompareVersionHeaderTmp.FieldName;
+                etg_SalesAgreementCompareVersionTmp.FirstVersion    = etg_SalesAgreementCompareVersionHeaderTmp.FirstVersion;
+                etg_SalesAgreementCompareVersionTmp.SecondVersion   = etg_SalesAgreementCompareVersionHeaderTmp.SecondVersion;
+                etg_SalesAgreementCompareVersionTmp.insert();
+            }
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>compareSalesAgreeement</Name>
+				<Source><![CDATA[
+    public void compareSalesAgreeement()
+    {
+        AgreementHeaderHistory          AgreementHeaderHistoryFirst,AgreementHeaderHistorySecond;
+        SalesAgreementHeaderHistory     salesAgreementHeaderHistoryFirst,SalesAgreementHeaderHistorySecond;
+        AgreementHeaderDefaultHistory   AgreementHeaderDefaultHistoryFirst,AgreementHeaderDefaultHistorySecond;
+        SalesAgreementHeaderDefaultHistory  SalesAgreementHeaderDefaultHistoryFirst,SalesAgreementHeaderDefaultHistorySecond;
+        AgreementLineHistory                AgreementLineHistoryFirst,AgreementLineHistorySecond;
+        AgreementLine         AgreementLineFirst,AgreementLineSecond;
+        SalesAgreementHeader    SalesAgreementHeader;
+
+        //AgreementLineHistory    AgreementLineHistoryFirst,AgreementLineHistorySecond;
+            
+        AgreementLineDefaultHistory     AgreementLineDefaultHistoryFirst,AgreementLineDefaultHistorySecond;
+        ETG_AgreementLineQualityGrpHistory  ETG_AgreementLineQualityGrpHistoryFirst,ETG_AgreementLineQualityGrpHistorySecond;
+        AgreementLineVolumeCommitmentHistory    AgreementLineVolumeCommitmentHistoryFirst,AgreementLineVolumeCommitmentHistorySecond;
+        AgreementLineQuantityCommitmentHistory  AgreementLineQuantityCommitmentHistoryFirst,AgreementLineQuantityCommitmentHistorySecond;
+        
+
+        select salesAgreementHeaderHistoryFirst
+            where salesAgreementHeaderHistoryFirst.SalesNumberSequence == agreementId
+            && salesAgreementHeaderHistoryFirst.ConfirmationNumber == firstVersion;
+        select salesAgreementHeaderHistorySecond
+            where salesAgreementHeaderHistorySecond.SalesNumberSequence == agreementId
+            && salesAgreementHeaderHistorySecond.ConfirmationNumber == secondVersion;
+        this.compareData(salesAgreementHeaderHistoryFirst,salesAgreementHeaderHistorySecond,true);
+
+        select AgreementHeaderHistoryFirst
+            where AgreementHeaderHistoryFirst.RecId == salesAgreementHeaderHistoryFirst.RecId;
+        select AgreementHeaderHistorySecond
+            where AgreementHeaderHistorySecond.RecId == salesAgreementHeaderHistorySecond.RecId;
+        this.compareData(AgreementHeaderHistoryFirst,AgreementHeaderHistorySecond,true);
+
+        select AgreementHeaderDefaultHistoryFirst
+            where AgreementHeaderDefaultHistoryFirst.AgreementHeaderHistory == salesAgreementHeaderHistoryFirst.RecId;
+        select AgreementHeaderDefaultHistorySecond
+            where AgreementHeaderDefaultHistorySecond.AgreementHeaderHistory == AgreementHeaderDefaultHistorySecond.RecId;
+        this.compareData(AgreementHeaderDefaultHistoryFirst,AgreementHeaderDefaultHistoryFirst,true);
+
+        select SalesAgreementHeaderDefaultHistoryFirst
+            where SalesAgreementHeaderDefaultHistoryFirst.SalesAgreementHeaderHistory == salesAgreementHeaderHistoryFirst.RecId;
+        select SalesAgreementHeaderDefaultHistorySecond
+            where SalesAgreementHeaderDefaultHistorySecond.SalesAgreementHeaderHistory == salesAgreementHeaderHistorySecond.RecId;
+        this.compareData(SalesAgreementHeaderDefaultHistoryFirst,SalesAgreementHeaderDefaultHistorySecond,true);
+
+        // Lines
+        //select SalesAgreementHeader
+        //where SalesAgreementHeader.SalesNumberSequence == agreementId;
+        while select AgreementLineFirst
+            where AgreementLineFirst.Agreement == AgreementHeaderHistoryFirst.AgreementHeader
+        {
+            lineNumber++;
+
+            select AgreementLineHistoryFirst
+                where AgreementLineHistoryFirst.AgreementLine == AgreementLineFirst.RecId
+                && AgreementLineHistoryFirst.ValidFrom <= salesAgreementHeaderHistoryFirst.CreatedDateTime
+                && AgreementLineHistoryFirst.ValidTo >= salesAgreementHeaderHistoryFirst.CreatedDateTime;
+            select AgreementLineDefaultHistoryFirst
+                where AgreementLineDefaultHistoryFirst.AgreementLineHistory == AgreementLineHistoryFirst.RecId;
+            select ETG_AgreementLineQualityGrpHistoryFirst
+                where ETG_AgreementLineQualityGrpHistoryFirst.AgreementLine == AgreementLineHistoryFirst.RecId;
+            select AgreementLineVolumeCommitmentHistoryFirst
+                where AgreementLineVolumeCommitmentHistoryFirst.RecId == AgreementLineHistoryFirst.RecId;
+            select AgreementLineQuantityCommitmentHistoryFirst
+                where AgreementLineQuantityCommitmentHistoryFirst.RecId == AgreementLineHistoryFirst.RecId;
+
+            select AgreementLineHistorySecond
+                where AgreementLineHistorySecond.AgreementLine == AgreementLineFirst.RecId
+                && AgreementLineHistorySecond.ValidFrom <= salesAgreementHeaderHistorySecond.CreatedDateTime
+                && AgreementLineHistorySecond.ValidTo >= salesAgreementHeaderHistorySecond.CreatedDateTime;
+            select AgreementLineDefaultHistorySecond
+                where AgreementLineDefaultHistorySecond.AgreementLineHistory == AgreementLineHistorySecond.RecId;
+            select ETG_AgreementLineQualityGrpHistorySecond
+                where ETG_AgreementLineQualityGrpHistorySecond.AgreementLine == AgreementLineHistorySecond.RecId;
+            select AgreementLineVolumeCommitmentHistorySecond
+                where AgreementLineVolumeCommitmentHistorySecond.RecId == AgreementLineHistorySecond.RecId;
+            select AgreementLineQuantityCommitmentHistorySecond
+                where AgreementLineQuantityCommitmentHistorySecond.RecId == AgreementLineHistorySecond.RecId;
+
+            this.compareData(AgreementLineHistoryFirst,AgreementLineHistorySecond,false);
+            this.compareData(AgreementLineDefaultHistoryFirst,AgreementLineDefaultHistoryFirst,false);
+            this.compareData(ETG_AgreementLineQualityGrpHistoryFirst,ETG_AgreementLineQualityGrpHistorySecond,false);
+            this.compareData(AgreementLineVolumeCommitmentHistoryFirst,AgreementLineVolumeCommitmentHistorySecond,false);
+            this.compareData(AgreementLineQuantityCommitmentHistoryFirst,AgreementLineQuantityCommitmentHistorySecond,false);
+
+            select etg_SalesAgreementCompareVersionTmp 
+                where etg_SalesAgreementCompareVersionTmp.LineNumber == lineNumber;
+            if(etg_SalesAgreementCompareVersionTmp.RecId)
+            {
+                while select etg_SalesAgreementCompareVersionHeaderTmp
+                {
+                    linesInserted = true;
+                    etg_SalesAgreementCompareVersionTmp.LineNumber      = lineNumber;
+                    etg_SalesAgreementCompareVersionTmp.CompanyImage    = FormLetter::companyLogo();
+                    etg_SalesAgreementCompareVersionTmp.FieldName       = etg_SalesAgreementCompareVersionHeaderTmp.FieldName;
+                    etg_SalesAgreementCompareVersionTmp.FirstVersion    = etg_SalesAgreementCompareVersionHeaderTmp.FirstVersion;
+                    etg_SalesAgreementCompareVersionTmp.SecondVersion   = etg_SalesAgreementCompareVersionHeaderTmp.SecondVersion;
+                    etg_SalesAgreementCompareVersionTmp.insert();
+                }
+            }
+            
+        }
+        if(!linesInserted)
+        {
+            while select etg_SalesAgreementCompareVersionHeaderTmp
+            {
+                etg_SalesAgreementCompareVersionTmp.LineNumber      = 1;
+                etg_SalesAgreementCompareVersionTmp.CompanyImage    = FormLetter::companyLogo();
+                etg_SalesAgreementCompareVersionTmp.FieldName       = etg_SalesAgreementCompareVersionHeaderTmp.FieldName;
+                etg_SalesAgreementCompareVersionTmp.FirstVersion    = etg_SalesAgreementCompareVersionHeaderTmp.FirstVersion;
+                etg_SalesAgreementCompareVersionTmp.SecondVersion   = etg_SalesAgreementCompareVersionHeaderTmp.SecondVersion;
+                etg_SalesAgreementCompareVersionTmp.insert();
+            }
+        }
+        //while select AgreementLineSecond
+        //    where AgreementLineSecond.Agreement == AgreementHeaderHistorySecond.AgreementHeader
+        //{
+        //    select AgreementLineHistorySecond
+        //        where AgreementLineHistorySecond.AgreementLine == AgreementLineSecond.RecId
+        //        && AgreementLineHistorySecond.ValidFrom <= salesAgreementHeaderHistorySecond.CreatedDateTime
+        //        && AgreementLineHistorySecond.ValidTo >= salesAgreementHeaderHistorySecond.CreatedDateTime;
+        //    select AgreementLineDefaultHistorySecond
+        //        where AgreementLineDefaultHistorySecond.AgreementLineHistory == AgreementLineHistorySecond.RecId
+        //}
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>compareData</Name>
+				<Source><![CDATA[
+    public void compareData(Common first, Common second,boolean _fromHeader)
+    {
+        DictTable   dictTable = new SysDictTable(first.TableId);
+        DictField   dictField;
+        FieldId     fieldId, extFieldId;
+        container   ret;
+        int         i, j;
+        str        fieldNameToCompare;
+         
+        int u = dictTable.fieldCnt();
+        for (i=1; i<=u; ++i)
+        {
+            fieldId  = dictTable.fieldCnt2Id(i);
+            dictField = new SysDictField(first.tableId, fieldId);
+ 
+            if (!dictField.isSystem())
+            {
+                for (j=1; j<= dictField.arraySize(); ++j)
+                {
+                    extFieldId = fieldId2Ext(fieldId, j);
+ 
+                    if (first.(extFieldId) != second.(extFieldId))
+                    {
+                        fieldNameToCompare = fieldId2Name(second.TableId, extFieldId);
+                        if(fieldNameToCompare     != "ValidFrom" && fieldNameToCompare != "ValidTo"
+                            && fieldNameToCompare != "ValidFromTZID" && fieldNameToCompare != "ValidToTZID" && fieldNameToCompare != "AgreementLine"
+                            && fieldNameToCompare != "InventDimId"
+                            && fieldNameToCompare != "DefaultDimension" && fieldNameToCompare != "ConfirmationNumber" 
+                            && fieldNameToCompare != "SalesAgreementHeaderHistory" && fieldNameToCompare != "PurchaseAgreementHeaderHistory")
+                        {
+                            if(_fromHeader)
+                            {
+                                //etg_SalesAgreementCompareVersionTmp.LineNumber      = lineNumber;
+                                etg_SalesAgreementCompareVersionHeaderTmp.CompanyImage    = FormLetter::companyLogo();
+                                etg_SalesAgreementCompareVersionHeaderTmp.FieldName       = fieldId2PName(second.TableId, extFieldId);//fieldId2Name(second.TableId, extFieldId);
+                                etg_SalesAgreementCompareVersionHeaderTmp.FirstVersion    = first.(extFieldId);
+                                etg_SalesAgreementCompareVersionHeaderTmp.SecondVersion   = second.(extFieldId);
+                                etg_SalesAgreementCompareVersionHeaderTmp.insert();
+                            }
+                            else
+                            {
+                                etg_SalesAgreementCompareVersionTmp.LineNumber      = lineNumber;
+                                etg_SalesAgreementCompareVersionTmp.CompanyImage    = FormLetter::companyLogo();
+                                etg_SalesAgreementCompareVersionTmp.FieldName       = fieldId2PName(second.TableId, extFieldId);//fieldId2Name(second.TableId, extFieldId);
+                                etg_SalesAgreementCompareVersionTmp.FirstVersion    = first.(extFieldId);
+                                etg_SalesAgreementCompareVersionTmp.SecondVersion   = second.(extFieldId);
+                                etg_SalesAgreementCompareVersionTmp.insert();
+                            }
+                        }
+                        else if(fieldNameToCompare == "InventDimId")
+                        {
+                            select firstonly inventDimFirst
+                                where inventDimFirst.inventDimId == first.(extFieldId);
+                            select firstonly inventDimSecond
+                                    where inventDimSecond.inventDimId == second.(extFieldId);
+                            this.compareInventData(inventDimFirst,inventDimSecond,false);
+
+                        }
+                        //[strfmt ("%1, %2, %3",fieldId2Name(second.TableId, extFieldId), first.(extFieldId), second.(extFieldId))];
+                    }
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>compareInventData</Name>
+				<Source><![CDATA[
+        public void compareInventData(Common first, Common second,boolean _fromHeader)
+        {
+            DictTable   dictTable = new SysDictTable(first.TableId);
+            DictField   dictField;
+            FieldId     fieldId, extFieldId;
+            container   ret;
+            int         i, j;
+            str        fieldNameToCompare;
+         
+            int u = dictTable.fieldCnt();
+            for (i=1; i<=u; ++i)
+            {
+                fieldId  = dictTable.fieldCnt2Id(i);
+                dictField = new SysDictField(first.tableId, fieldId);
+ 
+                if (!dictField.isSystem())
+                {
+                    for (j=1; j<= dictField.arraySize(); ++j)
+                    {
+                        extFieldId = fieldId2Ext(fieldId, j);
+ 
+                        if (first.(extFieldId) != second.(extFieldId))
+                        {
+                            fieldNameToCompare = fieldId2Name(second.TableId, extFieldId);
+                            if(fieldNameToCompare != "SHA1HashHex" && fieldNameToCompare != "InventDimId")
+                            {
+                                etg_SalesAgreementCompareVersionTmp.LineNumber      = lineNumber;
+                                etg_SalesAgreementCompareVersionTmp.CompanyImage    = FormLetter::companyLogo();
+                                etg_SalesAgreementCompareVersionTmp.FieldName       = fieldId2PName(second.TableId, extFieldId);//fieldId2Name(second.TableId, extFieldId);
+                                etg_SalesAgreementCompareVersionTmp.FirstVersion    = first.(extFieldId);
+                                etg_SalesAgreementCompareVersionTmp.SecondVersion   = second.(extFieldId);
+                                etg_SalesAgreementCompareVersionTmp.insert();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

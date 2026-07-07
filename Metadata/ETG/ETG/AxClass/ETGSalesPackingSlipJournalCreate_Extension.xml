@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesPackingSlipJournalCreate_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This class is an extension of <c>SalesPackingSlipJournalCreate</c>
+/// </summary>
+[ExtensionOf(classStr(SalesPackingSlipJournalCreate))]
+internal final class ETGSalesPackingSlipJournalCreate_Extension
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initJournalLine</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// In this method assigning ETGExciseDuty field from salesParmLine.
+    /// </summary>
+    /// <param name = "_parmLine">Common.</param>
+    /// <returns>CustPackingSlipTrans.</returns>
+    public Common initJournalLine(Common _parmLine)
+    {
+        CustPackingSlipTrans    custPackingSlipTrans;
+        SalesParmLine           salesParmLine = _parmLine as SalesParmLine;
+
+        custPackingSlipTrans                  = next initJournalLine(salesParmLine);
+
+        custPackingSlipTrans.ETGExciseDuty    = salesParmLine.ETGExciseDuty;
+
+        return custPackingSlipTrans;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createJournalLine</Name>
+				<Source><![CDATA[
+    //NS--11-04-2025--SYSTEM SHOULD NOT ALLOW TO BOOK PACKING LIST UNTILL GRN & PURCHASE INVOICE IS BOOKED.
+    protected void  createJournalLine(Common _salesParmLine)
+    {
+     
+        if (ETGACFParameters::find().EnableUATSmallPoints)
+        {
+            SalesParmTable          salesParmTable;
+            SalesParmLine           salesParmLineloc,salesParmLineloc1;
+            InventTable             inventTable;
+            
+            salesParmLineloc1 = _salesParmLine as SalesParmLine;
+            salesParmTable    = salesParmLineloc1.salesParmTable();
+
+            while select salesParmLineloc
+                where salesParmLineloc.ParmId == salesParmTable.ParmId
+                && salesParmLineloc.TableRefId == salesParmTable.TableRefId
+                && salesParmLineloc.ItemId == salesParmLineloc1.ItemId
+            {
+                EcoResProduct     ecoResProduct = EcoResProduct::find(InventTable::find(salesParmLineloc.ItemId).Product);
+                inventTable = (InventTable::find(salesParmLineloc.ItemId));
+                if(ecoResProduct.ProductType == EcoResProductType::Item)
+                {
+                    Qty totalPurchased = abs(this.TotalPurchased(salesParmLineloc));
+                    Qty totalDelivered = abs(this.Totaldeleveried(salesParmLineloc));
+
+                    if((totalPurchased-totalDelivered) < UnitOfMeasureConverter::convert(salesParmLineloc.DeliverNow,
+                                                                UnitOfMeasure::unitOfMeasureIdBySymbol(salesParmLineloc.salesUnit()),
+                                                                UnitOfMeasure::unitOfMeasureIdBySymbol(inventTable.BOMUnitId),
+                                                                NoYes::Yes,
+                                                                InventTable::itemProduct(inventTable.ItemId),
+                                                                NoYes::Yes))
+                    {
+                        throw error(strFmt("@ETG_New:PackingSlipCancelInsufficientQuantity", salesParmLineLoc.ItemId));
+                    }
+                }
+            }
+        }
+        next createJournalLine(_salesParmLine);
+
+        SalesParmLine salesParmLine = _salesParmLine as SalesParmLine;
+
+        if (salesParmLine && ETGACFParameters::find().EnableDMSIntegration 
+            && BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGDMSRevereSalesAgreementIntegrationEventClass)))
+        {
+            SalesTable salesTable = SalesTable::find(salesParmLine.OrigSalesId);
+
+            if (salesTable.MatchingAgreement)
+            {
+                SalesAgreementHeader salesAgreementHeader = SalesAgreementHeader::find(salesTable.MatchingAgreement);
+
+                if (salesAgreementHeader)
+                {
+                    CustPackingSlipJour custPackingSlipJour;
+                    SalesLine saleLine;
+                    //boolean isPartial = false;
+
+
+                    select  custPackingSlipJour
+                        order by CustPackingSlipJour.PackingSlipId desc
+                        where custPackingSlipJour.SalesId == salesTable.SalesId;
+
+                  
+                    select firstOnly saleLine
+                        where saleLine.SalesId == salesTable.SalesId;
+
+                    str formattedDateTime = DateTimeUtil::toStr(custPackingSlipJour.CreatedDateTime);
+
+
+                        ETGDMSRevereSalesAgreementIntegrationContract contract = new ETGDMSRevereSalesAgreementIntegrationContract();
+
+                        contract.parmDealNumber(salesAgreementHeader.ETGDMSDealNumber);
+                        contract.parmDataAreaId(curExt());
+                        contract.parmDocumentNumber(custPackingSlipJour.PackingSlipId);
+                        contract.parmDocumentDate(formattedDateTime);
+                        contract.parmActivityOwner(custPackingSlipJour.CreatedBy);
+
+                        contract.parmOperationType("Packing Slip Posting - Delivered");
+                        contract.parmActivityName("Sales Agreement Receipt Posted");
+                        contract.parmActivityRemarks(strFmt("The  Sale order %1 is delivered with packing slip %2",salesTable.SalesId,custPackingSlipJour.PackingSlipId));
+
+                        //if(salesTable.SalesStatus == SalesStatus::Delivered)
+                        //{
+                        //contract.parmOperationType("Packing Slip Posting - Delivered ");
+                        //contract.parmActivityName("Sales Agreement Full Receipt Posting");
+                        //contract.parmActivityRemarks(strFmt("The  Sale order %1 is delivered with packing slip %2",salesTable.SalesId,custPackingSlipJour.PackingSlipId));
+
+                        //}
+                        //else
+                        //{
+                        //contract.parmOperationType("Packing Slip Posting - Partially Delivered");
+                        //contract.parmActivityName("Sales Agreement Partial Receipt Posting");
+                        //contract.parmActivityRemarks(strFmt("The  Sale order %1 is partially delivered with packing slip %2",salesTable.SalesId,custPackingSlipJour.PackingSlipId));
+                        //}
+
+                        ETGDMSRevereSalesAgreementIntegrationEventClass eventClass = ETGDMSRevereSalesAgreementIntegrationEventClass::newFromContract(contract);
+                        eventClass.send();
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>TotalPurchased</Name>
+				<Source><![CDATA[
+    protected Qty TotalPurchased(SalesParmLine _salesParmLine)
+    {
+        SalesParmLine           salesParmLineloc = _salesParmLine;
+        InventTrans             inventTrans;
+
+        select sum(Qty) from inventTrans where inventTrans.ItemId == salesParmLineloc.ItemId
+                              && inventTrans.inventDimId == salesParmLineloc.InventDimId
+                              && inventTrans.StatusReceipt == StatusReceipt::Purchased;
+
+        return inventTrans.Qty;
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>Totaldeleveried</Name>
+				<Source><![CDATA[
+    protected Qty  Totaldeleveried(SalesParmLine _salesParmLine)
+    {
+        SalesParmLine           salesParmLineloc = _salesParmLine;
+        InventTrans             inventTrans ;
+
+        select sum(Qty) from inventTrans where inventTrans.ItemId == salesParmLineloc.ItemId
+                              && inventTrans.inventDimId == salesParmLineloc.InventDimId
+                              && ((inventTrans.StatusIssue == StatusIssue::Sold) ||(inventTrans.StatusIssue == StatusIssue::Deducted));
+
+        return  inventTrans.Qty;
+
+    }
+    //NE--11-04-2025--SYSTEM SHOULD NOT ALLOW TO BOOK PACKING LIST UNTILL GRN & PURCHASE INVOICE IS BOOKED.
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

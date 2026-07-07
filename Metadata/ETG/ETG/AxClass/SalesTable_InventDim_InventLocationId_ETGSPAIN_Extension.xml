@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>SalesTable_InventDim_InventLocationId_ETGSPAIN_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the <c>InventLocationId</c> field in the <c>SalesTable</c> form for the ETGSPAIN model.
+/// </summary>
+[ExtensionOf(formDataFieldStr(SalesTable, InventDim, InventLocationId))]
+final class SalesTable_InventDim_InventLocationId_ETGSPAIN_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>modified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extended <c>modified</c> method to update dimension values related to the inventory location.
+    /// </summary>
+    public void modified()
+    {
+        next modified();
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            FormDataObject      formDataObject      = any2Object(this) as FormDataObject;
+            FormDataSource      formDataSource      = formDataObject.datasource();
+            InventDim           inventDim           = formDataSource.cursor();
+
+            InventDimension1    inventDimension1    = inventDim.orig().InventDimension1;
+            InventSerialId      inventSerialId      = inventDim.orig().InventSerialId;
+            InventBatchId       inventBatchId       = inventDim.orig().InventBatchId;
+        
+            LedgerParameters    ledgerParameters    = LedgerParameters::find();
+            FormDataSource      salesline_ds        = formDataSource.formRun().dataSource(formDataSourceStr(SalesLine, salesLine));
+            SalesLine           salesLine           = salesLine_ds.cursor();
+
+            ttsbegin;
+
+            if (inventDimension1 || inventSerialId || inventBatchId)
+            {
+                salesLine.ETGSPAINsetDimensionValue(ledgerParameters.ETGSPAINFinDimOperation,   inventBatchId,   ETGSPAINPurchOperationTable::find(inventBatchId).Name);
+                salesLine.ETGSPAINsetDimensionValue(ledgerParameters.ETGSPAINFinDimContract,    inventSerialId,    inventSerialId);
+                salesLine.ETGSPAINsetDimensionValue(ledgerParameters.ETGSPAINFinDimApplication, inventDimension1, inventDimension1);
+            }
+            /*
+        InventDim inventDimNew = salesLine.inventDim();
+
+        inventDimNew.InventDimension1 = inventDimension1;
+        inventDimNew.inventSerialId = inventSerialId;
+        inventDimNew.inventBatchId = inventBatchId;
+
+        inventDimNew = inventDim::findOrCreate(inventDimNew);
+
+        salesLine.InventDimId = inventDimNew.inventDimId;
+        salesLine.update();
+        
+        ETGSPAINInventTransApplication etgSPAINInventTransApplication = ETGSPAINInventTransApplication::findTransId(salesLine.InventTransId, true);
+        if (etgSPAINInventTransApplication)
+        {
+            etgSPAINInventTransApplication.inventDimId = inventDim.inventDimId;
+            etgSPAINInventTransApplication.update();
+        }
+        */
+            ttscommit;
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

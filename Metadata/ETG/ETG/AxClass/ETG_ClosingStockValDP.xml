@@ -1,0 +1,1197 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_ClosingStockValDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// ///    changes for closing ctock report
+/// Developed by SD S3
+/// </summary>
+[
+    SRSReportParameterAttribute(classStr(ETG_ClosingStockValContract))
+    ]
+    class ETG_ClosingStockValDP extends SrsReportDataProviderPreProcessTempDB
+{
+    ETG_ClosingStockValContract         ETG_ClosingStockValContract;
+
+    ETG_ClosingStockValLedgerLine     closingStockValLedgerLine;
+    TransDate                           _tdate;
+    DateOnhand                          _from;
+    InventTable                         inventTable;
+    InventTrans                         inventtrans,inventtrans1;
+    InventTransOrigin                   inventTransOrigin;
+    InventDim                           inventDim;
+    InventDim                           inventDimTot;
+    InventItemGroup                     inventItemGroup;
+    InventItemGroupItem                 inventItemGroupItem;
+    ItemId                              _itemid,s3itemid;
+    InventDimId                         inventdimid,s3inventdimid;
+    InventDim                           inventDimLocal;
+    CompanyInfo                         companyInfo;
+    InventValueReportTmpLine            inventValueReportTmpLine;
+    NoYes                               config,size,color,style,site , warehouse,location,batchnumber,serialNumber;
+    real                                purchqty, soldqty, soldamount, purchamount, deductedqty, deductedamount, receivedqty, receivedamount;             //rajesh
+    ETGACFParameters                    acfParameters = ETGACFParameters::find();
+    PurchLine                           purchLine, purchLine1;
+    VendTable                           vendTable;
+    PurchTable                          purchTable;
+    VendInvoiceTrans                    vendInvoiceTrans;
+    VendInvoiceJour                     vendInvoiceJour;
+    AgreementLine                       agreementLine;
+    VendBankAccount                     vendBankAccount;
+    AgreementHeader                     agreementHeader;
+    PurchAgreementHeader                purchAgreementHeader;
+    InventDim                           inventDim1;
+     
+            
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getInventValueReportTmpLedgerLine</Name>
+				<Source><![CDATA[
+    [
+    SRSReportDataSetAttribute(tableStr(ETG_ClosingStockValLedgerLine))
+    ]
+    public ETG_ClosingStockValLedgerLine getInventValueReportTmpLedgerLine()
+    {
+        select closingStockValLedgerLine;
+        return closingStockValLedgerLine;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        //delete_from closingStockValLedgerLine     ;
+       
+        if(ETGACFParameters::find().EnableClosingStockValueReportChanges == NoYes::Yes)
+        {
+        this.processreport2();
+        }
+        else
+        {
+        this.processreport1();
+        }
+  
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createFairValueLines</Name>
+				<Source><![CDATA[
+    public void createFairValueLines(ETG_InventFairValueHeaderTable        _inventFairValueHeaderTable, ItemId _fairValueItemId)
+    {
+        ETG_InventFairValueLineTable        inventFairValueLineTable;
+        ETG_InventFairValueLineTable        inventFairValueLineTableUpd;
+        while select closingStockValLedgerLine
+            where (closingStockValLedgerLine.ItemId == _fairValueItemId ||  _fairValueItemId == Null)
+        {
+            inventDimLocal.clear();
+            inventDimLocal.configId             =  closingStockValLedgerLine.configId ;
+            inventDimLocal.wMSLocationId        =  closingStockValLedgerLine.WMSLocationId;
+            inventDimLocal.InventStyleId        = closingStockValLedgerLine.InventStyleId;
+            inventDimLocal.InventSizeId         = closingStockValLedgerLine.InventSizeId;
+            inventDimLocal.InventSiteId         = closingStockValLedgerLine.InventSiteId;
+            inventDimLocal.InventLocationId     = closingStockValLedgerLine.InventLocationId;
+            inventDimLocal.inventBatchId        = closingStockValLedgerLine.InventBatchId;
+            inventDimLocal.InventColorId        = closingStockValLedgerLine.InventColorId;
+
+            inventFairValueLineTable.clear();
+            inventFairValueLineTable.FairValuationSerialNumber       =  _inventFairValueHeaderTable.FairValuationSerialNumber; //_inventFairValueContract.parmInventFairValueHeaderTable().FairValuationSerialNumber;
+            inventFairValueLineTable.ItemNumber                      =  closingStockValLedgerLine.ItemId;
+            inventFairValueLineTable.ItemName                        =  closingStockValLedgerLine.ResourceId;
+            inventFairValueLineTable.UnitId                          =  InventTable::find( closingStockValLedgerLine.ItemId).inventTableModuleInvent().UnitId;
+            inventFairValueLineTable.Itemdimension                   =  InventDim::findOrCreate(inventDimLocal).inventDimId;
+            inventFairValueLineTable.configId                        =  closingStockValLedgerLine.configId;
+            inventFairValueLineTable.WMSLocationId                   =  closingStockValLedgerLine.wMSLocationId;
+            inventFairValueLineTable.InventStyleId                   =  closingStockValLedgerLine.InventStyleId;
+            inventFairValueLineTable.InventSizeId                    =  closingStockValLedgerLine.InventSizeId;
+            inventFairValueLineTable.InventSiteId                    =  closingStockValLedgerLine.InventSiteId ;
+            inventFairValueLineTable.InventLocationId                =  closingStockValLedgerLine.InventLocationId;
+            inventFairValueLineTable.InventBatchId                   =  closingStockValLedgerLine.inventBatchId;
+            inventFairValueLineTable.InventColorId                   =  closingStockValLedgerLine.InventColorId;
+            inventFairValueLineTable.Quantity                        = closingStockValLedgerLine.InventoryFinancialQty; // abs(purchqty + receivedqty) - abs(soldqty + deductedqty)  ;
+            inventFairValueLineTable.OriginalCostValue               = closingStockValLedgerLine.InventoryFinancialAmount; // abs(purchamount + receivedamount) - abs(soldamount + deductedamount);
+
+            if((inventFairValueLineTable.Quantity)!= 0)
+            {
+                inventFairValueLineTable.OriginalCost  = (inventFairValueLineTable.OriginalCostValue)/(inventFairValueLineTable.Quantity);
+            }
+            select inventFairValueLineTableUpd
+                where inventFairValueLineTableUpd.FairValuationSerialNumber == inventFairValueLineTable.FairValuationSerialNumber &&
+                      inventFairValueLineTableUpd.ItemNumber == inventFairValueLineTable.ItemNumber &&
+                      inventFairValueLineTableUpd.Itemdimension == inventFairValueLineTable.Itemdimension;
+            if(inventFairValueLineTableUpd.RecId == 0)
+                inventFairValueLineTable.insert();
+            else
+            {
+                ttsbegin;
+                inventFairValueLineTableUpd.selectForUpdate(true);
+                inventFairValueLineTableUpd.Quantity += inventFairValueLineTable.Quantity;
+                inventFairValueLineTableUpd.OriginalCostValue += inventFairValueLineTable.OriginalCostValue;
+                if((inventFairValueLineTableUpd.Quantity)!= 0)
+                {
+                    inventFairValueLineTableUpd.OriginalCost  = (inventFairValueLineTableUpd.OriginalCostValue)/(inventFairValueLineTableUpd.Quantity);
+                }
+                inventFairValueLineTableUpd.update();
+                ttscommit;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processreport1</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// process report logic for ReportUOM
+    /// </summary>
+    
+    public void processreport1()
+    {
+  
+        InventTable              inventTableloc;
+        InventTableModule        inventTableModule;
+        InventDimParm            inventDimParmCriteria;
+        container                conItemInventDim;
+        String255                keyItemInventDim;
+        UnitOfMeasureConversion  unitOfMeasureConversion;
+        str                      fromUnit,toUnit;
+        UnitOfMeasure            fromUnitOfMeasure, toUnitOfMeasure;
+
+
+        ETG_ClosingStockValContract = this.parmDataContract() as ETG_ClosingStockValContract;
+
+        _from         =       ETG_ClosingStockValContract.parmPerDate();
+        config        =       ETG_ClosingStockValContract.parmConfig();
+        size          =       ETG_ClosingStockValContract.parmSize();
+        color         =       ETG_ClosingStockValContract.parmColor();
+        style         =       ETG_ClosingStockValContract.parmStyle();
+        site          =       ETG_ClosingStockValContract.parmSite();
+        warehouse     =       ETG_ClosingStockValContract.parmWarehouse();
+        location      =       ETG_ClosingStockValContract.parmLocation();
+        batchnumber   =       ETG_ClosingStockValContract.parmBatchNumber();
+
+        companyInfo                 = CompanyInfo::find();
+        closingStockValLedgerLine.CompanyLogo = CompanyImage::findByRecord(companyInfo).Image;
+        closingStockValLedgerLine.CompanyName= companyInfo.Name;
+    
+        inventdimid = "";
+        _itemid = "";
+
+        while select   inventtrans1
+        order by itemid /*,InventDimId ,StatusIssue */
+        where (inventtrans1.DateFinancial <= _from || inventtrans1.DatePhysical <= _from) && // s3
+        (inventtrans1.StatusIssue == StatusIssue::Sold ||  inventtrans1.StatusReceipt == StatusReceipt::Purchased ||  inventtrans1.StatusReceipt == StatusReceipt::Received || inventtrans1.StatusIssue == StatusIssue::Deducted)      //rajesh
+        join inventdim
+        Order by configId,InventStyleId, InventSizeId, InventColorId,InventSiteId, InventLocationId, wMSLocationId, inventBatchId
+        where   inventtrans1.InventDimId == inventdim.inventDimId
+         //&& inventtrans1.ItemId == 'PP DAL REJ_SFG'
+         
+        {
+            closingStockValLedgerLine.clear();
+            if(config)
+            closingStockValLedgerLine.configId                  =  inventDim.configId;
+            if(location)
+            closingStockValLedgerLine.WMSLocationId             =  inventDim.wMSLocationId;
+            if(style)
+            closingStockValLedgerLine.InventStyleId             =  inventDim.InventStyleId;
+            if(size)
+            closingStockValLedgerLine.InventSizeId              =  inventDim.InventSizeId;
+            if(site)
+            closingStockValLedgerLine.InventSiteId              =  inventDim.InventSiteId ;
+            if(warehouse)
+            closingStockValLedgerLine.InventLocationId          =  inventDim.InventLocationId;
+            if(batchnumber)
+            closingStockValLedgerLine.InventBatchId             =  inventDim.inventBatchId;
+            if(color)
+            closingStockValLedgerLine.InventColorId             =  inventDim.InventColorId;
+
+            keyItemInventDim = strFmt("%1-%2-%3-%4-%5-%6-%7-%8-%9",inventtrans1.itemid,closingStockValLedgerLine.configId,closingStockValLedgerLine.InventStyleId, closingStockValLedgerLine.InventSizeId, closingStockValLedgerLine.InventColorId,closingStockValLedgerLine.InventSiteId, closingStockValLedgerLine.InventLocationId, closingStockValLedgerLine.wMSLocationId, closingStockValLedgerLine.inventBatchId);
+            if(conFind(conItemInventDim,keyItemInventDim) == 0)
+            {
+                conItemInventDim += keyItemInventDim ;
+                inventTableloc     = InventTable::find(inventtrans1.ItemId);
+                //inventDim          = InventDim::find(inventtrans1.inventDimId);
+
+
+                inventTableModule                = InventTableModule::find(inventTableloc.ItemId,ModuleInventPurchSales::Invent);
+
+
+                closingStockValLedgerLine.CompanyLogo               = FormLetter::companyLogo();
+                closingStockValLedgerLine.CompanyName               = companyInfo.Name;
+
+                closingStockValLedgerLine.ItemId                    =  inventTableloc.ItemId;
+                closingStockValLedgerLine.ItemName                  =  EcoResProductTranslation::findByProductLanguage(InventTable::find(inventTableloc.ItemId).Product, SystemParameters::getSystemLanguageId()).Name;
+                closingStockValLedgerLine.ResourceId                =  inventTableloc.itemName();
+                closingStockValLedgerLine.ResourceGroupId           =  inventTableloc.itemGroupId();
+                closingStockValLedgerLine.FromUnit                  =  inventTableModule.UnitId;
+
+
+                inventDimLocal.clear();
+                inventDimLocal.configId             =  closingStockValLedgerLine.configId ;
+                inventDimLocal.wMSLocationId        =  closingStockValLedgerLine.WMSLocationId;
+                inventDimLocal.InventStyleId        = closingStockValLedgerLine.InventStyleId;
+                inventDimLocal.InventSizeId         = closingStockValLedgerLine.InventSizeId;
+                inventDimLocal.InventSiteId         = closingStockValLedgerLine.InventSiteId;
+                inventDimLocal.InventLocationId     = closingStockValLedgerLine.InventLocationId;
+                inventDimLocal.inventBatchId        = closingStockValLedgerLine.InventBatchId;
+                inventDimLocal.InventColorId        = closingStockValLedgerLine.InventColorId;
+
+                //if(inventdimid == InventDim::findOrCreate(inventDimLocal).inventDimId && _itemid == inventtrans1.ItemId)
+                //   && s3_StatusIssue == inventtrans1.StatusIssue && s3_statusReceipt == inventtrans1.StatusReceipt)
+                //continue;
+   
+                //if(inventdimid != InventDim::findOrCreate(inventDimLocal).inventDimId || _itemid != inventtrans1.ItemId)
+                //{
+                soldqty = 0;
+                purchqty= 0;
+                receivedqty = 0;
+                deductedqty = 0;                     //rajesh
+        
+                //if(inventdimid != InventDim::findOrCreate(inventDimLocal).inventDimId || _itemid != inventtrans1.ItemId)
+                {
+          
+                    select sum(Qty) from   inventtrans
+                join inventDimTot
+                where  inventtrans.ItemId == inventtrans1.ItemId
+                && (inventtrans.DateFinancial <= _from  || inventtrans.DatePhysical <= _from)
+                && inventtrans.StatusIssue == StatusIssue::Sold
+                && inventtrans.inventDimId == inventDimTot.inventDimId
+                && ( (inventDimTot.configId     == closingStockValLedgerLine.configId           || config       == NoYes::No) &&
+                (inventDimTot.InventSizeId      == closingStockValLedgerLine.InventSizeId       || Size         == NoYes::No) &&
+                (inventDimTot.InventColorId     == closingStockValLedgerLine.InventColorId      || color        == NoYes::No) &&
+                (inventDimTot.InventStyleId     == closingStockValLedgerLine.InventStyleId      || style        == NoYes::No) &&
+                (inventDimTot.InventSiteId      == closingStockValLedgerLine.InventSiteId       || site         == NoYes::No) &&
+                (inventDimTot.InventLocationId  == closingStockValLedgerLine.InventLocationId   || warehouse    == NoYes::No) &&
+                (inventDimTot.wMSLocationId     == closingStockValLedgerLine.WMSLocationId      || location     == NoYes::No) &&
+                (inventDimTot.inventBatchId     == closingStockValLedgerLine.InventBatchId      || batchnumber  == NoYes::No));
+            
+                    soldqty = inventtrans.Qty;
+
+
+                    select sum(Qty) from   inventtrans
+                 join inventDimTot
+                where inventtrans.ItemId == inventtrans1.ItemId
+                     && (inventtrans.DateFinancial <= _from   || inventtrans.DatePhysical <= _from)
+                    && inventtrans.StatusReceipt == StatusReceipt::Purchased &&
+               inventtrans.inventDimId == inventDimTot.inventDimId
+                && ( (inventDimTot.configId     == closingStockValLedgerLine.configId           || config       == NoYes::No) &&
+                (inventDimTot.InventSizeId      == closingStockValLedgerLine.InventSizeId       || Size         == NoYes::No) &&
+                (inventDimTot.InventColorId     == closingStockValLedgerLine.InventColorId      || color        == NoYes::No) &&
+                (inventDimTot.InventStyleId     == closingStockValLedgerLine.InventStyleId      || style        == NoYes::No) &&
+                (inventDimTot.InventSiteId      == closingStockValLedgerLine.InventSiteId       || site         == NoYes::No) &&
+                (inventDimTot.InventLocationId  == closingStockValLedgerLine.InventLocationId   || warehouse    == NoYes::No) &&
+                (inventDimTot.wMSLocationId     == closingStockValLedgerLine.WMSLocationId      || location     == NoYes::No) &&
+                (inventDimTot.inventBatchId     == closingStockValLedgerLine.InventBatchId      || batchnumber  == NoYes::No));
+                    purchqty =   inventtrans.Qty;
+
+                    //Commented by rajesh s3
+
+                    select sum(Qty) from   inventtrans
+                join inventDimTot
+                where  inventtrans.ItemId == inventtrans1.ItemId
+                && inventtrans.DatePhysical <= _from                             //rajesh S3 //
+                    && inventtrans.StatusIssue == StatusIssue::Deducted
+                && inventtrans.inventDimId == inventDimTot.inventDimId
+                && ( (inventDimTot.configId     == closingStockValLedgerLine.configId           || config       == NoYes::No) &&
+                (inventDimTot.InventSizeId      == closingStockValLedgerLine.InventSizeId       || Size         == NoYes::No) &&
+                (inventDimTot.InventColorId     == closingStockValLedgerLine.InventColorId      || color        == NoYes::No) &&
+                (inventDimTot.InventStyleId     == closingStockValLedgerLine.InventStyleId      || style        == NoYes::No) &&
+                (inventDimTot.InventSiteId      == closingStockValLedgerLine.InventSiteId       || site         == NoYes::No) &&
+                (inventDimTot.InventLocationId  == closingStockValLedgerLine.InventLocationId   || warehouse    == NoYes::No) &&
+                (inventDimTot.wMSLocationId     == closingStockValLedgerLine.WMSLocationId      || location     == NoYes::No) &&
+                (inventDimTot.inventBatchId     == closingStockValLedgerLine.InventBatchId      || batchnumber  == NoYes::No));
+                    deductedqty = inventtrans.Qty;
+
+                    select sum(Qty) from   inventtrans
+                join inventDimTot
+                where  inventtrans.ItemId == inventtrans1.ItemId
+                && inventtrans.DatePhysical <= _from                                //rajesh
+                    && inventtrans.StatusReceipt == StatusReceipt::Received
+                && inventtrans.inventDimId == inventDimTot.inventDimId
+                && ( (inventDimTot.configId     == closingStockValLedgerLine.configId           || config       == NoYes::No) &&
+                (inventDimTot.InventSizeId      == closingStockValLedgerLine.InventSizeId       || Size         == NoYes::No) &&
+                (inventDimTot.InventColorId     == closingStockValLedgerLine.InventColorId      || color        == NoYes::No) &&
+                (inventDimTot.InventStyleId     == closingStockValLedgerLine.InventStyleId      || style        == NoYes::No) &&
+                (inventDimTot.InventSiteId      == closingStockValLedgerLine.InventSiteId       || site         == NoYes::No) &&
+                (inventDimTot.InventLocationId  == closingStockValLedgerLine.InventLocationId   || warehouse    == NoYes::No) &&
+                (inventDimTot.wMSLocationId     == closingStockValLedgerLine.WMSLocationId      || location     == NoYes::No) &&
+                (inventDimTot.inventBatchId     == closingStockValLedgerLine.InventBatchId      || batchnumber  == NoYes::No));
+                    receivedqty = inventtrans.Qty;
+                    //rajesh
+
+
+
+                }
+                // s3
+                //  inventDimid = inventDim.inventDimId;//s3
+                inventdimid = InventDim::findOrCreate(inventDimLocal).inventDimId;
+                _itemid = inventtrans1.ItemId;
+       
+        
+                //closingStockValLedgerLine.InventoryFinancialQty = purchqty + soldqty;
+                closingStockValLedgerLine.InventoryFinancialQty     =  abs(purchqty + receivedqty) - abs(soldqty + deductedqty) ;   //rajesh
+
+         
+                //NS, DLT ,10/03/2025  UOM we required along with MT & LBS, KGS AT closing Stock level
+                if(ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+                {
+                    fromUnit           = inventTableModule.UnitId;
+                    fromUnitOfMeasure  = UnitOfMeasure::findBySymbol(fromUnit);
+                    boolean           isvaild;
+
+                    while select unitOfMeasureConversion
+                      where unitOfMeasureConversion.FromUnitOfMeasure  == fromUnitOfMeasure.RecId
+                    {
+                   
+                        toUnit   = UnitOfMeasure::find(unitOfMeasureConversion.ToUnitOfMeasure).Symbol;
+
+                        if(unitOfMeasureConversion.FromUnitOfMeasure  == fromUnitOfMeasure.RecId && unitOfMeasureConversion.Product == 0)
+                        {
+                            if(fromUnit == toUnit && toUnit == "@ETG_New:MT")
+                            {
+                                closingStockValLedgerLine.ETGMT = closingStockValLedgerLine.InventoryFinancialQty;
+                                isvaild = true;
+                            }
+                            else if(fromUnit && toUnit == "@ETG_New:KG")
+                            {
+                                closingStockValLedgerLine.ETGKG =unitOfMeasureConversion.Factor * closingStockValLedgerLine.InventoryFinancialQty;
+                                isvaild = true;
+                            }
+                            if(fromUnit == toUnit && toUnit == "@ETG_New:KG")
+                            {
+                                closingStockValLedgerLine.ETGKG  = closingStockValLedgerLine.InventoryFinancialQty;
+                                isvaild = true;
+                            }
+                            else if(fromUnit  && toUnit == "@ETG_New:MT")
+                            {
+                                closingStockValLedgerLine.ETGMT = unitOfMeasureConversion.Factor * closingStockValLedgerLine.InventoryFinancialQty;
+                                isvaild = true;
+                            }
+                            if(fromUnit == toUnit && toUnit == "@ETG_New:LBS")
+                            {
+                                closingStockValLedgerLine.ETGLBS  = closingStockValLedgerLine.InventoryFinancialQty;
+                                isvaild = true;
+                            }
+                            else if(fromUnit  && toUnit == "@ETG_New:LBS")
+                            {
+                                closingStockValLedgerLine.ETGLBS = unitOfMeasureConversion.Factor * closingStockValLedgerLine.InventoryFinancialQty;
+                                isvaild = true;
+                            }
+               
+                        }
+                        else
+                        {
+                            if(!isvaild)
+                            {
+                                select firstonly  unitOfMeasureConversion
+                              where     unitOfMeasureConversion.Product  == inventTableloc.Product
+                                   &&   unitOfMeasureConversion.FromUnitOfMeasure == fromUnitOfMeasure.RecId;
+               
+                                if(fromUnit == toUnit && toUnit == "@ETG_New:MT")
+                                {
+                                    closingStockValLedgerLine.ETGMT = closingStockValLedgerLine.InventoryFinancialQty;
+                                }
+                                else if(fromUnit && toUnit == "@ETG_New:KG")
+                                {
+                                    closingStockValLedgerLine.ETGKG =unitOfMeasureConversion.Factor * closingStockValLedgerLine.InventoryFinancialQty;
+                                }
+                                if(fromUnit == toUnit && toUnit == "@ETG_New:KG")
+                                {
+                                    closingStockValLedgerLine.ETGKG  = closingStockValLedgerLine.InventoryFinancialQty;
+                                }
+                                else if(fromUnit  && toUnit == "@ETG_New:MT")
+                                {
+                                    closingStockValLedgerLine.ETGMT = unitOfMeasureConversion.Factor * closingStockValLedgerLine.InventoryFinancialQty;
+                                }
+                                if(fromUnit == toUnit && toUnit == "@ETG_New:LBS")
+                                {
+                                    closingStockValLedgerLine.ETGLBS  = closingStockValLedgerLine.InventoryFinancialQty;
+                                }
+                                else if(fromUnit  && toUnit == "@ETG_New:LBS")
+                                {
+                                    closingStockValLedgerLine.ETGLBS = unitOfMeasureConversion.Factor * closingStockValLedgerLine.InventoryFinancialQty;
+                                }
+                            }
+                        }
+                        if(closingStockValLedgerLine.ETGMT == 0 && fromUnit =="MT")
+                        {
+                            closingStockValLedgerLine.ETGMT  = closingStockValLedgerLine.InventoryFinancialQty;
+                        }
+                        if(closingStockValLedgerLine.ETGKG== 0 && fromUnit =="KG")
+                        {
+                            closingStockValLedgerLine.ETGKG  = closingStockValLedgerLine.InventoryFinancialQty;
+                        }
+                        if(closingStockValLedgerLine.ETGLBS == 0 && fromUnit == "LBS")
+                        {
+                            closingStockValLedgerLine.ETGLBS  = closingStockValLedgerLine.InventoryFinancialQty;
+                        }
+                    }
+                
+                }
+
+                //NE, DLT ,10/03/2025  UOM we required along with MT & LBS, KGS AT closing Stock level
+   
+                soldamount = 0;
+                purchamount= 0;
+                receivedamount = 0;
+                deductedamount = 0;         //rajesh
+                //sold amount
+        
+        
+                while select * from   inventtrans
+                join inventDimTot
+                where  inventtrans.ItemId == inventtrans1.ItemId
+                && (inventtrans.DateFinancial   <= _from  || inventtrans.DatePhysical <= _from)
+                && inventtrans.StatusIssue      == StatusIssue::Sold
+                && inventtrans.inventDimId      == inventDimTot.inventDimId
+                && ( (inventDimTot.configId     == closingStockValLedgerLine.configId           || config       == NoYes::No) &&
+                (inventDimTot.InventSizeId      == closingStockValLedgerLine.InventSizeId       || Size         == NoYes::No) &&
+                (inventDimTot.InventColorId     == closingStockValLedgerLine.InventColorId      || color        == NoYes::No) &&
+                (inventDimTot.InventStyleId     == closingStockValLedgerLine.InventStyleId      || style        == NoYes::No) &&
+                (inventDimTot.InventSiteId      == closingStockValLedgerLine.InventSiteId       || site         == NoYes::No) &&
+                (inventDimTot.InventLocationId  == closingStockValLedgerLine.InventLocationId   || warehouse    == NoYes::No) &&
+                (inventDimTot.wMSLocationId     == closingStockValLedgerLine.WMSLocationId      || location     == NoYes::No) &&
+                (inventDimTot.inventBatchId     == closingStockValLedgerLine.InventBatchId      || batchnumber  == NoYes::No))
+                {
+                    //1805
+
+                    if(_from < inventtrans.DateFinancial)
+                    {
+                        soldamount += inventtrans.CostAmountPhysical;
+                    }
+                    else if( _from >= inventtrans.DateFinancial && _from >= inventtrans.DatePhysical)// s3 for physical date change 16062022
+                    {
+                        // if(inventtrans.CostAmountPosted != 0)
+                        if(inventtrans.DateFinancial != dateNull()) // s3 new for date range blank check and financial posting
+                        soldamount += inventtrans.CostAmountPosted;
+                        else if(inventtrans.DatePhysical != dateNull())// physical posting
+                        soldamount += inventtrans.CostAmountPhysical;
+                    }
+                }
+                //1805
+                //s3 adjustment amount;
+                InventSettlement        inventsettlement;
+               
+                //select sum(CostAmountAdjustment) from   inventtrans
+                while    select inventtrans
+                join inventsettlement  where   inventsettlement.TransRecId == inventtrans.RecId &&  inventsettlement.TransDate <= _from  && inventsettlement.Cancelled == 0
+                join inventDimTot
+                where  inventtrans.ItemId == inventtrans1.ItemId
+                && (inventtrans.DateFinancial <= _from  || inventtrans.DatePhysical <= _from)
+                && inventtrans.StatusIssue == StatusIssue::Sold
+                && inventtrans.inventDimId == inventDimTot.inventDimId
+                && ( (inventDimTot.configId     == closingStockValLedgerLine.configId           || config       == NoYes::No) &&
+                (inventDimTot.InventSizeId      == closingStockValLedgerLine.InventSizeId       || Size         == NoYes::No) &&
+                (inventDimTot.InventColorId     == closingStockValLedgerLine.InventColorId      || color        == NoYes::No) &&
+                (inventDimTot.InventStyleId     == closingStockValLedgerLine.InventStyleId      || style        == NoYes::No) &&
+                (inventDimTot.InventSiteId      == closingStockValLedgerLine.InventSiteId       || site         == NoYes::No) &&
+                (inventDimTot.InventLocationId  == closingStockValLedgerLine.InventLocationId   || warehouse    == NoYes::No) &&
+                (inventDimTot.wMSLocationId     == closingStockValLedgerLine.WMSLocationId      || location     == NoYes::No) &&
+                (inventDimTot.inventBatchId     == closingStockValLedgerLine.InventBatchId      || batchnumber  == NoYes::No))
+                {
+                    //soldamount += inventtrans.CostAmountAdjustment;
+                    soldamount += inventsettlement.CostAmountAdjustment;
+                }
+
+                //s3
+           
+                //s3 end
+                //deducted amount
+                select sum(CostAmountPhysical) from   inventtrans
+                join inventDimTot
+                where  inventtrans.ItemId == inventtrans1.ItemId
+                && inventtrans.DatePhysical <= _from                                //rajesh
+                && inventtrans.StatusIssue == StatusIssue::Deducted
+                && inventtrans.inventDimId == inventDimTot.inventDimId
+                && ( (inventDimTot.configId     == closingStockValLedgerLine.configId           || config       == NoYes::No) &&
+                (inventDimTot.InventSizeId      == closingStockValLedgerLine.InventSizeId       || Size         == NoYes::No) &&
+                (inventDimTot.InventColorId     == closingStockValLedgerLine.InventColorId      || color        == NoYes::No) &&
+                (inventDimTot.InventStyleId     == closingStockValLedgerLine.InventStyleId      || style        == NoYes::No) &&
+                (inventDimTot.InventSiteId      == closingStockValLedgerLine.InventSiteId       || site         == NoYes::No) &&
+                (inventDimTot.InventLocationId  == closingStockValLedgerLine.InventLocationId   || warehouse    == NoYes::No) &&
+                (inventDimTot.wMSLocationId     == closingStockValLedgerLine.WMSLocationId      || location     == NoYes::No) &&
+                (inventDimTot.inventBatchId     == closingStockValLedgerLine.InventBatchId      || batchnumber  == NoYes::No));
+
+
+                deductedamount = inventtrans.CostAmountPhysical ;
+                //
+
+                //Purch amount
+  
+                while select * from   inventtrans
+                join inventDimTot
+                where  inventtrans.ItemId == inventtrans1.ItemId
+                && (inventtrans.DateFinancial <= _from   || inventtrans.DatePhysical <= _from)
+            && inventtrans.StatusReceipt == StatusReceipt::Purchased
+                && inventtrans.inventDimId == inventDimTot.inventDimId
+                && ( (inventDimTot.configId     == closingStockValLedgerLine.configId           || config       == NoYes::No) &&
+                (inventDimTot.InventSizeId      == closingStockValLedgerLine.InventSizeId       || Size         == NoYes::No) &&
+                (inventDimTot.InventColorId     == closingStockValLedgerLine.InventColorId      || color        == NoYes::No) &&
+                (inventDimTot.InventStyleId     == closingStockValLedgerLine.InventStyleId      || style        == NoYes::No) &&
+                (inventDimTot.InventSiteId      == closingStockValLedgerLine.InventSiteId       || site         == NoYes::No) &&
+                (inventDimTot.InventLocationId  == closingStockValLedgerLine.InventLocationId   || warehouse    == NoYes::No) &&
+                (inventDimTot.wMSLocationId     == closingStockValLedgerLine.WMSLocationId      || location     == NoYes::No) &&
+                (inventDimTot.inventBatchId     == closingStockValLedgerLine.InventBatchId      || batchnumber  == NoYes::No))
+                {
+                    //loop start while
+                    // purchamount = inventtrans.CostAmountPosted + inventtrans.CostAmountAdjustment;      // s3
+                    if(_from < inventtrans.DateFinancial)   //1805
+                    {
+                        purchamount  += inventtrans.CostAmountPhysical;
+                    }
+                    else if( _from >= inventtrans.DateFinancial && _from >= inventtrans.DatePhysical  )
+                    {
+                        // if(inventtrans.CostAmountPosted != 0)
+                        if(inventtrans.DateFinancial != dateNull())
+                purchamount += inventtrans.CostAmountPosted;
+                        else if(inventtrans.DatePhysical != dateNull())
+                purchamount += inventtrans.CostAmountPhysical ;
+                    }
+                    // 1805
+                }
+                //loop closing while
+                //
+                //s3 adjustment amount;
+           
+
+                //select sum(CostAmountAdjustment) from   inventtrans
+                while select inventtrans
+                join inventsettlement  where   inventsettlement.TransRecId == inventtrans.RecId &&  inventsettlement.TransDate <= _from  && inventsettlement.Cancelled == 0
+                join inventDimTot
+                where  inventtrans.ItemId == inventtrans1.ItemId
+                && (inventtrans.DateFinancial <= _from  || inventtrans.DatePhysical <= _from)
+                && inventtrans.StatusReceipt == StatusReceipt::Purchased
+                && inventtrans.inventDimId == inventDimTot.inventDimId
+                && ( (inventDimTot.configId     == closingStockValLedgerLine.configId           || config       == NoYes::No) &&
+                (inventDimTot.InventSizeId      == closingStockValLedgerLine.InventSizeId       || Size         == NoYes::No) &&
+                (inventDimTot.InventColorId     == closingStockValLedgerLine.InventColorId      || color        == NoYes::No) &&
+                (inventDimTot.InventStyleId     == closingStockValLedgerLine.InventStyleId      || style        == NoYes::No) &&
+                (inventDimTot.InventSiteId      == closingStockValLedgerLine.InventSiteId       || site         == NoYes::No) &&
+                (inventDimTot.InventLocationId  == closingStockValLedgerLine.InventLocationId   || warehouse    == NoYes::No) &&
+                (inventDimTot.wMSLocationId     == closingStockValLedgerLine.WMSLocationId      || location     == NoYes::No) &&
+                (inventDimTot.inventBatchId     == closingStockValLedgerLine.InventBatchId      || batchnumber  == NoYes::No))
+                {
+                    //purchamount += inventtrans.CostAmountAdjustment;
+                    purchamount += inventsettlement.CostAmountAdjustment;
+                }
+
+                //s3
+
+        
+                //receive amount
+                select sum(CostAmountPhysical)  from   inventtrans
+                join inventDimTot
+                where  inventtrans.ItemId == inventtrans1.ItemId
+                && inventtrans.DatePhysical <= _from
+            && inventtrans.StatusReceipt == StatusReceipt::Received
+                && inventtrans.inventDimId == inventDimTot.inventDimId
+                && ( (inventDimTot.configId     == closingStockValLedgerLine.configId           || config       == NoYes::No) &&
+                (inventDimTot.InventSizeId      == closingStockValLedgerLine.InventSizeId       || Size         == NoYes::No) &&
+                (inventDimTot.InventColorId     == closingStockValLedgerLine.InventColorId      || color        == NoYes::No) &&
+                (inventDimTot.InventStyleId     == closingStockValLedgerLine.InventStyleId      || style        == NoYes::No) &&
+                (inventDimTot.InventSiteId      == closingStockValLedgerLine.InventSiteId       || site         == NoYes::No) &&
+                (inventDimTot.InventLocationId  == closingStockValLedgerLine.InventLocationId   || warehouse    == NoYes::No) &&
+                (inventDimTot.wMSLocationId     == closingStockValLedgerLine.WMSLocationId      || location     == NoYes::No) &&
+                (inventDimTot.inventBatchId     == closingStockValLedgerLine.InventBatchId      || batchnumber  == NoYes::No)) ;
+                    
+                receivedamount = inventtrans.CostAmountPhysical ;
+                //
+
+                //closingStockValLedgerLine.InventoryFinancialAmount  = purchamount - soldamount;
+                closingStockValLedgerLine.InventoryFinancialAmount  = abs(purchamount + receivedamount) - abs(soldamount + deductedamount);              //rajesh
+        
+                closingStockValLedgerLine.insert();
+            }
+            }
+        }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processreport2</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// process report logic for ReportUOMSerialId
+    /// </summary>
+    public void processreport2()
+    {
+        InventTable              inventTableloc;
+        InventTableModule        inventTableModule;
+        InventDimParm            inventDimParmCriteria;
+        container                conItemInventDim;
+        String255                keyItemInventDim;
+        UnitOfMeasureConversion  unitOfMeasureConversion;
+        str                      fromUnit,toUnit;
+        UnitOfMeasure            fromUnitOfMeasure, toUnitOfMeasure;
+
+
+        ETG_ClosingStockValContract = this.parmDataContract() as ETG_ClosingStockValContract;
+
+        _from         =       ETG_ClosingStockValContract.parmPerDate();
+        config        =       ETG_ClosingStockValContract.parmConfig();
+        size          =       ETG_ClosingStockValContract.parmSize();
+        color         =       ETG_ClosingStockValContract.parmColor();
+        style         =       ETG_ClosingStockValContract.parmStyle();
+        site          =       ETG_ClosingStockValContract.parmSite();
+        warehouse     =       ETG_ClosingStockValContract.parmWarehouse();
+        location      =       ETG_ClosingStockValContract.parmLocation();
+        batchnumber   =       ETG_ClosingStockValContract.parmBatchNumber();
+        if(ETGACFParameters::find().EnableClosingStockValueReportChanges == NoYes::Yes)
+        {
+            serialNumber  =       ETG_ClosingStockValContract.parmSerialNumber();
+        }
+        
+
+        companyInfo                 = CompanyInfo::find();
+        closingStockValLedgerLine.CompanyLogo = CompanyImage::findByRecord(companyInfo).Image;
+        closingStockValLedgerLine.CompanyName= companyInfo.Name;
+        
+        inventdimid = "";
+        _itemid = "";
+        str purchIdtemp;
+        RecId lastInsertedRecId;
+
+        Map serialInvoiceMap = new Map(Types::String, Types::String);
+
+        while select   inventtrans1
+            order by itemid /*,InventDimId ,StatusIssue */
+        where (inventtrans1.DateFinancial <= _from || inventtrans1.DatePhysical <= _from) && // s3
+            (inventtrans1.StatusIssue == StatusIssue::Sold ||  inventtrans1.StatusReceipt == StatusReceipt::Purchased ||  inventtrans1.StatusReceipt == StatusReceipt::Received || inventtrans1.StatusIssue == StatusIssue::Deducted)
+        join inventdim
+            Order by configId,InventStyleId, InventSizeId, InventColorId,InventSiteId, InventLocationId, wMSLocationId, inventBatchId, InventSerialId
+            where   inventtrans1.InventDimId == inventdim.inventDimId
+             //&& inventtrans1.ItemId == 'PP DAL REJ_SFG'
+             
+        {
+            closingStockValLedgerLine.clear();
+
+                select firstOnly inventTransOrigin
+                where (inventTransOrigin.RecId == inventtrans1.InventTransOrigin &&
+                (inventTransOrigin.ReferenceCategory == InventTransType::Purch ||
+                inventTransOrigin.ReferenceCategory == InventTransType::InventTransaction));
+                closingStockValLedgerLine.PurchId = inventTransOrigin.ReferenceId;
+
+                if(closingStockValLedgerLine.PurchId == null)
+                continue;
+
+                select firstOnly purchTable
+                   where purchTable.PurchId == inventTransOrigin.ReferenceId;
+           
+                if(purchTable.PurchId)
+                {
+                    closingStockValLedgerLine.VendAccount = purchTable.OrderAccount;
+                    closingStockValLedgerLine.VendName = purchTable.PurchName;
+                    select agreementHeader where agreementHeader.RecId == purchTable.MatchingAgreement;
+                }
+ 
+                if(purchIdtemp!=purchTable.PurchId)
+                {
+                    serialInvoiceMap = new Map(Types::String, Types::String); // replaces old map with a new empty map
+                    purchIdtemp=purchTable.PurchId;
+                }
+                boolean allowDuplicate =false;
+                if(!closingStockValLedgerLine.InvoiceAccount)
+                {
+                    if (serialInvoiceMap.exists(inventDim.inventDimId))
+                    {
+                        str invoiceIdItr = serialInvoiceMap.lookup(inventDim.inventDimId);
+                        if (!strContains(invoiceIdItr, inventtrans1.InvoiceId))
+                        {
+                            if(invoiceIdItr != "")
+                            {
+                                invoiceIdItr += ',' + inventtrans1.InvoiceId;
+                            }
+                            else
+                            {
+                                invoiceIdItr=inventtrans1.InvoiceId;
+                            }
+                            allowDuplicate = true;
+
+                        }
+                
+                        if(inventtrans1.StatusReceipt == StatusReceipt::Purchased)
+                        closingStockValLedgerLine.InvoiceAccount = invoiceIdItr;
+
+                        serialInvoiceMap.insert(inventDim.inventDimId, invoiceIdItr);
+                    }
+                    else
+                    {
+                        if(inventtrans1.StatusReceipt == StatusReceipt::Purchased)
+                            closingStockValLedgerLine.InvoiceAccount = inventtrans1.InvoiceId;
+                        serialInvoiceMap.insert(inventDim.inventDimId, inventtrans1.InvoiceId);
+                    }
+                }
+
+            if(closingStockValLedgerLine.PurchId == null)
+                continue;
+
+                if(agreementHeader.RecId && !(inventTransOrigin.ReferenceCategory == InventTransType::InventTransaction))
+                {
+                    closingStockValLedgerLine.AgreementId = PurchAgreementHeader::find(agreementHeader.RecId).PurchNumberSequence;
+                }
+  
+            if(config)
+                closingStockValLedgerLine.configId                  =  inventDim.configId;
+            if(location)
+                closingStockValLedgerLine.WMSLocationId             =  inventDim.wMSLocationId;
+            if(style)
+                closingStockValLedgerLine.InventStyleId             =  inventDim.InventStyleId;
+            if(size)
+                closingStockValLedgerLine.InventSizeId              =  inventDim.InventSizeId;
+            if(site)
+                closingStockValLedgerLine.InventSiteId              =  inventDim.InventSiteId ;
+            if(warehouse)
+                closingStockValLedgerLine.InventLocationId          =  inventDim.InventLocationId;
+            if(batchnumber)
+                closingStockValLedgerLine.InventBatchId             =  inventDim.inventBatchId;
+            if(color)
+                closingStockValLedgerLine.InventColorId             =  inventDim.InventColorId;
+            if(serialNumber)
+                closingStockValLedgerLine.InventSerialId             =  inventDim.inventSerialId;
+            closingStockValLedgerLine.BOLNo                      =  inventDim.inventSerialId;
+
+            keyItemInventDim = strFmt("%1-%2-%3-%4-%5-%6-%7-%8-%9-%10",inventtrans1.itemid,closingStockValLedgerLine.configId,closingStockValLedgerLine.InventStyleId, closingStockValLedgerLine.InventSizeId, closingStockValLedgerLine.InventColorId,closingStockValLedgerLine.InventSiteId, closingStockValLedgerLine.InventLocationId, closingStockValLedgerLine.wMSLocationId, closingStockValLedgerLine.inventBatchId, closingStockValLedgerLine.InventSerialId);
+            if(conFind(conItemInventDim,keyItemInventDim) == 0 || allowDuplicate)
+            {
+                if(conFind(conItemInventDim,keyItemInventDim) == 0)
+                    conItemInventDim += keyItemInventDim ;
+
+                inventTableloc     = InventTable::find(inventtrans1.ItemId);
+                //inventDim          = InventDim::find(inventtrans1.inventDimId);
+
+
+                inventTableModule                = InventTableModule::find(inventTableloc.ItemId,ModuleInventPurchSales::Invent);
+
+
+                closingStockValLedgerLine.CompanyLogo               = FormLetter::companyLogo();
+                closingStockValLedgerLine.CompanyName               = companyInfo.Name;
+
+                closingStockValLedgerLine.ItemId                    =  inventTableloc.ItemId;
+                closingStockValLedgerLine.ItemName                  =  EcoResProductTranslation::findByProductLanguage(InventTable::find(inventTableloc.ItemId).Product, SystemParameters::getSystemLanguageId()).Name;
+                closingStockValLedgerLine.ResourceId                =  inventTableloc.itemName();
+                closingStockValLedgerLine.ResourceGroupId           =  inventTableloc.itemGroupId();
+                closingStockValLedgerLine.FromUnit                  =  inventTableModule.UnitId;
+
+
+                inventDimLocal.clear();
+                inventDimLocal.configId             =  closingStockValLedgerLine.configId ;
+                inventDimLocal.wMSLocationId        =  closingStockValLedgerLine.WMSLocationId;
+                inventDimLocal.InventStyleId        = closingStockValLedgerLine.InventStyleId;
+                inventDimLocal.InventSizeId         = closingStockValLedgerLine.InventSizeId;
+                inventDimLocal.InventSiteId         = closingStockValLedgerLine.InventSiteId;
+                inventDimLocal.InventLocationId     = closingStockValLedgerLine.InventLocationId;
+                inventDimLocal.inventBatchId        = closingStockValLedgerLine.InventBatchId;
+                inventDimLocal.InventColorId        = closingStockValLedgerLine.InventColorId;
+                inventDimLocal.inventSerialId       = closingStockValLedgerLine.InventSerialId;
+
+                //if(inventdimid == InventDim::findOrCreate(inventDimLocal).inventDimId && _itemid == inventtrans1.ItemId)
+                //   && s3_StatusIssue == inventtrans1.StatusIssue && s3_statusReceipt == inventtrans1.StatusReceipt)
+                //continue;
+       
+                //if(inventdimid != InventDim::findOrCreate(inventDimLocal).inventDimId || _itemid != inventtrans1.ItemId)
+                //{
+                soldqty = 0;
+                purchqty= 0;
+                receivedqty = 0;
+                deductedqty = 0;                     //rajesh
+            
+                //if(inventdimid != InventDim::findOrCreate(inventDimLocal).inventDimId || _itemid != inventtrans1.ItemId)
+                {
+              
+                    select sum(Qty) from   inventtrans
+                    join inventDimTot
+                    where  inventtrans.ItemId == inventtrans1.ItemId
+                    && (inventtrans.DateFinancial <= _from  || inventtrans.DatePhysical <= _from)
+                    && inventtrans.StatusIssue == StatusIssue::Sold
+                    && inventtrans.inventDimId == inventDimTot.inventDimId
+                    && ( (inventDimTot.configId     == closingStockValLedgerLine.configId           || config       == NoYes::No) &&
+                    (inventDimTot.InventSizeId      == closingStockValLedgerLine.InventSizeId       || Size         == NoYes::No) &&
+                    (inventDimTot.InventColorId     == closingStockValLedgerLine.InventColorId      || color        == NoYes::No) &&
+                    (inventDimTot.InventStyleId     == closingStockValLedgerLine.InventStyleId      || style        == NoYes::No) &&
+                    (inventDimTot.InventSiteId      == closingStockValLedgerLine.InventSiteId       || site         == NoYes::No) &&
+                    (inventDimTot.InventLocationId  == closingStockValLedgerLine.InventLocationId   || warehouse    == NoYes::No) &&
+                    (inventDimTot.wMSLocationId     == closingStockValLedgerLine.WMSLocationId      || location     == NoYes::No) &&
+                    (inventDimTot.inventBatchId     == closingStockValLedgerLine.InventBatchId      || batchnumber  == NoYes::No) &&
+                    (inventDimTot.inventSerialId     == closingStockValLedgerLine.InventSerialId    || serialNumber == NoYes::No));
+                
+                    soldqty = inventtrans.Qty;
+
+
+                    select sum(Qty) from   inventtrans
+                     join inventDimTot
+                    where inventtrans.ItemId == inventtrans1.ItemId
+                         && (inventtrans.DateFinancial <= _from   || inventtrans.DatePhysical <= _from)
+                        && inventtrans.StatusReceipt == StatusReceipt::Purchased &&
+                   inventtrans.inventDimId == inventDimTot.inventDimId
+                    && ( (inventDimTot.configId     == closingStockValLedgerLine.configId           || config       == NoYes::No) &&
+                    (inventDimTot.InventSizeId      == closingStockValLedgerLine.InventSizeId       || Size         == NoYes::No) &&
+                    (inventDimTot.InventColorId     == closingStockValLedgerLine.InventColorId      || color        == NoYes::No) &&
+                    (inventDimTot.InventStyleId     == closingStockValLedgerLine.InventStyleId      || style        == NoYes::No) &&
+                    (inventDimTot.InventSiteId      == closingStockValLedgerLine.InventSiteId       || site         == NoYes::No) &&
+                    (inventDimTot.InventLocationId  == closingStockValLedgerLine.InventLocationId   || warehouse    == NoYes::No) &&
+                    (inventDimTot.wMSLocationId     == closingStockValLedgerLine.WMSLocationId      || location     == NoYes::No) &&
+                    (inventDimTot.inventBatchId     == closingStockValLedgerLine.InventBatchId      || batchnumber  == NoYes::No) &&
+                    (inventDimTot.inventSerialId     ==closingStockValLedgerLine.InventSerialId     || serialNumber == NoYes::No));
+                    purchqty =   inventtrans.Qty;
+
+                    //Commented by rajesh s3
+
+                    select sum(Qty) from   inventtrans
+                    join inventDimTot
+                    where  inventtrans.ItemId == inventtrans1.ItemId
+                    && inventtrans.DatePhysical <= _from                             //rajesh S3 //
+                    && inventtrans.StatusIssue == StatusIssue::Deducted
+                    && inventtrans.inventDimId == inventDimTot.inventDimId
+                    && ( (inventDimTot.configId     == closingStockValLedgerLine.configId           || config       == NoYes::No) &&
+                    (inventDimTot.InventSizeId      == closingStockValLedgerLine.InventSizeId       || Size         == NoYes::No) &&
+                    (inventDimTot.InventColorId     == closingStockValLedgerLine.InventColorId      || color        == NoYes::No) &&
+                    (inventDimTot.InventStyleId     == closingStockValLedgerLine.InventStyleId      || style        == NoYes::No) &&
+                    (inventDimTot.InventSiteId      == closingStockValLedgerLine.InventSiteId       || site         == NoYes::No) &&
+                    (inventDimTot.InventLocationId  == closingStockValLedgerLine.InventLocationId   || warehouse    == NoYes::No) &&
+                    (inventDimTot.wMSLocationId     == closingStockValLedgerLine.WMSLocationId      || location     == NoYes::No) &&
+                    (inventDimTot.inventBatchId     == closingStockValLedgerLine.InventBatchId      || batchnumber  == NoYes::No) &&
+                    (inventDimTot.inventSerialId     == closingStockValLedgerLine.InventSerialId    || serialNumber == NoYes::No));
+                    deductedqty = inventtrans.Qty;
+
+                    select sum(Qty) from   inventtrans
+                    join inventDimTot
+                    where  inventtrans.ItemId == inventtrans1.ItemId
+                    && inventtrans.DatePhysical <= _from                                //rajesh
+                    && inventtrans.StatusReceipt == StatusReceipt::Received
+                    && inventtrans.inventDimId == inventDimTot.inventDimId
+                    && ( (inventDimTot.configId     == closingStockValLedgerLine.configId           || config       == NoYes::No) &&
+                    (inventDimTot.InventSizeId      == closingStockValLedgerLine.InventSizeId       || Size         == NoYes::No) &&
+                    (inventDimTot.InventColorId     == closingStockValLedgerLine.InventColorId      || color        == NoYes::No) &&
+                    (inventDimTot.InventStyleId     == closingStockValLedgerLine.InventStyleId      || style        == NoYes::No) &&
+                    (inventDimTot.InventSiteId      == closingStockValLedgerLine.InventSiteId       || site         == NoYes::No) &&
+                    (inventDimTot.InventLocationId  == closingStockValLedgerLine.InventLocationId   || warehouse    == NoYes::No) &&
+                    (inventDimTot.wMSLocationId     == closingStockValLedgerLine.WMSLocationId      || location     == NoYes::No) &&
+                    (inventDimTot.inventBatchId     == closingStockValLedgerLine.InventBatchId      || batchnumber  == NoYes::No) &&
+                    (inventDimTot.inventSerialId     == closingStockValLedgerLine.InventSerialId    || serialNumber  == NoYes::No));
+                    receivedqty = inventtrans.Qty;
+                    //rajesh
+
+
+
+                }
+                // s3
+                //  inventDimid = inventDim.inventDimId;//s3
+                inventdimid = InventDim::findOrCreate(inventDimLocal).inventDimId;
+                _itemid = inventtrans1.ItemId;
+           
+            
+                //closingStockValLedgerLine.InventoryFinancialQty = purchqty + soldqty;
+                closingStockValLedgerLine.InventoryFinancialQty     =  abs(purchqty + receivedqty) - abs(soldqty + deductedqty) ;   //rajesh
+
+             
+                //NS, DLT ,10/03/2025  UOM we required along with MT & LBS, KGS AT closing Stock level
+                
+                fromUnit           = inventTableModule.UnitId;
+                fromUnitOfMeasure  = UnitOfMeasure::findBySymbol(fromUnit);
+                boolean           isvaild;
+
+                while select unitOfMeasureConversion
+                          where unitOfMeasureConversion.FromUnitOfMeasure  == fromUnitOfMeasure.RecId
+                {
+                       
+                    toUnit   = UnitOfMeasure::find(unitOfMeasureConversion.ToUnitOfMeasure).Symbol;
+
+                    if(unitOfMeasureConversion.FromUnitOfMeasure  == fromUnitOfMeasure.RecId && unitOfMeasureConversion.Product == 0)
+                    {
+                        if(fromUnit == toUnit && toUnit == "@ETG_New:MT")
+                        {
+                            closingStockValLedgerLine.ETGMT = closingStockValLedgerLine.InventoryFinancialQty;
+                            isvaild = true;
+                        }
+                        else if(fromUnit && toUnit == "@ETG_New:KG")
+                        {
+                            closingStockValLedgerLine.ETGKG =unitOfMeasureConversion.Factor * closingStockValLedgerLine.InventoryFinancialQty;
+                            isvaild = true;
+                        }
+                        if(fromUnit == toUnit && toUnit == "@ETG_New:KG")
+                        {
+                            closingStockValLedgerLine.ETGKG  = closingStockValLedgerLine.InventoryFinancialQty;
+                            isvaild = true;
+                        }
+                        else if(fromUnit  && toUnit == "@ETG_New:MT")
+                        {
+                            closingStockValLedgerLine.ETGMT = unitOfMeasureConversion.Factor * closingStockValLedgerLine.InventoryFinancialQty;
+                            isvaild = true;
+                        }
+                        if(fromUnit == toUnit && toUnit == "@ETG_New:LBS")
+                        {
+                            closingStockValLedgerLine.ETGLBS  = closingStockValLedgerLine.InventoryFinancialQty;
+                            isvaild = true;
+                        }
+                        else if(fromUnit  && toUnit == "@ETG_New:LBS")
+                        {
+                            closingStockValLedgerLine.ETGLBS = unitOfMeasureConversion.Factor * closingStockValLedgerLine.InventoryFinancialQty;
+                            isvaild = true;
+                        }
+                   
+                    }
+                    else
+                    {
+                        if(!isvaild)
+                        {
+                            select firstonly  unitOfMeasureConversion
+                                  where     unitOfMeasureConversion.Product  == inventTableloc.Product
+                                       &&   unitOfMeasureConversion.FromUnitOfMeasure == fromUnitOfMeasure.RecId;
+                   
+                            if(fromUnit == toUnit && toUnit == "@ETG_New:MT")
+                            {
+                                closingStockValLedgerLine.ETGMT = closingStockValLedgerLine.InventoryFinancialQty;
+                            }
+                            else if(fromUnit && toUnit == "@ETG_New:KG")
+                            {
+                                closingStockValLedgerLine.ETGKG =unitOfMeasureConversion.Factor * closingStockValLedgerLine.InventoryFinancialQty;
+                            }
+                            if(fromUnit == toUnit && toUnit == "@ETG_New:KG")
+                            {
+                                closingStockValLedgerLine.ETGKG  = closingStockValLedgerLine.InventoryFinancialQty;
+                            }
+                            else if(fromUnit  && toUnit == "@ETG_New:MT")
+                            {
+                                closingStockValLedgerLine.ETGMT = unitOfMeasureConversion.Factor * closingStockValLedgerLine.InventoryFinancialQty;
+                            }
+                            if(fromUnit == toUnit && toUnit == "@ETG_New:LBS")
+                            {
+                                closingStockValLedgerLine.ETGLBS  = closingStockValLedgerLine.InventoryFinancialQty;
+                            }
+                            else if(fromUnit  && toUnit == "@ETG_New:LBS")
+                            {
+                                closingStockValLedgerLine.ETGLBS = unitOfMeasureConversion.Factor * closingStockValLedgerLine.InventoryFinancialQty;
+                            }
+                        }
+                    }
+                    if(closingStockValLedgerLine.ETGMT == 0 && fromUnit =="MT")
+                    {
+                        closingStockValLedgerLine.ETGMT  = closingStockValLedgerLine.InventoryFinancialQty;
+                    }
+                    if(closingStockValLedgerLine.ETGKG== 0 && fromUnit =="KG")
+                    {
+                        closingStockValLedgerLine.ETGKG  = closingStockValLedgerLine.InventoryFinancialQty;
+                    }
+                    if(closingStockValLedgerLine.ETGLBS == 0 && fromUnit == "LBS")
+                    {
+                        closingStockValLedgerLine.ETGLBS  = closingStockValLedgerLine.InventoryFinancialQty;
+                    }
+                }
+                    
+                
+
+                //NE, DLT ,10/03/2025  UOM we required along with MT & LBS, KGS AT closing Stock level
+       
+                soldamount = 0;
+                purchamount= 0;
+                receivedamount = 0;
+                deductedamount = 0;         //rajesh
+                //sold amount
+            
+            
+                while select * from   inventtrans
+                    join inventDimTot
+                    where  inventtrans.ItemId == inventtrans1.ItemId
+                    && (inventtrans.DateFinancial   <= _from  || inventtrans.DatePhysical <= _from)
+                    && inventtrans.StatusIssue      == StatusIssue::Sold
+                    && inventtrans.inventDimId      == inventDimTot.inventDimId
+                    && ( (inventDimTot.configId     == closingStockValLedgerLine.configId           || config       == NoYes::No) &&
+                    (inventDimTot.InventSizeId      == closingStockValLedgerLine.InventSizeId       || Size         == NoYes::No) &&
+                    (inventDimTot.InventColorId     == closingStockValLedgerLine.InventColorId      || color        == NoYes::No) &&
+                    (inventDimTot.InventStyleId     == closingStockValLedgerLine.InventStyleId      || style        == NoYes::No) &&
+                    (inventDimTot.InventSiteId      == closingStockValLedgerLine.InventSiteId       || site         == NoYes::No) &&
+                    (inventDimTot.InventLocationId  == closingStockValLedgerLine.InventLocationId   || warehouse    == NoYes::No) &&
+                    (inventDimTot.wMSLocationId     == closingStockValLedgerLine.WMSLocationId      || location     == NoYes::No) &&
+                    (inventDimTot.inventBatchId     == closingStockValLedgerLine.InventBatchId      || batchnumber  == NoYes::No) &&
+                    (inventDimTot.inventSerialId    == closingStockValLedgerLine.InventSerialId     || serialNumber  == NoYes::No))
+                {
+                    //1805
+
+                    if(_from < inventtrans.DateFinancial)
+                    {
+                        soldamount += inventtrans.CostAmountPhysical;
+                    }
+                    else if( _from >= inventtrans.DateFinancial && _from >= inventtrans.DatePhysical)// s3 for physical date change 16062022
+                    {
+                        // if(inventtrans.CostAmountPosted != 0)
+                        if(inventtrans.DateFinancial != dateNull()) // s3 new for date range blank check and financial posting
+                        soldamount += inventtrans.CostAmountPosted;
+                        else if(inventtrans.DatePhysical != dateNull())// physical posting
+                        soldamount += inventtrans.CostAmountPhysical;
+                    }
+                }
+                //1805
+                //s3 adjustment amount;
+                InventSettlement        inventsettlement;
+                   
+                //select sum(CostAmountAdjustment) from   inventtrans
+                while    select inventtrans
+                    join inventsettlement  where   inventsettlement.TransRecId == inventtrans.RecId &&  inventsettlement.TransDate <= _from  && inventsettlement.Cancelled == 0
+                    join inventDimTot
+                    where  inventtrans.ItemId == inventtrans1.ItemId
+                    && (inventtrans.DateFinancial <= _from  || inventtrans.DatePhysical <= _from)
+                    && inventtrans.StatusIssue == StatusIssue::Sold
+                    && inventtrans.inventDimId == inventDimTot.inventDimId
+                    && ( (inventDimTot.configId     == closingStockValLedgerLine.configId           || config       == NoYes::No) &&
+                    (inventDimTot.InventSizeId      == closingStockValLedgerLine.InventSizeId       || Size         == NoYes::No) &&
+                    (inventDimTot.InventColorId     == closingStockValLedgerLine.InventColorId      || color        == NoYes::No) &&
+                    (inventDimTot.InventStyleId     == closingStockValLedgerLine.InventStyleId      || style        == NoYes::No) &&
+                    (inventDimTot.InventSiteId      == closingStockValLedgerLine.InventSiteId       || site         == NoYes::No) &&
+                    (inventDimTot.InventLocationId  == closingStockValLedgerLine.InventLocationId   || warehouse    == NoYes::No) &&
+                    (inventDimTot.wMSLocationId     == closingStockValLedgerLine.WMSLocationId      || location     == NoYes::No) &&
+                    (inventDimTot.inventBatchId     == closingStockValLedgerLine.InventBatchId      || batchnumber  == NoYes::No) &&
+                    (inventDimTot.inventSerialId   == closingStockValLedgerLine.InventSerialId      || serialNumber  == NoYes::No))
+                {
+                    //soldamount += inventtrans.CostAmountAdjustment;
+                    soldamount += inventsettlement.CostAmountAdjustment;
+                }
+
+                //s3
+               
+                //s3 end
+                //deducted amount
+                select sum(CostAmountPhysical) from   inventtrans
+                    join inventDimTot
+                    where  inventtrans.ItemId == inventtrans1.ItemId
+                    && inventtrans.DatePhysical <= _from                                //rajesh
+                && inventtrans.StatusIssue == StatusIssue::Deducted
+                    && inventtrans.inventDimId == inventDimTot.inventDimId
+                    && ( (inventDimTot.configId     == closingStockValLedgerLine.configId           || config       == NoYes::No) &&
+                    (inventDimTot.InventSizeId      == closingStockValLedgerLine.InventSizeId       || Size         == NoYes::No) &&
+                    (inventDimTot.InventColorId     == closingStockValLedgerLine.InventColorId      || color        == NoYes::No) &&
+                    (inventDimTot.InventStyleId     == closingStockValLedgerLine.InventStyleId      || style        == NoYes::No) &&
+                    (inventDimTot.InventSiteId      == closingStockValLedgerLine.InventSiteId       || site         == NoYes::No) &&
+                    (inventDimTot.InventLocationId  == closingStockValLedgerLine.InventLocationId   || warehouse    == NoYes::No) &&
+                    (inventDimTot.wMSLocationId     == closingStockValLedgerLine.WMSLocationId      || location     == NoYes::No) &&
+                    (inventDimTot.inventBatchId     == closingStockValLedgerLine.InventBatchId      || batchnumber  == NoYes::No)&&
+                    (inventDimTot.inventSerialId    == closingStockValLedgerLine.InventSerialId     || serialNumber == NoYes::No));
+
+
+                deductedamount = inventtrans.CostAmountPhysical ;
+                //
+
+                //Purch amount
+      
+                while select * from   inventtrans
+                    join inventDimTot
+                    where  inventtrans.ItemId == inventtrans1.ItemId
+                    && (inventtrans.DateFinancial <= _from   || inventtrans.DatePhysical <= _from)
+                && inventtrans.StatusReceipt == StatusReceipt::Purchased
+                    && inventtrans.inventDimId == inventDimTot.inventDimId
+                    && ( (inventDimTot.configId     == closingStockValLedgerLine.configId           || config       == NoYes::No) &&
+                    (inventDimTot.InventSizeId      == closingStockValLedgerLine.InventSizeId       || Size         == NoYes::No) &&
+                    (inventDimTot.InventColorId     == closingStockValLedgerLine.InventColorId      || color        == NoYes::No) &&
+                    (inventDimTot.InventStyleId     == closingStockValLedgerLine.InventStyleId      || style        == NoYes::No) &&
+                    (inventDimTot.InventSiteId      == closingStockValLedgerLine.InventSiteId       || site         == NoYes::No) &&
+                    (inventDimTot.InventLocationId  == closingStockValLedgerLine.InventLocationId   || warehouse    == NoYes::No) &&
+                    (inventDimTot.wMSLocationId     == closingStockValLedgerLine.WMSLocationId      || location     == NoYes::No) &&
+                    (inventDimTot.inventBatchId     == closingStockValLedgerLine.InventBatchId      || batchnumber  == NoYes::No) &&
+                    (inventDimTot.inventSerialId     == closingStockValLedgerLine.InventSerialId    || serialNumber  == NoYes::No))
+                {
+                    //loop start while
+                    // purchamount = inventtrans.CostAmountPosted + inventtrans.CostAmountAdjustment;      // s3
+                    if(_from < inventtrans.DateFinancial)   //1805
+                    {
+                        purchamount  += inventtrans.CostAmountPhysical;
+                    }
+                    else if( _from >= inventtrans.DateFinancial && _from >= inventtrans.DatePhysical  )
+                    {
+                        // if(inventtrans.CostAmountPosted != 0)
+                        if(inventtrans.DateFinancial != dateNull())
+                    purchamount += inventtrans.CostAmountPosted;
+                        else if(inventtrans.DatePhysical != dateNull())
+                    purchamount += inventtrans.CostAmountPhysical ;
+                    }
+                    // 1805
+                }
+                //loop closing while
+                //
+                //s3 adjustment amount;
+               
+
+                //select sum(CostAmountAdjustment) from   inventtrans
+                while select inventtrans
+                    join inventsettlement  where   inventsettlement.TransRecId == inventtrans.RecId &&  inventsettlement.TransDate <= _from  && inventsettlement.Cancelled == 0
+                    join inventDimTot
+                    where  inventtrans.ItemId == inventtrans1.ItemId
+                    && (inventtrans.DateFinancial <= _from  || inventtrans.DatePhysical <= _from)
+                    && inventtrans.StatusReceipt == StatusReceipt::Purchased
+                    && inventtrans.inventDimId == inventDimTot.inventDimId
+                    && ( (inventDimTot.configId     == closingStockValLedgerLine.configId           || config       == NoYes::No) &&
+                    (inventDimTot.InventSizeId      == closingStockValLedgerLine.InventSizeId       || Size         == NoYes::No) &&
+                    (inventDimTot.InventColorId     == closingStockValLedgerLine.InventColorId      || color        == NoYes::No) &&
+                    (inventDimTot.InventStyleId     == closingStockValLedgerLine.InventStyleId      || style        == NoYes::No) &&
+                    (inventDimTot.InventSiteId      == closingStockValLedgerLine.InventSiteId       || site         == NoYes::No) &&
+                    (inventDimTot.InventLocationId  == closingStockValLedgerLine.InventLocationId   || warehouse    == NoYes::No) &&
+                    (inventDimTot.wMSLocationId     == closingStockValLedgerLine.WMSLocationId      || location     == NoYes::No) &&
+                    (inventDimTot.inventBatchId     == closingStockValLedgerLine.InventBatchId      || batchnumber  == NoYes::No) &&
+                    (inventDimTot.inventSerialId== closingStockValLedgerLine.InventSerialId         || serialNumber  == NoYes::No))
+                {
+                    //purchamount += inventtrans.CostAmountAdjustment;
+                    purchamount += inventsettlement.CostAmountAdjustment;
+                }
+
+                //s3
+
+            
+                //receive amount
+                select sum(CostAmountPhysical)  from   inventtrans
+                    join inventDimTot
+                    where  inventtrans.ItemId == inventtrans1.ItemId
+                    && inventtrans.DatePhysical <= _from
+                && inventtrans.StatusReceipt == StatusReceipt::Received
+                    && inventtrans.inventDimId == inventDimTot.inventDimId
+                    && ( (inventDimTot.configId     == closingStockValLedgerLine.configId           || config       == NoYes::No) &&
+                    (inventDimTot.InventSizeId      == closingStockValLedgerLine.InventSizeId       || Size         == NoYes::No) &&
+                    (inventDimTot.InventColorId     == closingStockValLedgerLine.InventColorId      || color        == NoYes::No) &&
+                    (inventDimTot.InventStyleId     == closingStockValLedgerLine.InventStyleId      || style        == NoYes::No) &&
+                    (inventDimTot.InventSiteId      == closingStockValLedgerLine.InventSiteId       || site         == NoYes::No) &&
+                    (inventDimTot.InventLocationId  == closingStockValLedgerLine.InventLocationId   || warehouse    == NoYes::No) &&
+                    (inventDimTot.wMSLocationId     == closingStockValLedgerLine.WMSLocationId      || location     == NoYes::No) &&
+                    (inventDimTot.inventBatchId     == closingStockValLedgerLine.InventBatchId      || batchnumber  == NoYes::No) &&
+                    (inventDimTot.inventSerialId== closingStockValLedgerLine.InventSerialId         || serialnumber  == NoYes::No));
+                        
+                receivedamount = inventtrans.CostAmountPhysical ;
+                //
+
+                //closingStockValLedgerLine.InventoryFinancialAmount  = purchamount - soldamount;
+                closingStockValLedgerLine.InventoryFinancialAmount  = abs(purchamount + receivedamount) - abs(soldamount + deductedamount);              //rajesh
+            
+                closingStockValLedgerLine.ETGCommodity     = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(inventTableloc.DefaultDimension,acfParameters.MainCommodity);
+                closingStockValLedgerLine.ETGSubCommodity  = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(inventTableloc.DefaultDimension,acfParameters.SubCommodity);
+                closingStockValLedgerLine.ETGVertical      = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(inventTableloc.DefaultDimension,acfParameters.Vertical);
+                closingStockValLedgerLine.ETGSubVertical   = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(inventTableloc.DefaultDimension,acfParameters.SubVertical);
+
+
+                closingStockValLedgerLine.insert();
+                RecId insertedRecId = closingStockValLedgerLine.RecId;
+
+                if(conFind(conItemInventDim,keyItemInventDim) != 0 && allowDuplicate)
+                {
+                    delete_from closingStockValLedgerLine
+                        where closingStockValLedgerLine.RecId == lastInsertedRecId;
+                }
+
+                lastInsertedRecId = insertedRecId;
+           
+            }
+        }
+
+        //}// return above for itemid and inventdimid close of loop
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

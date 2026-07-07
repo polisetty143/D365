@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGVendExchRateAdjSimulationDP_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(vendExchRateAdjSimulationDP))]
+final class ETGVendExchRateAdjSimulationDP_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>insertRecord</Name>
+				<Source><![CDATA[
+    protected void insertRecord(CustVendTrans _custVendTrans, AmountCur _transactionCurrencyAmount,
+                                AmountMST _currentBalance, AmountMST _newBalance, CurrencyExchangeRate _accountingCurrencyExchangeRateUsed,
+                                AmountMSTSecondary _currentBalanceReporting, AmountMSTSecondary _newBalanceReporting,
+                                CurrencyExchangeRate _reportingCurrencyExchangeRateUsed)
+    {
+        VendTrans vendTrans;
+        VendSettlement vendSettlement;
+        ETG_VendExchRateAdjSimulation eTG_VendExchRateAdjSimulation;
+        GeneralJournalEntry           generalJournalEntry;
+        GeneralJournalAccountEntry    generalJournalAccountEntry,gjAccEntry;
+        DimensionAttributeValueCombination  dimAttrValueComb;
+        DimensionStorage                    dimensionStorage;
+        DimensionStorageSegment             segment;
+        int                     segmentCount, segmentIndex;
+        int                     hierarchyCount, hierarchyIndex;
+        str                     segmentName, segmentDescription;
+        SysDim                  segmentValue;
+        TransDate considerddate =     this.getConsideredDate();
+        TransDate exchRate = this.getExchangeRateDate();
+
+        next insertRecord( _custVendTrans,  _transactionCurrencyAmount,
+                           _currentBalance,  _newBalance,  _accountingCurrencyExchangeRateUsed,
+                          _currentBalanceReporting,  _newBalanceReporting,
+                         _reportingCurrencyExchangeRateUsed);
+        //next createSettledTransQuery(Query _baseQuery);
+        eTG_VendExchRateAdjSimulation.ETG_ConsiderDate = considerddate;
+        eTG_VendExchRateAdjSimulation.ETG_DateOfRate = exchRate;
+        eTG_VendExchRateAdjSimulation.ETG_CustVendExchPrinciples = this.getRevaluationMethod();
+        eTG_VendExchRateAdjSimulation.AccountNum              = vendExchRateAdjSimulationTmp.AccountNum ;
+        eTG_VendExchRateAdjSimulation.AccountName             = vendExchRateAdjSimulationTmp.AccountName;
+        eTG_VendExchRateAdjSimulation.CurrencyCode            = vendExchRateAdjSimulationTmp.CurrencyCode;
+        eTG_VendExchRateAdjSimulation.TransDate               = vendExchRateAdjSimulationTmp.TransDate;
+        eTG_VendExchRateAdjSimulation.AmountCur               = vendExchRateAdjSimulationTmp.AmountCur;
+        eTG_VendExchRateAdjSimulation.CurBalance              = vendExchRateAdjSimulationTmp.CurBalance;
+        eTG_VendExchRateAdjSimulation.NewBalance              = vendExchRateAdjSimulationTmp.NewBalance;
+        eTG_VendExchRateAdjSimulation.ExchangeAdj             = vendExchRateAdjSimulationTmp.ExchangeAdj;
+        eTG_VendExchRateAdjSimulation.ExchangeRate            = vendExchRateAdjSimulationTmp.ExchangeRate;
+        eTG_VendExchRateAdjSimulation.CurrentBalanceReporting = vendExchRateAdjSimulationTmp.CurrentBalanceReporting;
+        eTG_VendExchRateAdjSimulation.NewBalanceReporting     = vendExchRateAdjSimulationTmp.NewBalanceReporting;
+        eTG_VendExchRateAdjSimulation.ExchangeAdjReporting    = vendExchRateAdjSimulationTmp.ExchangeAdjReporting;
+        eTG_VendExchRateAdjSimulation.ExchangeRateReporting   = vendExchRateAdjSimulationTmp.ExchangeRateReporting;
+        eTG_VendExchRateAdjSimulation.ETGFinalSimulation      = NoYes::Yes;
+
+        
+        eTG_VendExchRateAdjSimulation.Voucher = _custVendTrans.Voucher;
+        select vendSettlement where vendSettlement.OffsetTransVoucher == _custVendTrans.Voucher;
+        if(vendSettlement)
+        {
+            eTG_VendExchRateAdjSimulation.ETG_Settiledvoucher = vendSettlement.OffsetTransVoucher;
+            eTG_VendExchRateAdjSimulation.Settileddate = vendSettlement.TransDate;
+        }
+        select vendTrans where vendTrans.Voucher == _custVendTrans.Voucher;
+        eTG_VendExchRateAdjSimulation.InvoiceNumber = vendTrans.Invoice;
+
+        select  generalJournalEntry
+          where generalJournalEntry.SubledgerVoucher == eTG_VendExchRateAdjSimulation.ETG_Settiledvoucher ;
+        if(!generalJournalEntry)
+        {
+            select  generalJournalEntry
+          where generalJournalEntry.SubledgerVoucher == eTG_VendExchRateAdjSimulation.Voucher ;
+        }
+        select generalJournalAccountEntry order by RecId desc  where
+                  generalJournalAccountEntry.GeneralJournalEntry == generalJournalEntry.RecId ;
+
+        eTG_VendExchRateAdjSimulation.PostingType = generalJournalAccountEntry.PostingType;
+        eTG_VendExchRateAdjSimulation.Text = generalJournalAccountEntry.Text;
+        eTG_VendExchRateAdjSimulation.DocumentNumber = generalJournalEntry.DocumentNumber;
+        eTG_VendExchRateAdjSimulation.DocumentDate = generalJournalEntry.DocumentDate;
+        eTG_VendExchRateAdjSimulation.LedgerAccount = generalJournalAccountEntry.LedgerAccount;
+
+        setPrefix("@ETG_New:Dimensionvaluesfetching");
+        //Fetch the Value combination record
+        dimAttrValueComb = DimensionAttributeValueCombination::find(generalJournalAccountEntry.LedgerDimension);
+        setPrefix("@ETG_New:Breakupfor" + dimAttrValueComb.DisplayValue);
+        // Get dimension storage
+        dimensionStorage = DimensionStorage::findById(generalJournalAccountEntry.LedgerDimension);
+        if (dimensionStorage == null)
+        {
+            throw error("@SYS83964");
+        }
+        //Get hierarchy count
+        hierarchyCount = dimensionStorage.hierarchyCount();
+        //Loop through hierarchies to get individual segments
+        for(hierarchyIndex = 1; hierarchyIndex <= hierarchyCount; hierarchyIndex++)
+        {
+            setPrefix(strFmt("@ETG_New:Hierarchy", DimensionHierarchy::find(dimensionStorage.getHierarchyId(hierarchyIndex)).Name));
+            //Get segment count for hierarchy
+            segmentCount = dimensionStorage.segmentCountForHierarchy(hierarchyIndex);
+            //Loop through segments and display required values
+            for (segmentIndex = 1; segmentIndex <= segmentCount; segmentIndex++)
+            {
+                // Get segment
+                segment = dimensionStorage.getSegmentForHierarchy(hierarchyIndex, segmentIndex);
+                // Get the segment information
+                if (segment.parmDimensionAttributeValueId() != 0)
+                {
+                    // Get segment name
+                    segmentName = DimensionAttribute::find(DimensionAttributeValue::find(segment.parmDimensionAttributeValueId()).DimensionAttribute).Name;
+                    //Get segment value (id of the dimension)
+                    segmentValue        = segment.parmDisplayValue();
+                    //Get segment value name (Description for dimension)
+                    segmentDescription  = segment.getName();
+                    if(segmentName == "@ETG_New:Item")
+                    {
+                        eTG_VendExchRateAdjSimulation.ETGItemFinancialdimension = segmentValue;
+                    }
+
+                }
+
+            }
+
+        }
+
+        eTG_VendExchRateAdjSimulation.PostingProfile = _custVendTrans.PostingProfile;
+
+        if(!(eTG_VendExchRateAdjSimulation::find(eTG_VendExchRateAdjSimulation.ETG_ConsiderDate,eTG_VendExchRateAdjSimulation.ETG_DateOfRate,eTG_VendExchRateAdjSimulation.ETG_CustVendExchPrinciples,
+             eTG_VendExchRateAdjSimulation.AccountNum,eTG_VendExchRateAdjSimulation.AccountName,eTG_VendExchRateAdjSimulation.CurrencyCode,
+             eTG_VendExchRateAdjSimulation.TransDate,eTG_VendExchRateAdjSimulation.AmountCur,eTG_VendExchRateAdjSimulation.CurBalance,
+             eTG_VendExchRateAdjSimulation.NewBalance,eTG_VendExchRateAdjSimulation.ExchangeAdj,eTG_VendExchRateAdjSimulation.ExchangeRate,
+             eTG_VendExchRateAdjSimulation.CurrentBalanceReporting,eTG_VendExchRateAdjSimulation.NewBalanceReporting,eTG_VendExchRateAdjSimulation.ExchangeAdjReporting,
+             eTG_VendExchRateAdjSimulation.ExchangeRateReporting, eTG_VendExchRateAdjSimulation.ETGFinalSimulation,eTG_VendExchRateAdjSimulation.Voucher)))
+        {
+            eTG_VendExchRateAdjSimulation.insert();
+        }
+      
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

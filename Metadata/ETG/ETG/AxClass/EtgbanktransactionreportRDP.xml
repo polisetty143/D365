@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>EtgbanktransactionreportRDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(EtgbanktransactionContract))]
+class EtgbanktransactionreportRDP extends SRSReportDataProviderBase
+{
+       EtgBankTransactionTableTemp banktranstmp;
+
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(EtgBankTransactionTableTemp))]
+       public EtgBankTransactionTableTemp getTmp()
+        {
+            select banktranstmp;
+            return banktranstmp;
+        }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+        {
+            EtgbanktransactionContract contract =
+            this.parmDataContract() as EtgbanktransactionContract;
+           
+            BANKACCOUNTTABLE     BankTable;
+            BankAccountTrans banktrans;
+            CustTable   custTable;
+            VendTable  vendTable;
+            MainAccount mainAccount;
+            LEDGERJOURNALTRANS lEDGERJOURNALTRANS;
+            TransDate    fromdate = contract.parmfromDate();
+            TransDate    todate = contract.parmtoDate();
+            str         dispVal;
+           
+
+            while select banktrans  where (banktrans.TransDate >= fromdate
+                   &&  banktrans.TransDate <= todate)
+            {
+               banktranstmp.BankAccountId    = banktrans.AccountId;
+               banktranstmp.Voucher          = banktrans.Voucher;
+               banktranstmp.TransactionDate  = banktrans.TransDate;
+               banktranstmp.TransactionTxt   = banktrans.Txt;
+            select firstonly BankTable where BankTable.AccountID == banktrans.AccountId;
+            banktranstmp.BankAccountNum    = BankTable.AccountNum;
+            banktranstmp.BankAccountId    = BankTable.Name;
+               if(banktrans.AmountCur > 0)
+               {
+                   banktranstmp.Debit = banktrans.AmountCur;
+               }
+               else if(banktrans.AmountCur < 0)
+               {
+                   banktranstmp.Credit = banktrans.AmountCur;
+               }
+           
+            select firstonly lEDGERJOURNALTRANS where lEDGERJOURNALTRANS.Voucher == banktrans.Voucher;
+
+            if(lEDGERJOURNALTRANS.OffsetAccountType == LedgerJournalACType::Bank)
+            { 
+                dispVal = LedgerDimensionFacade::getDisplayValueForLedgerDimension(lEDGERJOURNALTRANS.OffsetLedgerDimension);
+
+                select firstonly BankTable where BankTable.AccountID == dispVal;
+                banktranstmp.OffsetAccountNum = dispVal;
+                banktranstmp.OffsetAccountName  = BankTable.Name;
+            }
+            else if(lEDGERJOURNALTRANS.OffsetAccountType == LedgerJournalACType::Cust)
+            {
+                dispVal = LedgerDimensionFacade::getDisplayValueForLedgerDimension(lEDGERJOURNALTRANS.OffsetLedgerDimension);
+                select firstonly custTable where custTable.AccountNum == dispVal;
+                banktranstmp.OffsetAccountNum = dispVal;
+                banktranstmp.OffsetAccountName  = custTable.name();
+            }
+            else if(lEDGERJOURNALTRANS.OffsetAccountType == LedgerJournalACType::Vend)
+            {
+                dispVal = LedgerDimensionFacade::getDisplayValueForLedgerDimension(lEDGERJOURNALTRANS.OffsetLedgerDimension);
+
+                select firstonly vendTable where vendTable.AccountNum == dispVal;
+                banktranstmp.OffsetAccountNum = dispVal;
+                banktranstmp.OffsetAccountName  = vendTable.name();
+            }
+            else if(lEDGERJOURNALTRANS.OffsetAccountType == LedgerJournalACType::Ledger)
+            {
+                dispVal = LedgerDimensionFacade::getDisplayValueForLedgerDimension(lEDGERJOURNALTRANS.OffsetLedgerDimension);
+
+                select firstonly mainAccount where mainAccount.MainAccountId == dispVal;
+                banktranstmp.OffsetAccountNum = dispVal;
+                banktranstmp.OffsetAccountName  = mainAccount.Name;
+            }                   
+               banktranstmp.insert();
+             }
+       
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

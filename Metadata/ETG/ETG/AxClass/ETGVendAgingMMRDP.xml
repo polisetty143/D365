@@ -1,0 +1,434 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGVendAgingMMRDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(ETGVendAgingMMRContract))]
+class ETGVendAgingMMRDP extends SrsReportDataProviderPreProcessTempDB
+{
+    ETGVendAgingMMR   etgVendAgingMMR;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGVendAgingMMR</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETGVendAgingMMR))]
+    public ETGVendAgingMMR getETGVendAgingMMR()
+    {
+        select * from etgVendAgingMMR;
+        return etgVendAgingMMR;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETGVendAgingMMRContract contract = this.parmDataContract() as ETGVendAgingMMRContract;
+        
+        etgVendAgingMMR.setConnection(this.parmUserConnection());
+
+        if (contract.parmReportType() == ETGReportType::Summary)
+        {
+            this.processSummaryReport(contract);
+        }
+        else
+        {
+            this.processDetailsReport(contract);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processDetailsReport</Name>
+				<Source><![CDATA[
+    private void processDetailsReport(ETGVendAgingMMRContract _contract)
+    {
+        date            asOfDate     = _contract.parmFromDate();
+        ETGAgingBasedOn agingBasedOn = _contract.parmAgingBasedOn();
+
+        str Vertical               = "vertical";
+        str MAINCOMMODITY          = "MainCommodity";
+        str ContractDimName        = "Contract";
+        str COSTCENTER             = "CostCenter";
+        str DEPARTMENT             = "Department";
+        str INTERCOMPANY           = "InterCompany";
+        str LINE_OF_BUSINESSS      = "Line_Of_Business";
+        str SUBVERTICAL            = "SubVertical";
+        str TRADER_EMPLOYEE        = "Trader_Employee";
+        str BusinessUnit           = "businessUnit";
+        str Item                   = "item";
+        str Plant_Warehouse_Office = "plant_Warehouse_Office";
+        str SubCommodity           = "SubCommodity";
+        str PRODUCT_SERVICE        = "pRODUCT_SERVICE";
+
+        Query query = this.parmQuery();
+        if (!query)
+        {
+            query = new Query();
+            query.addDataSource(tableNum(VendTrans));
+        }
+
+        QueryRun qr = new QueryRun(query);
+
+        VendTrans       vendTrans;
+        VendSettlement  vendSettlement;
+        VendTable       vendTable;
+        
+        real            balanceCur;
+        real            balanceMST;
+        real            settledCur;
+        real            settledMST;
+        int             daysPastDue;
+
+        while (qr.next())
+        {
+            if (qr.changed(tableNum(VendTrans)))
+            {
+                vendTrans = qr.get(tableNum(VendTrans));
+
+                if (vendTrans.TransDate > asOfDate)
+                {
+                    continue;
+                }
+
+                vendTable = VendTable::find(vendTrans.AccountNum);
+                
+                etgVendAgingMMR.clear();
+    
+                settledCur = 0;
+                settledMST = 0;
+
+                select sum(SettleAmountCur), sum(SettleAmountMST)
+                    from vendSettlement
+                    where vendSettlement.TransRecId == vendTrans.RecId
+                       && vendSettlement.TransDate  <= asOfDate;
+                
+                settledCur = vendSettlement.SettleAmountCur;
+                settledMST = vendSettlement.SettleAmountMST;
+
+                
+                balanceCur = decRound(vendTrans.AmountCur - settledCur, 2);
+                balanceMST = decRound(vendTrans.AmountMST - settledMST, 2);
+
+                
+                if (balanceCur == 0)
+                {
+                    balanceMST = 0;
+                }
+                
+
+                if (balanceCur == 0 && balanceMST == 0)
+                {
+                    continue;
+                }
+                
+                etgVendAgingMMR.VendAccount     = vendTrans.AccountNum;
+                etgVendAgingMMR.CustomerName    = vendTable.name();
+                etgVendAgingMMR.CustomerGroup   = vendTable.VendGroup;
+                etgVendAgingMMR.Voucher         = vendTrans.Voucher;
+                etgVendAgingMMR.TransactionDate = vendTrans.TransDate;
+                etgVendAgingMMR.DocumentDate    = vendTrans.DocumentDate;
+                etgVendAgingMMR.CurrencyCode    = vendTrans.CurrencyCode;
+                etgVendAgingMMR.DueDate         = vendTrans.DueDate;
+                etgVendAgingMMR.PaymTermId      = vendTrans.PaymTermId;
+                etgVendAgingMMR.Invoice         = vendTrans.Invoice;
+                
+                etgVendAgingMMR.OutStandingLC   = balanceMST;
+                etgVendAgingMMR.OutStandingTC   = balanceCur;
+
+                if (agingBasedOn == ETGAgingBasedOn::DueDate)
+                {
+                    daysPastDue = asOfDate - vendTrans.DueDate;
+                }
+                else if (agingBasedOn == ETGAgingBasedOn::DocumentDate)
+                {
+                    daysPastDue = asOfDate - vendTrans.DocumentDate;
+                }
+                else
+                {
+                    daysPastDue = asOfDate - vendTrans.TransDate;
+                }
+
+                if (curExt() == "o014")
+                {
+                    if (daysPastDue <= 30)
+                    {
+                        etgVendAgingMMR.Bucket01 = balanceMST; etgVendAgingMMR.AgingBucket = "0-30";
+                    }
+                    else if (daysPastDue <= 60)
+                    {
+                        etgVendAgingMMR.Bucket02 = balanceMST; etgVendAgingMMR.AgingBucket = "31-60";
+                    }
+                    else if (daysPastDue <= 90)
+                    {
+                        etgVendAgingMMR.Bucket03 = balanceMST; etgVendAgingMMR.AgingBucket = "61-90";
+                    }
+                    else if (daysPastDue <= 120)
+                    {
+                        etgVendAgingMMR.Bucket04 = balanceMST; etgVendAgingMMR.AgingBucket = "91-120";
+                    }
+                    else if (daysPastDue <= 180)
+                    {
+                        etgVendAgingMMR.Bucket05 = balanceMST; etgVendAgingMMR.AgingBucket = "121-180";
+                    }
+                    else
+                    {
+                        etgVendAgingMMR.Bucket06 = balanceMST; etgVendAgingMMR.AgingBucket = "180 Above";
+                    }
+                }
+                else if (curExt() == "o025")
+                {
+                    if (daysPastDue <= 30)
+                    {
+                        etgVendAgingMMR.Bucket01 = balanceCur; etgVendAgingMMR.AgingBucket = "0-30 DAYS";
+                    }
+                    else if (daysPastDue <= 45)
+                    {
+                        etgVendAgingMMR.Bucket02 = balanceCur; etgVendAgingMMR.AgingBucket = "31-45 DAYS";
+                    }
+                    else if (daysPastDue <= 60)
+                    {
+                        etgVendAgingMMR.Bucket03 = balanceCur; etgVendAgingMMR.AgingBucket = "46-60 DAYS";
+                    }
+                    else if (daysPastDue <= 90)
+                    {
+                        etgVendAgingMMR.Bucket04 = balanceCur; etgVendAgingMMR.AgingBucket = "61-90 DAYS";
+                    }
+                    else if (daysPastDue <= 120)
+                    {
+                        etgVendAgingMMR.Bucket05 = balanceCur; etgVendAgingMMR.AgingBucket = "91-120 DAYS";
+                    }
+                    else if (daysPastDue <= 180)
+                    {
+                        etgVendAgingMMR.Bucket06 = balanceCur; etgVendAgingMMR.AgingBucket = "121-180 DAYS";
+                    }
+                    else
+                    {
+                        etgVendAgingMMR.Bucket07 = balanceCur; etgVendAgingMMR.AgingBucket = ">180 DAYS";
+                    }
+                }
+                else
+                {
+                    if (daysPastDue <= 30)
+                    {
+                        etgVendAgingMMR.Bucket01 = balanceCur; etgVendAgingMMR.AgingBucket = "0-30";
+                    }
+                    else if (daysPastDue <= 60)
+                    {
+                        etgVendAgingMMR.Bucket02 = balanceCur; etgVendAgingMMR.AgingBucket = "31-60";
+                    }
+                    else if (daysPastDue <= 90)
+                    {
+                        etgVendAgingMMR.Bucket03 = balanceCur; etgVendAgingMMR.AgingBucket = "61-90";
+                    }
+                    else if (daysPastDue <= 120)
+                    {
+                        etgVendAgingMMR.Bucket04 = balanceCur; etgVendAgingMMR.AgingBucket = "91-120";
+                    }
+                    else if (daysPastDue <= 180)
+                    {
+                        etgVendAgingMMR.Bucket05 = balanceCur; etgVendAgingMMR.AgingBucket = "121-180";
+                    }
+                    else
+                    {
+                        etgVendAgingMMR.Bucket06 = balanceCur; etgVendAgingMMR.AgingBucket = "180 Above";
+                    }
+                }
+
+                // 4. DIMENSIONS
+                etgVendAgingMMR.BusinessUnit         = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, businessUnit);
+                etgVendAgingMMR.CostCenter           = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, COSTCENTER);
+                etgVendAgingMMR.Department           = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, DEPARTMENT);
+                etgVendAgingMMR.InterCompany         = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, INTERCOMPANY);
+                etgVendAgingMMR.Item                 = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, item);
+                etgVendAgingMMR.LineOfBusiness       = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, LINE_OF_BUSINESSS);
+                etgVendAgingMMR.Commodity            = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, MAINCOMMODITY);
+                etgVendAgingMMR.PlantWarehouseOffice = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, plant_Warehouse_Office);
+                etgVendAgingMMR.SubCommodity         = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(vendTrans.DefaultDimension, subCommodity);
+                etgVendAgingMMR.Trader               = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(vendTrans.DefaultDimension, TRADER_EMPLOYEE);
+                etgVendAgingMMR.Vertical             = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, Vertical);
+                etgVendAgingMMR.Product_Service      = vendTrans::product_Service(vendTrans);
+
+                etgVendAgingMMR.insert();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processSummaryReport</Name>
+				<Source><![CDATA[
+    private void processSummaryReport(ETGVendAgingMMRContract _contract)
+    {
+        date            asOfDate     = _contract.parmFromDate();
+        ETGAgingBasedOn agingBasedOn = _contract.parmAgingBasedOn();
+        
+        
+        str             BusinessUnit = "businessUnit";
+        str             businessUnitValue;
+        str             mapKey;
+
+        Query query = this.parmQuery();
+        if (!query)
+        {
+            query = new Query();
+            query.addDataSource(tableNum(VendTrans));
+        }
+
+        QueryRun qr = new QueryRun(query);
+
+        VendTrans       vendTrans;
+        VendSettlement  vendSettlement;
+        VendTable       vendTable;
+        
+        real            balanceCur;
+        real            balanceMST;
+        real            settledCur;
+        real            settledMST;
+        int             daysPastDue;
+
+        Map             vendorMap = new Map(Types::String, Types::Record);
+        ETGVendAgingMMR agingBuffer;
+
+        while (qr.next())
+        {
+            if (qr.changed(tableNum(VendTrans)))
+            {
+                vendTrans = qr.get(tableNum(VendTrans));
+
+                if (vendTrans.TransDate > asOfDate)
+                {
+                    continue;
+                }
+                
+                settledCur = 0;
+                settledMST = 0;
+
+                select sum(SettleAmountCur), sum(SettleAmountMST)
+                    from vendSettlement
+                    where vendSettlement.TransRecId == vendTrans.RecId
+                       && vendSettlement.TransDate  <= asOfDate;
+                
+                settledCur = vendSettlement.SettleAmountCur;
+                settledMST = vendSettlement.SettleAmountMST;
+
+                
+                balanceCur = decRound(vendTrans.AmountCur - settledCur, 2);
+                balanceMST = decRound(vendTrans.AmountMST - settledMST, 2);
+
+                if (balanceCur == 0)
+                {
+                    balanceMST = 0;
+                }
+
+                if (balanceCur == 0 && balanceMST == 0)
+                {
+                    continue;
+                }
+                
+                
+                businessUnitValue = ETG_Dimension_Class::getDimensionDisplayValue(vendTrans.DefaultDimension, BusinessUnit);
+                mapKey = strFmt("%1|%2|%3", vendTrans.AccountNum, businessUnitValue, vendTrans.CurrencyCode);
+                
+                if (vendorMap.exists(mapKey))
+                {
+                    agingBuffer = vendorMap.lookup(mapKey);
+                }
+                else
+                {
+                    vendTable = VendTable::find(vendTrans.AccountNum);
+                    
+                    agingBuffer.clear();
+                    agingBuffer.VendAccount     = vendTrans.AccountNum;
+                    agingBuffer.CustomerName    = vendTable.name();
+                    agingBuffer.CustomerGroup   = vendTable.VendGroup;
+                   
+                    agingBuffer.CurrencyCode    = vendTrans.CurrencyCode;
+                    agingBuffer.BusinessUnit    = businessUnitValue;
+                }
+
+                agingBuffer.OutStandingLC   += balanceMST;
+                agingBuffer.OutStandingTC   += balanceCur;
+
+                if (agingBasedOn == ETGAgingBasedOn::DueDate)
+                {
+                    daysPastDue = asOfDate - vendTrans.DueDate;
+                }
+                else if (agingBasedOn == ETGAgingBasedOn::DocumentDate)
+                {
+                    daysPastDue = asOfDate - vendTrans.DocumentDate;
+                }
+                else
+                {
+                    daysPastDue = asOfDate - vendTrans.TransDate;
+                }
+
+                if (curExt() == "o014")
+                {
+                    if (daysPastDue <= 30)       agingBuffer.Bucket01 += balanceMST;
+                    else if (daysPastDue <= 60)  agingBuffer.Bucket02 += balanceMST;
+                    else if (daysPastDue <= 90)  agingBuffer.Bucket03 += balanceMST;
+                    else if (daysPastDue <= 120) agingBuffer.Bucket04 += balanceMST;
+                    else if (daysPastDue <= 180) agingBuffer.Bucket05 += balanceMST;
+                    else                         agingBuffer.Bucket06 += balanceMST;
+                }
+                else if (curExt() == "o025")
+                {
+                    if (daysPastDue <= 30)       agingBuffer.Bucket01 += balanceCur;
+                    else if (daysPastDue <= 45)  agingBuffer.Bucket02 += balanceCur;
+                    else if (daysPastDue <= 60)  agingBuffer.Bucket03 += balanceCur;
+                    else if (daysPastDue <= 90)  agingBuffer.Bucket04 += balanceCur;
+                    else if (daysPastDue <= 120) agingBuffer.Bucket05 += balanceCur;
+                    else if (daysPastDue <= 180) agingBuffer.Bucket06 += balanceCur;
+                    else                         agingBuffer.Bucket07 += balanceCur;
+                }
+                else
+                {
+                    if (daysPastDue <= 30)       agingBuffer.Bucket01 += balanceCur;
+                    else if (daysPastDue <= 60)  agingBuffer.Bucket02 += balanceCur;
+                    else if (daysPastDue <= 90)  agingBuffer.Bucket03 += balanceCur;
+                    else if (daysPastDue <= 120) agingBuffer.Bucket04 += balanceCur;
+                    else if (daysPastDue <= 180) agingBuffer.Bucket05 += balanceCur;
+                    else                         agingBuffer.Bucket06 += balanceCur;
+                }
+
+                vendorMap.insert(mapKey, agingBuffer);
+            }
+        }
+
+        MapEnumerator mapEnum = vendorMap.getEnumerator();
+        
+        while (mapEnum.moveNext())
+        {
+            agingBuffer = mapEnum.currentValue();
+            
+            
+            if (decRound(agingBuffer.OutStandingTC, 2) == 0)
+            {
+                agingBuffer.OutStandingLC = 0;
+            }
+
+            if (decRound(agingBuffer.OutStandingTC, 2) == 0 && decRound(agingBuffer.OutStandingLC, 2) == 0)
+            {
+                continue;
+            }
+  
+
+            etgVendAgingMMR.clear();
+            etgVendAgingMMR.data(agingBuffer);
+            etgVendAgingMMR.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

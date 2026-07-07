@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_TmpPurchLine_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The class <c>ETG_TmpPurchLine_Extension</c> is used to handle the COC methods related to <c>TmpPurchLine</c> class.
+/// </summary>
+[ExtensionOf(tablestr(TmpPurchLine))]
+final class ETG_TmpPurchLine_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>validateFieldValue</Name>
+				<Source><![CDATA[
+    public boolean validateFieldValue(
+        fieldName   _fieldName,
+        int         _arrayIndex)
+    {
+        TmpPurchLine                    tmpPurchLineTmp;
+        AgreementLineQuantityCommitment agreementLine;
+        boolean                         ret;
+
+        ret = next validateFIeldValue(_fieldName, _arrayIndex);
+
+        switch (_fieldName)
+        {
+            case fieldStr(TmpPurchLine, PurchQty):
+                if (ret
+                    && this.PurchQty
+                    && this.AgreementLineQuantityCommitment)
+                {
+                    tmpPurchLineTmp.setTmpData(this);
+                    // Validate quantity against AgreementLineQuantityCommitment remaining quantity new way...
+                    select sum (PurchQty) from tmpPurchLineTmp
+                        where  tmpPurchLineTmp.AgreementLineQuantityCommitment == this.AgreementLineQuantityCommitment
+                            && tmpPurchLineTmp.RecId                           != this.RecId;
+
+                    agreementLine = AgreementLineQuantityCommitment::find(this.AgreementLineQuantityCommitment);
+                    ret = AgreementGenerateReleaseOrder::validateQty(tmpPurchLineTmp.PurchQty + this.PurchQty, agreementLine);
+                }
+                break;
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

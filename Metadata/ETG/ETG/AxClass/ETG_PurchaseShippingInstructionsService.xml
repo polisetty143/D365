@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_PurchaseShippingInstructionsService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+using Microsoft.Dynamics365.LocalizationFramework;
+
+public class ETG_PurchaseShippingInstructionsService
+{
+    public const str ERFormatModelName          = 'Model';
+    public const str ParametersDataSourceName   = 'RunTimeParameters';
+    public const str reportFormatName           = 'ETG Purchase shipping instructions format (Word)';
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>generateReportByGER</Name>
+				<Source><![CDATA[
+    public void generateReportByGER(ETG_PurchaseShippingInstructionsContract _contract)
+    {
+        ERFormatMappingId                   formatMappingId;
+        ERIFormatMappingRun                 formatMappingRun;
+        ERFormatMappingTable                formatMappingTable;
+        ETG_PurchaseShippingInstructionsDP  dataProvider;
+        ETG_PurchaseShippingInstructionsTmp purchShippingInstructionsTmp;
+        PurchAgreementId                    purchAgreementId;
+
+        select firstonly Name, RecId from formatMappingTable
+            where formatMappingTable.Name == reportFormatName;
+
+        dataProvider                    =   ETG_PurchaseShippingInstructionsDP::construct();
+        formatMappingId                 =   formatMappingTable.RecId;
+        purchShippingInstructionsTmp    =   dataProvider.processReport(_contract);
+        
+        if (formatMappingId)
+        {
+            try
+            {
+
+                ERIModelDefinitionParamsAction  parameters = new ERModelDefinitionParamsUIActionComposite().
+                    Add(new ERModelDefinitionDatabaseContext().addTemporaryTable(purchShippingInstructionsTmp)).
+                    Add(new ERModelDefinitionObjectParameterAction(ERFormatModelName, ParametersDataSourceName, _contract, true)).
+                    Add(new ERModelDefinitionDatabaseContext().addValue(tableNum(CompanyInfo), fieldNum(CompanyInfo, DataArea),curExt()));
+                
+                formatMappingRun    =   ERObjectsFactory::createFormatMappingRunByFormatMappingId(formatMappingId);
+
+                formatMappingRun.withParameter(parameters);
+                formatMappingRun.parmFileName(reportFormatName);
+                formatMappingRun.withFileDestination(_contract.getFileDestination());
+                formatMappingRun.parmShowPromptDialog(false);
+                formatMappingRun.run();
+
+            }
+            catch
+            {
+                info("@SYS300117");
+            }
+        }
+        else
+        {
+            info("@SYS300117");
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

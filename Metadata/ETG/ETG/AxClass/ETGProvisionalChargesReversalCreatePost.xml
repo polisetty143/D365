@@ -1,0 +1,290 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGProvisionalChargesReversalCreatePost</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGProvisionalChargesReversalCreatePost
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>Main</Name>
+				<Source><![CDATA[
+    public static void Main(Args _args)
+    {
+        LedgerJournalTable      ledgerJournalTable;
+        FormRun                 formRun  = _args.caller();
+        FormDataSource          ledgerJournalTable_ds;
+
+        ledgerJournalTable_ds = formRun.dataSource(tableStr(LedgerJournalTrans));
+        LedgerJournalTrans LedgerJournalTrans = ledgerJournalTable_ds.cursor() as LedgerJournalTrans;
+        ledgerJournalTable    = LedgerJournalTrans.ledgerJournalTable();//ledgerJournalTable_ds.cursor();
+
+        ETGProvisionalChargesReversalCreatePost::createReversalJournal(ledgerJournalTable);
+        ledgerJournalTable_ds.research(true);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createReversalJournal</Name>
+				<Source><![CDATA[
+    public static Void createReversalJournal(LedgerJournalTable ledgerJournalTableCaller)
+    {
+        #OCCRetryCount
+        Ledgerjournalname                          ledgerjournalname;
+        LedgerjournalTrans                         LedgerjournalTrans, ledgerjournalTransSelect;
+        NumberSeq                                  numberSeq;
+        CustInvoiceTrans                           custInvoiceTrans;
+        VendInvoiceTrans                           vendInvoiceTrans;
+        MarkupTable                                markUpTable;
+        MarkupTrans                                markUpTrans;
+        Amount                                     totalChargesAmount;
+        LedgerJournalTable                          ledgerJournalTable;
+        boolean                                     isLineCreated;
+        ETGACFParameters                           acfParameters = ETGACFParameters::find();
+
+
+        if(acfParameters.EnableProvisionalCharges == NoYes::No)
+        {
+            return;
+        }
+
+        if(acfParameters.CustVendInvJournalNameId == '')
+        {
+            throw error(strFmt("Define the provisional charges reversal journal name in ETG ACF parameter"));
+        }
+        try
+        {
+            if(ledgerJournalTableCaller.RecId)
+            {
+                select ledgerjournalname where ledgerjournalname.JournalName ==  acfParameters.CustVendInvJournalNameId;
+
+                ttsBegin;
+                LedgerjournalTable.clear();
+                LedgerjournalTable.initValue();
+                LedgerjournalTable.JournalName =  ledgerjournalname.JournalName;
+                LedgerjournalTable.initFromLedgerJournalName();
+                LedgerjournalTable.JournalNum  =  JournalTableData::newTable(LedgerjournalTable).nextJournalId();
+                LedgerjournalTable.Name = strFmt("Provisional charges reversal vendor invoice journal %1", ledgerjournaltrans.JournalNum);
+                LedgerjournalTable.ETGIsCustVendProvChargesReversalJour = NoYes::Yes;
+                LedgerjournalTable.ETGJournalNumVendInv = ledgerJournalTableCaller.JournalNum;
+                LedgerjournalTable.insert();
+         
+                if(ledgerjournalname)
+                {
+                    while select ledgerjournalTransSelect 
+                        where ledgerjournalTransSelect.JournalNum == ledgerJournalTableCaller.JournalNum
+                        && ledgerjournalTransSelect.ETGCustVendInvJournalQty != 0
+                    {
+                        //todod check logic
+                        if(ledgerjournalTransSelect.ETGCustVendInvJournalOrderType == ETGCustVendInvJournalOrderType::Purchase)
+                        {
+                            ledgerjournalTransSelect.ETGCustVendInvJournalRefRecId = ledgerjournalTransSelect.ETGVendInvoiceTransRecId;
+                        }
+                        else if(ledgerjournalTransSelect.ETGCustVendInvJournalOrderType == ETGCustVendInvJournalOrderType::Sales)
+                        {
+                            ledgerjournalTransSelect.ETGCustVendInvJournalRefRecId = ledgerjournalTransSelect.ETGCustInvoiceTransRecId;
+                        }
+
+                        numberSeq =  NumberSeq::newGetVoucherFromId((ledgerjournalname.NumberSequenceTable));
+                        LedgerjournalTrans.clear();
+                        LedgerjournalTrans.initValue();
+                        LedgerjournalTrans.Voucher         =   numberSeq.voucher();
+                        LedgerjournalTrans.JournalNum      =   LedgerjournalTable.JournalNum;
+                        LedgerjournalTrans.AccountType     =   LedgerJournalACType::Ledger;
+                        LedgerjournalTrans.Company         =   curext();
+                        LedgerjournalTrans.TransactionType =   LedgerTransType::GeneralJournal;
+                        LedgerjournalTrans.ETGCustVendInvJournalOrderType = ledgerjournalTransSelect.ETGCustVendInvJournalOrderType;
+                        LedgerjournalTrans.ETGCustInvoiceTransRecId = ledgerjournalTransSelect.ETGCustInvoiceTransRecId;
+                        LedgerjournalTrans.ETGVendInvoiceTransRecId = ledgerjournalTransSelect.ETGVendInvoiceTransRecId;
+                        LedgerjournalTrans.ETGCustVendInvJournalChargeCode = ledgerjournalTransSelect.ETGCustVendInvJournalChargeCode;
+                        LedgerjournalTrans.ETGCustVendInvJournalQty = ledgerjournalTransSelect.ETGCustVendInvJournalQty;
+
+                        if(ledgerjournalTransSelect.ETGCustVendInvJournalOrderType == ETGCustVendInvJournalOrderType::Purchase)
+                        {
+                            vendInvoiceTrans = VendInvoiceTrans::findRecId(ledgerjournalTransSelect.ETGCustVendInvJournalRefRecId);
+                            LedgerjournalTrans.Invoice                  = vendInvoiceTrans.InvoiceId;
+                            LedgerjournalTrans.DocumentDate             = ledgerjournalTransSelect.TransDate;
+                            LedgerjournalTrans.CurrencyCode             = vendInvoiceTrans.CurrencyCode;
+                            LedgerjournalTrans.TransDate                =  ledgerjournalTransSelect.TransDate;
+                            LedgerjournalTrans.initForCurrency(LedgerjournalTable);
+                            LedgerjournalTrans.Txt                      =   strFmt("Provision reversal for %1 against %2",ledgerjournalTransSelect.ETGCustVendInvJournalChargeCode, vendInvoiceTrans.InvoiceId);
+                           
+                            //charges
+                            markUpTable = MarkupTable::find(MarkupModuleType::Vend, ledgerjournalTransSelect.ETGCustVendInvJournalChargeCode);
+                            select firstonly CalculatedAmount from  markUpTrans
+                                where markUpTrans.TransRecId == vendInvoiceTrans.RecId
+                                && markUpTrans.TransTableId == tableNum(VendInvoiceTrans)
+                                && markUpTrans.MarkupCode == markUpTable.MarkupCode
+                                && markUpTrans.IsDeleted  == NoYes::No;
+                            totalChargesAmount = markUpTrans.CalculatedAmount;
+                            LedgerjournalTrans.AmountCurDebit = abs(totalChargesAmount * ledgerjournalTransSelect.ETGCustVendInvJournalQty / vendInvoiceTrans.Qty);
+                            
+                            //dimensions
+                            LedgerjournalTrans.DefaultDimension          = vendInvoiceTrans.DefaultDimension;
+                            LedgerjournalTrans.OffsetDefaultDimension    = vendInvoiceTrans.DefaultDimension;
+                            LedgerjournalTrans.AccountType               =  LedgerJournalACType::Ledger;
+                            LedgerjournalTrans.OffsetAccountType         =  LedgerJournalACType::Ledger;
+                            LedgerjournalTrans.LedgerDimension           = CostLedgerDimensionDerivationRule::createLedgerDimension(markupTable.VendorLedgerDimension, vendInvoiceTrans.DefaultDimension);
+                            LedgerjournalTrans.OffsetLedgerDimension     = CostLedgerDimensionDerivationRule::createLedgerDimension(markupTable.CustomerLedgerDimension, vendInvoiceTrans.DefaultDimension);
+                        }
+                        if(ledgerjournalTransSelect.ETGCustVendInvJournalOrderType == ETGCustVendInvJournalOrderType::Sales)
+                        {
+                            custInvoiceTrans                            = CustInvoiceTrans::findRecId(ledgerjournalTransSelect.ETGCustVendInvJournalRefRecId);
+                            LedgerjournalTrans.Invoice                  = custInvoiceTrans.InvoiceId;
+                            LedgerjournalTrans.CurrencyCode             = custInvoiceTrans.CurrencyCode;
+                            LedgerjournalTrans.DocumentDate             = ledgerjournalTransSelect.TransDate;
+                            LedgerjournalTrans.TransDate                = ledgerjournalTransSelect.TransDate;
+                            LedgerjournalTrans.Txt                      = strFmt("Provision reversal for %1 against %2",ledgerjournalTransSelect.ETGCustVendInvJournalChargeCode, custInvoiceTrans.InvoiceId);
+                            
+                            //charges
+                            markUpTable = MarkupTable::find(MarkupModuleType::Cust, ledgerjournalTransSelect.ETGCustVendInvJournalChargeCode);
+                            select firstonly CalculatedAmount from  markUpTrans
+                                where markUpTrans.TransRecId == custInvoiceTrans.RecId
+                                && markUpTrans.TransTableId == tableNum(CustInvoiceTrans)
+                                && markUpTrans.MarkupCode == markUpTable.MarkupCode
+                                && markUpTrans.IsDeleted  == NoYes::No;
+                            totalChargesAmount = markUpTrans.CalculatedAmount;
+                            LedgerjournalTrans.AmountCurDebit = abs(totalChargesAmount * ledgerjournalTransSelect.ETGCustVendInvJournalQty / custInvoiceTrans.Qty);
+                           
+                            //dimensions
+                            LedgerjournalTrans.DefaultDimension          = custInvoiceTrans.DefaultDimension;
+                            LedgerjournalTrans.OffsetDefaultDimension    = custInvoiceTrans.DefaultDimension;
+                            LedgerjournalTrans.AccountType               =  LedgerJournalACType::Ledger;
+                            LedgerjournalTrans.LedgerDimension           = CostLedgerDimensionDerivationRule::createLedgerDimension(markupTable.VendorLedgerDimension, custInvoiceTrans.DefaultDimension);
+                            LedgerjournalTrans.OffsetAccountType         =  LedgerJournalACType::Ledger;
+                            LedgerjournalTrans.OffsetLedgerDimension     = CostLedgerDimensionDerivationRule::createLedgerDimension(markupTable.CustomerLedgerDimension, custInvoiceTrans.DefaultDimension);
+                        }
+
+                        LedgerjournalTrans.Approved                 = NoYes::Yes;
+                        LedgerjournalTrans.Approver                 = HcmWorker::userId2Worker(curuserid());
+                        LedgerjournalTrans.DocumentNum              = ledgerJournalTable.JournalNum;
+                        LedgerjournalTrans.insert();
+                        isLineCreated = true;
+                    }
+                }
+
+                ttscommit;
+
+
+                if(isLineCreated)
+                {
+                    info(strFmt('Journal %1 Id is created.', ledgerjournalTable.JournalNum));
+                    if(ETGACFParameters::find().EnableProvisionalChargesReversalAutoPost == NoYes::Yes)
+                    {
+                        ttsbegin;
+                        LedgerJournalCheckPost jourPost;
+                        jourPost = LedgerJournalCheckPost::newLedgerJournalTable(ledgerJournalTable, NoYes::Yes);
+                        jourPost.runOperation();
+                        
+                        ttscommit;
+                        info(strFmt('Journal Id %1 is posted successfully', ledgerjournalTable.JournalNum));
+                    }
+                }
+            }
+         
+        }
+        catch(Exception::Error)
+        {
+            throw error(strFmt("Provision journal reversal creation failed for vendor invoice journal %1", ledgerJournalTableCaller.JournalNum));
+        }
+        catch(Exception::Deadlock)
+        {
+            retry;
+        }
+        catch(Exception::UpdateConflict)
+        {
+            if(appl.ttsLevel()==0)
+            {
+                if(xSession::currentRetryCount()>=#RetryNum)
+                {
+                    throw exception::UpdateConflictNotRecovered;
+                }
+                else
+                {
+                    retry;
+                }
+            }
+            else
+            {
+                throw exception::UpdateConflict;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createProvisionalReversalHistory</Name>
+				<Source><![CDATA[
+    public static void createProvisionalReversalHistory(LedgerJournalTable ledgerJournalTable)
+    {
+        LedgerJournalTrans ledgerJournalTrans, ledgerJournalTransUpd;
+        MarkupTrans markupTrans;
+        Qty invoiceQty;
+        ETGCustVendInvJournalReversalTable custVendInvJournalReversalTable;
+
+        while select ledgerJournalTrans where ledgerJournalTrans.JournalNum ==ledgerJournalTable.JournalNum
+        {
+            custVendInvJournalReversalTable.clear();
+            custVendInvJournalReversalTable.JournalNum        = ledgerJournalTrans.JournalNum;
+            custVendInvJournalReversalTable.Voucher           = ledgerJournalTrans.Voucher;
+            custVendInvJournalReversalTable.ChargeCode        = ledgerJournalTrans.ETGCustVendInvJournalChargeCode;
+            custVendInvJournalReversalTable.Qty               = ledgerJournalTrans.ETGCustVendInvJournalQty;
+            custVendInvJournalReversalTable.TransDate         = ledgerJournalTrans.TransDate;
+            custVendInvJournalReversalTable.ProvisionReversed = ledgerJournalTrans.AmountCurCredit ? 
+                                                                ledgerJournalTrans.AmountCurCredit : ledgerJournalTrans.AmountCurDebit;
+            if(ledgerJournalTrans.ETGCustInvoiceTransRecId)
+            {
+                custVendInvJournalReversalTable.RefRecId      =  ledgerJournalTrans.ETGCustInvoiceTransRecId;
+                custVendInvJournalReversalTable.RefTableId    = tableNum(CustInvoiceTrans);
+            }
+            if(ledgerJournalTrans.ETGVendInvoiceTransRecId)
+            {
+                custVendInvJournalReversalTable.RefRecId      =  ledgerJournalTrans.ETGVendInvoiceTransRecId;
+                custVendInvJournalReversalTable.RefTableId    = tableNum(VendInvoiceTrans);
+            }
+            custVendInvJournalReversalTable.JournalNumVendInv = ledgerJournalTable.ETGJournalNumVendInv;
+            custVendInvJournalReversalTable.insert();
+        }
+
+        ttsbegin;
+        while select ledgerJournalTransUpd where ledgerJournalTransUpd.JournalNum ==ledgerJournalTable.JournalNum
+        {
+            if(ledgerJournalTransUpd.ETGCustVendInvJournalOrderType == ETGCustVendInvJournalOrderType::Purchase)
+            {
+                select forupdate markupTrans
+                where markupTrans.TransRecId == ledgerJournalTransUpd.ETGVendInvoiceTransRecId
+                    && markupTrans.TransTableId == tableNum(VendInvoiceTrans)
+                    && markupTrans.MarkupCode == ledgerJournalTransUpd.ETGCustVendInvJournalChargeCode;
+
+                invoiceQty = VendInvoiceTrans::findRecId(ledgerJournalTransUpd.ETGVendInvoiceTransRecId).Qty;
+            }
+            if(ledgerJournalTransUpd.ETGCustVendInvJournalOrderType == ETGCustVendInvJournalOrderType::Sales)
+            {
+                select forupdate markupTrans
+                where markupTrans.TransRecId == ledgerJournalTransUpd.ETGCustInvoiceTransRecId
+                    && markupTrans.TransTableId == tableNum(CustInvoiceTrans)
+                    && markupTrans.MarkupCode == ledgerJournalTransUpd.ETGCustVendInvJournalChargeCode;
+
+                invoiceQty = CustInvoiceTrans::findRecId(ledgerJournalTransUpd.ETGCustInvoiceTransRecId).Qty;
+            }
+
+            if(markupTrans && invoiceQty)
+            {
+                markupTrans.ETGProvisionalChargesRemaining = abs(abs(markupTrans.CalculatedAmount) * (1 - ledgerJournalTransUpd.ETGCustVendInvJournalQty / invoiceQty));
+                markupTrans.doUpdate();
+            }
+        }
+        ttscommit;
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

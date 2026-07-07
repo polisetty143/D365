@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>MarkupTrans_EventHandler</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Handles data events on the MarkupTrans table to update the associated ETGPurchLineCocoaQuality table.
+/// </summary>
+public class MarkupTrans_EventHandler
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>MarkupTrans_onInserted</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Subscribes to the inserted event of the MarkupTrans table.
+    /// Recalculates the total sum after a new charge is added.
+    /// </summary>
+    [DataEventHandler(tableStr(MarkupTrans), DataEventType::Inserted)]
+    public static void MarkupTrans_onInserted(Common sender, DataEventArgs e)
+    {
+        MarkupTrans markupTrans = sender as MarkupTrans;
+        MarkupTrans_EventHandler::recalculateAndUpdatetotalSum(markupTrans.TransRecId);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>MarkupTrans_onUpdated</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Subscribes to the updated event of the MarkupTrans table.
+    /// Recalculates the total sum if the charge value has changed.
+    /// </summary>
+    [DataEventHandler(tableStr(MarkupTrans), DataEventType::Updated)]
+    public static void MarkupTrans_onUpdated(Common sender, DataEventArgs e)
+    {
+        MarkupTrans markupTrans = sender as MarkupTrans;
+        // Only recalculate if the field that matters (Value) has actually changed.
+        if (markupTrans.isFieldModified(fieldNum(MarkupTrans, Value)))
+        {
+            MarkupTrans_EventHandler::recalculateAndUpdatetotalSum(markupTrans.TransRecId);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>MarkupTrans_onDeleted</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Subscribes to the deleted event of the MarkupTrans table.
+    /// Recalculates the total sum after a charge has been removed.
+    /// </summary>
+    [DataEventHandler(tableStr(MarkupTrans), DataEventType::Deleted)]
+    public static void MarkupTrans_onDeleted(Common sender, DataEventArgs e)
+    {
+        MarkupTrans markupTrans = sender as MarkupTrans;
+        MarkupTrans_EventHandler::recalculateAndUpdatetotalSum(markupTrans.TransRecId);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>recalculateAndUpdatetotalSum</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Recalculates the sum of all MarkupTrans values for a given purchase line and updates the target table.
+    /// Creates a new record if one doesn't exist with all required fields populated.
+    /// </summary>
+    /// <param name="_purchLineRecId">The RecId of the purchase order line (from MarkupTrans.TransRecId).</param>
+    private static void recalculateAndUpdatetotalSum(RecId _purchLineRecId)
+    {
+        if (!_purchLineRecId)
+        {
+            return;
+        }
+
+        ETGPurchLineCocoaQuality etgPurchLineCocoaQuality;
+        Price totalMarkupValue;
+        MarkupTrans markupTrans;
+        PurchLine purchLine;
+        PurchTable purchTable;
+        boolean recordExists = false;
+
+        // Calculate the sum of all markup values for this purchase line
+        select sum(Value) from markupTrans
+            where markupTrans.TransRecId == _purchLineRecId;
+        
+        totalMarkupValue = markupTrans.Value;
+
+        // Get the purchase line details
+        select firstonly purchLine
+            where purchLine.RecId == _purchLineRecId;
+        
+        if (!purchLine.RecId)
+        {
+            return; // Exit if purchase line not found
+        }
+
+        // Get the purchase table (header) details
+        select firstonly purchTable
+            where purchTable.PurchId == purchLine.PurchId;
+
+        // Check if a record already exists in the custom table
+        select firstonly etgPurchLineCocoaQuality
+            where etgPurchLineCocoaQuality.PurchLineRecId == _purchLineRecId;
+
+        recordExists = etgPurchLineCocoaQuality.RecId != 0;
+
+        ttsbegin;
+        
+        if (recordExists)
+        {
+            // Update existing record if the value has changed
+            if (etgPurchLineCocoaQuality.TransportPrice != totalMarkupValue)
+            {
+                select forupdate etgPurchLineCocoaQuality
+                    where etgPurchLineCocoaQuality.PurchLineRecId == _purchLineRecId;
+                
+                etgPurchLineCocoaQuality.TransportPrice = totalMarkupValue;
+                
+                // Ensure REFPURCHID is populated if it's empty
+                if (!etgPurchLineCocoaQuality.RefPurchId && purchLine.PurchId)
+                {
+                    etgPurchLineCocoaQuality.RefPurchId = purchLine.PurchId;
+                }
+                
+                etgPurchLineCocoaQuality.update();
+            }
+        }
+        else
+        {
+            // Create a new record with all required fields
+            etgPurchLineCocoaQuality.clear();
+            etgPurchLineCocoaQuality.initValue();
+            
+            // Populate the key fields
+            etgPurchLineCocoaQuality.PurchLineRecId = _purchLineRecId;
+            etgPurchLineCocoaQuality.RefPurchId = purchLine.PurchId; // This is the missing field!
+            etgPurchLineCocoaQuality.TransportPrice = totalMarkupValue;
+            
+     
+            
+            etgPurchLineCocoaQuality.insert();
+        }
+        
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

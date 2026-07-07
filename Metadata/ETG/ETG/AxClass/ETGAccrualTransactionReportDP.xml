@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGAccrualTransactionReportDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+//SRSReportQueryAttribute(queryStr(ETGAccrualTransactionQuery)),
+[SRSReportParameterAttribute(classStr(ETGAccrualTransactionReportContract))]
+
+class ETGAccrualTransactionReportDP extends SRSReportDataProviderPreProcessTempDB
+{
+    ETGAccrualTransactionReportTemp          ETGAccrualTransactionReportTemp;
+    TransDate                                _fromDate,_ToDate;
+    PurchLine                               _PurchLine;
+    FromDate                                fromDate;
+    ToDate                          toDate;
+    ETGAccrualTransactionReportContract contract;
+    ETGAccrualTransactionReportController controller;
+    utcDateTime                     utcFromDate, utcToDate;
+    LedgerJournalTrans ledgerJournalTrans;
+    LedgerJournalTransAccrual ledgerJournalTransAccrual;
+    LedgerJournalTransAccrualTrans ledgerJournalTransAccrualTrans, ledgerJournalTransAccrualTransDate;
+    InventTable inventTable;
+    LedgerAccrualTable ledgerAccrualTable;
+    DimensionDefault dimDefault;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGRminCocoaTemp</Name>
+				<Source><![CDATA[
+    [SrsReportDataSetAttribute(tableStr(ETGAccrualTransactionReportTemp))]
+    public ETGAccrualTransactionReportTemp getETGRminCocoaTemp()
+    {
+        select ETGAccrualTransactionReportTemp;
+        return ETGAccrualTransactionReportTemp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ProcessReport</Name>
+				<Source><![CDATA[
+    public void ProcessReport()
+    {
+        this.initContract();
+       // this.generateDynamicFiscalColumns();
+        this.insertData();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initContract</Name>
+				<Source><![CDATA[
+    public void initContract()
+    {
+        contract                = this.parmDataContract() as ETGAccrualTransactionReportContract;
+        fromDate                = contract.parmFromDate();
+        toDate                  = contract.parmToDate();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertData</Name>
+				<Source><![CDATA[
+    public void insertData()
+    {
+        QueryRun                         queryRun;
+        Query                            query = new Query();
+        QueryBuildDataSource             qbds;
+        QueryBuildRange                  qbr;
+        QueryBuildDataSource             qbdsAccrual;
+        QueryBuildDataSource             qbdsAccrualTable;
+        QueryBuildDataSource             qbdsAccrualTrans;
+        FiscalCalendar                   fiscalCalendar;
+        FiscalCalendarPeriod             fiscalPeriod;
+        FiscalCalendarYear               fiscalCalendarYear;
+        CurrencyExchangeHelper           currencyExchangeHelper;
+        AmountMST                        amountInLocalCurrency;
+        CurrencyCode                     accountingCurrency;
+        AmountCur                        amountCur;
+        real                             exchangeRate;
+        AmountMst                        totalPL, totalBS;
+
+
+        qbds        = query.addDataSource(tablenum(LedgerJournalTrans));
+        qbdsAccrual = qbds.addDataSource(tablenum(LedgerJournalTransAccrual));
+        qbdsAccrual.relations(true); 
+        qbdsAccrual.joinMode(JoinMode::InnerJoin);
+       
+        qbdsAccrualTrans = qbdsAccrual.addDataSource(tablenum(LedgerJournalTransAccrualTrans));
+        qbdsAccrualTrans.relations(true);
+        qbdsAccrualTrans.joinMode(JoinMode::ExistsJoin);
+        qbdsAccrualTrans.addRange(fieldnum(LedgerJournalTransAccrualTrans, DocumentDate)).value(SysQuery::range(fromDate, toDate));
+
+        queryRun = new QueryRun(query); 
+        while (queryRun.next())
+        {
+             ledgerJournalTrans        = queryRun.get(tableNum(LedgerJournalTrans));
+
+            select LedgerJournalTransAccrual 
+                where LedgerJournalTransAccrual.RefRecid == ledgerJournalTrans.RecId
+                && LedgerJournalTransAccrual.RefTableid == ledgerJournalTrans.TableId;
+
+            select ledgerAccrualTable
+                where ledgerAccrualTable.Id == LedgerJournalTransAccrual.AccrualId;
+
+            ETGAccrualTransactionReportTemp.clear();
+            ETGAccrualTransactionReportTemp.Voucher        = ledgerJournalTrans.Voucher;
+            ETGAccrualTransactionReportTemp.DocumentNumber = ledgerJournalTrans.JournalNum;
+            ETGAccrualTransactionReportTemp.DateMMDDYYYY   = ledgerJournalTrans.TransDate;
+            ETGAccrualTransactionReportTemp.DocumentCurr   = ledgerJournalTrans.CurrencyCode;
+
+
+            dimDefault = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(ledgerjournalTrans.OffsetLedgerDimension);
+
+            if(dimDefault)
+            {
+                ETGAccrualTransactionReportTemp.Product      = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(dimDefault, "Item");
+                ETGAccrualTransactionReportTemp.Vertical     = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(dimDefault, "Vertical");
+                ETGAccrualTransactionReportTemp.SubVertical  = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(dimDefault, "BusinessUnit");
+            }
+
+            if (ledgerJournalTrans.AmountCurCredit)
+            {
+                ETGAccrualTransactionReportTemp.DocumentCurrAmount = ledgerJournalTrans.AmountCurCredit;
+            }
+            if (ledgerJournalTrans.AmountCurDebit)
+            {
+                ETGAccrualTransactionReportTemp.DocumentCurrAmount = ledgerJournalTrans.AmountCurDebit;
+            }
+
+            try
+            {
+
+                currencyExchangeHelper                                 = CurrencyExchangeHelper::newExchangeDate(Ledger::current(), ledgerJournalTrans.TransDate);
+                ETGAccrualTransactionReportTemp.AmountInUSD            = currencyExchangeHelper.calculateCurrencyToCurrency("USD",
+                                                                           ledgerJournalTrans.CurrencyCode,
+                                                                           ETGAccrualTransactionReportTemp.DocumentCurrAmount,
+                                                                           true);
+
+                currencyExchangeHelper                                   = CurrencyExchangeHelper::newExchangeDate(Ledger::current(), ledgerJournalTrans.TransDate);
+                ETGAccrualTransactionReportTemp.AmountinLocalCurrency    = currencyExchangeHelper.calculateCurrencyToCurrency(Ledger::accountingCurrency(),
+                                                                           ledgerJournalTrans.CurrencyCode,
+                                                                           ETGAccrualTransactionReportTemp.DocumentCurrAmount,
+                                                                           true);
+            }
+            catch
+            {
+                continue;
+            }
+            ETGAccrualTransactionReportTemp.PaymentReference         = ledgerJournalTrans.PaymReference;
+            ETGAccrualTransactionReportTemp.TransactionText          = ledgerJournalTrans.Txt;
+            ETGAccrualTransactionReportTemp.OffsetAccountNumber      = LedgerDimensionFacade::getMainAccountFromLedgerDimension(ledgerJournalTrans.OffsetLedgerDimension).MainAccountId;
+            ETGAccrualTransactionReportTemp.OffsetAccountDescription = MainAccount::findByMainAccountId(ETGAccrualTransactionReportTemp.OffsetAccountNumber).Name;
+            ETGAccrualTransactionReportTemp.InsuranceType            = ETGAccrualTransactionReportTemp.OffsetAccountDescription;
+
+
+            select firstonly TransDate from ledgerJournalTransAccrualTransDate order by TransDate asc
+                where ledgerJournalTransAccrualTransDate.RefRecid == ledgerJournalTransAccrual.RefRecid
+                && ledgerJournalTransAccrualTransDate.RefTableid == ledgerJournalTransAccrual.RefTableid
+                && ledgerJournalTransAccrualTransDate.AmountCur > 0;
+
+            ETGAccrualTransactionReportTemp.PeriodFrom               = ledgerJournalTransAccrualTransDate.TransDate;
+
+            select firstonly TransDate from ledgerJournalTransAccrualTransDate order by TransDate desc
+                where ledgerJournalTransAccrualTransDate.RefRecid == ledgerJournalTransAccrual.RefRecid
+                && ledgerJournalTransAccrualTransDate.RefTableid == ledgerJournalTransAccrual.RefTableid
+                && ledgerJournalTransAccrualTransDate.AmountCur > 0;
+
+            ETGAccrualTransactionReportTemp.PeriodTo                 = ledgerJournalTransAccrualTransDate.TransDate;
+            ETGAccrualTransactionReportTemp.AmmortizeAmountXX        = ETGAccrualTransactionReportTemp.DocumentCurrAmount;
+            ETGAccrualTransactionReportTemp.Months                   = ledgerAccrualTable.PeriodLength;
+            ETGAccrualTransactionReportTemp.Year                     = any2Str(year(ledgerJournalTrans.TransDate));
+
+            totalPL = 0;
+
+            while select ledgerJournalTransAccrualTrans
+                where ledgerJournalTransAccrualTrans.RefRecid == ledgerJournalTransAccrual.RefRecid
+                && ledgerJournalTransAccrualTrans.RefTableid == ledgerJournalTransAccrual.RefTableid
+                && ledgerJournalTransAccrualTrans.AmountCur > 0  
+            {
+                int monthIndex = DateTimeUtil::month(ledgerJournalTransAccrualTrans.TransDate);
+
+                totalPL = totalPL + ledgerJournalTransAccrualTrans.AmountCur;
+
+                switch (monthIndex)
+                {
+                    case 1:  ETGAccrualTransactionReportTemp.JanXX   = ledgerJournalTransAccrualTrans.AmountCur; break;
+                    case 2:  ETGAccrualTransactionReportTemp.FebXX   = ledgerJournalTransAccrualTrans.AmountCur; break;
+                    case 3:  ETGAccrualTransactionReportTemp.MarchXX = ledgerJournalTransAccrualTrans.AmountCur; break;
+                    case 4:  ETGAccrualTransactionReportTemp.AprilXX = ledgerJournalTransAccrualTrans.AmountCur; break;
+                    case 5:  ETGAccrualTransactionReportTemp.MayXX   = ledgerJournalTransAccrualTrans.AmountCur; break;
+                    case 6:  ETGAccrualTransactionReportTemp.JuneXX  = ledgerJournalTransAccrualTrans.AmountCur; break;
+                    case 7:  ETGAccrualTransactionReportTemp.JulyXX  = ledgerJournalTransAccrualTrans.AmountCur; break;
+                    case 8:  ETGAccrualTransactionReportTemp.AugXX   = ledgerJournalTransAccrualTrans.AmountCur; break;
+                    case 9:  ETGAccrualTransactionReportTemp.SepXX   = ledgerJournalTransAccrualTrans.AmountCur; break;
+                    case 10: ETGAccrualTransactionReportTemp.OctXX   = ledgerJournalTransAccrualTrans.AmountCur; break;
+                    case 11: ETGAccrualTransactionReportTemp.NovXX   = ledgerJournalTransAccrualTrans.AmountCur; break;
+                    case 12: ETGAccrualTransactionReportTemp.DecXX   = ledgerJournalTransAccrualTrans.AmountCur; break;
+                }
+            }
+
+            ETGAccrualTransactionReportTemp.TotalPL           = totalPL;
+            ETGAccrualTransactionReportTemp.TotalBalanceSheet = abs(ETGAccrualTransactionReportTemp.DocumentCurrAmount - totalPL);
+            ETGAccrualTransactionReportTemp.Year              = any2Str(year(ledgerJournalTrans.TransDate));
+            ETGAccrualTransactionReportTemp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

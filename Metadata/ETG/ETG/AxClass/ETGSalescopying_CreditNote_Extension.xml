@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalescopying_CreditNote_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Enabling attached sales agreement linkage for credit note
+/// </summary>
+[ExtensionOf(classStr(SalesCopying_CreditNote))]
+final class ETGSalescopying_CreditNote_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>copy</Name>
+				<Source><![CDATA[
+    void copy()
+    {
+        SalesAgreementHeader salesAgreementHeader;
+        SalesTable originalSalesTable;
+        next copy();
+
+        //todo check with team ifthis requirement needs any flag or parameter?
+    
+        if (custInvoiceJour.SalesId)
+        {
+            originalSalesTable = SalesTable::find(custInvoiceJour.SalesId);
+        }
+        if(!salesTable.Matchingagreement && originalSalesTable.RecId)
+        {
+            ttsbegin;
+            salesTable.MatchingAgreement = originalSalesTable.MatchingAgreement;
+            salesTable.update();
+            ttscommit;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateInvoiceCreditCopy</Name>
+				<Source><![CDATA[
+    void updateInvoiceCreditCopy(SalesLine _salesLine, CustVendInvoiceTrans _custVendInvoiceTrans)
+    {
+        SalesLine originalSalesLine;
+        next updateInvoiceCreditCopy(_salesLine, _custVendInvoiceTrans);
+
+        //todo check with team ifthis requirement needs any flag or parameter?
+        // Get original line using InventTransId
+        if (_custVendInvoiceTrans.TableId == tableNum(CustInvoiceTrans))
+        {
+            CustInvoiceTrans custInvoiceTrans = _custVendInvoiceTrans;
+
+            select firstonly originalSalesLine
+                where originalSalesLine.InventTransId == custInvoiceTrans.InventTransId
+                   && originalSalesLine.SalesId       == custInvoiceTrans.SalesId;
+        }
+
+        if (originalSalesLine.RecId && !_salesLine.MatchingAgreementLine)
+        {
+            ttsbegin;
+            _salesLine.MatchingAgreementLine = originalSalesLine.MatchingAgreementLine;
+            _salesLine.update();
+            ttscommit;
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

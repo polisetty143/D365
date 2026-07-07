@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGRminCashewDataProvider</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(ETGRminCashewContract))]
+class ETGRminCashewDataProvider extends  SRSReportDataProviderPreProcessTempDB
+
+{
+    ETGRminCashewTmp                     ETGRminCashewTmp;
+    TransDate                               _fromDate,_ToDate;
+    List                                    _InvoiceId= new List(Types::String);
+    List                                    _ItemId= new List(Types::String);
+    List                                    _VendAccount= new List(Types::String);
+    VendPackingSlipJour                     _VendPackingSlipJour;
+    VendPackingSlipTrans                    _VendPackingSlipTrans;
+    ETGPurchLineCashewQuality               _ETGPurchLineCashewQuality;
+    PurchLine                               _PurchLine;
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGRminCashewTmp</Name>
+				<Source><![CDATA[
+    [SrsReportDataSetAttribute(tableStr(ETGRminCashewTmp))]
+    public ETGRminCashewTmp getETGRminCashewTmp()
+    {
+        select * from ETGRminCashewTmp;
+        return ETGRminCashewTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ProcessReport</Name>
+				<Source><![CDATA[
+    public void ProcessReport()
+    {
+        Query                               query;
+        QueryRun                            queryRun;
+        QueryBuildDataSource                queryBuildDataSource, queryBuildDataSource1;
+        QueryBuildDataSource                queryBuildDataSource2;
+        QueryBuildRange                     queryBuildRange;
+        QueryBuildRange                     queryBuildRange2;
+        
+        ETGRminCashewContract   Contract;
+
+        Contract        = this.parmDataContract();
+
+        _fromDate       = Contract.parmFromDate();
+        _ToDate         = Contract.parmToDate();
+        _VendAccount    = Contract.parmVendAccount();
+        _InvoiceId      = Contract.parmInvoiceId();
+        _ItemId         = contract.parmItemId();
+        ListIterator             ItemIdListIterator,journalIdListIterator;
+        ListEnumerator           ListEnumerator;
+
+        query   =   new query();
+        queryBuildDataSource    =   query.addDataSource(tableNum(VendPackingSlipJour));
+        queryBuildDataSource1   =   queryBuildDataSource.addDataSource(tableNum(VendPackingSlipTrans));
+        queryBuildDataSource1.addLink(fieldNum(VendPackingSlipJour,RecId),fieldNum(VendPackingSlipTrans,VendPackingSlipJour));
+        if(_fromDate && !_ToDate)
+        {
+            queryBuildRange = queryBuildDataSource.addRange(fieldNum(VendPackingSlipJour,DELIVERYDATE));
+            queryBuildRange.value(strFmt('>%1',queryvalue(_fromDate-1)));
+        }
+        if(!_fromDate && _ToDate)
+        {
+            queryBuildDataSource.addRange(fieldNum(VendPackingSlipJour,DELIVERYDATE)).value(strFmt("<%1",queryValue(_ToDate+1)));
+        }
+        if(_fromDate && _ToDate)
+        {
+            queryBuildDataSource.addRange(fieldNum(VendPackingSlipJour,DELIVERYDATE)).value(queryRange(_fromDate,_toDate));
+        }
+        if(_VendAccount != null)
+        {
+            ListEnumerator  = _VendAccount.getEnumerator();
+            while (ListEnumerator.moveNext())
+            {
+                queryBuildDataSource.addRange(fieldNum(VendPackingSlipJour,ORDERACCOUNT)).value(ListEnumerator.current());
+            }
+        }
+        if(_InvoiceId  != null)
+        {
+            ListEnumerator = _invoiceid.getEnumerator();
+            while (ListEnumerator.moveNext())
+            {
+                queryBuildDataSource.addRange(fieldNum(VendPackingSlipJour,PackingSlipId)).value(ListEnumerator.current());
+            }
+        }
+        if(_ItemId != null)
+        {
+            ListEnumerator = _ItemId.getEnumerator();
+            while (ListEnumerator.moveNext())
+            {
+                queryBuildDataSource1.addRange(fieldNum(VendPackingSlipTrans, ItemId)).value(ListEnumerator.current());
+            }
+        }
+        queryBuildDataSource2 = queryBuildDataSource1.addDataSource(tableNum(PurchLine));
+        queryBuildDataSource2.addLink(fieldNum(VendPackingSlipTrans,InventTransId),fieldNum(PurchLine,InventTransId));
+        queryRun    = new queryRun(query) ;
+        while (queryRun.next())
+        {
+
+
+            _VendPackingSlipJour            =   queryRun.get(tableNum(VendPackingSlipJour)) ;
+            _VendPackingSlipTrans           =   queryRun.get(tableNum(VendPackingSlipTrans)) ;
+            _PurchLine                      =   queryRun.get(tableNum(PurchLine));
+
+            select  _ETGPurchLineCashewQuality
+                where _ETGPurchLineCashewQuality.RefPurchId == _PurchLine.PurchId
+                && _ETGPurchLineCashewQuality.PurchLineRecId == _PurchLine.RecId;
+
+            ETG_PurchTableTrade ETG_PurchTableTrade;
+            select ETG_PurchTableTrade where ETG_PurchTableTrade.PurchId == _PurchLine.PurchId;
+
+            ETGRminCashewTmp.clear();
+            ETGRminCashewTmp.initValue();
+            ETGRminCashewTmp.Date1                              = _ETGPurchLineCashewQuality.Date1;
+            ETGRminCashewTmp.TransferNote                       = _ETGPurchLineCashewQuality.TransferNote;
+            ETGRminCashewTmp.GRN                                = _ETGPurchLineCashewQuality.GRN;
+            ETGRminCashewTmp.ContractswithACF                   = _ETGPurchLineCashewQuality.ContractswithACF;
+            ETGRminCashewTmp.ItemNumber                         = _PurchLine.ItemId;
+            ETGRminCashewTmp.ItemDescription                    = _PurchLine.itemName();
+            ETGRminCashewTmp.GRN                                = _ETGPurchLineCashewQuality.GRN;
+            ETGRminCashewTmp.GRNNum                             = _VendPackingSlipJour.PackingSlipId;
+            InventDIm       InventDIm;
+
+            select * from InventDIm
+                where InventDIm.inventDimId == _VendPackingSlipTrans.InventDimId;
+
+            ETGRminCashewTmp.Warehouse  = InventDIm.InventLocationId;
+            ETGRminCashewTmp.TruckNo                            = _ETGPurchLineCashewQuality.TruckNo;
+            ETGRminCashewTmp.CooperativeName                    = _ETGPurchLineCashewQuality.CooperativeName;
+            ETGRminCashewTmp.NameofOwnerofCoop                  = _ETGPurchLineCashewQuality.NameofOwnerofCoop;
+            ETGRminCashewTmp.Origin                             = _ETGPurchLineCashewQuality.Origin;
+            ETGRminCashewTmp.Branch                             = _ETGPurchLineCashewQuality.Branch;
+            ETGRminCashewTmp.GrossWeight                        = _ETGPurchLineCashewQuality.GrossWeight;
+            ETGRminCashewTmp.WeightofBags                       = _ETGPurchLineCashewQuality.WeightofBags;
+            ETGRminCashewTmp.SoundBags                          = _ETGPurchLineCashewQuality.SoundBags;
+            ETGRminCashewTmp.Qualityreaction                    = _ETGPurchLineCashewQuality.Qualityreaction;
+            ETGRminCashewTmp.Humidityreaction                   = _ETGPurchLineCashewQuality.Humidityreaction;
+            ETGRminCashewTmp.ApprovedNetWeight                  = _VendPackingSlipTrans.Qty;
+            ETGRminCashewTmp.PricePerKg                         = _VendPackingSlipTrans.Qty == 0 ? _VendPackingSlipTrans.ValueMST : round((_VendPackingSlipTrans.ValueMST / _VendPackingSlipTrans.Qty),0.01);
+            ETGRminCashewTmp.Value                              = _VendPackingSlipTrans.ValueMST;
+            ETGRminCashewTmp.MTNN                               = _ETGPurchLineCashewQuality.MTNN;
+            ETGRminCashewTmp.MTNWeight                          = _ETGPurchLineCashewQuality.MTNWeight;
+            ETGRminCashewTmp.MTNValue                           = _ETGPurchLineCashewQuality.MTNValue;
+            ETGRminCashewTmp.Weightloss                         = _ETGPurchLineCashewQuality.Weightloss;
+            ETGRminCashewTmp.Humidity                           = _ETGPurchLineCashewQuality.Humidity;
+            ETGRminCashewTmp.Nutcount                           = _ETGPurchLineCashewQuality.Nutcount;
+            ETGRminCashewTmp.Outturn                            = _ETGPurchLineCashewQuality.Outturn;
+            ETGRminCashewTmp.Defect                             = _ETGPurchLineCashewQuality.Defect;
+            ETGRminCashewTmp.AnalyzedBy                         = _ETGPurchLineCashewQuality.AnalyzedBy;
+            ETGRminCashewTmp.ActualPrice                        = _ETGPurchLineCashewQuality.ActualPrice;
+            ETGRminCashewTmp.ActualCost                         = _ETGPurchLineCashewQuality.ActualCost;
+            ETGRminCashewTmp.Difference                         = _ETGPurchLineCashewQuality.Difference;
+            ETGRminCashewTmp.ValueCashew                        = _ETGPurchLineCashewQuality.Value;
+            ETGRminCashewTmp.ReceiptAmount                      = _ETGPurchLineCashewQuality.ReceiptAmount;
+            ETGRminCashewTmp.Date1                              = _ETGPurchLineCashewQuality.Date1;
+            ETGRminCashewTmp.DatePrice                          = _ETGPurchLineCashewQuality.Dateprice;
+            ETGRminCashewTmp.NutcountUP                         = _ETGPurchLineCashewQuality.NutcountUP;
+            ETGRminCashewTmp.OutturnUP                          = _ETGPurchLineCashewQuality.OutturnUP;          
+            ETGRminCashewTmp.AnalyzedByUP                       = _ETGPurchLineCashewQuality.AnalyzedByUP;
+            ETGRminCashewTmp.insert();
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

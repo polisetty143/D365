@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesAutoCreate_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classstr(SalesAutoCreate_ReleaseFromAgreement))]
+final class ETG_SalesAutoCreate_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initSalesTable</Name>
+				<Source><![CDATA[
+    protected void initSalesTable(
+        AgreementHeaderDefault      _agreementHeaderDefault,
+        SalesAgreementHeaderDefault _salesAgreementHeaderDefault)
+    {
+        SalesAgreementHeaderHistory         agreementHeaderHistory;
+        ETG_SalesAgreementHeader            salesAgreementTrade;
+        AgreementLineQuantityCommitment     agreementLineDerived;
+        SalesLine                           salesLine;
+
+        next initSalesTable(_agreementHeaderDefault,_salesAgreementHeaderDefault);
+
+        SalesTable            salesTable           = this.SalesTable;
+        SalesAgreementHeader  SalesAgreementHeader = this.createFromSalesAgreement;
+        
+        select firstonly ConfirmationNumber,SalesNumberSequence from agreementHeaderHistory
+            order by agreementHeaderHistory.ConfirmationNumber desc
+                where agreementHeaderHistory.SalesNumberSequence == SalesAgreementHeader.SalesNumberSequence
+        join salesAgreementTrade
+            where salesAgreementTrade.SalesAgreementId == agreementHeaderHistory.SalesNumberSequence;
+
+        salesTable.ETG_SalesAgreementIdComfirmVer = SalesAgreementHeader.SalesNumberSequence + "-" + agreementHeaderHistory.ConfirmationNumber;
+              
+        ETG_ReleaseOrder::createSalesTrade(salesTable.SalesId,salesAgreementTrade);
+
+        this.salesTable = salesTable;
+        if(SalesAgreementHeader)
+        {
+            SalesAgreementHeader.selectForUpdate(true);
+            select firstonly CommitedQuantity from agreementLineDerived
+                where agreementLineDerived.RecId == releaseOrderLine.AgreementLineQuantityCommitment;
+
+            select sum(SalesQty) from salesLine
+                where salesLine.MatchingAgreementLine == releaseOrderLine.AgreementLineQuantityCommitment;
+
+            if(agreementLineDerived.CommitedQuantity == releaseOrderLine.SalesQty + salesLine.SalesQty)
+                SalesAgreementHeader.ETG_TradingStatusSales = ETG_TradingStatus::Released;
+
+            else
+                SalesAgreementHeader.ETG_TradingStatusSales = ETG_TradingStatus::PartiallyReleased;
+
+            SalesAgreementHeader.ETG_DocumentStatusSales = ETG_DocumentStatus::Order;
+            SalesAgreementHeader.doUpdate();
+            
+        }
+
+       
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createSalesTable</Name>
+				<Source><![CDATA[
+    public void createSalesTable()
+    {
+        AgreementReference          agreementReference;
+        PurchTable                  purchTable;
+        PurchAgreementHeader        purchAgreementHeader;
+        SalesAgreementHeader        salesAgreementHeaderIC;
+        
+
+        next createSalesTable();
+
+        if(createFromSalesAgreement.ETG_PurchAgreementIdTP && !salesTable.ETG_TPPurchId)
+        {
+            select firstonly * from purchAgreementHeader
+                where purchAgreementHeader.PurchNumberSequence == createFromSalesAgreement.ETG_PurchAgreementIdTP;
+
+            if(purchAgreementHeader)
+            {
+                purchTable = ETG_ReleaseOrder::createPurchTable(purchAgreementHeader,salesTable.SalesId);
+
+                purchAgreementHeader.selectForUpdate(true);              
+                purchAgreementHeader.ETG_TradingStatusPurch  = createFromSalesAgreement.ETG_TradingStatusSales;
+                purchAgreementHeader.ETG_DocumentStatusPurch = ETG_DocumentStatus::Order;
+                purchAgreementHeader.doUpdate();
+            }
+            
+            if(purchAgreementHeader.ETG_SalesAgreementIdIC)
+            {
+                select firstonly DerivedAgreement from agreementReference
+                    where agreementReference.SourceAgreement == purchAgreementHeader.RecId;
+
+                salesAgreementHeaderIC = SalesAgreementHeader::find(agreementReference.DerivedAgreement,true);
+
+                salesAgreementHeaderIC.ETG_TradingStatusSales  = purchAgreementHeader.ETG_TradingStatusPurch;
+                salesAgreementHeaderIC.ETG_DocumentStatusSales = purchAgreementHeader.ETG_DocumentStatusPurch;
+                salesAgreementHeaderIC.doUpdate();
+            }
+
+            if(purchTable.PurchId)
+            {
+                salesTable.selectforupdate(true);
+                salesTable.ETG_TPPurchId       = purchTable.PurchId;
+                salesTable.ETG_IsThirdParty    = NoYes::Yes;
+                salesTable.doupdate();
+            }
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

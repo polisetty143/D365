@@ -1,0 +1,235 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesFormLetter_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// extension class for class <c>SalesFormLetter</c>
+/// </summary>
+[Extensionof(classStr(SalesFormLetter))]
+final class ETG_SalesFormLetter_Extension
+{
+    public FormDataSource shipTable_ds;
+    public FormDataSource shipContainers_ds;
+    public FormDataSource shipFolioTable_ds;
+
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initializeFromCallerRecord</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// initialize for outbound orders landed cost
+    /// </summary>
+    /// <param name = "_cachedArgs">SalesFormLetterCachedArguments _cachedArgs</param>
+    /// <param name = "_record">Common _record</param>
+    /// <param name = "_dataSourceRecordsPacked">container _dataSourceRecordsPacked</param>
+    [Hookable(false)]
+    protected void initializeFromCallerRecord(
+        SalesFormLetterCachedArguments  _cachedArgs,
+        Common                          _record,
+        container                       _dataSourceRecordsPacked)
+    {
+        next initializeFromCallerRecord(_cachedArgs, _record, _dataSourceRecordsPacked);
+
+        if (ITMParameters::find().ETGEnableLandedCostOutboundOrder == NoYes::Yes)
+        {
+            this.ETGITMInitializeBasedOnDocument(_record, _dataSourceRecordsPacked);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGITMInitializeBasedOnDocument</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// initialize for outbound orders landed cost
+    /// </summary>
+    /// <param name = "_record">Common _record</param>
+    /// <param name = "_dataSourceRecordsPacked">container _dataSourceRecordsPacked</param>
+    private void ETGITMInitializeBasedOnDocument(Common _record, container _dataSourceRecordsPacked)
+    {
+        switch (_record.TableId)
+        {
+            case tableNum(ITMTable):
+                this.ITMTable_ds(FormDataUtil::getFormDataSource(_record));
+                break;
+            
+            case tableNum(ITMContainers):
+                this.ITMContainers_ds(FormDataUtil::getFormDataSource(_record));
+                break;
+            
+            case tableNum(ITMFolioTable):
+                this.ITMFolioTable_ds(FormDataUtil::getFormDataSource(_record));
+                break;
+        }
+
+        if (shipTable_ds || shipContainers_ds || shipFolioTable_ds)
+        {
+            container lineListPacked = this.ITMSetDataSourceRecordList(_dataSourceRecordsPacked).pack();
+
+            this.parmLineList(lineListPacked);
+            this.parmCallerTable(_record);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ITMSetDataSourceRecordList</Name>
+				<Source><![CDATA[
+    private List ITMSetDataSourceRecordList(container _dataSourceRecordsPacked)
+    {
+        List list = new List(Types::Record);
+
+        MapEnumerator mapEnumerator = Map::create(_dataSourceRecordsPacked).getEnumerator();
+
+        while (mapEnumerator.moveNext())
+        {
+            list.addEnd(mapEnumerator.currentValue());
+        }
+
+        return list;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ITMContainers_ds</Name>
+				<Source><![CDATA[
+    internal FormDataSource ITMContainers_ds(FormDataSource _shipContainers_ds = shipContainers_ds)
+    {
+        shipContainers_ds = _shipContainers_ds;
+        return shipContainers_ds;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ITMFolioTable_ds</Name>
+				<Source><![CDATA[
+    internal FormDataSource ITMFolioTable_ds(FormDataSource _shipFolioTable_ds = shipFolioTable_ds)
+    {
+        shipFolioTable_ds = _shipFolioTable_ds;
+        return shipFolioTable_ds;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ITMTable_ds</Name>
+				<Source><![CDATA[
+    internal FormDataSource ITMTable_ds(FormDataSource _shipTable_ds = shipTable_ds)
+    {
+        shipTable_ds = _shipTable_ds;
+        return shipTable_ds;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    public void run()
+    {
+        next run();
+
+        if(this.documentStatus() == DocumentStatus::Invoice)
+        {
+            ETG_Parameters       parameters;
+
+            select firstonly Intercompanygoodsintransitjournalposting from parameters;
+
+            if((this.parmJournalRecord().TableId == tableNum(custInvoiceJour)) && (parameters.Intercompanygoodsintransitjournalposting == NoYes::Yes))
+            {
+                ETG_CreatePostLedgerJournal::CreateGeneralJournalSO(this.parmJournalRecord());
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    static void main(Args  args)
+    {
+        DefaultDimensionView        defaultDimView;
+        //DimensionHierarchyView      dimensionHierarchy;
+        DimensionHierarchy          dimensionHierarchy;
+        DimensionHierarchyLevel     dimensionHierarchyLevel;
+        DimensionAttribute          dimAttribute;
+        Description255              emptyDimension;
+
+        CustPackingSlipJour         custpackingslipjour;// = args.record();
+        SalesTable                  salesTable;// = args.record();
+
+
+        if((args.menuItemName() == 'SalesFormLetter_PackingSlipCancel') || (args.menuItemName() == 'SalesFormLetter_PackingSlipCorrection'))
+        {
+            custpackingslipjour = args.record();
+            
+            select firstonly salesTable
+                where salesTable.SalesId == custpackingslipjour.SalesId;
+        }
+        else
+        {
+            if(args.dataset() == tableNum(SalesTable))
+            {
+                salesTable = args.record();
+            }
+        }
+
+        if(args.parmEnum() == DocumentStatus::Confirmation && salesTable &&
+            ETG_Parameters::find().ETGIsDimensionValidationRequired == NoYes::Yes)
+        {
+            //select firstonly RecId from dimensionHierarchy
+            //    where dimensionHierarchy.StructureType == DimensionHierarchyType::AccountStructure
+            //        && dimensionHierarchy.Status == DimensionHierarchyConstraintStatus::Active
+            //        && dimensionHierarchy.UserLanguageId == CompanyInfo::languageId();
+
+            select firstonly RecId from dimensionHierarchy
+                where dimensionHierarchy.StructureType == DimensionHierarchyType::AccountStructure
+                     && dimensionHierarchy.IsDraft == NoYes::No;
+        
+
+            while select DimensionAttribute from dimensionHierarchyLevel
+                where dimensionHierarchyLevel.DimensionHierarchy == dimensionHierarchy.RecId
+            join dimAttribute
+                where dimAttribute.RecId == dimensionHierarchyLevel.DimensionAttribute
+                     && dimAttribute.Type != DimensionAttributeType::MainAccount
+            notexists join defaultDimView
+                where defaultDimView.Name ==  dimAttribute.Name
+                    && defaultDimView.DefaultDimension == salesTable.DefaultDimension
+            {
+                if(emptyDimension)
+                {
+                    emptyDimension = emptyDimension + ',' + dimAttribute.Name;
+                }
+                else
+                {
+                    emptyDimension = dimAttribute.Name;
+                }
+            }
+      
+            if(emptyDimension)
+            {
+                if(Box::yesNoAxaptaForm(strFmt('Financial dimensions - %1 are not filled in. Do you want to update? ',emptyDimension), DialogButton::Yes) == DialogButton::Yes)
+                {
+                    throw warning('Update has been canceled');
+                }
+            }
+        }
+        
+
+        next main(args);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

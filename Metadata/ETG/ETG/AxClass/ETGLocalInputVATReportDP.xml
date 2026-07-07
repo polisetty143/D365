@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLocalInputVATReportDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This class is an DP class for report LocalInputVATReport
+/// </summary>
+[SRSReportParameterAttribute(classStr(ETGLocalInputVATReportContract))]
+internal final class ETGLocalInputVATReportDP extends SRSReportDataProviderBase
+{
+    ETGLocalInputVATReportContract  etgLocalInputReportVATContract;
+    FromDate                        fromDate;
+    ToDate                          toDate;
+    VendAccount                     vendAccount;
+    ETGLocalInputVATReportTmp       etgLocalInputVATReportTmp;
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getTmpTable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets temporary table
+    /// </summary>
+    /// <returns>ETGLocalInputVATReportTmp temporary table.</returns>
+    [SrsReportDataSetAttribute(tableStr(ETGLocalInputVATReportTmp))]
+    public ETGLocalInputVATReportTmp getTmpTable()
+    {
+        select * from etgLocalInputVATReportTmp;
+        return etgLocalInputVATReportTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Processes the report business logic.
+    /// </summary>
+    public void processReport()
+    {
+        Query                                   query;
+        QueryRun                                queryRun;
+        QueryBuildDataSource                    queryBuildDataSource, queryBuildVendInvoiceTrans;
+        QueryBuildRange                         queryBuildRange;
+        VendInvoiceJour                         vendInvoiceJour;
+        VendInvoiceTrans                        vendInvoiceTrans;
+        DirPartyLocation                        dirPartyLocation;
+        TaxRegistration                         taxRegistration;
+        LogisticsElectronicAddress              electronicAddress;
+        TaxTrans                                taxTrans;
+        VendTable                               vendTable;
+        PurchLine                               purchLine;
+
+        CompanyInfo         companyInfo = CompanyInfo::find();
+        electronicAddress               = DirParty::primaryElectronicAddress(companyInfo.RecId, LogisticsElectronicAddressMethodType::Phone);
+
+        etgLocalInputReportVATContract = new ETGLocalInputVATReportContract();
+        etgLocalInputReportVATContract = this.parmDataContract() as ETGLocalInputVATReportContract;
+        fromDate                       = etgLocalInputReportVATContract.parmFromDate();
+        toDate                         = etgLocalInputReportVATContract.parmToDate();
+        vendAccount                    = etgLocalInputReportVATContract.parmVendAccount();
+
+        query = new Query();
+        queryBuildDataSource       = query.addDataSource(tableNum(VendInvoiceJour));
+        queryBuildVendInvoiceTrans = queryBuildDataSource.addDataSource(tableNum(VendInvoiceTrans));
+
+        queryBuildVendInvoiceTrans.joinMode(JoinMode::InnerJoin);
+        queryBuildVendInvoiceTrans.relations(true);
+        queryBuildVendInvoiceTrans.addLink(fieldNum(VendInvoiceJour, PurchId), fieldNum(VendInvoiceTrans, PurchId));
+        queryBuildVendInvoiceTrans.addLink(fieldNum(VendInvoiceJour, InvoiceDate), fieldNum(VendInvoiceTrans, InvoiceDate));
+        queryBuildVendInvoiceTrans.addLink(fieldNum(VendInvoiceJour, InvoiceId), fieldNum(VendInvoiceTrans, InvoiceId));
+
+        queryBuildDataSource.addSortField(fieldNum(VendInvoiceJour, InvoiceDate), SortOrder::Ascending);
+        
+        query.dataSourceTable(tableNum(VendInvoiceJour)).addRange(fieldNum(VendInvoiceJour, InvoiceDate)).value(queryRange(fromDate, toDate));
+        if(vendAccount)
+        {
+            queryBuildRange = queryBuildDataSource.addRange(fieldNum(VendInvoiceJour, OrderAccount));
+            queryBuildRange.value(vendAccount);
+        }
+
+        queryRun = new QueryRun(query);
+
+        while (queryRun.next())
+        {
+            etgLocalInputVATReportTmp.clear();
+
+            vendInvoiceJour                                         = queryRun.get(tableNum(VendInvoiceJour));
+            vendInvoiceTrans                                        = queryRun.get(tableNum(VendInvoiceTrans));
+            purchLine                                               = PurchLine::findInventTransId(vendInvoiceTrans.InventTransId);
+
+            etgLocalInputVATReportTmp.InvoiceDate                   = vendInvoiceJour.InvoiceDate;
+            etgLocalInputVATReportTmp.InvoiceId                     = vendInvoiceJour.InvoiceId;
+            etgLocalInputVATReportTmp.VendName                      = VendTable::find(vendInvoiceJour.InvoiceAccount).name();
+            etgLocalInputVATReportTmp.DescriptionOfGoodsServices    = vendInvoiceTrans.ETGDescriptionOfGoodsServices;
+            etgLocalInputVATReportTmp.CompanyLogo                   = FormLetter::companyLogo();
+            etgLocalInputVATReportTmp.SourceCurrencyCode            = vendInvoiceJour.CurrencyCode;
+            etglocalInputVATReportTmp.CompanyPhone                  = electronicAddress.LocatorExtension + ' ' + electronicAddress.Locator;
+            electronicAddress                                       = DirParty::primaryElectronicAddress(companyInfo.RecId, LogisticsElectronicAddressMethodType::Fax);
+            etglocalInputVATReportTmp.CompanyTeleFax                = strFmt('@ETG_New:TelFax',CompanyInfo::find().phone(),CompanyInfo::find().teleFax());
+            etglocalInputVATReportTmp.CompanyAddress                = companyInfo.postalAddress().Address;
+            etglocalInputVATReportTmp.CompanyAddress                = strReplace(etglocalInputVATReportTmp.CompanyAddress,'\n',' ');
+            etglocalInputVATReportTmp.CompanyName                   = companyInfo.Name;
+            etglocalInputVATReportTmp.ETGCompanyCoRegNum            = strFmt('@ETG_New:RegNoGstNo',companyInfo.Giro,companyInfo.CoRegNum);
+
+
+            select registrationNumber from taxRegistration
+                join dirPartyLocation
+                    where taxRegistration.dirPartyLocation == dirPartyLocation.RecId
+                join vendTable
+                    where vendTable.Party   == dirPartyLocation.Party
+                    && vendTable.AccountNum == vendInvoiceJour.InvoiceAccount;
+
+            etgLocalInputVATReportTmp.TaxRegistrationNumber = taxRegistration.RegistrationNumber;
+
+            select firstonly TaxBaseAmountCur, TaxAmountCur from taxTrans
+                where taxTrans.Voucher       == vendInvoiceJour.ledgerVoucher
+                &&    taxTrans.TransDate     == vendInvoiceJour.InvoiceDate
+                &&    taxTrans.InventTransId == vendInvoiceTrans.InventTransId;
+
+            if(purchLine.TaxItemGroup == '' || purchLine.TaxGroup == '')
+            {
+                etgLocalInputVATReportTmp.SourceBaseAmountCur       = vendInvoiceTrans.LineAmount;
+            }
+
+            else
+            {
+                etgLocalInputVATReportTmp.SourceBaseAmountCur       = taxTrans.TaxBaseAmountCur;
+                etglocalInputVATReportTmp.SourceRegulateAmountCur   = taxTrans.TaxAmountCur;
+            }
+
+            etgLocalInputVATReportTmp.insert();
+
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

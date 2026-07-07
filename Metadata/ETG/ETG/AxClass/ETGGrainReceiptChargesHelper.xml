@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGGrainReceiptChargesHelper</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Helper class for generating charges
+/// </summary>
+internal final class ETGGrainReceiptChargesHelper
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>generateCharges</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Helper method for genrating charges
+    /// </summary>
+    /// <param name = "_header"></param>
+    public static void generateCharges(ETGGrainReceiptNoteTable _header)
+    {
+            PurchTable purchTable = PurchTable::find(_header.PurchId, true);
+            ETGGrainReceiptCharges grainReceiptCharges;
+
+            if (!purchTable)
+            return;
+
+            ttsbegin;
+
+            delete_from grainReceiptCharges
+            where grainReceiptCharges.GrainReceiptNoteId == _header.GrainReceiptNoteId;
+
+            Map chargeMap = new Map(Types::String, Types::Real);
+
+            MarkupTrans markupTrans;
+            PurchLine purchLine;
+            boolean headerChargesExist = false;
+
+            select firstonly RecId from markupTrans
+            where markupTrans.TransTableId == tableNum(PurchTable)
+               && markupTrans.TransRecId  == purchTable.RecId;
+
+            headerChargesExist = markupTrans.RecId != 0;
+
+            if (headerChargesExist)
+            {
+                AmountCur totalLineAmount = 0.00;
+
+                while select purchLine
+                where purchLine.PurchId == purchTable.PurchId
+                {
+                    totalLineAmount += purchLine.LineAmount;
+                }
+
+                while select markupTrans
+                where markupTrans.TransTableId == tableNum(PurchTable)
+                   && markupTrans.TransRecId  == purchTable.RecId
+                {
+                    real amount;
+
+                    if (markupTrans.MarkupCategory == MarkupCategory::Percent)
+                    {
+                        amount = (totalLineAmount * markupTrans.Value) / 100;
+                    }
+                    else
+                    {
+                        amount = markupTrans.Value;
+                    }
+
+                    if (chargeMap.exists(markupTrans.MarkupCode))
+                    amount += chargeMap.lookup(markupTrans.MarkupCode);
+
+                    chargeMap.insert(markupTrans.MarkupCode, amount);
+                }
+            }
+            else
+            {
+                while select purchLine
+                where purchLine.PurchId == purchTable.PurchId
+                {
+                    while select markupTrans
+                    where markupTrans.TransTableId == tableNum(PurchLine)
+                       && markupTrans.TransRecId  == purchLine.RecId
+                    {
+                        real amount;
+
+                        amount = ETGLevyChargeSetup::calculateChargeFromMarkup(purchLine, markupTrans);
+
+                        if (chargeMap.exists(markupTrans.MarkupCode))
+                        amount += chargeMap.lookup(markupTrans.MarkupCode);
+
+                        chargeMap.insert(markupTrans.MarkupCode, amount);
+                    }
+                }
+            }
+
+            MapEnumerator me = chargeMap.getEnumerator();
+
+            while (me.moveNext())
+            {
+                ETGGrainReceiptCharges grnCharge;
+                MarkupTable markupTable;
+
+                str markupCode = me.currentKey();
+                real amount    = me.currentValue();
+
+                grnCharge.clear();
+                grnCharge.initValue();
+
+                grnCharge.GrainReceiptNoteId = _header.GrainReceiptNoteId;
+                grnCharge.LineNumber         = ETGGrainReceiptChargesHelper::getNextLineNum(_header.GrainReceiptNoteId);
+                grnCharge.ChargeMarkupCode   = markupCode;
+                grnCharge.Amount             = amount;
+
+                select firstonly markupTable
+                where markupTable.MarkupCode == markupCode;
+
+                if (markupTable)
+                grnCharge.Description = markupTable.Txt;
+
+                grnCharge.insert();
+            }
+
+            ttscommit;
+
+            ETGGrainReceiptNoteTable headerForUpdate;
+
+            headerForUpdate = ETGGrainReceiptNoteTable::
+    findFromGrainReceiptNote(_header.GrainReceiptNoteId, true);
+
+            if (headerForUpdate)
+            {
+                headerForUpdate.recalcNetAmountPayable();
+            }
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getNextLineNum</Name>
+				<Source><![CDATA[
+    private static int getNextLineNum(ETGGrainReceiptNoteId _grnId)
+    {
+        ETGGrainReceiptCharges charge;
+        int maxLineNum = 0;
+
+        select maxof(LineNumber) from charge
+            where charge.GrainReceiptNoteId == _grnId;
+
+        maxLineNum = charge.LineNumber;
+
+        return maxLineNum + 1;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

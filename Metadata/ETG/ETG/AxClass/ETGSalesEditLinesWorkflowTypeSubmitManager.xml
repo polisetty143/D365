@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesEditLinesWorkflowTypeSubmitManager</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The ETGSalesEditLinesWorkflowTypeSubmitManager menu item action event handler.
+/// </summary>
+public class ETGSalesEditLinesWorkflowTypeSubmitManager 
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args args)
+	{
+		//  TODO:  Write code to execute once a work item is submitted.
+        ETGSalesEditLines     customWorkflowTable;
+        WorkflowComment         note = "";
+        WorkflowSubmitDialog    workflowSubmitDialog;
+        WorkflowCorrelationId   workflowCorrelationId;
+        WorkflowTypeName        workflowTypeName = workFlowTypeStr("ETGSalesEditLinesWorkflowType");
+
+        //Opens the submit to workflow dialog.
+        workflowSubmitDialog =    WorkflowSubmitDialog::construct(args.caller().getActiveWorkflowConfiguration());
+
+        workflowSubmitDialog.run();
+        if (workflowSubmitDialog.parmIsClosedOK())
+        {
+            //customWorkflowTable = args.record();Abhinav
+            //Get comments from the submit to workflow dialog.
+            
+            note = workflowSubmitDialog.parmWorkflowComment();
+            try
+            {
+                MultiSelectionHelper helper = MultiSelectionHelper::construct();
+                FormDataSource FormDS = args.record().dataSource();
+                helper.parmDatasource(FormDS);
+                customWorkflowTable = helper.getFirst();
+                while(customWorkflowTable.RecId)
+                {
+                    if(customWorkflowTable.WorkflowStatus != ETGSalesEditLinesWorkflow::Approved)
+                    {
+                        ttsbegin;
+                        workflowCorrelationId = Workflow::activateFromWorkflowType(workflowTypeName, customWorkflowTable.RecId, note, NoYes::No);
+                        customWorkflowTable.WorkflowStatus = ETGSalesEditLinesWorkflow::Submitted;
+                        customWorkflowTable.update();
+                        ttscommit;
+                    }
+                    
+                    customWorkflowTable = helper.getNext();
+                }
+                // Send an Infolog message.
+                info("Submitted to workflow.");
+                
+            }
+            catch (Exception::Error)
+            {
+                error("Error on workflow activation.");
+            }
+        }
+        args.caller().updateWorkFlowControls();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

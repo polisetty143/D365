@@ -1,0 +1,447 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerAccrualTrans_Fiscal</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The <c>LedgerAccrualTrans_Fiscal</c> class manages fiscal accrual processing.
+/// </summary>
+class ETGLedgerAccrualTrans_Fiscal extends ETGLedgerAccrualTrans
+{
+    TaxAmountCur taxInCostPriceAmountCurAccrued;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>allocate</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Allocate amounts by inserting records in the <c>LedgerJournalTransAccrualTrans</c> table.
+    /// </summary>
+    /// <returns>
+    /// Always returns true.
+    /// </returns>
+    public boolean allocate()
+    {
+        TransDate                       firstDateAfterAllAccrualPeriods;
+        Counter                         counter;
+        Counter                         curCounter;
+        boolean                         moreRecords;
+        AmountCur                       amountCurAccrued;
+        RecordSortedList                recordSortedList;
+        boolean                         ok;
+        TaxAmountCur                    taxInCostPriceAmountCur;
+        boolean                         useTaxInCostPrice = (TaxParameters::find().PurchTaxOnOperations == false);
+
+        ok = super();
+
+        if (ok)
+        {
+            recordSortedList = new RecordSortedList(tablenum(ETGLedgerJournalTransAccrualTrans));
+            recordSortedList.sortOrder(fieldnum(ETGLedgerJournalTransAccrualTrans, DocumentDate));
+
+            firstDateAfterAllAccrualPeriods = ETGLedgerAccrualTrans_Fiscal::getFirstDateAfterAllAccrualPeriods(ledgerAccrualTable.PeriodLength, ledgerAccrualTable.PeriodType, LedgerJournalTransAccrual.TransDate, calendarRecId);
+
+            ledgerJournalTransAccrualTrans.DocumentDate = this.nextFreq(ledgerJournalTransAccrual.TransDate, true);
+
+            taxInCostPriceAmountCur = this.getTaxInCostPriceAmountCur(useTaxInCostPrice);
+
+            while (ledgerJournalTransAccrualTrans.DocumentDate && ledgerJournalTransAccrualTrans.DocumentDate < firstDateAfterAllAccrualPeriods)
+            {
+                counter++;
+
+                ledgerJournalTransAccrualTrans.TransDate = LedgerFiscalCalendar::findFirstOpenStartDateInAnyYear(calendarRecId,ledgerJournalTransAccrualTrans.DocumentDate);
+                this.setTransTxt();
+                recordSortedList.ins(ledgerJournalTransAccrualTrans);
+                ledgerJournalTransAccrualTrans.DocumentDate = this.nextFreq(ledgerJournalTransAccrualTrans.DocumentDate);
+            }
+
+            ttsbegin;
+
+            moreRecords = recordSortedList.first(ledgerJournalTransAccrualTrans);
+
+            while (moreRecords)
+            {
+                curCounter++;
+
+                amountCurAccrued = this.insertLedgerAccrualTransactions(amountCurAccrued, curCounter, firstDateAfterAllAccrualPeriods, counter, taxInCostPriceAmountCur, useTaxInCostPrice);
+
+                moreRecords = recordSortedList.next(ledgerJournalTransAccrualTrans);
+            }
+
+            ttscommit;
+        }
+
+        return ok;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertLedgerAccrualTransactions</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates ledger accrual transactions.
+    /// </summary>
+    /// <param name = "_amountCurAccrued">
+    /// The Amount currency accrued.
+    /// </param>
+    /// <param name = "_curCounter">
+    /// Flag to track the count.
+    /// </param>
+    /// <param name = "_firstDateAfterAllAccrualPeriods">
+    /// The first date after all accrual periods.
+    /// </param>
+    /// <param name = "_counter">
+    /// Flag to track the count.
+    /// </param>
+    /// <param name = "_taxInCostPriceAmountCur">
+    /// The Tax in cost price amount.
+    /// </param>
+    /// <param name = "_useTaxInCostPrice">
+    /// A boolean value for determining if use tax in cost price.
+    /// </param>
+    /// <returns>
+    /// The Amount currency accrued.
+    /// </returns>
+    protected AmountCur insertLedgerAccrualTransactions(AmountCur _amountCurAccrued, Counter _curCounter, TransDate _firstDateAfterAllAccrualPeriods, Counter _counter,
+                          TaxAmountCur _taxInCostPriceAmountCur,
+                          boolean _useTaxInCostPrice)
+    {
+        real                            factor;
+        ETGLedgerJournalTransAccrualTrans  ledgerJournalTransAccrualTransTaxCost;
+
+        if (_useTaxInCostPrice)
+        {
+            ledgerJournalTransAccrualTransTaxCost.data(ledgerJournalTransAccrualTrans);
+        }
+
+        if (_curCounter != _counter)
+        {
+            if (ledgerAccrualTable.ValuePosted == LedgerAccrualEvenScale::Even)
+            {
+                factor = 1 / _counter;
+            }
+            else
+            {
+                switch (ledgerAccrualTable.PostingFreq)
+                {
+                    case DayWeekMonth::Month :
+                        factor = ((this.getPeriodEndDate(ledgerJournalTransAccrualTrans.DocumentDate) + 1)
+                                    - max(this.getPeriodStartDate(ledgerJournalTransAccrualTrans.DocumentDate), ledgerJournalTransAccrual.TransDate))
+                                    / (_firstDateAfterAllAccrualPeriods  - ledgerJournalTransAccrual.TransDate);
+                        break;
+
+                    case DayWeekMonth::Quarter :
+                        factor = (dateMthFwd(dateStartQtr(ledgerJournalTransAccrualTrans.DocumentDate), 3)
+                                    - max(dateStartQtr(ledgerJournalTransAccrualTrans.DocumentDate), ledgerJournalTransAccrual.TransDate))
+                                    / (_firstDateAfterAllAccrualPeriods  - ledgerJournalTransAccrual.TransDate);
+                        break;
+                }
+            }
+
+            ledgerJournalTransAccrualTrans.AmountCur = CurrencyExchangeHelper::amount(ledgerJournalTransAccrual.AmountCur * factor, baseCurrencyCode);
+
+            if (_useTaxInCostPrice)
+            {
+                ledgerJournalTransAccrualTransTaxCost.AmountCur = CurrencyExchangeHelper::amount(_taxInCostPriceAmountCur * factor, baseCurrencyCode);
+            }
+        }
+        else
+        {
+            ledgerJournalTransAccrualTrans.AmountCur = CurrencyExchangeHelper::amount(ledgerJournalTransAccrual.AmountCur - _amountCurAccrued, baseCurrencyCode);
+
+            if (_useTaxInCostPrice)
+            {
+                ledgerJournalTransAccrualTransTaxCost.AmountCur = CurrencyExchangeHelper::amount(_taxInCostPriceAmountCur - taxInCostPriceAmountCurAccrued, baseCurrencyCode);
+            }
+        }
+
+        if (ledgerJournalTransAccrualTrans.AmountCur)
+        {
+            //this.setVoucher();  //Voucher will set durng posting
+
+            ledgerJournalTransAccrualTrans.LedgerDimension = baseLedgerDimension;
+            ledgerJournalTransAccrualTrans.insert();
+
+            _amountCurAccrued += ledgerJournalTransAccrualTrans.AmountCur;
+
+            this.saveOffset();
+        }
+
+        if (ledgerJournalTransAccrualTransTaxCost.AmountCur)
+        {
+            if (ledgerJournalTransAccrualTrans.AmountCur == 0)
+            {
+                //this.setVoucher();  //Voucher will set durng posting
+            }
+
+            taxInCostPriceAmountCurAccrued += ledgerJournalTransAccrualTransTaxCost.AmountCur;
+
+            this.insertTaxInCostPriceForSourceLine(ledgerJournalTransAccrualTransTaxCost, ledgerJournalTransAccrualTrans.Voucher, baseLedgerDimension);
+        }
+
+        return _amountCurAccrued;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getPeriodStartDate</Name>
+				<Source><![CDATA[
+    private StartDate getPeriodStartDate(date _documentDate)
+    {
+        FiscalCalendarPeriod startPeriod = FiscalCalendarPeriod::findPeriodByCalendarDate(
+            calendarRecId,
+            _documentDate,
+            FiscalPeriodType::Operating);
+
+        return startPeriod.StartDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getPeriodEndDate</Name>
+				<Source><![CDATA[
+    private StartDate getPeriodEndDate(date _documentDate)
+    {
+        FiscalCalendarPeriod startPeriod = FiscalCalendarPeriod::findPeriodByCalendarDate(
+            calendarRecId,
+            _documentDate,
+            FiscalPeriodType::Operating);
+
+        return startPeriod.EndDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getTaxInCostPriceAmountCur</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Retrieves calculated Tax value based on taxation rules.
+    /// </summary>
+    /// <param name="_useTaxInCostPrice">
+    /// Boolean value to validate if taxation rules are applicable.
+    /// </param>
+    /// <returns>
+    /// Returns Tax amount based on taxation rules.
+    /// </returns>
+    protected TaxAmountCur getTaxInCostPriceAmountCur(boolean _useTaxInCostPrice)
+    {
+        TaxAmountCur taxInCostPriceAmountCur;
+
+        if (_useTaxInCostPrice)
+        {
+            taxInCostPriceAmountCur = this.calcTaxInCostPriceAmountCur();
+        }
+
+        return taxInCostPriceAmountCur;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>endDate</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the date after all the accrual periods based upon the transaction date.
+    /// </summary>
+    /// <param name="_transDate">
+    /// The transaction date.
+    /// </param>
+    /// <returns>
+    /// The date after all the accrual periods based upon the transaction date.
+    /// </returns>
+    public TransDate endDate(TransDate _transDate)
+    {
+        TransDate endDate;
+        TransDate transDate;
+        TransDate firstDateAfterAllAccrualPeriods = ETGLedgerAccrualTrans_Fiscal::getFirstDateAfterAllAccrualPeriods(ledgerAccrualTable.PeriodLength, ledgerAccrualTable.PeriodType, LedgerJournalTransAccrual.TransDate, calendarRecId);
+
+        transDate = this.nextFreq(_transDate, true);
+        while (transDate && transDate < firstDateAfterAllAccrualPeriods)
+        {
+            endDate = periodEndDate;
+            transDate = this.nextFreq(transDate);
+        }
+
+        if (endDate == dateNull())
+        {
+            warning("@SYS68959");
+        }
+
+        return endDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>nextFreq</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the date of the next accrual occurence based upon the transaction date.
+    /// </summary>
+    /// <param name="_baseTransdate">
+    /// The transaction date.
+    /// </param>
+    /// <param name="_init">
+    /// true if data provided initializes the period search; otherwise false for subsequent searches.
+    /// </param>
+    /// <returns>
+    /// The date of the next occurrence of accrual.
+    /// </returns>
+    protected TransDate nextFreq(TransDate _baseTransdate, boolean _init = false)
+    {
+        FiscalCalendarPeriod    fiscalCalendarPeriod;
+        FiscalCalendarYear      fiscalCalendarYear;
+
+        if (_init)
+        {
+            if (ledgerAccrualTable.PeriodType == AssetAccrual::FiscalPeriod)
+            {
+                select  firstonly fiscalCalendarPeriod
+                where   fiscalCalendarPeriod.StartDate      <= _baseTransdate
+                &&      fiscalCalendarPeriod.EndDate        >= _baseTransdate
+                &&      fiscalCalendarPeriod.Type           == FiscalPeriodType::Operating
+                join    RecId from fiscalCalendarYear
+                where   fiscalCalendarYear.RecId            == fiscalCalendarPeriod.FiscalCalendarYear
+                &&      fiscalCalendarYear.FiscalCalendar   == calendarRecId
+                        && fiscalCalendarYear.StartDate <= fiscalCalendarPeriod.StartDate
+                        && fiscalCalendarYear.EndDate >= fiscalCalendarPeriod.EndDate;
+            }
+            else
+            {
+                fiscalCalendarPeriod = LedgerFiscalCalendar::findYearEndClosingPeriodByDate(calendarRecId,_baseTransdate);
+                fiscalCalendarPeriod.StartDate = LedgerFiscalCalendar::findOpeningPeriodStartDateByDate(calendarRecId,_baseTransdate);
+            }
+        }
+        else
+        {
+            if (ledgerAccrualTable.PeriodType == AssetAccrual::FiscalPeriod)
+            {
+                select  firstonly fiscalCalendarPeriod
+                order by StartDate
+                where   fiscalCalendarPeriod.StartDate      > _baseTransdate
+                &&      fiscalCalendarPeriod.Type           == FiscalPeriodType::Operating
+                join    RecId from fiscalCalendarYear
+                where   fiscalCalendarYear.RecId            == fiscalCalendarPeriod.FiscalCalendarYear
+                &&      fiscalCalendarYear.FiscalCalendar   == calendarRecId
+                &&      fiscalCalendarYear.StartDate        <= fiscalCalendarPeriod.StartDate
+                &&      fiscalCalendarYear.EndDate          >= fiscalCalendarPeriod.StartDate;
+            }
+            else
+            {
+                fiscalCalendarPeriod.StartDate = LedgerFiscalCalendar::findYearEndClosingPeriodByDate(calendarRecId,_baseTransdate).EndDate + 1;
+                fiscalCalendarPeriod.EndDate = LedgerFiscalCalendar::findYearEndClosingPeriodByDate(calendarRecId,fiscalCalendarPeriod.StartDate).EndDate;
+            }
+        }
+
+        periodStartDate = fiscalCalendarPeriod.StartDate;
+        periodEndDate   = fiscalCalendarPeriod.EndDate;
+
+        switch (ledgerAccrualTable.PostingDate)
+        {
+            case PrimoMedioUltimo::Primo:
+                return fiscalCalendarPeriod.StartDate;
+            case PrimoMedioUltimo::Medio:
+                return fiscalCalendarPeriod.EndDate ? fiscalCalendarPeriod.StartDate + (fiscalCalendarPeriod.EndDate - fiscalCalendarPeriod.StartDate) / 2 : dateNull();
+            case PrimoMedioUltimo::Ultimo:
+                return fiscalCalendarPeriod.EndDate;
+        }
+
+        return super(_baseTransdate, _init);  // so it won't loop endlessly!
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getFirstDateAfterAllAccrualPeriods</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the date of the first day after all accrual periods based upon the period length, type, calendar and transaction date.
+    /// </summary>
+    /// <param name="_accrualPeriodLength">
+    /// The period length specified in the <c>LedgerAccrualTable</c> record.
+    /// </param>
+    /// <param name="_acrualPeriodType">
+    /// The period type specified in the <c>LedgerAccrualTable</c> record.
+    /// </param>
+    /// <param name="_transactionDate">
+    /// The transaction date specified in the <c>LedgerJournalTransAccrual</c> record.
+    /// </param>
+    /// <param name="_calendarRecId">
+    /// The record ID of the <c>FiscalCalendar</c>.
+    /// </param>
+    /// <returns>
+    /// The first day after all accrual periods.
+    /// </returns>
+    private static TransDate getFirstDateAfterAllAccrualPeriods(LedgerAccrualPeriodLength _accrualPeriodLength, LedgerAccrualPeriodType _acrualPeriodType, TransDate _transactionDate, RecId _calendarRecId)
+    {
+        FiscalCalendarPeriod    fiscalCalendarPeriod;
+        FiscalCalendarYear      fiscalCalendarYear;
+        Counter                 accrualPeriodsRemaining = _accrualPeriodLength;
+        TransDate               nextPeriodStartDate = _transactionDate;
+
+        if (accrualPeriodsRemaining)
+        {
+            switch (_acrualPeriodType)
+            {
+                case AssetAccrual::FiscalPeriod:
+                    FiscalCalendarPeriod startPeriod = FiscalCalendarPeriod::findPeriodByCalendarDate(
+                        _calendarRecId,
+                        _transactionDate,
+                        FiscalPeriodType::Operating);
+
+                    while select StartDate, EndDate from fiscalCalendarPeriod
+                        order by StartDate
+                        where fiscalCalendarPeriod.StartDate >= startPeriod.StartDate
+                            && fiscalCalendarPeriod.Type == FiscalPeriodType::Operating
+                        exists join fiscalCalendarYear
+                            where  fiscalCalendarYear.RecId == fiscalCalendarPeriod.FiscalCalendarYear
+                                && fiscalCalendarYear.FiscalCalendar == _calendarRecId
+                                && fiscalCalendarYear.StartDate <= fiscalCalendarPeriod.StartDate
+                                && fiscalCalendarYear.EndDate >= fiscalCalendarPeriod.StartDate
+                    {
+                        accrualPeriodsRemaining--;
+
+                        if (!accrualPeriodsRemaining)
+                        {
+                            nextPeriodStartDate = fiscalCalendarPeriod.EndDate + 1;
+                            break;
+                        }
+                    }
+
+                    break;
+
+                case AssetAccrual::Yearly:
+                    while select EndDate from fiscalCalendarPeriod
+                        order by EndDate
+                        where  fiscalCalendarPeriod.EndDate >= _transactionDate
+                            && fiscalCalendarPeriod.Type == FiscalPeriodType::Closing
+                        exists join fiscalCalendarYear
+                        where  fiscalCalendarYear.RecId == fiscalCalendarPeriod.FiscalCalendarYear
+                            && fiscalCalendarYear.FiscalCalendar == _calendarRecId
+                            && fiscalCalendarYear.StartDate <= fiscalCalendarPeriod.StartDate
+                            && fiscalCalendarYear.EndDate >= fiscalCalendarPeriod.StartDate
+                    {
+                        accrualPeriodsRemaining--;
+                        if (!accrualPeriodsRemaining)
+                        {
+                            nextPeriodStartDate = fiscalCalendarPeriod.EndDate + 1;
+                            break;
+                        }
+                    }
+            }
+        }
+
+        return nextPeriodStartDate;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

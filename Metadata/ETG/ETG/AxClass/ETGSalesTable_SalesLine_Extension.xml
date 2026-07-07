@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesTable_SalesLine_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formDataSourceStr(SalesTable, SalesLine))]
+internal final class ETGSalesTable_SalesLine_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>validateWrite</Name>
+				<Source><![CDATA[
+    public boolean validateWrite()
+    {
+        boolean ret;
+
+        ret = next validateWrite();
+
+        if(ret && SalesParameters::find().ETGEnableCylinderTracking == NoYes::Yes)
+        {
+            SalesLine         salesLine         = this.cursor();
+            InventTableModule inventTableModule = InventTableModule::find(salesLine.ItemId, ModuleInventPurchSales::Sales);
+
+            // Update: If entity is 'o018', allow None, otherwise enforce mandatory check
+            if (salesLine.ETGConnectionType == ETGConnectionType::None && curExt() != 'o018' && curExt() != 'o025')
+            {
+                ret = checkFailed("@ETG_New:ConnectionTypeMandatoryMsg");
+            }
+
+            if (inventTableModule
+                && inventTableModule.ETGDepositNeeded == NoYes::Yes
+                && inventTableModule.ETGFilledEmptyNeeded == NoYes::Yes
+                && salesLine.ETGFilledOrEmpty == ETGFilledOrEmpty::None)
+            {
+                ret = checkFailed("@ETG_New:FilledEmptyIsMandatoryMsg");
+            }
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

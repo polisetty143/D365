@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGInventJournalCreate_Form_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formStr(InventJournalCreate))]
+final class ETGInventJournalCreate_Form_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>ETGParentEntity_OnLookup</Name>
+				<Source><![CDATA[
+        /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(InventJournalCreate, ETGParentEntity), FormControlEventType::Lookup)]
+    public static void ETGParentEntity_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        FormControlCancelableSuperEventArgs cancelEventArgs = e as FormControlCancelableSuperEventArgs;
+        cancelEventArgs.cancelSuperCall();
+
+        Query query = new Query();
+        QueryBuildDataSource queryBuildDataSource;
+        QueryBuildRange queryBuildRange;
+        SysTableLookup sysTableLookup = SysTableLookup::newParameters(tableNum(ETGLegalEntityListForSUbcontractingProdOrder), sender);
+
+        sysTableLookup.addLookupField(fieldNum(ETGLegalEntityListForSUbcontractingProdOrder,LegalEntityName));
+        sysTableLookup.addLookupField(fieldNum(ETGLegalEntityListForSUbcontractingProdOrder,Name));
+
+        queryBuildDataSource = query.addDataSource(tableNum(ETGLegalEntityListForSUbcontractingProdOrder));
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.performFormLookup();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGParentEntityWarehouse_OnLookup</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(InventJournalCreate, ETGParentEntityWarehouse), FormControlEventType::Lookup)]
+    public static void ETGParentEntityWarehouse_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        FormControlCancelableSuperEventArgs cancelEventArgs = e as FormControlCancelableSuperEventArgs;
+        cancelEventArgs.cancelSuperCall();
+
+        Query query = new Query();
+        QueryBuildDataSource queryBuildDataSource;
+        QueryBuildRange queryBuildRange;
+        SysTableLookup sysTableLookup = SysTableLookup::newParameters(tableNum(InventLocation), sender);
+
+        InventJournalTable inventJournalTable = sender.formRun().dataSource(1).cursor();
+        queryBuildDataSource = query.addDataSource(tableNum(InventLocation));
+        queryBuildDataSource.company(inventJournalTable.ETGParentEntity);
+
+        sysTableLookup.addLookupField(fieldNum(InventLocation,InventLocationId));
+        sysTableLookup.addLookupField(fieldNum(InventLocation,Name));
+
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.performFormLookup();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>InventJournalCreate_OnInitialized</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormEventHandler(formStr(InventJournalCreate), FormEventType::Initialized)]
+    public static void InventJournalCreate_OnInitialized(xFormRun sender, FormEventArgs e)
+    {
+        sender.design().controlName(FormControlstr(InventJournalCreate,ETGAutoCreateBOMJournal)).visible(false);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>InventJournalTable_JournalNameId_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(InventJournalCreate, InventJournalTable_JournalNameId), FormControlEventType::Modified)]
+    public static void InventJournalTable_JournalNameId_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        InventJournalName inventJournalName   = InventJournalName::find(sender.valueStr());
+
+        FormDataSource inventJournalDS        = sender.formRun().dataSource(formDataSourceStr(InventJournalCreate,InventJournalTable));
+        InventJournalTable inventJournalTable = inventJournalDS.cursor();
+        boolean makeMandatory                 = ETGCanadaParameters::find().EnableAutoCreateBOM  && inventJournalName && inventJournalName.ETGAutoCreateBOMJournal
+                                                && inventJournalName.ETGSelectJournalForAutoCreation;
+
+        FormStringControl parentEntityCtrl          = sender.formRun().design().controlName(FormControlstr(InventJournalCreate, ETGParentEntity));
+        FormStringControl warehouseCtrl             = sender.formRun().design().controlName(FormControlstr(InventJournalCreate, ETGParentEntityWarehouse));
+
+        parentEntityCtrl.mandatory(makeMandatory);
+        warehouseCtrl.mandatory(makeMandatory);
+
+
+        if(ETGCanadaParameters::find().EnableAutoCreateBOM  && inventJournalName && inventJournalName.ETGAutoCreateBOMJournal)
+        {
+            sender.formRun().design().controlName(FormControlstr(InventJournalCreate,ETGAutoCreateBOMJournal)).visible(true);
+            ETGLegalEntityListForSUbcontractingProdOrder entity;
+
+            select firstOnly entity;
+            if (entity)
+            {
+                inventJournalTable.ETGParentEntity = entity.LegalEntityName;
+            }
+           
+
+        }
+        else
+        {
+            sender.formRun().design().controlName(FormControlstr(InventJournalCreate,ETGAutoCreateBOMJournal)).visible(false);
+            inventJournalTable.ETGParentEntity = '';
+        }
+        //sender.formRun().dataSource().refresh();
+     
+        inventJournalDS.reread();
+        inventJournalDS.refresh();
+
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

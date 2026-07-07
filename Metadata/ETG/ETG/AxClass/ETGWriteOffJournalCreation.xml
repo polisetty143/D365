@@ -1,0 +1,298 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGWriteOffJournalCreation</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+ public class ETGWriteOffJournalCreation
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args _args)
+    {
+        ETGWriteOffJournals     WriteOffJournals;
+        int                     recordsCount;
+        VendTrans               vendTrans,vendTransloc;
+        CustTrans               custTrans,custTransloc;
+        FormRun                 formRun = _args.caller();
+        FormDataSource          vendTrans_ds,custTrans_ds;
+        VendTransOpen           vendTransOpen;
+        SpecTrans               specTrans;
+        SysTableIdTable         sysTableId;
+        CustTransOpen           custTransOpen;
+        real                    num;
+        boolean                 check = true;
+
+        delete_from WriteOffJournals;
+
+        try
+        {
+            if(_args.menuItemName() == menuItemActionStr(ETGWriteOffJournals))
+            {
+                VendParameters      vendParameters = VendParameters::findByCompany(curExt());
+                RecId               offsetDim      = LedgerDimensionFacade::serviceCreateLedgerDimension(vendParameters.ETGOffsetLedgerDimension);
+                MainAccountNum      _mainAccountId = MainAccount::findByLedgerDimension(offsetDim).MainAccountId;
+                RecId               offsetLedgerdimension;
+                
+
+                if(!vendParameters.ETGJournalName && !vendParameters.ETGOffsetLedgerDimension)
+                {
+                    throw error('Write-off journal name and offset ledger dimension is missing');
+                }
+
+                vendTrans_ds    = formRun.dataSource();
+                recordsCount    = vendTrans_ds.recordsMarked().lastIndex();
+                vendTrans       = vendTrans_ds.getFirst(1);
+                while (vendTrans)
+                {
+                    select vendTransOpen
+                            where  vendTransOpen.AccountNum == vendTrans.AccountNum &&
+                                   vendTransOpen.RefRecId   == vendTrans.RecId      &&
+                                   vendTrans.Invoice        == vendTrans.Invoice;
+
+                    select sysTableId
+                        where sysTableId.Name == "VendTransOpen";
+
+                    specTrans   = SpecTrans::findByRef(vendTransOpen.DataAreaId,sysTableId.Id,vendTransOpen.RecId);
+                    num         = Global::sign(vendTrans.remainAmountCur());
+
+                    offsetLedgerdimension = LedgerDimensionFacade::serviceCreateLedgerDimension(LedgerDefaultAccountHelper::getDefaultAccountFromMainAccountRecId(MainAccount::findByMainAccountId(_mainAccountId).RecId),vendTrans.DefaultDimension);
+                    if(vendTrans.remainAmountCur() != 0.00 && !specTrans.RecId && num != 1 && vendTrans.ETGWriteOff == NoYes::No)
+                    {
+                        check = false;
+                        WriteOffJournals.AccountNum             = vendTrans.AccountNum;
+                        WriteOffJournals.JournalName            = vendParameters.ETGJournalName;
+                        WriteOffJournals.OffsetLedgerDimension  = offsetLedgerdimension;
+                        WriteOffJournals.RemainAmountCur        = vendTrans.remainAmountCur();
+                        WriteOffJournals.CurrencyCode           = vendTrans.CurrencyCode;
+                        WriteOffJournals.Voucher                = vendTrans.Voucher;
+                        WriteOffJournals.TransDate              = vendTrans.TransDate;
+                        WriteOffJournals.InvoiceId              = vendTrans.Invoice;
+                        WriteOffJournals.PostingProfile         = vendTrans.PostingProfile;
+                        WriteOffJournals.insert();
+                    }
+                    vendTrans = vendTrans_ds.getNext();
+                }
+                if(!check)
+                {
+                    ETGWriteOffJournalCreation::createJournal(vendParameters.ETGJournalName,offsetLedgerdimension);
+                    vendTrans_ds.refresh();
+                    vendTrans_ds.reread();
+                    vendTrans_ds.research();
+                }
+                else
+                {
+                    info("@ETG:ETGWriteOffJourInfo");
+                }
+            }
+            else if(_args.menuItemName() == menuItemActionStr(ETGWriteOffCustJournals))
+            {
+                CustParameters      custParameters = CustParameters::findByCompany(curExt());
+                RecId               offsetDim      = LedgerDimensionFacade::serviceCreateLedgerDimension(custParameters.ETGCustPaymOffsetLedgerDimension);
+                MainAccountNum      _mainAccountId = MainAccount::findByLedgerDimension(offsetDim).MainAccountId;
+                RecId               offsetLedgerdimension;
+
+                if(!custParameters.ETGCustPaymWriteOffJournalName && !custParameters.ETGCustPaymOffsetLedgerDimension)
+                {
+                    throw  error('@ETG:ETGWiteOffSalesParameterError');
+                }
+                custTrans_ds    = formRun.dataSource();
+                recordsCount    = custTrans_ds.recordsMarked().lastIndex(); 
+                custTrans       = custTrans_ds.getFirst(1);
+                while (custTrans)
+                {
+                    select custTransOpen
+                            where  custTransOpen.AccountNum == custTrans.AccountNum &&
+                                   custTransOpen.RefRecId   == custTrans.RecId      &&
+                                   custTrans.Invoice        == custTrans.Invoice;
+
+                    select sysTableId
+                        where sysTableId.Name == "CustTransOpen";
+
+                    specTrans   = SpecTrans::findByRef(custTransOpen.DataAreaId,sysTableId.Id,custTransOpen.RecId);
+
+                    num = Global::sign(custTrans.remainAmountCur());
+                    offsetLedgerdimension = LedgerDimensionFacade::serviceCreateLedgerDimension(LedgerDefaultAccountHelper::getDefaultAccountFromMainAccountRecId(MainAccount::findByMainAccountId(_mainAccountId).RecId), custTrans.DefaultDimension);
+                    if(custTrans.remainAmountCur() != 0.00 && !specTrans.RecId && num != -1 && custTrans.ETGWriteOff == NoYes::No)
+                    {
+                        check = false;
+                        WriteOffJournals.AccountNum             = custTrans.AccountNum;
+                        WriteOffJournals.JournalName            = custParameters.ETGCustPaymWriteOffJournalName;
+                        WriteOffJournals.OffsetLedgerDimension  = offsetLedgerdimension;
+                        WriteOffJournals.RemainAmountCur        = custTrans.remainAmountCur();
+                        WriteOffJournals.CurrencyCode           = custTrans.CurrencyCode;
+                        WriteOffJournals.Voucher                = custTrans.Voucher;
+                        WriteOffJournals.TransDate              = custTrans.TransDate;
+                        WriteOffJournals.InvoiceId              = custTrans.Invoice;
+                        WriteOffJournals.PostingProfile         = custTrans.PostingProfile;
+                        WriteOffJournals.insert();
+                    }
+                    custTrans = custTrans_ds.getNext();
+                }
+                if(!check)
+                {
+                    ETGWriteOffJournalCreation::createJournal(custParameters.ETGCustPaymWriteOffJournalName, offsetLedgerdimension);
+                    custTrans_ds.refresh();
+                    custTrans_ds.reread();
+                    custTrans_ds.research();
+                }
+                else
+                {
+                    info("@ETG:ETGWriteOffJourInfo");
+                }
+            }
+        }
+        catch(Exception::Error)
+        {
+            throw Exception::Error;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createJournal</Name>
+				<Source><![CDATA[
+    public static void createJournal(str  _journalName,RecId _offsetAccount)
+    {
+        LedgerJournalTable      ledgerJournalTable;
+        LedgerJournalTrans      ledgerJournalTrans;
+        LedgerJournalCheckPost  journalCheckPost;
+        LedgerJournalName       ledgerJournalName;
+        NumberSeq               numberseq;
+        Voucher                 voucher;
+        VendTable               vendTable;
+        CustTable               custTable;
+        ETGWriteOffJournals     WriteOffJournals,WriteOffJournalsloc;
+        LedgerJournalCheckPost jourPost;
+        VendTrans               vendTrans;
+        CustTrans               custTrans;
+        select firstonly WriteOffJournalsloc;
+
+        vendTable = VendTable::find(WriteOffJournalsloc.AccountNum);
+        custTable = CustTable::find(WriteOffJournalsloc.AccountNum);
+        
+        ttsbegin;
+        //select crosscompany ledgerJournaltable
+        //    where ledgerJournaltable.JournalName == _journalName;
+
+        ledgerJournalTable.clear();
+        ledgerJournalTable.initFromLedgerJournalName(_journalName);
+        ledgerJournaltable.JournalNum = JournalTableData::newTable(ledgerJournalTable).nextJournalId();
+        if (ledgerJournalTable.validateWrite())
+        {
+            ledgerJournalTable.insert();
+        }
+
+        while select WriteOffJournals
+        {
+            if (ledgerJournalTable.RecId)
+            {
+                // Line
+                ledgerJournalTrans.clear();
+                ledgerJournalTrans.initValue();
+                ledgerjournalTrans.JournalNum = ledgerJournalTable.JournalNum;
+                ledgerJournalTrans.Company = curExt();
+                ledgerJournalTrans.TransDate = today();
+                ledgerJournalTrans.LineNum = LedgerJournalTrans::lastLineNum(ledgerJournalTrans.JournalNum);
+
+                voucher = new JournalVoucherNum(JournalTableData::newTable(ledgerJournalTable)).getNew(false);
+
+                ledgerJournalTrans.Voucher = voucher;
+                ledgerJournalTrans.CurrencyCode = WriteOffJournals.CurrencyCode;
+                ledgerJournalTrans.ETGCTRMInvoiceReferance = WriteOffJournals.InvoiceId;
+                if(vendTable)
+                {
+                    ledgerJournalTrans.AmountCurDebit = abs(WriteOffJournals.RemainAmountCur);
+                    ledgerJournalTrans.AccountType = LedgerJournalACType::Vend;
+                    ledgerJournalTrans.DefaultDimension = VendTable::find(WriteOffJournals.AccountNum).DefaultDimension;
+                    ledgerJournalTrans.OffsetDefaultDimension = VendTable::find(WriteOffJournals.AccountNum).DefaultDimension;
+                    ledgerJournalTrans.LedgerDimension = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(WriteOffJournals.AccountNum, LedgerJournalACType::Vend);
+                }
+                else if(custTable)
+                {
+                    ledgerJournalTrans.AmountCurCredit = WriteOffJournals.RemainAmountCur;
+                    ledgerJournalTrans.DefaultDimension = CustTable::find(WriteOffJournals.AccountNum).DefaultDimension;
+                    ledgerJournalTrans.OffsetDefaultDimension = CustTable::find(WriteOffJournals.AccountNum).DefaultDimension;
+                    ledgerJournalTrans.AccountType = LedgerJournalACType::Cust;
+                    ledgerJournalTrans.LedgerDimension = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(WriteOffJournals.AccountNum, LedgerJournalACType::Cust);
+                }
+                ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                ledgerJournalTrans.OffsetLedgerDimension = _offsetAccount;
+                ledgerJournalTrans.Approved = NoYes::Yes;
+                ledgerJournalTrans.PostingProfile = WriteOffJournals.PostingProfile;
+                ledgerJournalTrans.ETGWriteOff = NoYes::Yes;
+                ledgerJournalTrans.PaymReference = strFmt("WRITE-OFF-INV-%1", WriteOffJournals.InvoiceId);
+                if (ledgerJournalTrans.validateWrite())
+                {
+                    ledgerjournalTrans.insert();
+                }
+            }
+            if(vendTable)
+            {
+                select forupdate vendTrans
+                    where vendTrans.Voucher == WriteOffJournals.Voucher
+                    && vendTrans.AccountNum == WriteOffJournals.AccountNum
+                    && vendTrans.TransDate == WriteOffJournals.TransDate;
+                ttsbegin;
+                vendTrans.ETGWriteOff = NoYes::Yes;
+                vendTrans.update();
+                ttscommit;
+            }
+            else if(custTable)
+            {
+                select forupdate custTrans
+                    where custTrans.Voucher == WriteOffJournals.Voucher
+                    && custTrans.AccountNum == WriteOffJournals.AccountNum
+                    && custTrans.TransDate == WriteOffJournals.TransDate;
+                ttsbegin;
+                custTrans.ETGWriteOff = NoYes::Yes;
+                custTrans.update();
+                ttscommit;
+            }
+        }
+        ttscommit;
+        jourPost = LedgerJournalCheckPost::newLedgerJournalTable(ledgerJournalTable, NoYes::Yes);
+        if(jourPost.validate())
+        {
+            jourPost.run();
+        }
+        info(strFmt("Journal %1 has been created.",ledgerJournalTable.JournalNum));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>settleTransaction</Name>
+				<Source><![CDATA[
+    public static void settleTransaction(CustTrans custTransInvoice, CustTrans custTransPayment)
+    {
+        // VendTable vendTable;
+        //VendTrans invVendTrans, payVendTrans;
+        //SpecTransManager manager;
+        //CustVendTransData custVendTransData;
+
+        //ttsbegin;
+        //// Create an object of the CustVendTransData class with the invoice transaction as parameter
+        //custVendTransData = CustVendTransData::construct(invVendTrans);
+        //// Mark it for settlement
+        //custVendTransData.markForSettlement(vendTable);
+        //// Create an object of the CustVendTransData class with the payment transaction as parameter
+        //custVendTransData = CustVendTransData::construct(payVendTrans);
+        ////mark it for settlement
+        //custVendTransData.markForSettlement(vendTable);
+        //ttscommit;
+        //// Settle all marked transactions
+        //if(VendTrans::settleTransact(vendTable, null, true,SettleDatePrinc::DaysDate, systemdateget()))
+        //info("Transactions settled");
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

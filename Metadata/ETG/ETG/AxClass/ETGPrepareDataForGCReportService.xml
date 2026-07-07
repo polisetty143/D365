@@ -1,0 +1,2247 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPrepareDataForGCReportService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+internal final class ETGPrepareDataForGCReportService extends SysOperationServiceBase
+{
+    
+    TransDate fiscalYearStartDate;
+    ETGACFParameters aCFParameters;
+    Map mappingCache;
+    // transfer value
+  
+
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getMonthlyPurchaseQty</Name>
+				<Source><![CDATA[
+    public static real getMonthlyPurchaseQty(
+    ETGItemNumber    _item,
+    ETGCommodity     _comm,
+    ETGSubCommodity  _subComm,
+    ETGVertical      _ver,
+    ETGSubVertical   _subVer,
+    date             _monthStartDate,
+    date             _monthEndDate)
+
+    {
+        real purchaseQty = 0;
+
+        InventTrans inventTrans;
+        InventTransOrigin inventTransOrigin;
+        InventTransPosting inventTransPosting;
+
+        Set summedTrans = new Set(Types::Int64);
+
+        while select inventTrans
+        where inventTrans.DateFinancial != dateNull()
+           && inventTrans.DateFinancial >= _monthStartDate
+           && inventTrans.DateFinancial <= _monthEndDate
+           && !summedTrans.in(inventTrans.RecId)
+    join inventTransOrigin
+        where inventTransOrigin.RecId == inventTrans.InventTransOrigin
+           && inventTransOrigin.ReferenceCategory == InventTransType::Purch
+        {
+            // Check if at least one valid InventTransPosting exists
+            select firstOnly RecId
+            from inventTransPosting
+            where inventTransPosting.InventTransOrigin == inventTransOrigin.RecId
+              && inventTransPosting.ItemId == _item
+              && inventTransPosting.ETGCommodity == _comm
+              && inventTransPosting.ETGSubCommodity == _subComm
+              && inventTransPosting.ETGVertical == _ver
+              && inventTransPosting.ETGSubVertical == _subVer
+              && inventTransPosting.IsPosted == NoYes::Yes;
+
+            if (inventTransPosting.RecId)
+            {
+                purchaseQty += inventTrans.Qty;
+                summedTrans.add(inventTrans.RecId);
+            }
+        }
+
+        return purchaseQty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getMonthlySalesQty</Name>
+				<Source><![CDATA[
+    // Sales qty
+    public static real getMonthlySalesQty(
+    ETGitemnumber    _item,
+    ETGCommodity     _comm,
+    ETGSubCommodity  _subComm,
+    ETGVertical      _ver,
+    ETGSubVertical   _subVer,
+    date             _monthStartDate,
+    date             _monthEndDate)
+    {
+        real salesQty = 0;
+        Set summedTrans = new Set(Types::Int64);
+
+        InventTrans inventTrans;
+        InventTransOrigin inventTransOrigin;
+        InventTransPosting inventTransPosting;
+
+        while select inventTrans
+        where inventTrans.DateFinancial != dateNull()
+           && inventTrans.DateFinancial >= _monthStartDate
+           && inventTrans.DateFinancial <= _monthEndDate
+           && !summedTrans.in(inventTrans.RecId)
+    join inventTransOrigin
+        where inventTransOrigin.RecId == inventTrans.InventTransOrigin
+           && inventTransOrigin.ReferenceCategory == InventTransType::Sales
+        {
+            select firstOnly RecId
+            from inventTransPosting
+            where inventTransPosting.InventTransOrigin == inventTransOrigin.RecId
+              && inventTransPosting.ItemId == _item
+              && inventTransPosting.ETGSubCommodity == _subComm
+              && inventTransPosting.ETGCommodity == _comm
+              && inventTransPosting.ETGVertical == _ver
+              && inventTransPosting.ETGSubVertical == _subVer
+              && inventTransPosting.IsPosted == NoYes::Yes;
+
+            if (inventTransPosting.RecId)
+            {
+                salesQty += inventTrans.Qty;
+                summedTrans.add(inventTrans.RecId);
+            }
+        }
+
+        return salesQty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getMonthlySalesValue</Name>
+				<Source><![CDATA[
+    public static real getMonthlySalesValue(
+    ETGitemnumber     _item,
+    ETGCommodity     _comm,
+    ETGSubCommodity  _subComm,
+    ETGVertical      _ver,
+    ETGSubVertical   _subVer,
+    date             _monthStartDate,
+    date             _monthEndDate)
+    {
+        real salesValue = 0;
+        Set seenInvoiceTrans = new Set(Types::Int64); // Track CustInvoiceTrans.RecId
+
+        InventTrans inventTrans;
+        InventTransOrigin inventTransOrigin;
+        InventTransPosting inventTransPosting;
+        CustInvoiceTrans custInvoiceTrans;
+
+        while select inventTrans
+        where inventTrans.DateFinancial >= _monthStartDate
+           && inventTrans.DateFinancial <= _monthEndDate
+           && inventTrans.DateFinancial != dateNull()
+    join inventTransOrigin
+        where inventTransOrigin.RecId == inventTrans.InventTransOrigin
+           && inventTransOrigin.ReferenceCategory == InventTransType::Sales
+    join inventTransPosting
+        where inventTransPosting.InventTransOrigin == inventTransOrigin.RecId
+           && inventTransPosting.ItemId == _item
+           && inventTransPosting.IsPosted == NoYes::Yes
+           && inventTransPosting.ETGCommodity == _comm
+           && inventTransPosting.ETGSubCommodity == _subComm
+           && inventTransPosting.ETGVertical == _ver
+           && inventTransPosting.ETGSubVertical == _subVer
+        {
+            // Match invoice line using InventTransId only
+            // Restricting join by InvoiceDate to handle edge cases
+            // where a single InventTransId is associated with multiple invoice lines.
+            while select custInvoiceTrans
+            where custInvoiceTrans.InventTransId == inventTransOrigin.InventTransId
+             //  && custInvoiceTrans.InvoiceId == inventTrans.InvoiceId
+               && custInvoiceTrans.InvoiceDate == inventTrans.DateFinancial
+            {
+                if (!seenInvoiceTrans.in(custInvoiceTrans.RecId))
+                {
+                    salesValue += custInvoiceTrans.LineAmountMST;
+                    seenInvoiceTrans.add(custInvoiceTrans.RecId);
+                }
+            }
+        }
+
+        return salesValue;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getSalesOrderQtyGroup</Name>
+				<Source><![CDATA[
+    public static real getSalesOrderQtyGroup(
+    ETGitemnumber     _item,
+    ETGCommodity     _comm,
+    ETGSubCommodity  _subComm,
+    ETGVertical      _ver,
+    ETGSubVertical   _subVer,
+    date             _monthStartDate,
+    date             _monthEndDate)
+    {
+        real salesQty = 0;
+        Set summedTrans = new Set(Types::Int64);
+
+        InventTrans inventTrans;
+        InventTransOrigin inventTransOrigin;
+        InventTransPosting inventTransPosting;
+        SalesTable salesTable;
+        CustTable custTable;
+
+        while select inventTrans
+        where inventTrans.DateFinancial != dateNull()
+           && inventTrans.DateFinancial >= _monthStartDate
+           && inventTrans.DateFinancial <= _monthEndDate
+           && !summedTrans.in(inventTrans.RecId)
+    join inventTransOrigin
+        where inventTransOrigin.RecId == inventTrans.InventTransOrigin
+           && inventTransOrigin.ReferenceCategory == InventTransType::Sales
+        {
+            select firstOnly RecId
+            from inventTransPosting
+            where inventTransPosting.InventTransOrigin == inventTransOrigin.RecId
+              && inventTransPosting.ItemId == _item
+              && inventTransPosting.ETGSubCommodity == _subComm
+              && inventTransPosting.ETGCommodity == _comm
+              && inventTransPosting.ETGVertical == _ver
+              && inventTransPosting.ETGSubVertical == _subVer
+              && inventTransPosting.IsPosted == NoYes::Yes;
+
+            if (inventTransPosting.RecId)
+            {
+                salesTable = SalesTable::find(inventTransOrigin.ReferenceId);
+                if (salesTable)
+                {
+                    custTable = CustTable::find(salesTable.CustAccount);
+                    if (custTable.CustGroup == '40')
+                    {
+                        salesQty += inventTrans.Qty;
+                        summedTrans.add(inventTrans.RecId);
+                    }
+                }
+            }
+        }
+
+        return salesQty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getSalesOrderValueThirdParty</Name>
+				<Source><![CDATA[
+    // sales
+
+    public static real getSalesOrderValueThirdParty(
+     ETGitemnumber    _item,
+    ETGCommodity     _comm,
+    ETGSubCommodity  _subComm,
+    ETGVertical      _ver,
+    ETGSubVertical   _subVer,
+    date             _monthStartDate,
+    date             _monthEndDate)
+    {
+        real salesValue = 0;
+        Set summedTrans = new Set(Types::Int64);
+
+        InventTrans inventTrans;
+        InventTransOrigin inventTransOrigin;
+        InventTransPosting inventTransPosting;
+        SalesTable salesTable;
+        CustTable custTable;
+        CustInvoiceTrans custInvoiceTrans;
+
+        while select inventTrans
+        where inventTrans.DateFinancial != dateNull()
+           && inventTrans.DateFinancial >= _monthStartDate
+           && inventTrans.DateFinancial <= _monthEndDate
+    join inventTransOrigin
+        where inventTransOrigin.RecId == inventTrans.InventTransOrigin
+           && inventTransOrigin.ReferenceCategory == InventTransType::Sales
+    join inventTransPosting
+         where inventTransPosting.InventTransOrigin == inventTransOrigin.RecId
+            && inventTransPosting.ItemId == _item
+            && inventTransPosting.IsPosted == NoYes::Yes
+            && inventTransPosting.ETGCommodity == _comm
+            && inventTransPosting.ETGSubCommodity == _subComm
+            && inventTransPosting.ETGVertical == _ver
+            && inventTransPosting.ETGSubVertical == _subVer
+        {
+            /* select firstOnly inventTransPosting
+            where inventTransPosting.InventTransOrigin == inventTransOrigin.RecId
+               && inventTransPosting.ItemId == _item
+               && inventTransPosting.ETGSubCommodity == _subComm
+               && inventTransPosting.ETGCommodity == _comm
+               && inventTransPosting.ETGVertical == _ver
+               && inventTransPosting.ETGSubVertical == _subVer
+               && inventTransPosting.IsPosted == NoYes::Yes;*/
+
+               if (inventTransPosting.RecId)
+            {
+                salesTable = SalesTable::find(inventTransOrigin.ReferenceId);
+                custTable = salesTable ? CustTable::find(salesTable.CustAccount) : null;
+
+                if (custTable && custTable.CustGroup != '40')
+                {
+                    ////select firstOnly custInvoiceTrans
+                    ////where custInvoiceTrans.InvoiceId == inventTrans.InvoiceId
+                    ////   && custInvoiceTrans.InventTransId == inventTransOrigin.InventTransId;
+
+                    ////if (custInvoiceTrans)
+                    ////{
+                    ////    salesValue += custInvoiceTrans.LineAmountMST;
+                    ////    summedTrans.add(inventTrans.RecId);
+                    ////}
+
+                    while select custInvoiceTrans
+                       where custInvoiceTrans.InventTransId == inventTransOrigin.InventTransId
+                          //&& custInvoiceTrans.InvoiceId == inventTrans.InvoiceId
+                          && custInvoiceTrans.InvoiceDate == inventTrans.DateFinancial
+                    {
+                        if (!summedTrans.in(custInvoiceTrans.RecId))
+                        {
+                            salesValue += custInvoiceTrans.LineAmountMST;
+                            summedTrans.add(custInvoiceTrans.RecId);
+                            // seenInvoiceTrans.add(custInvoiceTrans.RecId);
+                        }
+                    }
+                }
+            }
+        }
+
+        return salesValue;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getSalesOrderQtyGroup3rdParty</Name>
+				<Source><![CDATA[
+    // sales 3rd party qty
+    public static real getSalesOrderQtyGroup3rdParty(
+    ETGitemnumber     _item,
+    ETGCommodity     _comm,
+    ETGSubCommodity  _subComm,
+    ETGVertical      _ver,
+    ETGSubVertical   _subVer,
+    date             _monthStartDate,
+    date             _monthEndDate)
+    {
+        real salesQty = 0;
+        Set summedTrans = new Set(Types::Int64);
+
+        InventTrans inventTrans;
+        InventTransOrigin inventTransOrigin;
+        InventTransPosting inventTransPosting;
+        SalesTable salesTable;
+        CustTable custTable;
+
+        while select inventTrans
+        where inventTrans.DateFinancial != dateNull()
+           && inventTrans.DateFinancial >= _monthStartDate
+           && inventTrans.DateFinancial <= _monthEndDate
+           && !summedTrans.in(inventTrans.RecId)
+    join inventTransOrigin
+        where inventTransOrigin.RecId == inventTrans.InventTransOrigin
+           && inventTransOrigin.ReferenceCategory == InventTransType::Sales
+        {
+            // Check only the first valid posting record to avoid duplication
+            select firstOnly RecId
+            from inventTransPosting
+            where inventTransPosting.InventTransOrigin == inventTransOrigin.RecId
+              && inventTransPosting.ItemId == _item
+              && inventTransPosting.ETGSubCommodity == _subComm
+              && inventTransPosting.ETGCommodity == _comm
+              && inventTransPosting.ETGVertical == _ver
+              && inventTransPosting.ETGSubVertical ==_subVer
+              && inventTransPosting.IsPosted == NoYes::Yes;
+
+            if (inventTransPosting.RecId)
+            {
+                salesTable = SalesTable::find(inventTransOrigin.ReferenceId);
+                if (salesTable)
+                {
+                    custTable = CustTable::find(salesTable.CustAccount);
+                    if (custTable.CustGroup != '40')
+                    {
+                        salesQty += inventTrans.Qty;
+                        summedTrans.add(inventTrans.RecId);
+                    }
+                }
+            }
+        }
+
+        return salesQty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getMonthlyPurchaseValue</Name>
+				<Source><![CDATA[
+    public static real getMonthlyPurchaseValue(
+    ETGItemNumber     _item,
+    ETGCommodity     _comm,
+    ETGSubCommodity  _subComm,
+    ETGVertical      _ver,
+    ETGSubVertical   _subVer,
+    date             _monthStartDate,
+    date             _monthEndDate)
+    {
+        real purchaseValue = 0;
+
+        InventTrans inventTrans;
+        InventTransOrigin inventTransOrigin;
+        InventTransPosting inventTransPosting;
+
+        Set summedTrans = new Set(Types::Int64);
+
+        while select inventTrans
+        where inventTrans.DateFinancial != dateNull()
+           && inventTrans.DateFinancial >= _monthStartDate
+           && inventTrans.DateFinancial <= _monthEndDate
+           && !summedTrans.in(inventTrans.RecId)
+    join inventTransOrigin
+        where inventTransOrigin.RecId == inventTrans.InventTransOrigin
+           && inventTransOrigin.ReferenceCategory == InventTransType::Purch
+        {
+            // Only proceed if there is at least one matching InventTransPosting
+            select firstOnly RecId
+            from inventTransPosting
+            where inventTransPosting.InventTransOrigin == inventTransOrigin.RecId
+              && inventTransPosting.ItemId == _item
+              && inventTransPosting.ETGCommodity == _comm
+              && inventTransPosting.ETGSubCommodity == _subComm
+              && inventTransPosting.ETGVertical == _ver
+              && inventTransPosting.ETGSubVertical == _subVer
+              && inventTransPosting.IsPosted == NoYes::Yes;
+
+            if (inventTransPosting.RecId)
+            {
+                purchaseValue += inventTrans.CostAmountPosted + inventTrans.CostAmountAdjustment;
+                summedTrans.add(inventTrans.RecId);
+            }
+        }
+
+        return purchaseValue;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getStockTransferQtyCumulativeByMonth</Name>
+				<Source><![CDATA[
+    //Transfer qty
+    public static real getStockTransferQtyCumulativeByMonth(
+    ETGItemNumber     _item,
+    ETGCommodity     _comm,
+    ETGSubCommodity  _subComm,
+    ETGVertical      _ver,
+    ETGSubVertical   _subVer,
+    date             _fiscalStartDate,
+    date             _monthEndDate)
+    {
+        real transferQty = 0;
+
+        InventTrans inventTrans;
+        InventTransOrigin inventTransOrigin;
+        InventTransPosting inventTransPosting;
+
+        Set summedTrans = new Set(Types::Int64); // To avoid duplicate counting
+
+        while select inventTrans
+        where inventTrans.DateFinancial != dateNull()
+           && inventTrans.DateFinancial >= _fiscalStartDate
+           && inventTrans.DateFinancial <= _monthEndDate
+           && !summedTrans.in(inventTrans.RecId)
+    join inventTransOrigin
+        where inventTransOrigin.RecId == inventTrans.InventTransOrigin
+          && (inventTransOrigin.ReferenceCategory == InventTransType::TransferOrderShip
+              || inventTransOrigin.ReferenceCategory == InventTransType::TransferOrderReceive)
+        {
+            select firstOnly RecId
+            from inventTransPosting
+            where inventTransPosting.InventTransOrigin == inventTransOrigin.RecId
+              && inventTransPosting.ItemId == _item
+              && inventTransPosting.ETGSubCommodity == _subComm
+              && inventTransPosting.ETGCommodity == _comm
+              && inventTransPosting.ETGVertical == _ver
+              && inventTransPosting.ETGSubVertical == _subVer
+              && inventTransPosting.IsPosted == NoYes::Yes;
+
+            if (inventTransPosting.RecId)
+            {
+                transferQty += inventTrans.Qty;
+                summedTrans.add(inventTrans.RecId);
+            }
+        }
+
+        return transferQty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getStockTransferValueCumulativeByMonth</Name>
+				<Source><![CDATA[
+    public static real getStockTransferValueCumulativeByMonth(
+    ETGItemnumber      _item,
+    ETGCommodity     _comm,
+    ETGSubCommodity  _subComm,
+    ETGVertical      _ver,
+    ETGSubVertical   _subVer,
+    date             _fiscalStartDate,
+    date             _monthEndDate)
+    {
+        real transferValue = 0;
+
+        InventTrans inventTrans;
+        InventTransOrigin inventTransOrigin;
+        InventTransPosting inventTransPosting;
+
+        Set summedTrans = new Set(Types::Int64); // To avoid duplicate value addition
+
+        while select inventTrans
+        where inventTrans.DateFinancial != dateNull()
+           && inventTrans.DateFinancial >= _fiscalStartDate
+           && inventTrans.DateFinancial <= _monthEndDate
+           && !summedTrans.in(inventTrans.RecId)
+    join inventTransOrigin
+        where inventTransOrigin.RecId == inventTrans.InventTransOrigin
+          && (inventTransOrigin.ReferenceCategory == InventTransType::TransferOrderShip
+              || inventTransOrigin.ReferenceCategory == InventTransType::TransferOrderReceive)
+        {
+            select firstOnly RecId
+            from inventTransPosting
+            where inventTransPosting.InventTransOrigin == inventTransOrigin.RecId
+              && inventTransPosting.ItemId == _item
+              && inventTransPosting.ETGSubCommodity == _subComm
+              && inventTransPosting.ETGCommodity == _comm
+              && inventTransPosting.ETGVertical == _ver
+              && inventTransPosting.ETGSubVertical == _subVer
+              && inventTransPosting.IsPosted == NoYes::Yes;
+
+            if (inventTransPosting.RecId)
+            {
+                transferValue += inventTrans.CostAmountPosted + inventTrans.CostAmountAdjustment;
+                summedTrans.add(inventTrans.RecId);
+            }
+        }
+
+        return transferValue;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>assignChargesFromMainAccount</Name>
+				<Source><![CDATA[
+    private void assignChargesFromMainAccount(ETGGCReportStaging staging, str mainAccName, AmountCur amount)
+    {
+        switch (mainAccName)
+        {
+            // Main
+            case "COS - Handling charges":
+                staging.COSHandlingCleaningCharges += amount;
+                break;
+            case "COS - Fumigation Charges":
+                staging.COSFumigationCharges += amount;
+                break;
+            case "COS - Port Charges Imports":
+                staging.COSPortChargesImports += amount;
+                break;
+            case "COS - IMPORT DUTIES AND TAXES":
+                staging.COSImportDutiesAndTaxes += amount;
+                break;
+            case "COS - Rates and Duties":
+                staging.COSRatesAndDuties += amount;
+                break;
+            case "COS - Freight Inward Third Party":
+            case "COS - Freight Inward Intercompany":
+                staging.COSFreightInward += amount;
+                break;
+            case "COS - Demurrage and Wharfage Charges":
+                staging.CosDemurrageAndWharfageCharges += amount;
+                break;
+            case "Stevedoring Charges - Imports":
+                staging.StevedoringChargesImports += amount;
+                break;
+            case "COS - Storage Charges - Centres":
+                staging.StorageChargesImports += amount;
+                break;
+            case "COS - Electricity":
+                staging.COSElectricity += amount;
+                break;
+            case "COS - UTILITY COST":
+                staging.COSUtilityCost += amount;
+                break;
+            case "COS - RENT BUILDINGS AND WAREHOUSES":
+                staging.CosRentBuildingsAndWarehouses += amount;
+                break;
+            case "COS - OTHER DIRECT EXPENSES":
+                staging.COSOtherDirectExpenses += amount;
+                break;
+            case "COS - Other Processing Costs / Miscellaneous":
+                staging.CosOtherProcessingCostsMiscellaneous += amount;
+                break;
+            case "COS - Loading / Unloading Charges":
+                staging.COSLoadingUnloadingCharges += amount;
+                break;
+            case "COS - PACKING AND REBAGGING CHARGES":
+                staging.CosPackingAndRebaggingCharges += amount;
+                break;
+            case "COS - CLEARNING AND FORWARDING AGENCY CHARGES":
+                staging.CosClearningAndForwardingAgencyCharges += amount;
+                break;
+            case "COS - SALARIES":
+                staging.COSSalaries += amount;
+                break;
+            case "COS - WAGES":
+                staging.COSWages += amount;
+                break;
+            case "COS - BONUS":
+                staging.COSBonus += amount;
+                break;
+            case "COS - OTHER DIRECT STAFF COST":
+                staging.COSOtherDirectStaffCost += amount;
+                break;
+
+            // New1
+            case "COS - Water":
+                staging.COSWater += amount;
+                break;
+            case "COS - Energy Charges":
+                staging.COSEnergyCharges += amount;
+                break;
+            case "COS - Diesel":
+                staging.COSDiesel += amount;
+                break;
+            case "COS - VEHICLE DIESEL":
+                staging.COSVehicleDiesel += amount;
+                break;
+            case "COS - Petrol":
+                staging.COSPetrol += amount;
+                break;
+            case "COS - VEHICLE PETROL":
+                staging.COSVehiclePetrol +=amount;
+                break;
+            case "COS - Gas":
+                staging.COSGas += amount;
+                break;
+            case "COS - Rent Others":
+                staging.COSRentOthers += amount;
+                break;
+
+            // New2
+            case "COS - Rent Buildings and Warehouses Third Party":
+                staging.COSRentBuildingsWarehousesTP += amount;
+                break;
+            case "COS - Rent Buildings and Warehouses Intercompany":
+                staging.COSRentBuildingsWarehousesIC += amount;
+                break;
+            case "COS - Rent Machinery & Store Equipments":
+                staging.COSRentMachineryStoreEquipments += amount;
+                break;
+            case "COS - Rent Motor Vehicles":
+                staging.COSRentMotorVehicles += amount;
+                break;
+            case "COS - RENT MOTOR VEHICLE REPAIRS & MAINTAINANCE":
+                staging.COSRentVehicleRepairsMaintenance += amount;
+                break;
+            case "COS - Rent Furniture, Fittings & Office Equipments":
+                staging.COSRentFurnitureFittingsOffice += amount;
+                break;
+
+            // New3
+            case "COS - Repair":
+                staging.COSRepair += amount;
+                break;
+            case "COS - Maintenance":
+                staging.COSMaintenance += amount;
+                break;
+            case "COS - Lab Expenses":
+                staging.COSLabExpenses += amount;
+                break;
+            case "COS - Quality Issue Expenses":
+                staging.COSQualityIssueExpenses += amount;
+                break;
+            case "COS - Staff Meal":
+                staging.COSStaffMeal += amount;
+                break;
+            case "COS - Staff Recruitment & Training":
+                staging.COSStaffRecruitmentTraining += amount;
+                break;
+            case "Cost of Goods Sold - Intercompany":
+                staging.CostOfGoodsSoldIntercompanyLc += amount;
+                break;
+            case "Cost of Goods Sold - Third Party":
+                staging.CostOfGoodsSold3rdPartyLc += amount;
+                break;
+
+            // Selling and distribution
+
+            case "S&D - Digital":
+                staging.SDDigital += amount;
+                break;
+            case "S&D - TV":
+                staging.SDTV += amount;
+                break;
+            case "S&D - Radio":
+                staging.SDRadio += amount;
+                break;
+            case "S&D - Print":
+                staging.SDPrint += amount;
+                break;
+            case "S&D - Others":
+                staging.SDOthers += amount;
+                break;
+            case "S&D - Expense":
+                staging.SDOthers += amount;
+                break;
+            case "S&D - Commission":
+                staging.SDCommission += amount;
+                break;
+            case "S&D - Brokerage":
+                staging.SDBrokerage += amount;
+                break;
+            case "S&D - Entertainment Expenses":
+                staging.SDEntertainmentExpenses += amount;
+                break;
+            case "S&D - Vehicle Hire charges":
+                staging.SDVehicleHireCharges += amount;
+                break;
+            case "S&D - Vehicle Fuel charges":
+                staging.SDVehicleFuelCharges += amount;
+                break;
+            case "S&D - Vehicle Expenses Fuel":
+                staging.SDVehicleExpensesFuel += amount;
+                break;
+            case "S&D - Vehicle Expenses Maintenance":
+                staging.SDVehicleExpensesMaintenance += amount;
+                break;
+            case "S&D - Vehicle Expenses Insurance":
+                staging.SDVehicleExpensesInsurance += amount;
+                break;
+            case "S&D - Promotion Sponsorships":
+                staging.SDPromotionSponsorships += amount;
+                break;
+            case "S&D - Business Promotion":
+                staging.SDBusinessPromotion += amount;
+                break;
+            case "S&D - Promotion Exhibition":
+                staging.SDPromotionExhibition += amount;
+                break;
+            case "S&D - Promotion Others":
+                staging.SDPromotionOthers += amount;
+                break;
+            case "S&D - Cost of Recoveries":
+                staging.SDCostOfRecoveries += amount;
+                break;
+            case "S&D - Royalties":
+                staging.SDRoyalties += amount;
+                break;
+            case "S&D - Freight Outward Road":
+                staging.SDFreightOutwardRoad += amount;
+                break;
+            case "S&D - Freight Outward Sea":
+                staging.SDFreightOutwardSea += amount;
+                break;
+            case "S&D - Freight Outward Rail":
+                staging.SDFreightOutwardRail += amount;
+                break;
+            case "S&D - Customer Claims":
+                staging.SDCustomerClaims += amount;
+                break;
+            case "S&D - Warranty Expenses":
+                staging.SDWarrantyExpenses += amount;
+                break;
+            case "S&D - Product Loss Claims (Weight & Quality)":
+                staging.SDProductLossClaims += amount;
+                break;
+            case "S&D - Document Charges":
+                staging.SDDocumentCharges += amount;
+                break;
+            case "S&D - Loading & unloading Charges":
+                staging.SDLoadingUnloadingCharges += amount;
+                break;
+            case "S&D - Handling Charges":
+                staging.SDHandlingCharges += amount;
+                break;
+            case "S&D - Duties & Charges - Exports":
+                staging.SDDutiesChargesExports += amount;
+                break;
+            case "S&D - Inspection Charges":
+                staging.SDInspectionCharges += amount;
+                break;
+            case "S&D - Port Charges Exports":
+                staging.SDPortChargesExports += amount;
+                break;
+            case "S&D - Storage Charges":
+                staging.SDStorageCharges += amount;
+                break;
+            case "S&D - Packing and Rebagging Charges":
+                staging.SDPackingRebaggingCharges += amount;
+                break;
+            case "S&D - Weighbridge Charges":
+                staging.SDWeighbridgeCharges += amount;
+                break;
+            case "S&D - Insurance Marine / Stock Throughput":
+                staging.SDInsuranceMarineStockThroughput += amount;
+                break;
+            case "S&D - Bank Charges on Exports":
+                staging.SDBankChargesOnExports += amount;
+                break;
+            case "S&D - Miscellaneous Expenses":
+                staging.SDMiscellaneousExpenses += amount;
+                break;
+            case "S&D - Depreciation - Motor vehicle":
+                staging.SDDepreciationMotorVehicle += amount;
+                break;
+            case "S&D - Electricity charges":
+                staging.SDElectricityCharges += amount;
+                break;
+            case "S&D - Sustainability Expenses":
+                staging.SDSustainabilityExpenses += amount;
+                break;
+
+           
+           
+
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateMonthlyCumulativeStockClosingQty</Name>
+				<Source><![CDATA[
+    // closing qty for combination
+    public static real calculateMonthlyCumulativeStockClosingQty(
+    str _etgitemid,
+    str _etgCommodity,
+    str _etgSubCommodity,
+    str _etgVertical,
+    str _etgSubVertical,
+    TransDate _monthEndDate)
+    {
+        real totalQty = 0.0;
+        TransDate cutoffDate = endMth(_monthEndDate); // Include transactions up to month end
+
+        InventTrans inventTrans;
+        InventTransOrigin inventTransOrigin;
+        InventTransPosting inventTransPosting;
+
+        Set summedTrans = new Set(Types::Int64); // To avoid double-counting
+
+        while select inventTrans
+        where inventTrans.DateFinancial != dateNull()
+           && inventTrans.DateFinancial <= cutoffDate
+           && !summedTrans.in(inventTrans.RecId)
+    join inventTransOrigin
+        where inventTransOrigin.RecId == inventTrans.InventTransOrigin
+        {
+            select firstOnly RecId
+            from inventTransPosting
+            where inventTransPosting.InventTransOrigin == inventTransOrigin.RecId
+              && inventTransPosting.IsPosted == NoYes::Yes
+              && inventTransPosting.ItemId == _etgitemid
+              && inventTransPosting.ETGCommodity == _etgCommodity
+              && inventTransPosting.ETGSubCommodity == _etgSubCommodity
+              && inventTransPosting.ETGVertical == _etgVertical
+              && inventTransPosting.ETGSubVertical == _etgSubVertical;
+
+            if (inventTransPosting.RecId)
+            {
+                totalQty += inventTrans.Qty;
+                summedTrans.add(inventTrans.RecId);
+            }
+        }
+
+        return totalQty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateMonthlyCumulativeStockClosingValue</Name>
+				<Source><![CDATA[
+    // clsoing
+    public static real calculateMonthlyCumulativeStockClosingValue(
+    str _etgitemid,
+    str _etgCommodity,
+    str _etgSubCommodity,
+    str _etgVertical,
+    str _etgSubVertical,
+    TransDate _monthEndDate
+)
+    {
+        real totalValue = 0.0;
+
+        InventTrans inventTrans;
+        InventTransOrigin inventTransOrigin;
+        InventTransPosting inventTransPosting;
+
+        TransDate endDate = endmth(_monthEndDate);
+
+        Set summedTrans = new Set(Types::Int64);
+
+        while select inventTrans
+        where inventTrans.DateFinancial != dateNull()
+            && inventTrans.DateFinancial <= endDate
+            && !summedTrans.in(inventTrans.RecId)
+    join inventTransOrigin
+        where inventTransOrigin.RecId == inventTrans.InventTransOrigin
+        {
+            select firstOnly RecId
+        from inventTransPosting
+        where inventTransPosting.InventTransOrigin == inventTransOrigin.RecId
+            && inventTransPosting.IsPosted == NoYes::Yes
+            && inventTransPosting.ItemId == _etgitemid
+            && inventTransPosting.ETGCommodity == _etgCommodity
+            && inventTransPosting.ETGSubCommodity == _etgSubCommodity
+            && inventTransPosting.ETGVertical == _etgVertical
+            && inventTransPosting.ETGSubVertical == _etgSubVertical;
+
+            if (inventTransPosting.RecId)
+            {
+                totalValue += (inventTrans.CostAmountPosted + inventTrans.CostAmountAdjustment);
+                summedTrans.add(inventTrans.RecId);
+            }
+        }
+
+        return totalValue;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertReportData</Name>
+				<Source><![CDATA[
+    //public void insertReportDataOld()
+    //{
+    //    GeneralJournalAccountEntry              generalJournalAccountEntry;
+    //    GeneralJournalEntry                     generalJournalEntry;
+    //    InventTrans                             inventTrans;
+    //    InventTransOrigin                       inventTransOrigin;
+    //    InventTransPosting                      inventTransPosting;
+    //    ETGGCReportStaging                      staging;
+    //    DataArea                                dataArea ;
+    //    int i = 1;
+    //    //Set processedKeySet = new Set(Types::String);
+    //    aCFParameters = ETGACFParameters::find();
+
+    //    select * from dataArea where dataArea.Id == curExt();
+
+    //    ttsbegin;
+    //    delete_from staging;
+    //    ttscommit;
+
+    //        ETGACFParameters etgParameters = ETGACFParameters::find();
+
+    //        // Define date range
+    //        TransDate minDate = mkDate(1, 1, 2022);
+    //        TransDate maxDate1 = DateTimeUtil::date(DateTimeUtil::addMonths(DateTimeUtil::getSystemDateTime(), 2));
+
+    //        // Required declarations
+    //        GeneralJournalAccountEntry gjAccEntry;
+    //        GeneralJournalEntry gjEntry;
+    //        DimensionDefault dimDefault;
+    //        Map fdCombinationMap = new Map(Types::String, Types::String);
+    //        Set processedKeySet = new Set(Types::String);
+
+    //        // Collect unique dimension combinations from journal entries
+    //        while select gjAccEntry
+    //    join gjEntry
+    //    where gjAccEntry.GeneralJournalEntry == gjEntry.RecId
+    //       && gjEntry.SubledgerVoucherDataAreaId == curext()
+    //        {
+    //            dimDefault = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(gjAccEntry.LedgerDimension);
+
+    //            str etgitemid = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault, etgParameters.ItemId);
+    //            str etgCommodity = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault, etgParameters.MainCommodity);
+    //            str etgSubCommodity = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault, etgParameters.SubCommodity);
+    //            str etgVertical = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault, etgParameters.Vertical);
+    //            str etgSubVertical = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault, etgParameters.SubVertical);
+
+    //            str dimKey = strFmt('%1|%2|%3|%4|%5', etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical);
+    //            fdCombinationMap.insert(dimKey, dimKey);
+    //        }
+
+    //        MapEnumerator mapEnum = fdCombinationMap.getEnumerator();
+    //        while (mapEnum.moveNext())
+    //        {
+    //            str dimKey = mapEnum.currentKey();
+    //            container dimParts = str2Con(dimKey, "|");
+
+    //            str etgitemid     = conPeek(dimParts, 1);
+    //            str etgCommodity = conPeek(dimParts, 2);
+    //            str etgSubCommodity = conPeek(dimParts, 3);
+    //            str etgVertical = conPeek(dimParts, 4);
+    //            str etgSubVertical = conPeek(dimParts, 5);
+
+    //            TransDate currentMonth = minDate;
+    //            while (currentMonth <= maxDate1)
+    //            {
+    //                int year = year(currentMonth);
+    //                int month = mthOfYr(currentMonth);
+    //                str dedupKey = strFmt('%1|%2|%3|%4|%5|%6|%7',etgitemid, etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, year, month);
+
+    //                if (processedKeySet.in(dedupKey))
+    //                {
+    //                    currentMonth = DateTimeUtil::date(DateTimeUtil::addMonths(DateTimeUtil::newDateTime(currentMonth, 0), 1));
+    //                    continue;
+    //                }
+
+    //                processedKeySet.add(dedupKey);
+
+    //                staging.clear();
+    //                staging.TransDate = currentMonth;
+    //                staging.Year = year;
+    //                staging.MonthName = mthName(month);
+    //                staging.Isinvent = NoYes::Yes;
+
+    //                staging.ItemId = etgitemid;
+    //                staging.ItemName = InventTable::find(etgitemid).productNameInSystemLanguage();
+    //                staging.ETGCommodity = etgCommodity;
+    //                staging.ETGSubCommodity = etgSubCommodity;
+    //                staging.ETGVertical = etgVertical;
+    //                staging.ETGSubVertical = etgSubVertical;
+
+    //                staging.OpeningQty = ETGPrepareDataForGCReportService::calculateMonthlyCumulativeStockQty(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, currentMonth);
+    //                staging.OpeningstockOPeningLC = ETGPrepareDataForGCReportService::calculateMonthlyCumulativeStockOpeningValue(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, currentMonth);
+    //            staging.ClosingQty = ETGPrepareDataForGCReportService::calculateMonthlyCumulativeStockClosingQty(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, currentMonth);
+    //            staging.ClosingStockvalue = ETGPrepareDataForGCReportService::calculateMonthlyCumulativeStockClosingValue(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, currentMonth);
+
+    //                TransDate fromDate = DateStartMth(currentMonth);
+    //                TransDate toDate = endMth(currentMonth);
+
+    //            staging.StockTransferQty = ETGPrepareDataForGCReportService::getStockTransferQtyCumulativeByMonth(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+    //            staging.StockTransferValueLC = ETGPrepareDataForGCReportService::getStockTransferValueCumulativeByMonth(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+
+    //            staging.SalesQty = -ETGPrepareDataForGCReportService::getMonthlySalesQty(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+    //            staging.SalesValueinLC = ETGPrepareDataForGCReportService::getMonthlySalesValue(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+    //            staging.SalesQty3rdParty = -ETGPrepareDataForGCReportService::getSalesOrderQtyGroup3rdParty(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+    //            staging.SalesValue3rdParty = ETGPrepareDataForGCReportService::getSalesOrderValueThirdParty(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+    //            staging.SalesQtyGroup = -ETGPrepareDataForGCReportService::getSalesOrderQtyGroup(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+    //            staging.SalesValueGroup = ETGPrepareDataForGCReportService::getSalesOrderValueGroup(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+
+    //            staging.PurchQty = ETGPrepareDataForGCReportService::getMonthlyPurchaseQty(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+    //            staging.PurchValueLC = ETGPrepareDataForGCReportService::getMonthlyPurchaseValue(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+    //            staging.RecordNum = int2Str(i);
+    //                staging.LocalCurrency = Ledger::accountingCurrency();
+    //            staging.EntityName = dataArea.Name;
+    //                staging.insert();
+
+    //                currentMonth = DateTimeUtil::date(DateTimeUtil::addMonths(DateTimeUtil::newDateTime(currentMonth, 0), 1));
+    //                i++;
+    //            }
+    //        i++;
+    //        }
+
+
+
+
+
+
+
+    //    // NON-INVENTORY LOOP
+    //    while select generalJournalAccountEntry
+    //join generalJournalEntry
+    //where generalJournalAccountEntry.GeneralJournalEntry == generalJournalEntry.RecId
+    //  && generalJournalEntry.SubledgerVoucherDataAreaId == curExt()
+    //    {
+    //        DimensionDefault dimDefault1 = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(generalJournalAccountEntry.LedgerDimension);
+    //        TransDate transDate = generalJournalEntry.AccountingDate;
+    //        int year = year(transDate);
+    //        int month = mthOfYr(transDate);
+
+    //        str etgitemid     = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault1, aCFParameters.ItemId);
+    //        str etgCommodity     = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault1, aCFParameters.MainCommodity);
+    //        str etgSubCommodity  = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault1, aCFParameters.SubCommodity);
+    //        str etgVertical      = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault1, aCFParameters.Vertical);
+    //        str etgSubVertical   = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault1, aCFParameters.SubVertical);
+
+    //        staging.clear();
+    //        staging.LedgerDimension     = generalJournalAccountEntry.LedgerDimension;
+    //        staging.SubledgerVoucher    = generalJournalEntry.SubledgerVoucher;
+    //        staging.TransDate           = transDate;
+    //        staging.Year                = year;
+    //        staging.MonthName           = mthName(month);
+    //        staging.LocalCurrency       = Ledger::accountingCurrency();
+    //        staging.EntityName          = dataArea.Name;
+    //        staging.Isinvent            = NoYes::No;
+    //        staging.RecordNum           = int2Str(i);
+
+    //        staging.ItemId              = etgitemid;
+    //        staging.ItemName = InventTable::find(etgitemid).productNameInSystemLanguage();
+    //        staging.ETGCommodity        = etgCommodity;
+    //        staging.ETGSubCommodity     = etgSubCommodity;
+    //        staging.ETGVertical         = etgVertical;
+    //        staging.ETGSubVertical      = etgSubVertical;
+
+    //        // Step 1: Get current MainAccount
+    //        MainAccount sourceMainAccount = MainAccount::find(generalJournalAccountEntry.MainAccount);
+
+
+    //        // Step 2: Look for a mapping where the REPORTPERTICULARID == sourceMainAccount.Name
+    //        ETGPowerBIReportGLMappingTable mapping;
+    //        select firstOnly mapping
+    //    where mapping.REPORTPERTICULARID == sourceMainAccount.Name
+    //       && mapping.ReportId == "GC Report"; // You can make this configurable
+
+    //        if (mapping)
+    //        {
+    //            // Step 3: Now take the MainAccountId from the mapping and find MainAccount again
+    //            Name MainAccountName =  MainAccount::findByMainAccountId(mapping.MainAccountId).name;
+
+    //            this.assignChargesFromMainAccount(staging, MainAccountName, generalJournalAccountEntry.AccountingCurrencyAmount);
+    //        }
+
+    //        staging.insert();
+    //        i++;
+    //    }
+
+
+    //}
+
+    //public void insertReportDataoldWithIncrem()
+    //{
+    //    ETGGCReportStaging staging;
+    //    DataArea dataArea;
+    //    int i = 1;
+
+    //     aCFParameters = ETGACFParameters::find(true);
+    //    select * from dataArea where dataArea.Id == curExt();
+
+    //    // Get Last Export Date
+    //    TransDate lastExportedDate = aCFParameters.GCReportLastExportedDate;
+    //    TransDate currentExportDate = today();
+
+    //    // INVENTORY SECTION (based on months)
+    //    TransDate minDate = DateStartMth(DateTimeUtil::date(lastExportedDate));
+    //    TransDate maxDate = endMth(currentExportDate);
+
+    //    GeneralJournalAccountEntry gjAccEntry;
+    //    GeneralJournalEntry gjEntry;
+    //    DimensionDefault dimDefault;
+    //    Map fdCombinationMap = new Map(Types::String, Types::String);
+    //    Set processedKeySet = new Set(Types::String);
+
+    //    // Step 1: Collect unique dimension combinations
+    //    while select gjAccEntry
+    //    join gjEntry
+    //    where gjAccEntry.GeneralJournalEntry == gjEntry.RecId
+    //       && gjEntry.SubledgerVoucherDataAreaId == curExt()
+    //    {
+    //        dimDefault = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(gjAccEntry.LedgerDimension);
+
+    //        str etgitemid = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault, aCFParameters.ItemId);
+    //        str etgCommodity = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault, aCFParameters.MainCommodity);
+    //        str etgSubCommodity = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault, aCFParameters.SubCommodity);
+    //        str etgVertical = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault, aCFParameters.Vertical);
+    //        str etgSubVertical = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault, aCFParameters.SubVertical);
+
+    //        str dimKey = strFmt('%1|%2|%3|%4|%5', etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical);
+    //        fdCombinationMap.insert(dimKey, dimKey);
+    //    }
+
+    //    // Step 2: For each dimension set, generate monthly records
+    //    MapEnumerator mapEnum = fdCombinationMap.getEnumerator();
+    //    while (mapEnum.moveNext())
+    //    {
+    //        str dimKey = mapEnum.currentKey();
+    //        container dimParts = str2Con(dimKey, "|");
+
+    //        str etgitemid = conPeek(dimParts, 1);
+    //        str etgCommodity = conPeek(dimParts, 2);
+    //        str etgSubCommodity = conPeek(dimParts, 3);
+    //        str etgVertical = conPeek(dimParts, 4);
+    //        str etgSubVertical = conPeek(dimParts, 5);
+
+    //        TransDate currentMonth = minDate;
+    //        while (currentMonth <= maxDate())
+    //        {
+    //            int year = year(currentMonth);
+    //            int month = mthOfYr(currentMonth);
+    //            str dedupKey = strFmt('%1|%2|%3|%4|%5|%6|%7', etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, year, month);
+
+    //            if (processedKeySet.in(dedupKey))
+    //            {
+    //                currentMonth = DateTimeUtil::date(DateTimeUtil::addMonths(DateTimeUtil::newDateTime(currentMonth, 0), 1));
+    //                continue;
+    //            }
+
+    //            processedKeySet.add(dedupKey);
+
+    //            staging.clear();
+    //            staging.TransDate = currentMonth;
+    //            staging.Year = year;
+    //            staging.MonthName = mthName(month);
+    //            staging.Isinvent = NoYes::Yes;
+    //            staging.ItemId = etgitemid;
+    //            staging.ItemName = InventTable::find(etgitemid).productNameInSystemLanguage();
+    //            staging.ETGCommodity = etgCommodity;
+    //            staging.ETGSubCommodity = etgSubCommodity;
+    //            staging.ETGVertical = etgVertical;
+    //            staging.ETGSubVertical = etgSubVertical;
+
+    //            staging.OpeningQty = ETGPrepareDataForGCReportService::calculateMonthlyCumulativeStockQty(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, currentMonth);
+    //            staging.OpeningstockOPeningLC = ETGPrepareDataForGCReportService::calculateMonthlyCumulativeStockOpeningValue(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, currentMonth);
+    //            staging.ClosingQty = ETGPrepareDataForGCReportService::calculateMonthlyCumulativeStockClosingQty(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, currentMonth);
+    //            staging.ClosingStockvalue = ETGPrepareDataForGCReportService::calculateMonthlyCumulativeStockClosingValue(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, currentMonth);
+
+    //            TransDate fromDate = DateStartMth(currentMonth);
+    //            TransDate toDate = endMth(currentMonth);
+
+    //            staging.StockTransferQty = ETGPrepareDataForGCReportService::getStockTransferQtyCumulativeByMonth(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+    //            staging.StockTransferValueLC = ETGPrepareDataForGCReportService::getStockTransferValueCumulativeByMonth(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+
+    //            staging.SalesQty = -ETGPrepareDataForGCReportService::getMonthlySalesQty(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+    //            staging.SalesValueinLC = ETGPrepareDataForGCReportService::getMonthlySalesValue(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+    //            staging.SalesQty3rdParty = -ETGPrepareDataForGCReportService::getSalesOrderQtyGroup3rdParty(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+    //            staging.SalesValue3rdParty = ETGPrepareDataForGCReportService::getSalesOrderValueThirdParty(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+    //            staging.SalesQtyGroup = -ETGPrepareDataForGCReportService::getSalesOrderQtyGroup(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+    //            staging.SalesValueGroup = ETGPrepareDataForGCReportService::getSalesOrderValueGroup(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+
+    //            staging.PurchQty = ETGPrepareDataForGCReportService::getMonthlyPurchaseQty(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+    //            staging.PurchValueLC = ETGPrepareDataForGCReportService::getMonthlyPurchaseValue(etgitemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+
+    //            staging.RecordNum = int2Str(i);
+    //            staging.LocalCurrency = Ledger::accountingCurrency();
+    //            staging.EntityName = dataArea.Name;
+    //            staging.insert();
+
+    //            currentMonth = nextMth(currentMonth);
+    //            i++;
+    //        }
+    //    }
+
+    //    // NON-INVENTORY INCREMENTAL EXPORT
+    //    GeneralJournalAccountEntry generalJournalAccountEntry;
+    //    GeneralJournalEntry generalJournalEntry;
+
+    //    while select generalJournalAccountEntry
+    //    join generalJournalEntry
+    //    where generalJournalAccountEntry.GeneralJournalEntry == generalJournalEntry.RecId
+    //        && generalJournalEntry.SubledgerVoucherDataAreaId == curExt()
+    //        && generalJournalEntry.AccountingDate > lastExportedDate
+    //    {
+    //        DimensionDefault dimDefault1 = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(generalJournalAccountEntry.LedgerDimension);
+    //        TransDate transDate = generalJournalEntry.AccountingDate;
+    //        int year = year(transDate);
+    //        int month = mthOfYr(transDate);
+
+    //        str etgitemid = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault1, aCFParameters.ItemId);
+    //        str etgCommodity = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault1, aCFParameters.MainCommodity);
+    //        str etgSubCommodity = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault1, aCFParameters.SubCommodity);
+    //        str etgVertical = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault1, aCFParameters.Vertical);
+    //        str etgSubVertical = ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault1, aCFParameters.SubVertical);
+
+    //        staging.clear();
+    //        staging.LedgerDimension = generalJournalAccountEntry.LedgerDimension;
+    //        staging.SubledgerVoucher = generalJournalEntry.SubledgerVoucher;
+    //        staging.TransDate = transDate;
+    //        staging.Year = year;
+    //        staging.MonthName = mthName(month);
+    //        staging.LocalCurrency = Ledger::accountingCurrency();
+    //        staging.EntityName = dataArea.Name;
+    //        staging.Isinvent = NoYes::No;
+    //        staging.RecordNum = int2Str(i);
+
+    //        staging.ItemId = etgitemid;
+    //        staging.ItemName = InventTable::find(etgitemid).productNameInSystemLanguage();
+    //        staging.ETGCommodity = etgCommodity;
+    //        staging.ETGSubCommodity = etgSubCommodity;
+    //        staging.ETGVertical = etgVertical;
+    //        staging.ETGSubVertical = etgSubVertical;
+
+    //        MainAccount sourceMainAccount = MainAccount::find(generalJournalAccountEntry.MainAccount);
+    //        ETGPowerBIReportGLMappingTable mapping;
+    //        select firstOnly mapping
+    //        where mapping.REPORTPERTICULARID == sourceMainAccount.Name
+    //            && mapping.ReportId == "GC Report";
+
+    //        if (mapping)
+    //        {
+    //            Name MainAccountName = MainAccount::findByMainAccountId(mapping.MainAccountId).Name;
+    //            this.assignChargesFromMainAccount(staging, MainAccountName, generalJournalAccountEntry.AccountingCurrencyAmount);
+    //        }
+
+    //        staging.insert();
+    //        i++;
+    //    }
+
+    //    //  Update ACFParamters Table
+    //    ttsbegin;
+    //    aCFParameters.GCReportLastExportedDate = currentExportDate;
+    //    aCFParameters.update();
+    //    ttscommit;
+    //}
+
+    public void insertReportData()
+    {
+        ETGGCReportStaging staging, StagingPrev;
+        DataArea dataArea;
+        int i = 1;
+
+        aCFParameters = ETGACFParameters::find(true);
+        select * from dataArea where dataArea.Id == curExt();
+
+        TransDate lastExportedDate = aCFParameters.GCReportLastExportedDate;
+        if (lastExportedDate)
+        {
+            select RecordNum from StagingPrev order by  RecordNum desc;
+            i = any2Int(StagingPrev.RecordNum) +1;
+
+        }
+        TransDate currentExportDate = today();
+        if (!lastExportedDate || lastExportedDate == dateNull())
+        {
+            lastExportedDate = mkDate(01,12,2022);
+        }
+
+        
+        TransDate minDate = DateStartMth(lastExportedDate);
+        TransDate maxDate1 = endMth(currentExportDate);
+
+        GeneralJournalAccountEntry gjAccEntry;
+        GeneralJournalEntry gjEntry;
+
+        DimensionDefault dimDefault;
+        Map fdCombinationMap = new Map(Types::String, Types::Container);
+        Set processedKeySet = new Set(Types::String);
+        RecordInsertList ril = new RecordInsertList(tablenum(ETGGCReportStaging));
+
+        this.getFiscalYearDate(currentExportDate);
+        
+        // Preload dimension combinations
+        while select firstonly10 gjAccEntry
+        join gjEntry
+        where gjAccEntry.GeneralJournalEntry == gjEntry.RecId
+            && gjEntry.SubledgerVoucherDataAreaId == curExt()
+           // && gjEntry.SubledgerVoucher =='O001VI_26003382'
+        {
+            dimDefault = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(gjAccEntry.LedgerDimension);
+            Map dimMap = ETGPrepareDataForGCReportService::getDimensionMap(dimDefault, aCFParameters);
+
+
+
+            str etgItemid = dimMap.lookup("ItemId");
+            //if(etgItemid != "01072502750000750600")
+            //{
+            //    continue;
+            //}
+            str etgCommodity = dimMap.lookup("MainCommodity");
+            str etgSubCommodity = dimMap.lookup("SubCommodity");
+            str etgVertical = dimMap.lookup("Vertical");
+            str etgSubVertical = dimMap.lookup("SubVertical");
+
+            str dimKey = strFmt('%1|%2|%3|%4|%5', etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical); //todo add item id
+            if (!fdCombinationMap.exists(dimKey))
+            {
+                fdCombinationMap.insert(dimKey, [etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical]); //todo add item id
+            }
+
+        }
+
+        // Process each dimension set
+        MapEnumerator mapEnum = fdCombinationMap.getEnumerator();
+        while (mapEnum.moveNext())
+        {
+            container dimParts = mapEnum.currentValue();
+
+            str etgItemid = conPeek(dimParts, 1);
+            str etgCommodity = conPeek(dimParts, 2);
+            str etgSubCommodity = conPeek(dimParts, 3);
+            str etgVertical = conPeek(dimParts, 4);
+            str etgSubVertical = conPeek(dimParts, 5);
+
+
+            TransDate currentMonth = minDate;
+            while (currentMonth <= currentExportDate)
+            {
+                int year = year(currentMonth);
+                int month = mthOfYr(currentMonth);
+                str dedupKey = strFmt('%1|%2|%3|%4|%5|%6|%7',etgItemid, etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, year, month);
+
+                if (!processedKeySet.in(dedupKey))
+                {
+                    processedKeySet.add(dedupKey);
+
+                    staging.clear();
+                    staging.TransDate = currentMonth;
+                    staging.Year = year;
+                    staging.MonthName = mthName(month);
+                    staging.Isinvent = NoYes::Yes;
+                    staging.ItemId  = etgItemid;
+                    staging.ItemName = InventTable::find(etgitemid).productNameInSystemLanguage();
+                    staging.ETGCommodity = etgCommodity;
+                    staging.ETGSubCommodity = etgSubCommodity;
+                    staging.ETGVertical = etgVertical;
+                    staging.ETGSubVertical = etgSubVertical;
+
+                    TransDate fiscalYrStartDate = fiscalYearStartDate;//mkDate(01,04, 2025);
+
+                    staging.OpeningQty = ETGPrepareDataForGCReportService::calculateMonthlyCumulativeStockQty(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fiscalYrStartDate);
+                    staging.OpeningstockOPeningLC = ETGPrepareDataForGCReportService::calculateMonthlyCumulativeStockOpeningValue(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fiscalYrStartDate);
+                    staging.ClosingQty = ETGPrepareDataForGCReportService::calculateMonthlyCumulativeStockClosingQty(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, currentMonth);
+                    staging.ClosingStockvalue = ETGPrepareDataForGCReportService::calculateMonthlyCumulativeStockClosingValue(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, currentMonth);
+
+                    TransDate fromDate = fiscalYearStartDate;//mkDate(01,04, 2025);//DateStartMth(currentMonth);
+                    TransDate toDate = endMth(currentMonth);
+
+                    staging.StockTransferQty = ETGPrepareDataForGCReportService::getStockTransferQtyCumulativeByMonth(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+                    staging.StockTransferValueLC = ETGPrepareDataForGCReportService::getStockTransferValueCumulativeByMonth(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+
+                    staging.SalesQty = -ETGPrepareDataForGCReportService::getMonthlySalesQty(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+                    staging.SalesValueinLC = ETGPrepareDataForGCReportService::getMonthlySalesValue(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+                    staging.SalesQty3rdParty = -ETGPrepareDataForGCReportService::getSalesOrderQtyGroup3rdParty(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+                    staging.SalesValue3rdParty = ETGPrepareDataForGCReportService::getSalesOrderValueThirdParty(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+                    staging.SalesQtyGroup = -ETGPrepareDataForGCReportService::getSalesOrderQtyGroup(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+                    staging.SalesValueGroup = ETGPrepareDataForGCReportService::getSalesOrderValueGroup(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+
+                    staging.PurchQty = ETGPrepareDataForGCReportService::getMonthlyPurchaseQty(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+                    staging.PurchValueLC = ETGPrepareDataForGCReportService::getMonthlyPurchaseValue(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+
+                    staging.RecordNum = int2Str(i);
+                    staging.LocalCurrency = Ledger::accountingCurrency();
+                    staging.EntityName = dataArea.Name;
+                    staging.ExchInUSD   = this.getExchangeRate();
+                    i++;
+
+                    ril.add(staging);
+                }
+                currentMonth = nextMth(currentMonth);
+            }
+        }
+
+        // Commit inventory records
+        ril.insertDatabase();
+
+        // Cache Power BI Mapping
+        mappingCache = new Map(Types::String, Types::String);
+        ETGPowerBIReportGLMappingTable mapping;
+        while select mapping where mapping.ReportId == "GC Report"
+        {
+            mappingCache.insert(mapping.MainAccountId,mapping.REPORTPERTICULARID);
+        }
+
+        // Non-inventory incremental export
+        GeneralJournalAccountEntry generalJournalAccountEntry;
+        GeneralJournalEntry generalJournalEntry;
+        AgreementLine aLine;
+        ril = new RecordInsertList(tablenum(ETGGCReportStaging));
+
+        while select  generalJournalAccountEntry
+        join generalJournalEntry
+        where generalJournalAccountEntry.GeneralJournalEntry == generalJournalEntry.RecId
+            && generalJournalEntry.SubledgerVoucherDataAreaId == curExt()
+            && generalJournalEntry.AccountingDate > lastExportedDate
+           // && generalJournalEntry.SubledgerVoucher == 'O001VI_26003382'
+        {
+            DimensionDefault dimDefault1 = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(generalJournalAccountEntry.LedgerDimension);
+            TransDate transDate = generalJournalEntry.AccountingDate;
+            int year = year(transDate);
+            int month = mthOfYr(transDate);
+
+            Map dimMap = ETGPrepareDataForGCReportService::getDimensionMap(dimDefault1, aCFParameters);
+
+            str etgitemid = dimMap.lookup("ItemId");
+            str etgCommodity = dimMap.lookup("MainCommodity");
+            str etgSubCommodity = dimMap.lookup("SubCommodity");
+            str etgVertical = dimMap.lookup("Vertical");
+            str etgSubVertical = dimMap.lookup("SubVertical");
+
+            staging.clear();
+            staging.LedgerDimension = generalJournalAccountEntry.LedgerDimension;
+            staging.SubledgerVoucher = generalJournalEntry.SubledgerVoucher;
+            staging.TransDate = transDate;
+            staging.Year = year;
+            staging.MonthName = mthName(month);
+            staging.LocalCurrency = Ledger::accountingCurrency();
+            staging.EntityName = dataArea.Name;
+            staging.Isinvent = NoYes::No;
+            staging.RecordNum = int2Str(i);
+            i++;
+            staging.Contract  = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(dimDefault1,aCFParameters.Contract);
+           
+            //if((etgitemid && etgitemid != "01072502750000750600") || staging.Contract == "")
+            //{
+            //    continue;
+            //}
+
+            if(etgitemid == "")
+            {
+                RefRecId  agreementHeaderRecId = PurchAgreementHeader::findAgreementId(staging.Contract).RecId;
+                if(!agreementHeaderRecId)
+                {
+                    agreementHeaderRecId = SalesAgreementHeader::findAgreementId(staging.Contract).RecId;
+                }
+                if(agreementHeaderRecId)
+                {
+                    select firstonly ItemId from aLine where aLine.Agreement == agreementHeaderRecId;
+                    etgitemid = aLine.ItemId;
+                }
+            }
+
+           
+            staging.ItemId   = etgitemid;
+            staging.ItemName = InventTable::find(etgitemid).productNameInSystemLanguage();
+            staging.ETGCommodity = etgCommodity;
+            staging.ETGSubCommodity = etgSubCommodity;
+            staging.ETGVertical = etgVertical;
+            staging.ETGSubVertical = etgSubVertical;
+
+
+            MainAccount sourceMainAccount = MainAccount::find(generalJournalAccountEntry.MainAccount);
+            if (mappingCache.exists(sourceMainAccount.MainAccountId))
+            {
+                Name mainAccountName = mappingCache.lookup(sourceMainAccount.MainAccountId);
+                // Name mainAccountName = MainAccount::findByMainAccountId(mappingCache.lookup(sourceMainAccount.MainAccountId)).Name;
+                this.assignChargesFromMainAccount(staging,mainAccountName, generalJournalAccountEntry.AccountingCurrencyAmount);
+            }
+
+            staging.ExchInUSD = this.getExchangeRate();
+            ril.add(staging);
+        }
+
+        ril.insertDatabase();
+
+        // Update export timestamp
+        ttsbegin;
+        aCFParameters.GCReportLastExportedDate = currentExportDate;
+        aCFParameters.update();
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>process</Name>
+				<Source><![CDATA[
+    /////duplicate method
+
+    public void process(ETGPreparedataforGCReport_Contract      GCReport_Contract)
+    {
+        ETGGCReportStaging staging, StagingPrev,StagingPrevloc,StagingPrevRecordNum,stagingmax;
+        DataArea dataArea;
+        int i = 1;
+        Map dimMap;
+        AgreementLine aLine;
+        aCFParameters = ETGACFParameters::find(true);
+        select * from dataArea where dataArea.Id == curExt();
+
+        select maxof(RecId) from stagingmax;
+
+        RecId  laslinenumber = stagingmax.RecId;
+
+        TransDate lastExportedDate = aCFParameters.GCReportLastExportedDate;
+        TransDate currentExportDate;
+
+        TransDate contracttoDate        = GCReport_Contract.parmToDate();
+
+        if (contracttoDate)
+        {
+            currentExportDate = contracttoDate;
+        }
+        else 
+        {
+            currentExportDate = today();
+        }
+
+        if (!lastExportedDate || lastExportedDate == dateNull())
+        {
+            lastExportedDate = mkDate(01,12,2022);
+        }
+
+        
+        TransDate minDate = DateStartMth(lastExportedDate);
+        TransDate maxDate1 = endMth(currentExportDate);
+
+        GeneralJournalAccountEntry    gjAccEntry;
+        GeneralJournalEntry           gjEntry;
+        InventTrans                   inventtrans;
+        InventDim                     inventDim;
+        InventTransPosting            inventTransPosting;
+
+        DimensionDefault dimDefault;
+        Map fdCombinationMap = new Map(Types::String, Types::Container);
+
+        Map fdCombinationMapFinance = new Map(Types::String, Types::Container);
+
+        Set processedKeySet = new Set(Types::String);
+        Set processedKeySetFin = new Set(Types::String);
+        Set processedKeySet1 = new Set(Types::String);
+        RecordInsertList ril = new RecordInsertList(tablenum(ETGGCReportStaging));
+
+        this.getFiscalYearDate(currentExportDate);     
+        
+        //while select inventtrans
+        //where //inventtrans.DateFinancial >= minDate
+        //      inventtrans.DateFinancial <= currentExportDate
+        //join  inventTransPosting
+        //where inventTransPosting.InventTransOrigin      == inventtrans.InventTransOrigin
+        //    && inventTransPosting.Voucher                == inventtrans.Voucher
+        //    && inventTransPosting.TransDate              == inventtrans.DateFinancial
+        //    && inventTransPosting.InventTransPostingType == InventTransPostingType::Financial
+        //    && inventtrans.DateFinancial                 != dateNull()
+        //{
+        //    str etgItemid        = inventTransPosting.ItemId;
+        //    str etgCommodity     = inventTransPosting.ETGCommodity;
+        //    str etgSubCommodity  = inventTransPosting.ETGSubCommodity;
+        //    str etgVertical      = inventTransPosting.ETGVertical;
+        //    str etgSubVertical   = inventTransPosting.ETGSubVertical;
+
+        //    str groupKey = strFmt("%1|%2|%3|%4|%5", etgItemid,etgCommodity,etgSubCommodity,etgVertical,etgSubVertical);
+
+        //    if (!fdCombinationMap.exists(groupKey))
+        //    {
+        //        fdCombinationMap.insert(groupKey, [etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical]);
+        //    }
+
+        //}
+
+        while select ItemId, ETGCommodity, ETGSubCommodity, ETGVertical, ETGSubVertical
+        from inventTransPosting
+        group by ItemId, ETGCommodity, ETGSubCommodity, ETGVertical, ETGSubVertical
+        exists join inventTrans
+        where inventTrans.InventTransOrigin == inventTransPosting.InventTransOrigin
+            && inventTrans.Voucher == inventTransPosting.Voucher
+            && inventTrans.DateFinancial == inventTransPosting.TransDate
+            && inventTrans.DateFinancial <= currentExportDate
+            && inventTrans.DateFinancial != dateNull()
+            && inventTransPosting.InventTransPostingType == InventTransPostingType::Financial
+        {
+            str etgItemid = inventTransPosting.ItemId;
+            str etgCommodity = inventTransPosting.ETGCommodity;
+            str etgSubCommodity = inventTransPosting.ETGSubCommodity;
+            str etgVertical = inventTransPosting.ETGVertical;
+            str etgSubVertical = inventTransPosting.ETGSubVertical;
+            str groupKey = strFmt("%1|%2|%3|%4|%5", etgItemid, etgCommodity, etgSubCommodity, etgVertical, etgSubVertical);
+            fdCombinationMap.insert(groupKey, [etgItemid, etgCommodity, etgSubCommodity, etgVertical, etgSubVertical]);
+        }
+
+
+        // Process each dimension set
+        MapEnumerator mapEnum = fdCombinationMap.getEnumerator();
+        while (mapEnum.moveNext())
+        {
+            container dimParts = mapEnum.currentValue();
+
+            str etgItemid = conPeek(dimParts, 1);
+            str etgCommodity = conPeek(dimParts, 2);
+            str etgSubCommodity = conPeek(dimParts, 3);
+            str etgVertical = conPeek(dimParts, 4);
+            str etgSubVertical = conPeek(dimParts, 5);
+
+
+            TransDate currentMonth = minDate;
+            while (currentMonth <= currentExportDate)
+            {
+                int year = year(currentMonth);
+                int month = mthOfYr(currentMonth);
+                str dedupKey = strFmt('%1|%2|%3|%4|%5|%6|%7',etgItemid, etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, year, month);
+
+                if (processedKeySet.in(dedupKey))
+                {
+                    currentMonth = DateTimeUtil::date(DateTimeUtil::addMonths(DateTimeUtil::newDateTime(currentMonth, 0), 1));
+                    continue;
+                }
+
+                select  firstonly StagingPrevloc where
+                StagingPrevloc.ItemId == etgItemid
+                && StagingPrevloc.ETGCommodity == etgCommodity
+                && StagingPrevloc.ETGSubCommodity == etgSubCommodity
+                && StagingPrevloc.ETGVertical == etgVertical
+                && StagingPrevloc.ETGSubVertical == etgSubVertical
+                && StagingPrevloc.Year == year
+                && StagingPrevloc.MonthName == mthName(month)
+                && StagingPrevloc.Isinvent == NoYes::Yes;
+
+                if(StagingPrevloc.RecId)
+                {
+                    currentMonth = nextMth(currentMonth);
+                    continue;
+                }
+                    
+                processedKeySet.add(dedupKey);
+
+                staging.clear();
+                staging.TransDate = currentMonth;
+                staging.Year = year;
+                staging.MonthName = mthName(month);
+                staging.Isinvent = NoYes::Yes;
+                staging.ItemId  = etgItemid;
+                staging.ItemName = InventTable::find(etgitemid).productNameInSystemLanguage();
+                staging.ETGCommodity = etgCommodity;
+                staging.ETGSubCommodity = etgSubCommodity;
+                staging.ETGVertical = etgVertical;
+                staging.ETGSubVertical = etgSubVertical;
+
+                TransDate fiscalYrStartDate = fiscalYearStartDate;//mkDate(01,04, 2025);
+
+                staging.OpeningQty = ETGPrepareDataForGCReportService::calculateMonthlyCumulativeStockQty(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fiscalYrStartDate);
+                staging.OpeningstockOPeningLC = ETGPrepareDataForGCReportService::calculateMonthlyCumulativeStockOpeningValue(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fiscalYrStartDate);
+                staging.ClosingQty = ETGPrepareDataForGCReportService::calculateMonthlyCumulativeStockClosingQty(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, currentMonth);
+                staging.ClosingStockvalue = ETGPrepareDataForGCReportService::calculateMonthlyCumulativeStockClosingValue(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, currentMonth);
+
+                TransDate fromDate = fiscalYearStartDate;//mkDate(01,04, 2025);//DateStartMth(currentMonth);
+                TransDate toDate = endMth(currentMonth);
+
+                staging.StockTransferQty = ETGPrepareDataForGCReportService::getStockTransferQtyCumulativeByMonth(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+                staging.StockTransferValueLC = ETGPrepareDataForGCReportService::getStockTransferValueCumulativeByMonth(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+
+                staging.SalesQty = -ETGPrepareDataForGCReportService::getMonthlySalesQty(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+                staging.SalesValueinLC = ETGPrepareDataForGCReportService::getMonthlySalesValue(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+                staging.SalesQty3rdParty = -ETGPrepareDataForGCReportService::getSalesOrderQtyGroup3rdParty(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+                staging.SalesValue3rdParty = ETGPrepareDataForGCReportService::getSalesOrderValueThirdParty(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+                staging.SalesQtyGroup = -ETGPrepareDataForGCReportService::getSalesOrderQtyGroup(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+                staging.SalesValueGroup = ETGPrepareDataForGCReportService::getSalesOrderValueGroup(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+
+                staging.PurchQty = ETGPrepareDataForGCReportService::getMonthlyPurchaseQty(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+                staging.PurchValueLC = ETGPrepareDataForGCReportService::getMonthlyPurchaseValue(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, fromDate, toDate);
+
+                // staging.RecordNum = int2Str(i);
+                staging.LocalCurrency = Ledger::accountingCurrency();
+                staging.EntityName = dataArea.Name;
+                staging.ExchInUSD   = this.getExchangeRate();
+                // i++;
+
+                try
+                {
+                    laslinenumber = laslinenumber + 1;
+                    staging.RecordNum = int642Str(laslinenumber)+ "-" + curExt();
+                    ril.add(staging);
+                }
+                catch
+                {
+                    continue;
+                }
+                finally
+                {
+                    currentMonth = nextMth(currentMonth);
+                }
+            }
+        }
+
+        // Commit inventory records
+        try
+        {
+            // Bulk insert
+            ril.insertDatabase();
+            info("Inventory section done.");
+        }
+        catch(Exception::Error)
+        {
+            error("error encountered during inventory insertion");
+        }
+        finally
+        {
+        }
+        
+
+        // Cache Power BI Mapping
+        mappingCache = new Map(Types::String, Types::String);
+        ETGPowerBIReportGLMappingTable mapping;
+        while select mapping where mapping.ReportId == "GC Report"
+        {
+            mappingCache.insert(mapping.MainAccountId,mapping.REPORTPERTICULARID);
+        }
+
+        // Non-inventory incremental export
+        GeneralJournalAccountEntry generalJournalAccountEntry;
+        GeneralJournalEntry generalJournalEntry;
+        ETGPowerBIReportGLMappingTable Existmapping;
+        MainAccount     mainAccount;
+
+        ril = new RecordInsertList(tablenum(ETGGCReportStaging));
+
+       // mapping
+
+        while select gjAccEntry
+        join gjEntry
+        where gjAccEntry.GeneralJournalEntry == gjEntry.RecId
+            && gjEntry.SubledgerVoucherDataAreaId == curExt()
+           && gjEntry.AccountingDate <= currentExportDate
+        {
+            dimDefault = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(gjAccEntry.LedgerDimension);
+            dimMap = ETGPrepareDataForGCReportService::getDimensionMap(dimDefault, aCFParameters);
+
+            string50 Contract  = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(dimDefault, aCFParameters.Contract);
+
+            str etgItemid = dimMap.lookup("ItemId");
+            if(etgitemid == "")
+            {
+                RefRecId  agreementHeaderRecId = PurchAgreementHeader::findAgreementId(Contract).RecId;
+                if(!agreementHeaderRecId)
+                {
+                    agreementHeaderRecId = SalesAgreementHeader::findAgreementId(Contract).RecId;
+                }
+                if(agreementHeaderRecId)
+                {
+                    select firstonly ItemId from aLine where aLine.Agreement == agreementHeaderRecId;
+                    etgitemid = aLine.ItemId;
+                }
+            }
+            str etgCommodity = dimMap.lookup("MainCommodity");
+            str etgSubCommodity = dimMap.lookup("SubCommodity");
+            str etgVertical = dimMap.lookup("Vertical");
+            str etgSubVertical = dimMap.lookup("SubVertical");
+
+            str dimKey = strFmt('%1|%2|%3|%4|%5', etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical); //todo add item id
+            if (!fdCombinationMapFinance.exists(dimKey))
+            {
+                fdCombinationMapFinance.insert(dimKey, [etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical]); //todo add item id
+            }
+
+        }
+
+        mapEnum = fdCombinationMapFinance.getEnumerator();
+        while (mapEnum.moveNext())
+        {
+            container dimParts = mapEnum.currentValue();
+
+            str etgItemid = conPeek(dimParts, 1);
+            str etgCommodity = conPeek(dimParts, 2);
+            str etgSubCommodity = conPeek(dimParts, 3);
+            str etgVertical = conPeek(dimParts, 4);
+            str etgSubVertical = conPeek(dimParts, 5);
+            
+            TransDate currentMonth = minDate;
+            while (currentMonth <= currentExportDate)
+            {
+                int year     = year(currentMonth);
+                int month    = mthOfYr(currentMonth);
+                str dedupKey = strFmt('%1|%2|%3|%4|%5|%6|%7',etgItemid, etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, year, month);
+
+                if (processedKeySet1.in(dedupKey))
+                {
+                    currentMonth = DateTimeUtil::date(DateTimeUtil::addMonths(DateTimeUtil::newDateTime(currentMonth, 0), 1));
+                    continue;
+                }
+
+                select  firstonly StagingPrevloc where
+                    StagingPrevloc.ItemId == etgItemid
+                  && StagingPrevloc.ETGCommodity == etgCommodity
+                  && StagingPrevloc.ETGSubCommodity == etgSubCommodity
+                  && StagingPrevloc.ETGVertical == etgVertical
+                  && StagingPrevloc.ETGSubVertical == etgSubVertical
+                  && StagingPrevloc.Year == year
+                  && StagingPrevloc.MonthName == mthName(month)
+                  && StagingPrevloc.Isinvent==NoYes::No;
+
+                if(StagingPrevloc.RecId)
+                {
+                    currentMonth = nextMth(currentMonth);
+                    continue;
+                }
+                processedKeySet1.add(dedupKey);
+
+                staging.clear();
+                staging.ItemId          = etgitemid;
+                staging.ItemName        = InventTable::find(etgitemid).productNameInSystemLanguage();
+                staging.ETGCommodity    = etgCommodity;
+                staging.ETGSubCommodity = etgSubCommodity;
+                staging.ETGVertical      = etgVertical;
+                staging.ETGSubVertical   = etgSubVertical;              
+                staging.TransDate        = currentMonth;//transDate;
+                staging.Year             = year;
+                staging.MonthName        = mthName(month);
+                staging.LocalCurrency    = Ledger::accountingCurrency();
+                staging.EntityName       = dataArea.Name;
+                staging.Isinvent         = NoYes::No;
+
+                TransDate fiscalYrStartDate = fiscalYearStartDate;//mkDate(01,04, 2025);
+
+                TransDate fromDate = DateStartMth(currentMonth);
+                TransDate toDate = endMth(currentMonth);
+
+                this.glAmountYTD(etgItemid,etgCommodity, etgSubCommodity, etgVertical, etgSubVertical, staging, toDate);
+                staging.ExchInUSD     = this.getExchangeRate();
+
+                try
+                {
+                    laslinenumber = laslinenumber + 1;
+                    staging.RecordNum = int642Str(laslinenumber)+ "-" + curExt();
+                    ril.add(staging);
+                }
+                catch(Exception::Error)
+                {
+                    error("error encountered durng GL insertion");
+                    info(strFmt("Staging %1",staging.TransDate));
+                    //continue;
+                }
+                finally
+                {
+                   currentMonth = nextMth(currentMonth);
+                }
+            }
+        }
+
+        try
+        {
+            ril.insertDatabase();
+            info("GL data inserted.");
+        }
+        catch(Exception::Error)
+        {
+            error("error encountered durng GL insertion");
+        }
+        finally
+        {
+        }
+        // Update export timestamp
+        ttsbegin;
+        aCFParameters.GCReportLastExportedDate = currentExportDate;
+        aCFParameters.update();
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getPurchaseQtyByLedgerDimension</Name>
+				<Source><![CDATA[
+    public static Qty getPurchaseQtyByLedgerDimension(
+    ETGItemNumber    _item,
+    ETGCommodity     _comm,
+    ETGSubCommodity  _subComm,
+    ETGVertical      _ver,
+    ETGSubVertical   _subVer)
+    {
+        Qty totalQty = 0;
+        InventTrans inventTrans;
+        InventTransOrigin inventTransOrigin;
+        InventTransPosting inventTransPosting;
+
+        while select inventTrans
+            where inventTrans.DateFinancial != dateNull()
+        join inventTransOrigin
+            where inventTrans.InventTransOrigin == inventTransOrigin.RecId
+              && inventTransOrigin.ReferenceCategory == InventTransType::Purch
+        join inventTransPosting
+            where inventTransPosting.InventTransOrigin == inventTransOrigin.RecId
+              && inventTransPosting.ItemId == _item
+              && inventTransPosting.ETGCommodity == _comm
+              && inventTransPosting.ETGSubCommodity == _subComm
+              && inventTransPosting.ETGSubVertical == _subVer
+              && inventTransPosting.ETGVertical == _ver
+        {
+            totalQty += inventTrans.Qty;
+        }
+
+        return totalQty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getFiscalYearDate</Name>
+				<Source><![CDATA[
+    public void getFiscalYearDate(TransDate _date)
+    {
+        RecId calendarRecId;
+        //Date transDate = today();
+        FiscalCalendarYear fiscalCalenderYear;
+
+        calendarRecId      = Ledger::fiscalCalendar(CompanyInfo::find().RecId);
+        fiscalCalenderYear =  FiscalCalendarYear::findYearByCalendarDate(calendarRecId, _date);
+
+        if (fiscalCalenderYear)
+        {
+            fiscalYearStartDate = fiscalCalenderYear.StartDate;
+        }
+        else
+        {
+            throw error("No fiscal period found for the given date.");
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateMonthlyCumulativeStockQty</Name>
+				<Source><![CDATA[
+    // to get opening Balance
+    public static real calculateMonthlyCumulativeStockQty(
+     str _etgitemid,
+    str _etgCommodity,
+    str _etgSubCommodity,
+    str _etgVertical,
+    str _etgSubVertical,
+    TransDate _monthStartDate)
+    {
+        real totalQty = 0.0;
+        TransDate strdate = DateStartMth(_monthStartDate);
+
+        InventTrans inventTrans;
+        InventTransOrigin inventTransOrigin;
+        InventTransPosting inventTransPosting;
+
+        Set summedTrans = new Set(Types::Int64); // Avoid double-counting
+
+        while select inventTrans
+        where inventTrans.DateFinancial != dateNull()
+           && inventTrans.DateFinancial < strdate
+           && !summedTrans.in(inventTrans.RecId)
+    join inventTransOrigin
+        where inventTransOrigin.RecId == inventTrans.InventTransOrigin
+        {
+            select firstOnly RecId
+            from inventTransPosting
+            where inventTransPosting.InventTransOrigin == inventTransOrigin.RecId
+              && inventTransPosting.IsPosted == NoYes::Yes
+              && inventTransPosting.ItemId == _etgitemid
+              && inventTransPosting.ETGCommodity == _etgCommodity
+              && inventTransPosting.ETGSubCommodity == _etgSubCommodity
+              && inventTransPosting.ETGVertical == _etgVertical
+              && inventTransPosting.ETGSubVertical == _etgSubVertical;
+
+            if (inventTransPosting.RecId)
+            {
+                totalQty += inventTrans.Qty;
+                summedTrans.add(inventTrans.RecId);
+            }
+        }
+
+        return totalQty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>glAmountYTD</Name>
+				<Source><![CDATA[
+    public void glAmountYTD(
+     str _etgitemid,
+    str _etgCommodity,
+    str _etgSubCommodity,
+    str _etgVertical,
+    str _etgSubVertical,
+    ETGGCReportStaging staging,
+    TransDate _monthStartDate)
+    {
+        real totalAmount = 0.0;
+        // TransDate strdate = DateStartMth(_monthStartDate);
+
+        InventTrans inventTrans;
+        InventTransOrigin inventTransOrigin;
+        InventTransPosting inventTransPosting;
+        GeneralJournalEntry GJE;
+        GeneralJournalAccountEntry GJAEMain;
+        ETGGeneralJOurnalAccountEntryMMR GJAEMMR;
+
+        Set summedTrans = new Set(Types::Int64);
+
+        while select AccountingCurrencyAmount, RecId, MainAccount, LedgerDimension from GJAEMain
+            join AccountingDate from GJE
+            where GJE.RecId == GJAEMain.GeneralJournalEntry
+            && GJE.AccountingDate != dateNull()
+            && GJE.AccountingDate <= _monthStartDate
+            exists join GJAEMMR
+            where GJAEMMR.GeneralJournalAccountEntryRecId == GJAEMain.RecId
+             && GJAEMMR.ItemId == _etgitemid
+              && GJAEMMR.Commodity == _etgCommodity
+              && GJAEMMR.SubCommodity == _etgSubCommodity
+              && GJAEMMR.Vertical == _etgVertical
+              && GJAEMMR.SubVertical == _etgSubVertical
+        {
+            if (GJAEMain.RecId)
+            {
+
+                RecId dimDefault1 = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(GJAEMain.LedgerDimension);
+               // staging.Contract  = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(dimDefault1, aCFParameters.Contract);
+
+                MainAccount sourceMainAccount = MainAccount::find(GJAEMain.MainAccount);
+               
+                //  this.assignChargesFromMainAccount(staging, mainAccountName, totalAmount);
+                if (mappingCache.exists(sourceMainAccount.MainAccountId))
+                {
+                    Name        mainAccountName   = mappingCache.lookup(sourceMainAccount.MainAccountId);//sourceMainAccount.Name;
+                    this.assignChargesFromMainAccount(staging, mainAccountName, GJAEMain.AccountingCurrencyAmount);
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateMonthlyCumulativeStockOpeningValue</Name>
+				<Source><![CDATA[
+    // opening value
+    public static real calculateMonthlyCumulativeStockOpeningValue(
+    str _etgitemid,
+    str _etgCommodity,
+    str _etgSubCommodity,
+    str _etgVertical,
+    str _etgSubVertical,
+    TransDate _monthEndDate // Month end input, but we use start of month for opening
+)
+    {
+        real totalValue = 0.0;
+        TransDate startOfMonth = DateStartMth(_monthEndDate); // Opening value: transactions before this
+
+        InventTrans inventTrans;
+        InventTransOrigin inventTransOrigin;
+        InventTransPosting inventTransPosting;
+
+        Set summedTrans = new Set(Types::Int64); // Avoid double-counting
+
+        while select inventTrans
+        where inventTrans.DateFinancial != dateNull()
+            && inventTrans.DateFinancial < startOfMonth // Key difference!
+            && !summedTrans.in(inventTrans.RecId)
+    join inventTransOrigin
+        where inventTransOrigin.RecId == inventTrans.InventTransOrigin
+        {
+            select firstOnly RecId
+        from inventTransPosting
+        where inventTransPosting.InventTransOrigin == inventTransOrigin.RecId
+            && inventTransPosting.IsPosted == NoYes::Yes
+            && inventTransPosting.ItemId == _etgitemid
+            && inventTransPosting.ETGCommodity == _etgCommodity
+            && inventTransPosting.ETGSubCommodity == _etgSubCommodity
+            && inventTransPosting.ETGVertical == _etgVertical
+            && inventTransPosting.ETGSubVertical == _etgSubVertical;
+
+            if (inventTransPosting.RecId)
+            {
+                totalValue += inventTrans.CostAmountPosted + inventTrans.CostAmountAdjustment;
+                summedTrans.add(inventTrans.RecId);
+            }
+        }
+
+        return totalValue;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getSalesOrderValueGroup</Name>
+				<Source><![CDATA[
+    public static real getSalesOrderValueGroup(
+    ETGitemnumber     _item,
+    ETGCommodity     _comm,
+    ETGSubCommodity  _subComm,
+    ETGVertical      _ver,
+    ETGSubVertical   _subVer,
+    date             _monthStartDate,
+    date             _monthEndDate)
+    {
+        real salesValue = 0;
+        Set summedTrans = new Set(Types::Int64);
+
+        InventTrans inventTrans;
+        InventTransOrigin inventTransOrigin;
+        InventTransPosting inventTransPosting;
+        SalesTable salesTable;
+        CustTable custTable;
+        CustInvoiceTrans custInvoiceTrans;
+
+        while select inventTrans
+        where inventTrans.DateFinancial != dateNull()
+           && inventTrans.DateFinancial >= _monthStartDate
+           && inventTrans.DateFinancial <= _monthEndDate
+           && !summedTrans.in(inventTrans.RecId)
+        join inventTransOrigin
+        where inventTransOrigin.RecId == inventTrans.InventTransOrigin
+           && inventTransOrigin.ReferenceCategory == InventTransType::Sales
+        {
+            select firstOnly inventTransPosting
+            where inventTransPosting.InventTransOrigin == inventTransOrigin.RecId
+               && inventTransPosting.ItemId == _item
+               && inventTransPosting.ETGSubCommodity == _subComm
+               && inventTransPosting.ETGCommodity == _comm
+               && inventTransPosting.ETGVertical == _ver
+               && inventTransPosting.ETGSubVertical == _subVer
+               && inventTransPosting.IsPosted == NoYes::Yes;
+
+            if (inventTransPosting.RecId)
+            {
+                salesTable = SalesTable::find(inventTransOrigin.ReferenceId);
+                custTable = salesTable ? CustTable::find(salesTable.CustAccount) : null;
+
+                if (custTable && custTable.CustGroup == '40')
+                {
+                    select firstOnly custInvoiceTrans
+                    where custInvoiceTrans.InvoiceId == inventTrans.InvoiceId
+                       && custInvoiceTrans.InventTransId == inventTransOrigin.InventTransId
+                       && CustInvoiceTrans.InvoiceDate == inventTrans.DateFinancial;
+
+                    if (!summedTrans.in(custInvoiceTrans.RecId))
+                    {
+                        salesValue += custInvoiceTrans.LineAmountMST;
+                        summedTrans.add(custInvoiceTrans.RecId);
+                    }
+
+                }
+            }
+        }
+
+        return salesValue;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getDimensionMap</Name>
+				<Source><![CDATA[
+    public static Map getDimensionMap(DimensionDefault dimDefault, ETGACFParameters aCFParameters)
+    {
+        Map dimMap = new Map(Types::String, Types::String);
+
+        dimMap.insert("ItemId", ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(dimDefault, aCFParameters.ItemId));
+        dimMap.insert("MainCommodity", ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault, aCFParameters.MainCommodity));
+        dimMap.insert("SubCommodity", ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault, aCFParameters.SubCommodity));
+        dimMap.insert("Vertical", ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault, aCFParameters.Vertical));
+        dimMap.insert("SubVertical", ETGFinancialDimensionHelper::getDimensionDisplayValue(dimDefault, aCFParameters.SubVertical));
+
+
+        return dimMap;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getExchangeRate</Name>
+				<Source><![CDATA[
+    public AmountMST getExchangeRate()
+    {
+        ExchangeRate     exchangeRate;
+        ExchangeRateType ExchangeRateType;
+        ExchangeRateCurrencyPair exchangeRateCurrencyPair;
+        real             exchRate;
+     
+        CurrencyCode fromCurrency  = "AED";
+        CurrencyCode toCurrency    = "USD";
+        TransDate    transDate     = today();
+     
+        select firstonly exchangeRateCurrencyPair
+        where
+        exchangeRateCurrencyPair.ExchangeRateType
+        == Ledger::find(Ledger::current()).DefaultExchangeRateType
+        &&  exchangeRateCurrencyPair.FromCurrencyCode == fromCurrency
+        &&  exchangeRateCurrencyPair.ToCurrencyCode   == toCurrency;
+ 
+        exchRate = exchangeRate::findByDate(exchangeRateCurrencyPair.RecId,
+            transDate).ExchangeRate;
+     
+        return (exchRate/100);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

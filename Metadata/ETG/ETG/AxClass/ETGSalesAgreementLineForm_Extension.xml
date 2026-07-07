@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesAgreementLineForm_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formDataSourceStr(SalesAgreement, ALine))]
+final class ETGSalesAgreementLineForm_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>write</Name>
+				<Source><![CDATA[
+    public void write()
+    {
+        next write();
+       
+        ETGACFParameters acfParameters = ETGACFParameters::find();
+ 
+        if(acfParameters.EnableLinetoHeaderCopyFinDIm == NoYes::Yes)
+        {
+            AgreementLine line, agreementLine;
+            SalesAgreementHeader header, headerUpd,currentHeader;
+            FormDataSource fds, fdsHeader;
+
+            line      = this.cursor();
+            header    = line.agreementHeader();
+            fdsHeader = this.formRun().dataSource(formDataSourceStr(SalesAgreement, SalesAgreementHeader));
+        
+            if(line.DefaultDimension != header.DefaultDimension)
+            {
+                select firstonly RecId from agreementLine order by LineNumber asc
+                    where agreementLine.Agreement == header.RecId;
+                if(agreementLine.RecId == line.RecId)
+                {
+                    DialogButton diagBut;
+
+                    str strMessage = 'Do you want to copy financial dimension from line to header?';
+                    str strTitle   = 'Copy financial dimension';
+
+                    diagBut = Box::yesNo(strMessage, DialogButton::No, strTitle);
+
+                    if(diagBut == DialogButton::Yes)
+                    {
+                        RecId currentRecId =  header.RecId;
+                        ttsBegin;
+                        header.skipDataMethods(true);
+                        header.selectForUpdate(true);
+                        header.DefaultDimension = line.DefaultDimension;
+                        header.doUpdate();
+                        ttsCommit;
+                        fdsHeader.reread();
+                        fdsHeader.research(true);
+
+                        currentHeader = SalesAgreementHeader::find(currentRecId);
+                        fdsHeader.findRecord(currentHeader);
+                        //fdsHeader.reread();
+                       // fdsHeader.research();
+                        Info("Financial dimesnions has been copied to header.");
+                    }
+
+                }
+                   
+            }
+        }
+        //else
+        //{
+        //    warning(strFmt("Financial dimension can not be update form line to header for agremment id %1, item %2", header.PurchNumberSequence, line.ItemId));
+        //}
+           
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateWrite</Name>
+				<Source><![CDATA[
+    public boolean validateWrite()
+    {
+        boolean ret = next validateWrite();
+        ETGACFParameters acfParameters = ETGACFParameters::find();
+
+        if (ret && acfParameters.EnableMandatoryFields == NoYes::Yes)
+        {
+            str dimensionName, label;
+            str dimensionValue;
+            AgreementLine aLine = this.cursor();
+           
+            FormDataSource      agrLine         = any2Object(this) as FormDataSource;
+
+            CustTable           custTable;
+            CustGroup           custGroup;
+            SalesAgreementHeader agreementHeader;
+
+            ret = ETGSalesAgreementMandatoryValidation::validateFormLines(this.formRun());
+
+            container mandatoryDims = [
+            [acfParameters.BusinessUnit, "BusinessUnit"],
+            [acfParameters.Department, "Department"],
+            [acfParameters.InterCompany, "InterCompany"],
+            [acfParameters.ItemId, "Items"],
+            [acfParameters.LineofBusinesss, "Line_of_Businesss"],
+            [acfParameters.MainCommodity, "MainCommodity"],
+            [acfParameters.PlantWarehouseOffice, "Plant_Warehouse_Office"],
+            [acfParameters.SubCommodity, "SubCommodity"],
+              [acfParameters.TraderEmployee, "Trader_Employee"],
+            [acfParameters.Vertical, "Vertical"]
+            ];
+
+            agreementHeader = aLine.agreementHeader();
+
+            select firstonly custTable where
+                            custTable.AccountNum == agreementHeader.CustAccount
+                        &&  custTable.DataAreaId == agreementHeader.CustomerDataAreaId;
+
+            select firstonly custGroup where  custGroup.CustGroup == custTable.CustGroup;
+            
+            for (int i = 1; i <= conLen(mandatoryDims); i++)
+            {
+                container dimEntry = conPeek(mandatoryDims, i);
+                dimensionName = conPeek(dimEntry, 1);
+                label = conPeek(dimEntry, 2);
+
+                dimensionValue = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(aLine.DefaultDimension, dimensionName);
+
+                if (!dimensionValue)
+                {
+                    if(dimensionName == "InterCompany" && custGroup.CustGroup != '40')
+                    {
+                        // Dimension is NOT mandatory here - do nothing
+                    }
+                    else
+                    {
+                        checkFailed(strFmt("Financial dimension %1 is mandatory.", label));
+                        ret = false;
+                    }
+                }
+            }
+        }
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {
+        int ret = next active();
+        FormDataSource      salesAgreementLine_ds         = any2Object(this) as FormDataSource;
+        AgreementLine       agreementLine                 = salesAgreementLine_ds.cursor();
+
+        if(ETGACFParameters::find().EnableContractFDAutomation == NoYes::Yes)
+        {
+            salesAgreementLine_ds.object(fieldNum(AgreementLine, DefaultDimension)).allowEdit(agreementLine.ETG_IsThirdParty == NoYes::No);
+        }
+
+        if(ETGACFParameters::find().EnableMandatoryFields == NoYes::Yes)
+        {
+            this.object(fieldNum(AgreementLine, ETGFinalPlaceOfDelivery)).mandatory(true);
+            this.object(fieldNum(AgreementLine, ItemId)).mandatory(true);
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

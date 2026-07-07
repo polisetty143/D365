@@ -1,0 +1,677 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_InventFairValueService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The <c>ETG_InventFairValueService</c> class is the base class for services that provide common runtime
+/// functions.
+/// </summary>
+class ETG_InventFairValueService extends SysOperationServiceBase
+{
+    ETG_ClosingStockValLedgerLine     closingStockValLedgerLine;
+    ETGACFParameters    etgAcfParameters = ETGACFParameters::find();
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>ItemIdService</Name>
+				<Source><![CDATA[
+    public void ItemIdService(ETG_InventFairValueContract _inventFairValueContract )
+    {
+        // you can write business Logic here
+        if(etgAcfParameters.EnableFairValue == NoYes::Yes)
+        {
+            this.GenerateFairValueDataNew(_inventFairValueContract);
+        }
+        else
+        {
+            this.GenerateFairValueDataClosingStock(_inventFairValueContract) ;
+        }
+        //this.GenerateFairValueData(_inventFairValueContract);
+     
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>GenerateFairValueDataClosingStock</Name>
+				<Source><![CDATA[
+    public void   GenerateFairValueDataClosingStock(ETG_InventFairValueContract _inventFairValueContract )
+    {
+        ETG_ClosingStockValContract                 closingStockValContract;
+        ETG_InventFairValueLineTable                inventFairValueLineTable;
+        ETG_InventFairValueHeaderTable              inventFairValueHeaderTable;
+        ETG_ClosingStockValDP closingStockValue   = new ETG_ClosingStockValDP();
+        closingStockValContract                   = new ETG_ClosingStockValContract();
+        ttsbegin;
+        select forupdate inventFairValueHeaderTable
+            where inventFairValueHeaderTable.FairValuationSerialNumber == _inventFairValueContract.parmInventFairValueHeaderTable().FairValuationSerialNumber ;
+        if(inventFairValueHeaderTable)
+        {
+            inventFairValueHeaderTable.Grade        = _inventFairValueContract.parmConfig();
+            inventFairValueHeaderTable.Size         = _inventFairValueContract.parmSize();
+            inventFairValueHeaderTable.Origin       = _inventFairValueContract.parmColor();
+            inventFairValueHeaderTable.Brand        = _inventFairValueContract.parmStyle();
+            inventFairValueHeaderTable.Site         = _inventFairValueContract.parmSite();
+            inventFairValueHeaderTable.Warehouse    = _inventFairValueContract.parmWarehouse();
+            inventFairValueHeaderTable.Location     = _inventFairValueContract.parmLocation();
+            inventFairValueHeaderTable.BatchNumber  = _inventFairValueContract.parmBatchNumber();
+
+            inventFairValueHeaderTable.update();
+        }
+        ttscommit;
+        closingStockValContract.parmPerDate(_inventFairValueContract.parmPerDate()) ;
+        closingStockValContract.parmBatchNumber(_inventFairValueContract.parmBatchNumber()) ;
+        closingStockValContract.parmColor(_inventFairValueContract.parmColor()) ;
+        closingStockValContract.parmConfig(_inventFairValueContract.parmConfig()) ;
+        closingStockValContract.parmLocation(_inventFairValueContract.parmLocation()) ;
+        closingStockValContract.parmSite(_inventFairValueContract.parmSite()) ;
+        closingStockValContract.parmStyle(_inventFairValueContract.parmStyle()) ;
+        closingStockValContract.parmSize(_inventFairValueContract.parmSize()) ;
+        closingStockValContract.parmWarehouse(_inventFairValueContract.parmWarehouse()) ;
+        //closingStockValContract(_inventFairValueContract.parmItemId()) ;
+        closingStockValue.parmDataContract(closingStockValContract);
+        closingStockValue.processreport1();
+        closingStockValue.createFairValueLines(_inventFairValueContract.parmInventFairValueHeaderTable(), _inventFairValueContract.parmItemId());
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createFairValueLines</Name>
+				<Source><![CDATA[
+    public void createFairValueLines(ETG_InventFairValueHeaderTable        _inventFairValueHeaderTable, ItemId _fairValueItemId)
+    {
+        ETG_InventFairValueLineTable        inventFairValueLineTable;
+        ETG_InventFairValueLineTable        inventFairValueLineTableUpd;
+        while select closingStockValLedgerLine
+            where (closingStockValLedgerLine.ItemId == _fairValueItemId ||  _fairValueItemId == "")
+        {
+            inventFairValueLineTable.clear();
+            inventFairValueLineTable.FairValuationSerialNumber       =  _inventFairValueHeaderTable.FairValuationSerialNumber; //_inventFairValueContract.parmInventFairValueHeaderTable().FairValuationSerialNumber;
+            inventFairValueLineTable.ItemNumber                      =  closingStockValLedgerLine.ItemId;
+            inventFairValueLineTable.ItemName                        =  closingStockValLedgerLine.ResourceId;
+            inventFairValueLineTable.UnitId                          =  InventTable::find( closingStockValLedgerLine.ItemId).inventTableModuleInvent().UnitId;
+            inventFairValueLineTable.configId                        =  closingStockValLedgerLine.configId;
+            inventFairValueLineTable.WMSLocationId                   =  closingStockValLedgerLine.wMSLocationId;
+            inventFairValueLineTable.InventStyleId                   =  closingStockValLedgerLine.InventStyleId;
+            inventFairValueLineTable.InventSizeId                    =  closingStockValLedgerLine.InventSizeId;
+            inventFairValueLineTable.InventSiteId                    =  closingStockValLedgerLine.InventSiteId ;
+            inventFairValueLineTable.InventLocationId                =  closingStockValLedgerLine.InventLocationId;
+            inventFairValueLineTable.InventBatchId                   =  closingStockValLedgerLine.inventBatchId;
+            inventFairValueLineTable.InventColorId                   =  closingStockValLedgerLine.InventColorId;
+            inventFairValueLineTable.Quantity                        = closingStockValLedgerLine.InventoryFinancialQty; // abs(purchqty + receivedqty) - abs(soldqty + deductedqty)  ;
+            inventFairValueLineTable.OriginalCostValue               = closingStockValLedgerLine.InventoryFinancialAmount; // abs(purchamount + receivedamount) - abs(soldamount + deductedamount);
+
+            if((inventFairValueLineTable.Quantity)!= 0)
+            {
+                inventFairValueLineTable.OriginalCost  = (inventFairValueLineTable.OriginalCostValue)/(inventFairValueLineTable.Quantity);
+            }
+            select inventFairValueLineTableUpd
+                where inventFairValueLineTableUpd.FairValuationSerialNumber == inventFairValueLineTable.FairValuationSerialNumber &&
+                      inventFairValueLineTableUpd.ItemNumber == inventFairValueLineTable.ItemNumber &&
+                      inventFairValueLineTableUpd.Itemdimension == inventFairValueLineTable.Itemdimension;
+            if(inventFairValueLineTableUpd.RecId == 0)
+                inventFairValueLineTable.insert();
+            else
+            {
+                ttsbegin;
+                inventFairValueLineTableUpd.selectForUpdate(true);
+                inventFairValueLineTableUpd.Quantity += inventFairValueLineTable.Quantity;
+                inventFairValueLineTableUpd.OriginalCostValue += inventFairValueLineTable.OriginalCostValue;
+                if((inventFairValueLineTableUpd.Quantity)!= 0)
+                {
+                    inventFairValueLineTableUpd.OriginalCost  = (inventFairValueLineTableUpd.OriginalCostValue)/(inventFairValueLineTableUpd.Quantity);
+                }
+                inventFairValueLineTableUpd.update();
+                ttscommit;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>GenerateFairValueData</Name>
+				<Source><![CDATA[
+    public void   GenerateFairValueData(ETG_InventFairValueContract _inventFairValueContract )
+    {
+        //ETG_InventFairValueContract         ETG_InventFairValueContract;
+
+        ETG_InventFairValueLineTable        inventFairValueLineTable;
+        ETG_InventFairValueLineTable        inventFairValueLineTableUpd;
+        ETG_InventFairValueHeaderTable        inventFairValueHeaderTable;
+        TransDate                           _tdate;
+        DateOnhand                          _from;
+        InventTable                         inventTable;
+        InventTrans                         inventtrans,inventtrans1;
+        InventTransOrigin                   inventTransOrigin;
+        InventDim                           inventDim;
+        InventDim                           inventDimTot;
+        InventItemGroup                     inventItemGroup;
+        InventItemGroupItem                 inventItemGroupItem;
+        ItemId                              _itemid;
+        InventDimId                         inventdimid;
+        InventDim                           inventDimLocal;
+        CompanyInfo                         companyInfo;
+        InventValueReportTmpLine            inventValueReportTmpLine;
+        NoYes                               config,size,color,style,site , warehouse,location,batchnumber;
+        real                                purchqty, soldqty, soldamount, purchamount, deductedqty, deductedamount, receivedqty, receivedamount;
+        ItemId                              fairValueItemId;
+        InventTableModule                   inventTableModule;
+   
+      
+
+        InventTable                         inventTableloc;
+        InventDimParm                       inventDimParmCriteria;
+
+        //ETG_InventFairValueContract = this.parmcontract() as ETG_InventFairValueContract;
+       
+        _from           =       _inventFairValueContract.parmPerDate();
+        config          =       _inventFairValueContract.parmConfig();
+        size            =       _inventFairValueContract.parmSize();
+        color           =       _inventFairValueContract.parmColor();
+        style           =       _inventFairValueContract.parmStyle();
+        site            =       _inventFairValueContract.parmSite();
+        warehouse       =       _inventFairValueContract.parmWarehouse();
+        location        =       _inventFairValueContract.parmLocation();
+        batchnumber     =       _inventFairValueContract.parmBatchNumber();
+        fairValueItemId =       _inventFairValueContract.parmItemId();
+        //companyInfo                 = CompanyInfo::find();
+        // inventFairValueLineTable.CompanyLogo = CompanyImage::findByRecord(companyInfo).Image;
+        //inventFairValueLineTable.CompanyName= companyInfo.Name;
+        ttsbegin;
+        select forupdate inventFairValueHeaderTable
+            where inventFairValueHeaderTable.FairValuationSerialNumber == _inventFairValueContract.parmInventFairValueHeaderTable().FairValuationSerialNumber ;
+        if(inventFairValueHeaderTable)
+        {
+            inventFairValueHeaderTable.Grade        = config;
+            inventFairValueHeaderTable.Size         = size;
+            inventFairValueHeaderTable.Origin       = Color;
+            inventFairValueHeaderTable.Brand        = style;
+            inventFairValueHeaderTable.Site         = site;
+            inventFairValueHeaderTable.Warehouse    = warehouse;
+            inventFairValueHeaderTable.Location     = location;
+            inventFairValueHeaderTable.BatchNumber  = batchnumber;
+
+            inventFairValueHeaderTable.update();
+        }
+        ttscommit;
+        while select inventtrans1
+                  order by itemid ,inventdimid
+            where inventtrans1.DateFinancial <= _from &&
+                  (inventtrans1.StatusIssue == StatusIssue::Sold ||  inventtrans1.StatusReceipt == StatusReceipt::Purchased ||  inventtrans1.StatusReceipt == StatusReceipt::Received || inventtrans1.StatusIssue == StatusIssue::Deducted)
+            join inventdim
+            where  inventtrans1.InventDimId == inventdim.inventDimId
+                    && (inventtrans1.ItemId == fairValueItemId ||  fairValueItemId == Null)
+
+
+        {
+       
+            inventTableloc     = InventTable::find(inventtrans1.ItemId);
+            inventDim          = InventDim::find(inventtrans1.inventDimId);
+
+
+
+            inventFairValueLineTable.clear();
+
+            // inventFairValueLineTable.CompanyLogo                   = FormLetter::companyLogo();
+            // inventFairValueLineTable.CompanyName                   = companyInfo.Name;
+            inventFairValueLineTable.FairValuationSerialNumber       =  _inventFairValueContract.parmInventFairValueHeaderTable().FairValuationSerialNumber;
+            inventFairValueLineTable.ItemNumber                      =  inventTableloc.ItemId;
+            inventFairValueLineTable.ItemName                        =  inventTableloc.itemName();
+            inventFairValueLineTable.UnitId                          =  InventTable::find( inventTableloc.ItemId).inventTableModuleInvent().UnitId;
+            //inventFairValueLineTable.ResourceGroupId               =  inventTableloc.itemGroupId();
+            inventDimLocal.clear();
+            if(config)
+            {
+                inventDimLocal.configId                                  =  inventDim.configId;
+                inventFairValueLineTable.configId                        =  inventDim.configId;
+            }
+            if(location)
+            {
+                inventDimLocal.WMSLocationId                             =  inventDim.wMSLocationId;
+                inventFairValueLineTable.WMSLocationId                   =  inventDim.wMSLocationId;
+            }
+            if(style)
+            {
+                inventDimLocal.InventStyleId                             =  inventDim.InventStyleId;
+                inventFairValueLineTable.InventStyleId                   =  inventDim.InventStyleId;
+            }
+            if(size)
+            {
+                inventDimLocal.InventSizeId                              =  inventDim.InventSizeId;
+                inventFairValueLineTable.InventSizeId                    =  inventDim.InventSizeId;
+            }
+            if(site)
+            {
+                inventDimLocal.InventSiteId                              =  inventDim.InventSiteId ;
+                inventFairValueLineTable.InventSiteId                    =  inventDim.InventSiteId ;
+            }
+            if(warehouse)
+            {
+                inventDimLocal.InventLocationId                          =  inventDim.InventLocationId;
+                inventFairValueLineTable.InventLocationId                =  inventDim.InventLocationId;
+            }
+            if(batchnumber)
+            {
+                inventDimLocal.InventBatchId                             =  inventDim.inventBatchId;
+                inventFairValueLineTable.InventBatchId                   =  inventDim.inventBatchId;
+            }
+            if(color)
+            {
+                inventDimLocal.InventColorId                             =  inventDim.InventColorId;
+                inventFairValueLineTable.InventColorId                   =  inventDim.InventColorId;
+            }
+                
+            /*
+                inventDimLocal.clear();
+                inventDimLocal.configId          =  inventFairValueLineTable.configId ;
+                inventDimLocal.wMSLocationId     =  inventFairValueLineTable.WMSLocationId;
+                inventDimLocal.InventStyleId     = inventFairValueLineTable.InventStyleId;
+                inventDimLocal.InventSizeId      = inventFairValueLineTable.InventSizeId;
+                inventDimLocal.InventSiteId      = inventFairValueLineTable.InventSiteId;
+                inventDimLocal.InventLocationId  = inventFairValueLineTable.InventLocationId;
+                inventDimLocal.inventBatchId     = inventFairValueLineTable.InventBatchId;
+                inventDimLocal.InventColorId     = inventFairValueLineTable.InventColorId;
+                */
+            inventFairValueLineTable.Itemdimension = InventDim::findOrCreate(inventDimLocal).inventDimId;
+            if(inventdimid == InventDim::findOrCreate(inventDimLocal).inventDimId && _itemid == inventtrans1.ItemId)
+                continue;
+       
+            soldqty = 0;
+            purchqty= 0;
+            receivedqty = 0;
+            deductedqty = 0;
+             
+            if(inventdimid != InventDim::findOrCreate(inventDimLocal).inventDimId || _itemid != inventtrans1.ItemId)
+            {
+                select sum(Qty) from   inventtrans
+                    join inventDimTot
+                    where  inventtrans.ItemId == inventtrans1.ItemId
+                    && (inventtrans.DateFinancial <= _from  || inventtrans.DatePhysical <= _from)
+                    && inventtrans.StatusIssue          == StatusIssue::Sold
+                    && inventtrans.inventDimId          == inventDimTot.inventDimId
+                    && ( (inventDimTot.configId         == inventDimLocal.configId           || config == NoYes::No) &&
+                         (inventDimTot.InventSizeId     == inventDimLocal.InventSizeId   || Size       == NoYes::No) &&
+                         (inventDimTot.InventColorId    == inventDimLocal.InventColorId || color       == NoYes::No) &&
+                         (inventDimTot.InventStyleId    == inventDimLocal.InventStyleId || style       == NoYes::No) &&
+                         (inventDimTot.InventSiteId     == inventDimLocal.InventSiteId   || site       == NoYes::No) &&
+                         (inventDimTot.InventLocationId == inventDimLocal.InventLocationId ||warehouse == NoYes::No) &&
+                         (inventDimTot.wMSLocationId    == inventDimLocal.WMSLocationId || location    == NoYes::No) &&
+                         (inventDimTot.inventBatchId    == inventDimLocal.InventBatchId || batchnumber == NoYes::No)
+                       ) ;
+                soldqty = inventtrans.Qty;
+
+
+                select sum(Qty) from   inventtrans
+                    join inventDimTot
+                    where inventtrans.ItemId           == inventtrans1.ItemId
+                    && (inventtrans.DateFinancial <= _from  || inventtrans.DatePhysical <= _from)
+                    && inventtrans.StatusReceipt         == StatusReceipt::Purchased
+                    && inventtrans.inventDimId           == inventDimTot.inventDimId
+                    && ( (inventDimTot.configId          == inventDimLocal.configId || config   == NoYes::No) &&
+                         (inventDimTot.InventSizeId      == inventDimLocal.InventSizeId || Size  == NoYes::No) &&
+                         (inventDimTot.InventColorId     == inventDimLocal.InventColorId || color == NoYes::No) &&
+                         (inventDimTot.InventStyleId     == inventDimLocal.InventStyleId || style == NoYes::No) &&
+                         (inventDimTot.InventSiteId      == inventDimLocal.InventSiteId || site == NoYes::No) &&
+                         (inventDimTot.InventLocationId  == inventDimLocal.InventLocationId || warehouse == NoYes::No) &&
+                         (inventDimTot.wMSLocationId     == inventDimLocal.WMSLocationId || location == NoYes::No) &&
+                         (inventDimTot.inventBatchId     == inventDimLocal.InventBatchId || batchnumber == NoYes::No)
+                       );
+                purchqty =   inventtrans.Qty;
+
+
+                select sum(Qty) from   inventtrans
+                    join inventDimTot
+                    where  inventtrans.ItemId == inventtrans1.ItemId
+                    && inventtrans.DateFinancial <= _from
+                    && inventtrans.StatusIssue == StatusIssue::Deducted
+                    && inventtrans.inventDimId == inventDimTot.inventDimId
+                    && ( (inventDimTot.configId == inventDimLocal.configId || config == NoYes::No) &&
+                         (inventDimTot.InventSizeId == inventDimLocal.InventSizeId || Size == NoYes::No) &&
+                         (inventDimTot.InventColorId == inventDimLocal.InventColorId || color == NoYes::No) &&
+                         (inventDimTot.InventStyleId == inventDimLocal.InventStyleId || style == NoYes::No) &&
+                         (inventDimTot.InventSiteId == inventDimLocal.InventSiteId || site == NoYes::No) &&
+                         (inventDimTot.InventLocationId == inventDimLocal.InventLocationId || warehouse == NoYes::No) &&
+                         (inventDimTot.wMSLocationId == inventDimLocal.WMSLocationId || location == NoYes::No) &&
+                         (inventDimTot.inventBatchId == inventDimLocal.InventBatchId || batchnumber == NoYes::No)
+                       ) ;
+                deductedqty = inventtrans.Qty;
+
+                select sum(Qty) from   inventtrans
+                    join inventDimTot
+                    where  inventtrans.ItemId == inventtrans1.ItemId
+                    && inventtrans.DateFinancial <= _from
+                    && inventtrans.StatusReceipt == StatusReceipt::Received
+                    && inventtrans.inventDimId == inventDimTot.inventDimId
+                    && ( (inventDimTot.configId == inventDimLocal.configId || config == NoYes::No) &&
+                         (inventDimTot.InventSizeId == inventDimLocal.InventSizeId || Size == NoYes::No) &&
+                         (inventDimTot.InventColorId == inventDimLocal.InventColorId || color == NoYes::No) &&
+                         (inventDimTot.InventStyleId == inventDimLocal.InventStyleId || style == NoYes::No) &&
+                         (inventDimTot.InventSiteId == inventDimLocal.InventSiteId || site == NoYes::No) &&
+                         (inventDimTot.InventLocationId == inventDimLocal.InventLocationId || warehouse == NoYes::No) &&
+                         (inventDimTot.wMSLocationId == inventDimLocal.WMSLocationId || location == NoYes::No) &&
+                         (inventDimTot.inventBatchId == inventDimLocal.InventBatchId || batchnumber == NoYes::No)
+                       ) ;
+                receivedqty = inventtrans.Qty;
+
+
+
+
+            }
+            inventdimid = InventDim::findOrCreate(inventDimLocal).inventDimId;
+            _itemid = inventtrans1.ItemId;
+            
+            //closingStockValLedgerLine.InventoryFinancialQty = purchqty + soldqty;
+            inventFairValueLineTable.Quantity     =   abs(purchqty + receivedqty) - abs(soldqty + deductedqty)  ;
+
+            soldamount           = 0;
+            purchamount          = 0;
+            receivedamount       = 0;
+            deductedamount       = 0;
+            
+            while select inventtrans where inventtrans.ItemId == _itemid
+                 join inventDimTot
+                 where inventtrans.ItemId == inventtrans1.ItemId
+                    && (inventtrans.DateFinancial <= _from  || inventtrans.DatePhysical <= _from)
+                    &&  inventtrans.StatusIssue == StatusIssue::Sold
+                    &&inventtrans.inventDimId == inventDimTot.inventDimId
+                    && ( (inventDimTot.configId == inventDimLocal.configId || config == NoYes::No) &&
+                         (inventDimTot.InventSizeId == inventDimLocal.InventSizeId || Size == NoYes::No) &&
+                         (inventDimTot.InventColorId == inventDimLocal.InventColorId || color == NoYes::No) &&
+                         (inventDimTot.InventStyleId == inventDimLocal.InventStyleId || style == NoYes::No) &&
+                         (inventDimTot.InventSiteId == inventDimLocal.InventSiteId || site == NoYes::No) &&
+                         (inventDimTot.InventLocationId == inventDimLocal.InventLocationId || warehouse == NoYes::No) &&
+                         (inventDimTot.wMSLocationId == inventDimLocal.WMSLocationId || location == NoYes::No) &&
+                         (inventDimTot.inventBatchId == inventDimLocal.InventBatchId || batchnumber == NoYes::No)
+                       )
+            {
+                
+                soldamount += inventtrans.CostAmountPosted;
+
+            }
+            InventSettlement        inventsettlement;
+            select sum(CostAmountAdjustment) from   inventtrans
+                join inventsettlement where   inventsettlement.TransRecId == inventtrans.RecId &&  inventsettlement.TransDate <= _from  && inventsettlement.Cancelled == 0
+                    join inventDimTot
+                    where  inventtrans.ItemId == inventtrans1.ItemId
+                    && (inventtrans.DateFinancial <= _from  || inventtrans.DatePhysical <= _from)
+                    && inventtrans.StatusIssue == StatusIssue::Sold
+                    && inventtrans.inventDimId == inventDimTot.inventDimId
+                    && ( (inventDimTot.configId == inventDimLocal.configId || config == NoYes::No) &&
+                    (inventDimTot.InventSizeId == inventDimLocal.InventSizeId || Size == NoYes::No) &&
+                    (inventDimTot.InventColorId == inventDimLocal.InventColorId || color == NoYes::No) &&
+                    (inventDimTot.InventStyleId == inventDimLocal.InventStyleId || style == NoYes::No) &&
+                    (inventDimTot.InventSiteId == inventDimLocal.InventSiteId || site == NoYes::No) &&
+                    (inventDimTot.InventLocationId == inventDimLocal.InventLocationId || warehouse == NoYes::No) &&
+                    (inventDimTot.wMSLocationId == inventDimLocal.WMSLocationId || location == NoYes::No) &&
+                    (inventDimTot.inventBatchId == inventDimLocal.InventBatchId || batchnumber == NoYes::No)) ;
+                        
+            soldamount += inventtrans.CostAmountAdjustment;
+
+            //s3
+            //deducted amount
+            select sum(CostAmountPhysical) from   inventtrans
+                    join inventDimTot
+                    where  inventtrans.ItemId == inventtrans1.ItemId
+                    && inventtrans.DatePhysical <= _from                                //rajesh
+                   && inventtrans.StatusIssue == StatusIssue::Deducted
+                    && inventtrans.inventDimId == inventDimTot.inventDimId
+                    && ( (inventDimTot.configId == inventDimLocal.configId || config == NoYes::No) &&
+                    (inventDimTot.InventSizeId == inventDimLocal.InventSizeId || Size == NoYes::No) &&
+                    (inventDimTot.InventColorId == inventDimLocal.InventColorId || color == NoYes::No) &&
+                    (inventDimTot.InventStyleId == inventDimLocal.InventStyleId || style == NoYes::No) &&
+                    (inventDimTot.InventSiteId == inventDimLocal.InventSiteId || site == NoYes::No) &&
+                    (inventDimTot.InventLocationId == inventDimLocal.InventLocationId || warehouse == NoYes::No) &&
+                    (inventDimTot.wMSLocationId == inventDimLocal.WMSLocationId || location == NoYes::No) &&
+                    (inventDimTot.inventBatchId == inventDimLocal.InventBatchId || batchnumber == NoYes::No)
+                ) ;
+
+            deductedamount = inventtrans.CostAmountPhysical ;
+            //
+            //Purch amount
+            select sum(costamountposted) ,sum(CostAmountAdjustment) from   inventtrans
+                    join inventDimTot
+                    where  inventtrans.ItemId == inventtrans1.ItemId
+                    && (inventtrans.DateFinancial <= _from   || inventtrans.DatePhysical <= _from)
+                && inventtrans.StatusReceipt == StatusReceipt::Purchased
+                    && inventtrans.inventDimId == inventDimTot.inventDimId
+                    && ( (inventDimTot.configId == inventDimLocal.configId || config == NoYes::No) &&
+                    (inventDimTot.InventSizeId == inventDimLocal.InventSizeId || Size == NoYes::No) &&
+                    (inventDimTot.InventColorId == inventDimLocal.InventColorId || color == NoYes::No) &&
+                    (inventDimTot.InventStyleId == inventDimLocal.InventStyleId || style == NoYes::No) &&
+                    (inventDimTot.InventSiteId == inventDimLocal.InventSiteId || site == NoYes::No) &&
+                    (inventDimTot.InventLocationId == inventDimLocal.InventLocationId || warehouse == NoYes::No) &&
+                    (inventDimTot.wMSLocationId == inventDimLocal.WMSLocationId || location == NoYes::No) &&
+                    (inventDimTot.inventBatchId == inventDimLocal.InventBatchId || batchnumber == NoYes::No)
+                ) ;
+                        
+            purchamount = inventtrans.CostAmountPosted + inventtrans.CostAmountAdjustment;
+
+
+
+
+            //receive amount
+            select sum(CostAmountPhysical)  from   inventtrans
+                    join inventDimTot
+                    where  inventtrans.ItemId == inventtrans1.ItemId
+                    && inventtrans.DatePhysical <= _from
+                && inventtrans.StatusReceipt == StatusReceipt::Received
+                    && inventtrans.inventDimId == inventDimTot.inventDimId
+                    && ( (inventDimTot.configId == inventDimLocal.configId || config == NoYes::No) &&
+                    (inventDimTot.InventSizeId == inventDimLocal.InventSizeId || Size == NoYes::No) &&
+                    (inventDimTot.InventColorId == inventDimLocal.InventColorId || color == NoYes::No) &&
+                    (inventDimTot.InventStyleId == inventDimLocal.InventStyleId || style == NoYes::No) &&
+                    (inventDimTot.InventSiteId == inventDimLocal.InventSiteId || site == NoYes::No) &&
+                    (inventDimTot.InventLocationId == inventDimLocal.InventLocationId || warehouse == NoYes::No) &&
+                    (inventDimTot.wMSLocationId == inventDimLocal.WMSLocationId || location == NoYes::No) &&
+                    (inventDimTot.inventBatchId == inventDimLocal.InventBatchId || batchnumber == NoYes::No)
+                ) ;
+                        
+            receivedamount = inventtrans.CostAmountPhysical ;
+
+
+
+
+
+            //closingStockValLedgerLine.InventoryFinancialAmount  = purchamount - soldamount;
+            inventFairValueLineTable.OriginalCostValue  = abs(purchamount + receivedamount) - abs(soldamount + deductedamount);
+
+            if((inventFairValueLineTable.Quantity)!= 0)
+            {
+                inventFairValueLineTable.OriginalCost  = (inventFairValueLineTable.OriginalCostValue)/(inventFairValueLineTable.Quantity);
+            }
+            select inventFairValueLineTableUpd
+                where inventFairValueLineTableUpd.FairValuationSerialNumber == inventFairValueLineTable.FairValuationSerialNumber &&
+                      inventFairValueLineTableUpd.ItemNumber == inventFairValueLineTable.ItemNumber &&
+                      inventFairValueLineTableUpd.Itemdimension == inventFairValueLineTable.Itemdimension;
+            if(inventFairValueLineTableUpd.RecId == 0)
+                inventFairValueLineTable.insert();
+            else
+            {
+                ttsbegin;
+                inventFairValueLineTableUpd.selectForUpdate(true);
+                inventFairValueLineTableUpd.Quantity += inventFairValueLineTable.Quantity;
+                inventFairValueLineTableUpd.OriginalCostValue += inventFairValueLineTable.OriginalCostValue;
+                if((inventFairValueLineTableUpd.Quantity)!= 0)
+                {
+                    inventFairValueLineTableUpd.OriginalCost  = (inventFairValueLineTableUpd.OriginalCostValue)/(inventFairValueLineTableUpd.Quantity);
+                }
+                inventFairValueLineTableUpd.update();
+                ttscommit;
+            }
+
+
+        }
+
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>GenerateFairValueDataNew</Name>
+				<Source><![CDATA[
+    public void  GenerateFairValueDataNew(ETG_InventFairValueContract _inventFairValueContract)
+    {
+        ETG_InventFairValueLineTable        inventFairValueLineTable;
+        ETG_InventFairValueLineTable        inventFairValueLineTableUpd;
+        ETG_InventFairValueHeaderTable        inventFairValueHeaderTable;
+        TransDate                           _tdate;
+        DateOnhand                          _from;
+        InventTable                         inventTable;
+        InventTrans                         inventtrans,inventtrans1;
+        InventTransOrigin                   inventTransOrigin;
+        InventDim                           inventDim;
+        InventDim                           inventDimTot;
+        InventItemGroup                     inventItemGroup;
+        InventItemGroupItem                 inventItemGroupItem;
+        ItemId                              _itemid;
+        InventDimId                         inventdimid;
+        InventDim                           inventDimLocal;
+        CompanyInfo                         companyInfo;
+        InventValueReportTmpLine            inventValueReportTmpLine;
+        NoYes                               config,size,color,style,site , warehouse,location,batchnumber, serialNumber;
+        real                                purchqty, soldqty, soldamount, purchamount, deductedqty, deductedamount, receivedqty, receivedamount;
+        ItemId                              fairValueItemId;
+        InventTableModule                   inventTableModule;
+        InventTransPosting                  inventTransPosting;//Added by Sai
+    
+      
+    
+        InventTable                         inventTableloc;
+        InventDimParm                       inventDimParmCriteria;
+    
+       
+        _from             = _inventFairValueContract.parmPerDate();
+        config            = _inventFairValueContract.parmConfig();
+        size              = _inventFairValueContract.parmSize();
+        color             = _inventFairValueContract.parmColor();
+        style             = _inventFairValueContract.parmStyle();
+        site              = _inventFairValueContract.parmSite();
+        warehouse         = _inventFairValueContract.parmWarehouse();
+        location          = _inventFairValueContract.parmLocation();
+        batchnumber       = _inventFairValueContract.parmBatchNumber();
+        serialNumber      = _inventFairValueContract.parmSerialNumber();
+        fairValueItemId   = _inventFairValueContract.parmItemId();
+
+      
+        ttsbegin;
+        select forupdate inventFairValueHeaderTable
+            where inventFairValueHeaderTable.FairValuationSerialNumber == _inventFairValueContract.parmInventFairValueHeaderTable().FairValuationSerialNumber ;
+        if(inventFairValueHeaderTable)
+        {
+            inventFairValueHeaderTable.Grade        = config;
+            inventFairValueHeaderTable.Size         = size;
+            inventFairValueHeaderTable.Origin       = Color;
+            inventFairValueHeaderTable.Brand        = style;
+            inventFairValueHeaderTable.Site         = site;
+            inventFairValueHeaderTable.Warehouse    = warehouse;
+            inventFairValueHeaderTable.Location     = location;
+            inventFairValueHeaderTable.BatchNumber  = batchnumber;
+            inventFairValueHeaderTable.SerialNumber = serialNumber;
+
+            inventFairValueHeaderTable.update();
+        }
+        ttscommit;
+        //Added by Sai  - begin
+        while select sum(Qty),sum(CostAmountPosted),sum(CostAmountAdjustment),ItemId,inventdimid from inventtrans 
+            group by itemid ,inventdimid 
+            where inventtrans.DateFinancial != dateNull() 
+            && inventtrans.DateFinancial <= _inventFairValueContract.parmPerDate() 
+            join inventdim
+            group by configId,InventStyleId, InventSizeId, InventColorId,InventSiteId, InventLocationId, wMSLocationId, inventBatchId,InventSerialId //added by sai
+            where  inventtrans.InventDimId == inventdim.inventDimId
+            && (inventtrans.ItemId == fairValueItemId ||  fairValueItemId == Null)
+            join inventTransOrigin
+            where inventTransOrigin.RecId == inventtrans.InventTransOrigin
+            exists join  inventTransPosting
+            where inventTransPosting.InventTransOrigin == inventTransOrigin.RecId
+            && inventTransPosting.IsPosted        == NoYes::Yes
+            && inventTransPosting.ETGCommodity    == _inventFairValueContract.parmCommodity()
+            && inventTransPosting.ETGSubCommodity == _inventFairValueContract.parmSubCommodity()
+            && inventTransPosting.ETGVertical     == _inventFairValueContract.parmvertical()
+            && inventTransPosting.ETGSubVertical  == _inventFairValueContract.parmSubvertical()
+
+        {
+            inventTableloc     = InventTable::find(inventtrans.ItemId);
+            inventDim          = InventDim::find(inventtrans.inventDimId);
+            if(inventtrans.Qty <= 0)
+            continue;
+            soldamount         = inventtrans.CostAmountPosted ;
+            inventFairValueLineTable.clear();
+            
+            inventFairValueLineTable.FairValuationSerialNumber = _inventFairValueContract.parmInventFairValueHeaderTable().FairValuationSerialNumber;
+            inventFairValueLineTable.ItemNumber                = inventTableloc.ItemId;
+            inventFairValueLineTable.ItemName                  = inventTableloc.itemName();
+            inventFairValueLineTable.UnitId                    = InventTable::find( inventTableloc.ItemId).inventTableModuleInvent().UnitId;
+            inventFairValueLineTable.Quantity                  = inventtrans.Qty;
+            inventFairValueLineTable.OriginalCostValue         = soldamount;
+            inventFairValueLineTable.OriginalCost              = (inventFairValueLineTable.OriginalCostValue)/(inventFairValueLineTable.Quantity);
+
+            inventDimLocal.clear();
+            if(config)
+            {
+                inventDimLocal.configId                  =  inventDim.configId;
+                inventFairValueLineTable.configId        =  inventDim.configId;
+            }
+            if(location)
+            {
+                inventDimLocal.WMSLocationId             =  inventDim.wMSLocationId;
+                inventFairValueLineTable.WMSLocationId   =  inventDim.wMSLocationId;
+            }
+            if(style)
+            {
+                inventDimLocal.InventStyleId             =  inventDim.InventStyleId;
+                inventFairValueLineTable.InventStyleId   =  inventDim.InventStyleId;
+            }
+            if(size)
+            {
+                inventDimLocal.InventSizeId              =  inventDim.InventSizeId;
+                inventFairValueLineTable.InventSizeId    =  inventDim.InventSizeId;
+            }
+            if(site)
+            {
+                inventDimLocal.InventSiteId              =  inventDim.InventSiteId ;
+                inventFairValueLineTable.InventSiteId    =  inventDim.InventSiteId ;
+            }
+            if(warehouse)
+            {
+                inventDimLocal.InventLocationId             =  inventDim.InventLocationId;
+                inventFairValueLineTable.InventLocationId   =  inventDim.InventLocationId;
+            }
+            if(batchnumber)
+            {
+                inventDimLocal.InventBatchId             =  inventDim.inventBatchId;
+                inventFairValueLineTable.InventBatchId   =  inventDim.inventBatchId;
+            } 
+            if(color)
+            {
+                inventDimLocal.InventColorId             =  inventDim.InventColorId;
+                inventFairValueLineTable.InventColorId   =  inventDim.InventColorId;
+            }
+            if(serialNumber)
+            {
+                inventDimLocal.inventSerialId            =  inventDim.inventSerialId;
+                inventFairValueLineTable.inventSerialId  =  inventDim.inventSerialId;
+            }
+            inventFairValueLineTable.Itemdimension       = InventDim::findOrCreate(inventDimLocal).inventDimId;
+            inventFairValueLineTable.ETGVertical         = _inventFairValueContract.parmvertical();
+            inventFairValueLineTable.ETGSubVertical      = _inventFairValueContract.parmSubvertical();
+            inventFairValueLineTable.ETGCommodity        = _inventFairValueContract.parmCommodity();
+            inventFairValueLineTable.ETGSubCommodity     = _inventFairValueContract.parmSubCommodity();
+
+            inventFairValueLineTable.insert();
+            
+        }
+    }
+    //Added by Sai -End
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

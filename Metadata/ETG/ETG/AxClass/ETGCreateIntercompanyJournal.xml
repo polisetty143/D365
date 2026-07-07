@@ -1,0 +1,289 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCreateIntercompanyJournal</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+internal final class ETGCreateIntercompanyJournal
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args _args)
+    {
+        if(ETGACFParameters::find().EnableIntercompanyTransactions == NoYes::Yes)
+        {
+        
+            LedgerJournalTrans LedgerJournalTrans,LedgerJournalTransLoc,LedgerJournalTransLines;
+            LedgerJournalTable LedgerJournalTable;
+        
+            FormDataSource Ledgertransds = _args.caller().datasource(1);
+
+
+            LedgerJournalTrans = Ledgertransds.cursor();
+
+            while select LedgerJournalTransLines
+            where LedgerJournalTransLines.JournalNum == LedgerJournalTrans.JournalNum
+            {
+                LedgerJournalTable = LedgerJournalTable::find(LedgerJournalTransLines.JournalNum);
+
+                if(LedgerJournalTable.ETGIsICJournalCreated)
+                {
+                    throw Error("@ETG_New:ETGIntercompanyJournalCreated");
+                }
+                
+                if(!LedgerJournalTransLines.ETGICDestinationEntity)
+                {
+                    throw Error("@ETG_New:ETGEnterDestination");
+                }
+
+                if(!LedgerJournalTransLines.OffsetLedgerDimension)
+                {
+                    throw Error("@ETG_New:ETGEnterOffsetAccount");
+                }
+
+                if(LedgerJournalTransLines.ETGICDestinationEntity == curExt())
+                {
+                    throw Error("@ETG_New:ETGDestinationCurrentCheck");
+                }
+           
+
+            }
+
+
+            int Counter =  1;
+            
+            ETGIntercompanyPostingSetup IntercompanyPostingSetup;
+            LedgerJournalTable ledgerJournalTableNew;
+            
+
+            while select LedgerJournalTransLoc
+            where LedgerJournalTransLoc.JournalNum == LedgerJournalTrans.JournalNum
+            {
+                LedgerJournalTable = LedgerJournalTable::find(LedgerJournalTransLoc.JournalNum);
+
+                if(LedgerJournalTransLoc.OffsetLedgerDimension)
+                {
+                    //CS, DLT, 2/19/2025 Shreelekha Samudralwar create vendor invoice journal for brokearges amount
+                    Voucher tmpVoucher;
+                    //CE, DLT, 2/19/2025 Shreelekha Samudralwar create vendor invoice journal for brokearges amount
+
+                    For (int VoucherLineCount=1; VoucherLineCount<=2; VoucherLineCount++)
+                    {
+                        select firstonly IntercompanyPostingSetup
+                            where IntercompanyPostingSetup.DestinationCompany == LedgerJournalTransLoc.ETGICDestinationEntity
+                            && IntercompanyPostingSetup.OriginatingCompany == curExt();
+                        ttsbegin;
+                        changecompany(LedgerJournalTransLoc.ETGICDestinationEntity)
+                        {
+                            if(Counter ==1)
+                            {
+                    
+                             //   LedgerJournalTable ledgerJournalTableNew = null;
+                                LedgerJournalName ledgerjournalnameloc;
+                                select ledgerjournalnameloc where ledgerjournalnameloc.JournalName ==  LedgerJournalTable.JournalName;
+
+                                ledgerJournalTableNew.clear();
+                                ledgerJournalTableNew.initValue();
+                                ledgerJournalTableNew.JournalName =  ledgerjournalnameloc.JournalName;
+                                ledgerJournalTableNew.initFromLedgerJournalName();
+                                ledgerJournalTableNew.JournalNum  =  JournalTableData::newTable(ledgerJournalTableNew).nextJournalId();
+                                ledgerJournalTableNew.Name = LedgerJournalTable.Name;
+                                ledgerJournalTableNew.JournalType = LedgerJournalTable.JournalType;
+                                ledgerJournalTableNew.CurrencyCode = LedgerJournalTable.CurrencyCode;
+                                ledgerJournalTableNew.ETGSourceEntityJournalNum = LedgerJournalTable.JournalNum;
+                                ledgerJournalTableNew.ETGICSourceEntity = LedgerJournalTable.DataAreaId;
+                                ledgerJournalTableNew.insert();
+
+                                WorkflowTable wfTable;
+
+                                select firstonly wfTable
+                                    where wfTable.SequenceNumber == ledgerjournalnameloc.Configuration;
+
+                                if(wfTable.TemplateName)
+                                {
+                                    try
+                                    {
+                                        ttsbegin;
+                                        Workflow::activateFromWorkflowSequenceNumber(ledgerjournalnameloc.Configuration, ledgerJournalTableNew.RecId,"Auto submit to workflow" , NoYes::No);
+                                        LedgerJournalWFApprovalStatusManager::submitFromForm(ledgerJournalTableNew);
+                                        ttscommit;
+                                    }
+                                    catch (Exception::Error)
+                                    {
+                                        throw error(strFmt("@SYS111653", ledgerJournalTableNew.JournalName, ledgerJournalTableNew.JournalNum));
+                                    }
+                       
+                                }
+
+                                
+                                //Send email in target entity.
+                                try
+                                {
+                                    ETGCreateIntercompanyJournal::sendEmailNotifications(ledgerjournalnameloc,ledgerJournalTableNew);
+                                }
+                                catch(Exception::Error)
+                                {
+                                    throw Error("@ETG_New:ErrorInSendingMail");
+                                }
+
+                            }
+
+                            LedgerJournalTrans LedgerJournalTransNew = null;
+
+                            Ledgerjournalname                          ledgerjournalname;
+                           // LedgerJournalTable LedgerJournaltablecreate;
+                            select ledgerjournalname where ledgerjournalname.JournalName ==  LedgerJournalTable.JournalName;
+
+                            //select firstonly LedgerJournaltablecreate
+                            //    where LedgerJournaltablecreate.ETGSourceEntityJournalNum == LedgerJournalTransLoc.JournalNum;
+
+                            NumberSeq numberSeq =  NumberSeq::newGetVoucherFromId((ledgerjournalname.NumberSequenceTable));
+                            LedgerJournalTransNew.clear();
+                            LedgerJournalTransNew.initValue();
+                            
+                            LedgerJournalTransNew.JournalNum   =   ledgerJournalTableNew.JournalNum;//LedgerJournaltablecreate.JournalNum;
+                            LedgerJournalTransNew.AccountType  =   LedgerJournalTransLoc.AccountType;
+                            LedgerJournalTransNew.Company      =   curext();
+                            //LedgerJournalTransNew.parmAccount(_VendInvoiceInfoTable.InvoiceAccount,LedgerjournalTrans.AccountType);
+                            LedgerJournalTransNew.CurrencyCode =   LedgerJournalTransLoc.CurrencyCode;
+                            LedgerJournalTransNew.TransDate    =  systemDateGet();
+                            LedgerJournalTransNew.initForCurrency( ledgerJournalTableNew);
+                           // LedgerJournalTransNew.initForCurrency( LedgerJournaltablecreate);
+                           LedgerJournalTransNew.Txt          =  ledgerJournalTableNew.Name;// LedgerJournaltablecreate.Name;
+
+                            //CS, DLT, 2/19/2025 Shreelekha Samudralwar create vendor invoice journal for brokearges amount
+                            if (!tmpVoucher || tmpVoucher == "")
+                            {
+                                tmpVoucher = numberSeq.voucher();
+                            }
+                            //CE, DLT, 2/19/2025 Shreelekha Samudralwar create vendor invoice journal for brokearges amount
+
+                            if(VoucherLineCount == 2)
+                            {
+                                //CS, DLT, 2/19/2025 Shreelekha Samudralwar create vendor invoice journal for brokearges amount
+                                LedgerJournalTransNew.Voucher = tmpVoucher;
+                                //CE, DLT, 2/19/2025 Shreelekha Samudralwar create vendor invoice journal for brokearges amount
+                                LedgerJournalTransNew.AmountCurCredit = LedgerJournalTransLoc.AmountCurDebit;
+                                LedgerJournalTransNew.AmountCurDebit = LedgerJournalTransLoc.AmountCurCredit;
+
+                                LedgerJournalTransNew.DefaultDimension  = LedgerJournalTransLoc.DefaultDimension;
+                                LedgerJournalTransNew.TransactionType         =  LedgerJournalTransLoc.TransactionType;
+                               
+                                LedgerJournalTransNew.LedgerDimension = LedgerDimensionFacade::ServiceCreateLedgerDimension(LedgerJournalTransLoc.OffsetLedgerDimension,
+                                                                                                                                    LedgerJournalTransLoc.DefaultDimension);
+                            }
+                            else
+                            {
+                                //CS, DLT, 2/19/2025 Shreelekha Samudralwar create vendor invoice journal for brokearges amount
+                                LedgerJournalTransNew.Voucher = tmpVoucher;
+                                //CE, DLT, 2/19/2025 Shreelekha Samudralwar create vendor invoice journal for brokearges amount
+                                LedgerJournalTransNew.AmountCurCredit = LedgerJournalTransLoc.AmountCurCredit;
+                                LedgerJournalTransNew.AmountCurDebit = LedgerJournalTransLoc.AmountCurDebit;
+
+                                LedgerJournalTransNew.DefaultDimension  = LedgerJournalTransLoc.DefaultDimension;
+                                LedgerJournalTransNew.TransactionType         =  LedgerJournalTransLoc.TransactionType;
+
+                                
+
+                                if(LedgerJournalTransLoc.AmountCurCredit)
+                                {
+                                    
+                                    LedgerJournalTransNew.LedgerDimension = LedgerDimensionFacade::ServiceCreateLedgerDimension(IntercompanyPostingSetup.DestinationCreditLedgerDimension,
+                                        LedgerJournalTransLoc.DefaultDimension);
+                                }
+                                else
+                                {
+                                    LedgerJournalTransNew.LedgerDimension = LedgerDimensionFacade::ServiceCreateLedgerDimension(IntercompanyPostingSetup.DestinationDebitLedgerDimension,
+                                        LedgerJournalTransLoc.DefaultDimension);
+                                }
+
+                                
+                            }
+                
+                            LedgerJournalTransNew.Approved                 = NoYes::Yes;
+                            LedgerJournalTransNew.Approver                 = HcmWorker::userId2Worker(curuserid());
+                            LedgerJournalTransNew.DocumentDate             = LedgerJournalTransNew.Transdate;
+                            ledgerjournaltransNew.ETGICDestinationEntity = '';
+                            ledgerjournaltransNew.ETGICSourceEntity = LedgerJournalTransLoc.DataAreaId;
+                            ledgerjournaltransNew.ETGIntercomRefRecID = LedgerJournalTransLoc.RecId;
+                            LedgerJournalTransNew.insert();
+                            Counter += 1;
+
+
+                        }
+                        ttscommit;
+
+                        ttsbegin;
+                        LedgerJournalTable.selectForUpdate(true);
+                        LedgerJournalTable.ETGICDestinationEntity = LedgerJournalTransLoc.ETGICDestinationEntity;
+                        LedgerJournalTable.ETGIsICJournalCreated = NoYes::Yes;
+                        LedgerJournalTable.update();
+                        ttscommit;
+
+                        ttsbegin;
+                        LedgerJournalTransLoc.selectForUpdate(true);
+                        LedgerJournalTransLoc.ETGIsICJournalCreated = NoYes::Yes;
+                        LedgerJournalTransLoc.update();
+                        ttscommit;
+
+                        
+                    
+                    }
+                }
+            }
+            info(strFmt("@ETG_New:IntercompanyJournalCreated", ledgerJournalTableNew.JournalNum, ledgerJournalTableNew.DataAreaId));
+            Ledgertransds.refresh();
+            Ledgertransds.research(true);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>sendEmailNotifications</Name>
+				<Source><![CDATA[
+    public static void sendEmailNotifications(LedgerJournalName ledgerjournalnameloc,LedgerJournalTable ledgerJournalTableNew)
+    {
+        SysEmailParameters _SysEmailParameters;
+
+
+        var builder = new SysMailerMessageBuilder();
+        select SMTPUserName from _SysEmailParameters;
+
+        if(_SysEmailParameters.SMTPUserName)
+        {
+            UserGroupList usergrouplist;
+            UserInfo userinfo;
+            select firstonly usergrouplist
+                where usergrouplist.groupId == ledgerjournalnameloc.ApproveGroupId;
+
+            if(usergrouplist.userId)
+            {
+                select firstonly userinfo
+                    where userinfo.id == usergrouplist.userId;
+
+                builder.setFrom(_SysEmailParameters.SMTPUserName);
+                builder.addTo(userinfo.networkAlias);
+
+                builder.setSubject(strFmt("Journal Created in %1 entity",curExt()));
+
+                builder.setBody(strFmt("Journal is created in %1 \n Journal number : %2 \n ",curExt(),ledgerJournalTableNew.JournalNum));
+
+                var message = builder.getMessage();
+
+                SysMailerFactory::getNonInteractiveMailer().sendNonInteractive(message);
+
+                Info("@ETG_New:EmailSuccess");
+            }
+
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

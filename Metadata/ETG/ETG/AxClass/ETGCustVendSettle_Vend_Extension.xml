@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCustVendSettle_Vend_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// extension class for class <c>CustVendSettle_Vend</c>
+/// </summary>
+[ExtensionOf(Classstr(CustVendSettle_Vend))]
+internal final class ETGCustVendSettle_Vend_Extension
+{
+    public container con;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getVouchers</Name>
+				<Source><![CDATA[
+    public container getVouchers()
+    {
+        return con;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateTransOpen</Name>
+				<Source><![CDATA[
+    public void updateTransOpen(CustVendTrans _custVendTrans, CustVendTransOpen _custVendTransOpen)
+    {
+        next updateTransOpen( _custVendTrans,  _custVendTransOpen);
+
+        //CS, DLT, 31012025, vendor payment journal integration with fusion
+        if (this.moduleCustVend() == ModuleCustVend::Vend && BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGVendPaymPostedBusinessEvent)))
+        {
+            VendTrans vendTransETG;
+            select firstonly vendTransETG where vendTransETG.Voucher == _custVendTrans.Voucher;
+            if (vendTransETG && (vendTransETG.TransType == LedgerTransType::Payment || vendTransETG.TransType == LedgerTransType::None))
+            {
+                con +=[_custVendTrans.Voucher];
+            }
+        }
+        //CE, DLT, 31012025, vendor payment journal integration with fusion
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>settleNow</Name>
+				<Source><![CDATA[
+    public void settleNow(dataAreaId _company, tableId _tableId, recId _recId, boolean _balancePostingProfile)
+    {
+        next settleNow( _company,  _tableId,  _recId,  _balancePostingProfile);
+        
+        //CS, DLT, 31012025, vendor payment journal integration with fusion
+        if (BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGVendPaymPostedBusinessEvent)))
+        {
+            container cont = this.getVouchers();
+        
+            if(this.moduleCustVend() == ModuleCustVend::Vend)
+            {
+                ETGCustVendPaymSettlement::sendPaymentVend(cont);
+            }
+        }
+        //CE, DLT, 31012025, vendor payment journal integration with fusion
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

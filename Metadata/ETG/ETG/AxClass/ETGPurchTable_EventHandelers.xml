@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchTable_EventHandelers</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+internal final class ETGPurchTable_EventHandelers
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>CreateLinkNew_OnClicked</Name>
+				<Source><![CDATA[
+   /// <summary>
+    ///Handles the Clicked event for the "CreateLinkNew" button
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(PurchTable, CreateLinkNew), FormControlEventType::Clicked)]
+    public static void CreateLinkNew_OnClicked(FormControl sender, FormControlEventArgs e)
+    {
+
+        if(ETGACFParameters::find().EnableUATSmallPoints)
+        {
+            FormDataSource purchtable_ds = sender.formRun().dataSource(formDataSourceStr(PurchTable, PurchTable));
+            PurchTable     purchtable    = purchtable_ds.cursor();
+            FormRun        formRun       = purchtable_ds.formRun();
+            if(formHasMethod(formRun,formMethodStr(PurchTable, createAgreementLink)))
+            {
+                formRun.createAgreementLink();
+            }
+
+            AgreementLineReleasedLine   agreementLineReleasedLine;
+            AgreementHeader             agreementheader;
+            VendInvoiceJour             vendinvoicejour;
+            VendInvoiceTrans            vendinvoicetrans;
+            AgreementLine               agreementLine;
+
+            select firstonly vendinvoicejour  where vendinvoicejour.PurchId == purchtable.PurchId;
+            select firstonly vendinvoicetrans where vendinvoicetrans.InvoiceId == vendinvoicejour.InvoiceId;
+            select firstonly agreementheader  where agreementheader.RecId  == purchtable.MatchingAgreement;
+            select firstonly agreementLine    where agreementLine.Agreement  == agreementheader.RecId ;
+            select firstonly agreementLineReleasedLine where agreementLineReleasedLine.AgreementLine == agreementLine.RecId;
+                  
+            if(purchtable.DocumentStatus == DocumentStatus::Invoice && vendinvoicetrans && agreementLineReleasedLine)
+            {
+                ttsbegin;
+                agreementLineReleasedLine.selectForUpdate(true);
+                agreementLineReleasedLine.ReferenceRelationType = vendinvoicetrans.TableId;
+                agreementLineReleasedLine.VendInvoiceTrans      = vendinvoicetrans.RecId;
+                agreementLineReleasedLine.update();
+                ttscommit;
+            }
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

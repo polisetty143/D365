@@ -1,0 +1,248 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGAgreementConfirmationReportDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(ETGAgreementConfirmationReportContract))]
+public class ETGAgreementConfirmationReportDP extends SRSReportDataProviderBase
+{
+    ETGAgreementConfirmationTmp agreementConfirmTmp;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGAgreementConfirmationTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETGAgreementConfirmationTmp))]
+    public ETGAgreementConfirmationTmp getETGAgreementConfirmationTmp()
+    {
+        select * from agreementConfirmTmp;
+        return agreementConfirmTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETGAgreementConfirmationReportContract contract;
+        RefRecId salesAgreementHeaderRecId;
+
+        // Get the contract
+        contract = this.parmDataContract() as ETGAgreementConfirmationReportContract;
+        salesAgreementHeaderRecId = contract.parmSalesAgreementHeaderRecId();
+
+        // ADD THIS LINE FOR DEBUGGING
+        info(strFmt("DP Class received RecId: %1", salesAgreementHeaderRecId));
+        
+        // Execute the business logic
+        if (salesAgreementHeaderRecId)
+        {
+            this.createSalesAgreement(salesAgreementHeaderRecId);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createSalesAgreement</Name>
+				<Source><![CDATA[
+    private void createSalesAgreement(RefRecId _salesAgreementHeader)
+    {
+        ETG_SalesAgreementHeader                      salesAgreementHeaderTrade;
+        SalesAgreementHeaderHistory                   salesAgreementHeader;
+        AgreementLineQuantityCommitmentHistory        agreementLineHistory;
+        AgreementLine                                 agreementLine;
+        AgreementHeaderDefaultHistory                 agreementHeaderDefault;
+        SalesAgreementHeaderDefaultHistory            salesAgreementHeaderDefaultHistory;
+        AgreementHeader                               agreementHeader;
+        ETG_AgreementLineNotes                        AgreementNotes;
+        ETG_AgreementLineQualityGrpHistory            qualityGrp,qualitygrpupd;
+        ETGAgrrementQualitySpecsLinehistory           qualitySubGrpView;
+        str                                           amount2Words;
+        CompanyInfo                                   companyInfo = CompanyInfo::find();
+        BankAccountTable                              sellerBank;
+        CustBankAccount                               buyerBank;
+        ETG_PackingGroup                              packingGroup;
+        inventTableModule                             inventTableModule;
+        ETG_AgreementLineQualityGrp                   ETG_AgreementLineQualityGrpOrg, ETG_AgreementLineQualityGrpOrgCount;
+        
+        // Added missing declarations
+        TaxRegistration                               taxRegistration;
+        DirPartyTable                                 dirPartyTable;
+        DirPartyLocation                              dirPartyLocation;
+        
+        // Clear the temp table buffer just in case
+        agreementConfirmTmp.clear();
+
+        select firstonly Currency,CustAccount,SalesNumberSequence,AgreementHeader,CreatedDateTime from salesAgreementHeader
+            where salesAgreementHeader.RecId == _salesAgreementHeader
+        join salesAgreementHeaderTrade
+            where salesAgreementHeaderTrade.SalesAgreementId == salesAgreementHeader.SalesNumberSequence
+        join agreementHeaderDefault
+            where agreementHeaderDefault.AgreementHeaderHistory == salesAgreementHeader.RecId
+        join salesAgreementHeaderDefaultHistory
+            where salesAgreementHeaderDefaultHistory.SalesAgreementHeaderHistory == agreementHeaderDefault.AgreementHeaderHistory;
+
+        select firstonly  * from agreementLine
+             where agreementLine.Agreement== salesAgreementHeader.AgreementHeader
+        join agreementLineHistory
+             where agreementLineHistory.AgreementLine == agreementLine.RecId
+                && agreementLineHistory.ValidFrom <= salesAgreementHeader.CreatedDateTime
+                && agreementLineHistory.ValidTo >= salesAgreementHeader.CreatedDateTime;
+
+        select firstonly RegistrationNumber from  taxRegistration
+               exists join dirPartyLocation
+               where  dirPartyLocation.RecId == taxRegistration.DirPartyLocation
+               exists join dirPartyTable
+               where dirPartyTable.RecId    == dirPartyLocation.Party;
+
+        if (companyInfo.DataArea == 'P007')
+        {
+            agreementConfirmTmp.CompanyCoRegNum    = strFmt('Tpin : %1' ,taxRegistration.RegistrationNumber);
+        }
+        else if(companyInfo.DataArea == 'O003')
+        {
+            agreementConfirmTmp.CompanyCoRegNum    = strFmt('Reg  : %1   GST Reg No : %2',companyInfo.Giro,companyInfo.CoRegNum);
+        }
+       
+        agreementConfirmTmp.CompanyLogo        = FormLetter::companyLogo();
+        agreementConfirmTmp.CompanyTeleFax     = strFmt('Tel : %1   Fax : %2',companyInfo.phone(),companyInfo.teleFax());
+        agreementConfirmTmp.CompanyAddress     = companyInfo.postalAddress().Address;
+        agreementConfirmTmp.CompanyAddress     = strReplace(agreementConfirmTmp.CompanyAddress,"\n","");
+        agreementConfirmTmp.CompanyName        = companyInfo.Name;
+        agreementConfirmTmp.CompanyCoRegNum    = strFmt('Tpin : %1' ,taxRegistration.RegistrationNumber);
+        agreementConfirmTmp.ExternalReference  = agreementHeaderDefault.ExternalReference;
+        agreementConfirmTmp.AgreementId        = salesAgreementHeader.SalesNumberSequence;
+        agreementConfirmTmp.SellerBank         = salesAgreementHeaderTrade.SellerBank;
+        agreementConfirmTmp.BuyerBank          = salesAgreementHeaderTrade.BuyerBank;
+        agreementConfirmTmp.ETGGSTIN           = CustTable::find(salesAgreementHeader.CustAccount).ETGGSTIN;
+        agreementConfirmTmp.ETGIECCode         = CustTable::find(salesAgreementHeader.CustAccount).ETGIECCode;
+        agreementConfirmTmp.ETGFSSAIID         = CustTable::find(salesAgreementHeader.CustAccount).ETGFSSAIID;
+        
+        if(agreementConfirmTmp.BuyerBank)
+        {
+            buyerBank     = CustBankAccount::find(salesAgreementHeader.CustAccount,agreementConfirmTmp.BuyerBank);
+            agreementConfirmTmp.BuyerAccountNum  = buyerBank.AccountNum;
+            agreementConfirmTmp.BuyerSWIFTNo     = buyerBank.SWIFTNo;
+        }
+        
+        if(agreementConfirmTmp.SellerBank)
+        {
+            sellerBank     = BankAccountTable::find(agreementConfirmTmp.sellerBank);
+            agreementConfirmTmp.SellerBankAddress = sellerBank.postalAddress().Address;
+            agreementConfirmTmp.SellerAccountNum  = sellerBank.AccountNum;
+            agreementConfirmTmp.SellerSWIFTNo     = sellerBank.SWIFTNo;
+        }
+        
+        agreementConfirmTmp.BuyerName        = salesAgreementHeaderTrade.buyerName();
+        agreementConfirmTmp.SellerName       = salesAgreementHeaderTrade.sellerName();
+        agreementConfirmTmp.Through          = VendTable::find(salesAgreementHeaderTrade.Through).name();
+
+        if(salesAgreementHeaderTrade.PackingGroup)
+        {
+            select firstonly Description from packingGroup
+                where packingGroup.PackingGroup == salesAgreementHeaderTrade.PackingGroup;
+            agreementConfirmTmp.PackingGroup = packingGroup.Description;
+        }
+       
+        agreementConfirmTmp.BuyerAddress     = LogisticsPostalAddress::findRecId(salesAgreementHeaderTrade.BuyerDeliveryAddress).Address;
+        agreementConfirmTmp.SellerAddress    = LogisticsPostalAddress::findRecId(salesAgreementHeaderTrade.SellerDeliveryAddress).Address;
+        agreementConfirmTmp.DeliveryTerm     = DlvTerm::find(agreementHeaderDefault.DeliveryTerm).Txt;
+        agreementConfirmTmp.DeliveryMode     = DlvMode::find(agreementHeaderDefault.DeliveryMode).Txt;
+        agreementConfirmTmp.PaymentTerms     = PaymTerm::find(agreementHeaderDefault.PaymentTerms).Description;
+        agreementConfirmTmp.TermOfPaymDescription   = salesAgreementHeaderTrade.TermPaymDescription;
+        agreementConfirmTmp.EffectiveDate    = agreementLineHistory.EffectiveDate;
+        agreementConfirmTmp.ItemName         = agreementLineHistory.ETG_ItemAlternativeName;
+        agreementConfirmTmp.CommitedQuantity = agreementLineHistory.CommitedQuantity;
+        
+        if((agreementLine.ETG_PriceType == ETG_PriceType::Fixed)||(agreementLine.ETG_PriceType == ETG_PriceType::None))
+        {
+            agreementConfirmTmp.PricePerUnit     = agreementLineHistory.PricePerUnit;
+            agreementConfirmTmp.AmountInWords    = strReplace(Global::numeralsToTxt(agreementConfirmTmp.PricePerUnit),"***"," ");
+            agreementConfirmTmp.CurrencyCode     = salesAgreementHeader.Currency;
+        }
+        
+        agreementConfirmTmp.Unit             = agreementLineHistory.ProductUnitOfMeasure;
+        agreementConfirmTmp.PriceCondition   = agreementLine.ETGPriceCondition;
+        agreementConfirmTmp.QualitySpecification    = agreementLine.ETG_QualitySpecification;
+
+        select firstonly inventTableModule
+            where inventTableModule.ItemId == agreementLine.ItemId
+            && inventTablemodule.RecVersion != 1;
+
+        if(inventTableModule.AmountInFigAndWords == NoYes::Yes)
+        {
+            agreementConfirmTmp.TotalAmountInFiguresAndWords    = (agreementLineHistory.PricePerUnit)*(agreementLineHistory.CommitedQuantity);
+            agreementConfirmTmp.TotalAmountInWords              = strReplace(Global::numeralsToTxt(agreementConfirmTmp.TotalAmountInFiguresAndWords),"***"," ");
+            agreementConfirmTmp.ETGCurrencyCode                 = salesAgreementHeader.Currency;
+        }
+        
+        agreementConfirmTmp.Origin           = InventDim::find(agreementLineHistory.InventDimId).InventColorId;
+        agreementConfirmTmp.PortOfDischargeDesc     = salesAgreementHeaderTrade.PortOfDischargeDesc;
+        agreementConfirmTmp.PortOfLoadingDesc       = salesAgreementHeaderTrade.PortOfLoadingDesc;
+        agreementConfirmTmp.ShipmentFromDatePort    = salesAgreementHeaderTrade.FromDatePort;
+        agreementConfirmTmp.ShipmentToDatePort      = salesAgreementHeaderTrade.ToDatePort;
+        agreementConfirmTmp.ShipmentDeliveryDescription     = salesAgreementHeaderTrade.DeliveryDescription;
+        agreementConfirmTmp.CustomerMethodOfPayment = CustPaymModeTable::find(salesAgreementHeaderDefaultHistory.CustomerMethodOfPayment).Name;
+        agreementConfirmTmp.OverUnderDeliveryDesc   = strFmt("(%1 % +/- seller's option)",agreementLine.ETG_OverDeliveryPct);
+
+        select firstonly qualitygrpupd
+            where qualitygrpupd.AgreementLine == agreementLine.RecId;
+            
+        if((qualitygrpupd)||(agreementLine.ETG_QualitySpecification))
+        {
+            agreementConfirmTmp.SpecificationLabel = 'Specifications';
+        }
+        
+        agreementConfirmTmp.insert();
+
+        while select qualityGrp
+            where qualityGrp.AgreementLine == agreementLineHistory.RecId
+        join qualitySubGrpView
+            where qualitySubGrpView.AgreementLineRefrecid == qualityGrp.AgreementLine
+             && qualitySubGrpView.GroupID == qualityGrp.GroupId
+        {
+            agreementConfirmTmp.clear();
+            agreementConfirmTmp.SpecDescription =  qualityGrp.groupDescription();
+
+            if(qualitySubGrpView.MinRange)
+            {
+                agreementConfirmTmp.MinRange        = " Min " +num2Str(qualitySubGrpView.MinRange,2,2,1,1);
+            }
+            else
+            {
+                agreementConfirmTmp.MinRange = '';
+            }
+            
+            if(qualitySubGrpView.MaxRange)
+            {
+                agreementConfirmTmp.MaxRange        =  "Max " +num2Str(qualitySubGrpView.MaxRange,2,2,1,1);
+            }
+            else
+            {
+                agreementConfirmTmp.MaxRange = '';
+            }
+          
+            agreementConfirmTmp.insert();
+        }
+
+        while select AgreementNotes
+            where AgreementNotes.AgreementLine == agreementLine.RecId
+                && AgreementNotes.PrintNotesInContract == NoYes::Yes
+        {
+            agreementConfirmTmp.clear();
+            agreementConfirmTmp.EnumNotes   = AgreementNotes.EnumNotes;
+            agreementConfirmTmp.Description = AgreementNotes.Description;
+            agreementConfirmTmp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

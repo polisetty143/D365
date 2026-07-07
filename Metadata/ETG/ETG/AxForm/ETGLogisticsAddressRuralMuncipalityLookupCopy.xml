@@ -1,0 +1,377 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxForm xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V6">
+	<Name>ETGLogisticsAddressRuralMuncipalityLookupCopy</Name>
+	<SourceCode>
+		<Methods xmlns="">
+			<Method>
+				<Name>classDeclaration</Name>
+				<Source><![CDATA[
+    [Form]
+    public class ETGLogisticsAddressRuralMuncipalityLookupCopy extends FormRun
+    {
+        LogisticsAddressCityRecId           cityRecId;
+        LogisticsAddressCountryRegionId     countryRegionId;
+        LogisticsAddressStateId             stateId;
+        LogisticsAddressCountyId            countyId;
+
+        FormStringControl                   lookupControl;       
+        LogisticsPostalAddressMap           callerLogisticsAddressMap;
+        boolean                             callerHasLogisticsAddressMap;    // Tells if caller data source is compatible with LogisticsAddressMap.
+                                                    // Used in cases where LogisticsAddress record is created but not yet saved.
+
+        LogisticsAddressZipCode             zipCodeRecord;
+}
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>closeSelect</Name>
+				<Source><![CDATA[
+    public void closeSelect(str _selectString)
+    {
+        if (!_selectString)
+        {
+            super(_selectString);
+            return;
+        }
+
+        if (callerHasLogisticsAddressMap)
+        {
+            callerLogisticsAddressMap.LogisticsPostalAddressMap::initFromDistrict(logisticsAddressDistrict);
+        }
+        else if (zipCodeRecord)
+        {
+            zipCodeRecord.District = logisticsAddressDistrict.RecId;
+        }
+
+        super(_selectString);
+
+        if (callerHasLogisticsAddressMap && FormDataUtil::getFormDataSource(callerLogisticsAddressMap) != null)
+        {
+            // Refresh the caller form data source to update LogisticsAddress fields.
+            FormDataUtil::getFormDataSource(callerLogisticsAddressMap).refresh();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>init</Name>
+				<Source><![CDATA[
+    void init()
+    {
+        FormRun     callerFormRun;
+
+        if (element.args() != null &&
+            typeOf(element.args().record()) != typeOf(null) &&
+            SysDictTable::isTableMapped(tableNum(LogisticsPostalAddressMap), element.args().record().TableId))
+        {
+            // Record type is checked against null as defaulting should still
+            // occur on non-persisted records which do not yet have a recid
+
+            // Save the caller data source to update its LogisticsAddress information later.
+            callerLogisticsAddressMap = element.args().record();
+            // Remember that caller has data source compatible with the LogisticsAddressMap map.
+            callerHasLogisticsAddressMap = true;
+            element.setCityRecId(callerLogisticsAddressMap.CityRecId);
+        }
+        else if (element.args().dataset() == tableNum(LogisticsAddressZipCode))
+        {
+            zipCodeRecord = element.args().record();
+            element.setCityRecId(zipCodeRecord.CityRecId);
+
+            if(!cityRecId)
+            {
+                element.setCountryRegionID(zipCodeRecord.CountryRegionId);
+                element.setStateID(zipCodeRecord.State);
+                element.setCountyID(zipCodeRecord.County);
+            }
+        }
+        else
+        {
+            callerHasLogisticsAddressMap = false;
+        }
+
+        super();
+
+        if (element.args().caller())
+        {
+            callerFormRun   = element.args().caller();
+            lookupControl   = SysTableLookup::getCallerStringControl(element.args());
+        }
+
+        if (this.lookupControlHasWildcard())
+        {
+            logisticsAddressDistrict_ds.query().dataSourceTable(tableNum(LogisticsAddressDistrict)).addRange(fieldNum(LogisticsAddressDistrict, Name)).value(lookupControl.text());
+        }
+
+        element.selectMode(district_Name);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>lookupControlHasWildcard</Name>
+				<Source><![CDATA[
+    private boolean lookupControlHasWildcard()
+    {
+        return lookupControl && strFind(lookupControl.text(), '*', 1, strLen(lookupControl.text()));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    public void run()
+    {       
+        boolean         filterLookup    = false;
+
+        if (!lookupControl)
+        {
+            super();
+            return;
+        }        
+
+        filterLookup = SysTableLookup::filterLookupPreRun(lookupControl, district_Name, logisticsAddressDistrict_ds);
+
+        super();
+
+        SysTableLookup::filterLookupPostRun(filterLookup, lookupControl.text(), district_Name, logisticsAddressDistrict_ds);
+
+       
+        if (callerHasLogisticsAddressMap)
+        {
+            if (!this.lookupControlHasWildcard())
+            {
+                if (lookupControl)
+                {
+                    callerLogisticsAddressMap.DistrictName = lookupControl.text();
+                }
+
+                if (lookupControl && lookupControl.text())
+                {
+                    logisticsAddressDistrict_ds.object(fieldNum(LogisticsAddressDistrict, Name)).filter(lookupControl.text() + '*');
+                }
+            }
+
+            if (lookupControl && (!lookupControl.text()|| this.lookupControlHasWildcard()))
+            {
+                if (callerLogisticsAddressMap.CityRecId)
+                {
+                    logisticsAddressDistrict_ds.object(fieldNum(LogisticsAddressDistrict, City)).filter(queryValue(callerLogisticsAddressMap.CityRecId));
+                }
+            }
+
+        }       
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setCityRecId</Name>
+				<Source><![CDATA[
+    void setCityRecId(LogisticsAddressCityRecId _cityRecId)
+    {
+        cityRecId = _cityRecId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setCountryRegionID</Name>
+				<Source><![CDATA[
+    void setCountryRegionID(LogisticsAddressCountryRegionId _countryRegionId)
+    {
+        countryRegionId = _countryRegionId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setCountyID</Name>
+				<Source><![CDATA[
+    void setCountyID(LogisticsAddressCountyId _countyId)
+    {
+        countyId = _countyId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setStateID</Name>
+				<Source><![CDATA[
+    void setStateID(LogisticsAddressStateId _stateId)
+    {
+        stateId = _stateId;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+		<DataSources xmlns="">
+			<DataSource>
+				<Name>LogisticsAddressDistrict</Name>
+				<Methods>
+					<Method>
+						<Name>init</Name>
+						<Source><![CDATA[
+        void init()
+        {
+            Query                   query = new Query();
+            QueryBuildDataSource    queryBuildCityDataSource, queryBuildDistrictDataSource;
+
+            super();
+
+            queryBuildDistrictDataSource = query.addDataSource(tableNum(LogisticsAddressDistrict));
+
+            if(cityRecId != 0)
+            {
+                queryBuildDistrictDataSource.addRange(fieldNum(LogisticsAddressDistrict, City)).value(queryValue(cityRecId));
+            }
+            else
+            {
+                queryBuildCityDataSource = queryBuildDistrictDataSource.addDataSource(tableNum(LogisticsAddressCity));
+                queryBuildCityDataSource.joinMode(JoinMode::ExistsJoin);
+                queryBuildCityDataSource.relations(true);
+
+                if(countryRegionId != '')
+                {
+                    queryBuildCityDataSource.addRange(fieldNum(LogisticsAddressCity, CountryRegionId)).value(queryValue(countryRegionId));
+                }
+
+                if(stateId != '')
+                {
+                    queryBuildCityDataSource.addRange(fieldNum(LogisticsAddressCity, StateId)).value(queryValue(stateId));
+                }
+
+                if(countyId != '')
+                {
+                    queryBuildCityDataSource.addRange(fieldNum(LogisticsAddressCity, CountyId)).value(queryValue(countyId));
+                }
+            }
+
+            this.query(query);
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields />
+			</DataSource>
+		</DataSources>
+		<DataControls xmlns="" />
+		<Members xmlns="" />
+	</SourceCode>
+	<DataSources>
+		<AxFormDataSource xmlns="">
+			<Name>LogisticsAddressDistrict</Name>
+			<Table>LogisticsAddressDistrict</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>City</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CountryRegionId_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CountyId_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>dataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Description</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Name</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Properties_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>StateId_RU</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<AutoNotify>No</AutoNotify>
+			<AutoQuery>No</AutoQuery>
+			<AllowCheck>No</AllowCheck>
+			<AllowCreate>No</AllowCreate>
+			<AllowDelete>No</AllowDelete>
+			<AllowEdit>No</AllowEdit>
+			<InsertAtEnd>No</InsertAtEnd>
+			<InsertIfEmpty>No</InsertIfEmpty>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+	</DataSources>
+	<Design>
+		<Frame xmlns="">Border</Frame>
+		<HeightMode xmlns="">SizeToContent</HeightMode>
+		<HideToolbar xmlns="">Yes</HideToolbar>
+		<Pattern xmlns="">LookupGridOnly</Pattern>
+		<PatternVersion xmlns="">1.1</PatternVersion>
+		<SetCompany xmlns="">No</SetCompany>
+		<Style xmlns="">Lookup</Style>
+		<WidthMode xmlns="">SizeToAvailable</WidthMode>
+		<Controls xmlns="">
+			<AxFormControl xmlns=""
+				i:type="AxFormGridControl">
+				<Name>Grid</Name>
+				<AllowEdit>No</AllowEdit>
+				<ElementPosition>1073741823</ElementPosition>
+				<FilterExpression>%1</FilterExpression>
+				<HeightMode>SizeToContent</HeightMode>
+				<Type>Grid</Type>
+				<VerticalSpacing>-1</VerticalSpacing>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>District_Name</Name>
+						<AutoDeclaration>Yes</AutoDeclaration>
+						<ElementPosition>1073741823</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<HeightMode>Auto</HeightMode>
+						<Type>String</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<WidthMode>Auto</WidthMode>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Name</DataField>
+						<DataSource>LogisticsAddressDistrict</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>District_Description</Name>
+						<AutoDeclaration>Yes</AutoDeclaration>
+						<ElementPosition>1610612734</ElementPosition>
+						<FilterExpression>%1</FilterExpression>
+						<HeightMode>Auto</HeightMode>
+						<Type>String</Type>
+						<VerticalSpacing>-1</VerticalSpacing>
+						<WidthMode>Auto</WidthMode>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Description</DataField>
+						<DataSource>LogisticsAddressDistrict</DataSource>
+					</AxFormControl>
+				</Controls>
+				<DataSource>LogisticsAddressDistrict</DataSource>
+				<MultiSelect>No</MultiSelect>
+				<ShowRowLabels>No</ShowRowLabels>
+				<Style>Tabular</Style>
+			</AxFormControl>
+		</Controls>
+	</Design>
+	<Parts />
+</AxForm>

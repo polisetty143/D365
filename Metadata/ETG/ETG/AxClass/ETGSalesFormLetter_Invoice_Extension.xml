@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesFormLetter_Invoice_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This class used to Invoice copy should sent to respective cutmoer via auto email.
+/// </summary>
+[ExtensionOf(classStr(SalesFormLetter_Invoice))]
+final class ETGSalesFormLetter_Invoice_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Invoice copy should sent to respective customer via auto email.
+    /// </summary>
+    public void run()
+    {
+        //NS, DLT ,13/03/2025 Invoice copy should sent to respective customer via auto email.
+        next run();
+
+        if (ETGACFParameters::find().EnableUATSmallPoints)
+        {
+            try
+            {
+               this.processSalesInvoiceReport(this.salesTable());
+            }
+            catch
+            {
+                warning("@ETG_New:SMTPError");
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processSalesInvoiceReport</Name>
+				<Source><![CDATA[
+    private void processSalesInvoiceReport(SalesTable salestable)
+    {
+             
+        Microsoft.Dynamics.AX.Framework.Reporting.Shared.ReportingService.ParameterValue[]  parameterValueArray;
+        SysOperationQueryDataContractInfo       sysOperationQueryDataContractInfo;
+        EtgSalesInvoiceController               reportRunController;
+        SRSReportExecutionInfo                  reportExecutionInfo;
+        SRSPrintDestinationSettings             printDestinationSettings;
+        SRSReportRunService                     srsReportRunService;
+        SRSProxy                                srsProxy;
+        Object                                  dataContractInfoObject;
+        Map                                     reportParametersMap;
+        System.Byte[]                           reportBytes;
+        Filename                                fileName;
+        Args                                    args;
+        System.IO.MemoryStream                  memoryStream;
+        System.IO.MemoryStream                  fileStream;
+        Email                                   toEmail  ;
+        SalesInvoiceContract                    contract;
+        Map                                     templateTokens;
+        str                                     emailSubject, emailBody;
+        CustTable                               custtable;
+        DirPartyLocation                        dirPartyLocation;
+        LogisticsLocation                       logisticsLocation;
+        LogisticsElectronicAddress              logisticsElectronicAddress;
+        LogisticsElectronicAddressRole          logisticsElectronicAddressRole;
+        LogisticsLocationRole                   locationRole;
+        str                                     emailid,emailid1;
+
+         salestable = this.salesTable();
+
+        if(this.documentStatus() == DocumentStatus::Invoice)
+        {
+            custtable               = custtable::find(salestable.CustAccount);
+            reportRunController     = EtgSalesInvoiceController::construct();
+            contract                = new SalesInvoiceContract();
+            reportExecutionInfo     = new SRSReportExecutionInfo();
+            srsReportRunService     = new SrsReportRunService();
+            reportBytes             = new System.Byte[0]();
+            args                    = new Args();
+            templateTokens          = new Map(Types::String, Types::String);
+            var messageBuilder      = new SysMailerMessageBuilder();
+
+            CustInvoiceJour custInvoiceJour = CustInvoiceJour::findFromSalesId(salesTable.SalesId);
+            contract.parmRecordId(custInvoiceJour.recid);
+            fileName    = strFmt("@ETG_New:SalesInvoiceReport", custTable.AccountNum);
+            args.record(custInvoiceJour);
+            args.parmEnumType(enumNum(PrintCopyOriginal));
+            args.parmEnum(PrintCopyOriginal::Original);
+
+            reportRunController.parmArgs(args);
+            reportRunController.parmReportName(ssrsReportStr(ETGSalesInvoice, ETGReport));
+            reportRunController.parmShowDialog(false);
+            reportRunController.parmLoadFromSysLastValue(false);
+            reportRunController.parmReportContract().parmRdpContract(contract);
+                
+            printDestinationSettings = reportRunController.parmReportContract().parmPrintSettings();
+            printDestinationSettings.printMediumType(SRSPrintMediumType::File);
+            printDestinationSettings.fileName(fileName);
+            printDestinationSettings.fileFormat(SRSReportFileFormat::PDF);
+
+            reportRunController.parmReportContract().parmReportServerConfig(SRSConfiguration::getDefaultServerConfiguration());
+            reportRunController.parmReportContract().parmReportExecutionInfo(reportExecutionInfo);
+
+            srsReportRunService.getReportDataContract(reportRunController.parmreportcontract().parmReportName());
+            srsReportRunService.preRunReport(reportRunController.parmreportcontract());
+
+            reportParametersMap = srsReportRunService.createParamMapFromContract(reportRunController.parmReportContract());
+            parameterValueArray = SrsReportRunUtil::getParameterValueArray(reportParametersMap);
+
+            srsProxy        = SRSProxy::constructWithConfiguration(reportRunController.parmReportContract().parmReportServerConfig());
+            reportBytes     = srsproxy.renderReportToByteArray(reportRunController.parmreportcontract().parmreportpath(),
+                                                                       parameterValueArray,
+                                                                       printDestinationSettings.fileFormat(),
+                                                                       printDestinationSettings.deviceinfo());
+
+            memoryStream    = new System.IO.MemoryStream(reportBytes);
+            memoryStream.Position = 0;
+            fileStream      = memoryStream;
+
+            select firstonly Location, Party from dirPartyLocation
+                      where dirPartyLocation.Party              == custTable.Party
+                 join RecId from logisticsLocation
+                     where logisticsLocation.RecId               == dirPartyLocation.Location
+                 join Locator from logisticsElectronicAddress
+                     where logisticsElectronicAddress.Location   == logisticsLocation.RecId
+                        && logisticsElectronicAddress.Type      == LogisticsElectronicAddressMethodType::Email
+                join  logisticsElectronicAddressRole
+                     where  logisticsElectronicAddressRole.ElectronicAddress ==  logisticsElectronicAddress.RecId
+                join   locationRole
+                    where  locationRole.RecId == logisticsElectronicAddressRole.LocationRole;
+
+            emailid = logisticsElectronicAddress.Locator;
+            toEmail         = emailid;
+
+            if ( toEmail)
+            {
+                SysEmailTable   SysEmailTable;
+                select firstonly SenderAddr, EmailId from SysEmailTable;
+                emailSubject = strFmt("@ETG_New:SalesorderinvoiceReport");
+                templateTokens.insert("@ETG_New:Subject", emailSubject);
+                templateTokens.insert("@ETG_New:Filename", filename);
+                emailBody = "@ETG_New:SalesorderinvoiceReport";
+                messageBuilder.addTo(toEmail)
+                                        .setSubject(emailSubject)
+                                        .setBody(SysEmailMessage::stringExpand(emailBody, SysEmailTable::htmlEncodeParameters(templateTokens)))
+                                        .addCC("");
+
+                messageBuilder.setFrom(SysEmailTable.SenderAddr , SysEmailTable.SenderName) ;
+                messageBuilder.addAttachment(fileStream, fileName);
+                SysMailerFactory::sendNonInteractive(messageBuilder.getMessage());
+                info(strFmt("@ETG_New:SOSentTomail", custTable.AccountNum));
+           
+            }
+            else
+            {
+                info(strFmt("@ETG_New:NoEmailCustomer", custtable.AccountNum));
+            }
+        }
+
+    }
+    //NE, DLT ,13/03/2025 Invoice copy should sent to respective customer via auto email.
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

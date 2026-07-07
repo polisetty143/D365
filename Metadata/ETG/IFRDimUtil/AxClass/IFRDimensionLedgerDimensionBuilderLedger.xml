@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>IFRDimensionLedgerDimensionBuilderLedger</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Clase para construir LedgerDimensions de tipo contable.
+/// </summary>
+class IFRDimensionLedgerDimensionBuilderLedger extends IFRDimensionLedgerDimensionBuilderBase
+{
+    DimensionDefault defaultDimension;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>new</Name>
+				<Source><![CDATA[
+    protected void new(LedgerJournalAC _ledgerJournalAC, DimensionDefault _defaultDimension)
+    {
+        ledgerJournalAC = _ledgerJournalAC;
+        defaultDimension = _defaultDimension;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static IFRDimensionLedgerDimensionBuilderLedger construct(LedgerJournalAC _ledgerJournalAC, DimensionDefault _defaultDimension)
+    {
+        IFRDimensionLedgerDimensionBuilderLedger IFRDimensionLedgerDimensionBuilderLedger;
+
+        IFRDimensionLedgerDimensionBuilderLedger = new IFRDimensionLedgerDimensionBuilderLedger(_ledgerJournalAC, _defaultDimension);
+
+        return IFRDimensionLedgerDimensionBuilderLedger;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>constructFromLedgerDimensionDefaultAccount</Name>
+				<Source><![CDATA[
+    public static IFRDimensionLedgerDimensionBuilderLedger constructFromLedgerDimensionDefaultAccount(
+        LedgerDimensionDefaultAccount _ledgerDimensionDefaultAccount,
+        DimensionDefault _defaultDimension)
+    {
+        IFRDimensionLedgerDimensionBuilderLedger IFRDimensionLedgerDimensionBuilderLedger;
+
+        IFRDimensionLedgerDimensionBuilderLedger = new IFRDimensionLedgerDimensionBuilderLedger(
+            LedgerDimensionFacade::getMainAccountIdFromLedgerDimension(_ledgerDimensionDefaultAccount),
+            _defaultDimension);
+
+        return IFRDimensionLedgerDimensionBuilderLedger;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>constructFromLedgerDimension</Name>
+				<Source><![CDATA[
+    public static IFRDimensionLedgerDimensionBuilderLedger constructFromLedgerDimension(LedgerDimensionAccount _ledgerDimension)
+    {
+        IFRDimensionLedgerDimensionBuilderLedger IFRDimensionLedgerDimensionBuilderLedger;
+
+        IFRDimensionLedgerDimensionBuilderLedger = new IFRDimensionLedgerDimensionBuilderLedger(
+            LedgerDimensionFacade::getMainAccountIdFromLedgerDimension(_ledgerDimension),
+            LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(_ledgerDimension));
+
+        return IFRDimensionLedgerDimensionBuilderLedger;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>applyDefaultDimensionsForMainAccount</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Aplica las dimensiones por defecto para una cuenta contable.
+    /// </summary>
+    /// <param name = "_mainAccountDefaultDimensionsForAccountThenClassVar">Indica si se fusionan las dimensiones por defecto sobre las de la clase (o al revés).</param>
+    /// <returns>Devuelve la instancia de la clase.</returns>
+    public IFRDimensionLedgerDimensionBuilderLedger applyDefaultDimensionsForMainAccount(boolean _mainAccountDefaultDimensionsForAccountThenClassVar = true)
+    {
+        MainAccount mainAccount = MainAccount::findByMainAccountId(ledgerJournalAC);
+        MainAccountLegalEntity mainAccountLegalEntity = MainAccountLegalEntity::findByMainAccountLegalEntity(mainAccount.RecId, CompanyInfo::current());
+
+        if (mainAccountLegalEntity.RecId != 0 && mainAccountLegalEntity.DefaultDimension)
+        {
+            DimensionDefault dimensionMainAccount = mainAccountLegalEntity.DefaultDimension;
+ 
+            if (_mainAccountDefaultDimensionsForAccountThenClassVar)
+            {
+                defaultDimension = LedgerDimensionDefaultFacade::serviceMergeDefaultDimensions(dimensionMainAccount, defaultDimension);
+            }
+            else
+            {
+                defaultDimension = LedgerDimensionDefaultFacade::serviceMergeDefaultDimensions(defaultDimension, dimensionMainAccount);
+            }
+        }
+
+        return this;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getLedgerDimension</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Obtiene el LedgerDimension que hemos construido.
+    /// </summary>
+    /// <returns>LedgerDimensionAccount</returns>
+    public LedgerDimensionAccount getLedgerDimension()
+    {
+        DimensionDynamicAccount dimensionDynamicAccount;
+        LedgerDimensionAccount ledgerDimensionAccount;
+
+        dimensionDynamicAccount = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(ledgerJournalAC, LedgerJournalACType::Ledger);
+        ledgerDimensionAccount = LedgerDimensionFacade::serviceCreateLedgerDimension(dimensionDynamicAccount, defaultDimension);
+
+        return ledgerDimensionAccount;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ToString</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Convierte un LedgerDimension a una cadena de texto separada por un separador (-).
+    /// </summary>
+    /// <returns>Cadena de texto con las dimensiones separadas por guión,</returns>
+    public str ToString()
+    {
+        return LedgerDimensionFacade::getDisplayValueForLedgerDimension(this.getLedgerDimension());
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getMainAccount</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Obtiene el mainAccount.
+    /// </summary>
+    /// <returns>Número de la cuenta contable</returns>
+    public MainAccountNum getMainAccount()
+    {
+        return ledgerJournalAC;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getDefaultDimension</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Obtiene el DimensionDefault.
+    /// </summary>
+    /// <returns>DimensionDefault</returns>
+    public DimensionDefault getDefaultDimension()
+    {
+        return defaultDimension;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,571 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCreateJournalHelper</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGCreateJournalHelper
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>CreateJnlEntry</Name>
+				<Source><![CDATA[
+    public int CreateJnlEntry(ETG_Estimation eTG_Estimation)
+    {
+        MCRLedgerJournal        journalTable;
+        LedgerJournalTable      ledgerJournalTable,ledgerJournalTableUpd;
+        LedgerJournalTrans      ledgerJournalTransupd;
+        Counter                 recordsInserted;
+        ETG_Parameters          eTG_Parameters;
+        AmountMST               amountdebit;
+        ETG_ChargeCodes         eTG_ChargeCodes,eTG_ChargeCodesUpd;
+        AgreementLine           agreementLine;
+        PurchAgreementHeader    purchAgreementHeader;
+        SalesAgreementHeader    salesAgreementHeader;
+        MarkupTable             markupTable;
+        LedgerDimensionAccount  ledgerAccount,offsetAccount;
+        Voucher                 voucher;
+
+        ttsbegin;
+        select firstonly eTG_ChargeCodes
+                   where eTG_ChargeCodes.ETG_Estimation == eTG_Estimation;
+
+        select firstonly eTG_Parameters;
+
+        journalTable       = new MCRLedgerJournal_Daily(LedgerJournalType::Daily,eTG_Parameters.ETGEstimationLedgerJournalName);
+        ledgerJournalTable = journalTable.createLedgerJournalTable(eTG_Parameters.ETGEstimationLedgerJournalName);
+
+        journalTable.parmLedgerJournalTable(ledgerJournalTable);
+        voucher = NumberSeq::newGetNum(LedgerParameters::numRefJournalNum()).num();
+        journalTable.parmMCRCCGeneralLedgerId(voucher);
+        journalTable.parmLedgerAccountType(LedgerJournalACType::Ledger);
+        journalTable.parmLedgerOffsetAccountType(LedgerJournalACType::Ledger);
+        journalTable.parmCurrencyCode(eTG_ChargeCodes.CurrencyCode);
+        journalTable.parmLineNum();
+
+        select firstonly markupTable 
+                   where markupTable.MarkupCode                  == eTG_ChargeCodes.MarkupCode 
+                      && markupTable.ETG_CustomerLedgerDimension != 0 
+                      && markupTable.ETG_VendLedgerDimension     != 0;
+
+        select firstonly RecId 
+                    from purchAgreementHeader
+                   where purchAgreementHeader.PurchNumberSequence == eTG_ChargeCodes.PurchNumberSequence
+                    join agreementLine
+                   where agreementLine.Agreement == purchAgreementHeader.RecId;
+
+        if(purchAgreementHeader)
+        {
+            ledgerAccount = LedgerDimensionFacade::serviceCreateLedgerDimension(markupTable.ETG_CustomerLedgerDimension,
+                                                                                agreementLine.DefaultDimension);
+            offsetAccount = LedgerDimensionFacade::serviceCreateLedgerDimension(markupTable.ETG_VendLedgerDimension,
+                                                                                agreementLine.DefaultDimension);
+        }
+        select firstonly RecId 
+                    from salesAgreementHeader
+                   where salesAgreementHeader.SalesNumberSequence == eTG_ChargeCodes.PurchNumberSequence
+                    join agreementLine
+                   where agreementLine.Agreement == salesAgreementHeader.RecId;
+        if(salesAgreementHeader)
+        {
+            ledgerAccount = LedgerDimensionFacade::serviceCreateLedgerDimension(markupTable.ETG_CustomerLedgerDimension,
+                                                                                agreementLine.DefaultDimension);
+            offsetAccount = LedgerDimensionFacade::serviceCreateLedgerDimension(markupTable.ETG_VendLedgerDimension,
+                                                                                agreementLine.DefaultDimension);
+        }
+        journalTable.parmLedgerAccount(ledgerAccount);
+        journalTable.parmledgerOffsetAccount(offsetAccount);
+        journalTable.parmTransDate(DateTimeUtil::getToday(DateTimeUtil::getUserPreferredTimeZone()));
+        journalTable.parmTransTxt(eTG_Parameters.ETGEstimationLedgerJournalName);
+        amountdebit = eTG_ChargeCodes.AmountMST;
+        journalTable.createLedgerJournalTrans(abs(0),abs(amountdebit),LedgerJournalACType::Ledger);
+       
+        recordsInserted++;
+        ttscommit;
+        select firstonly forupdate ledgerJournalTransupd 
+                             where ledgerJournalTransupd.JournalNum == ledgerJournalTable.JournalNum;
+        ttsbegin;
+        ledgerJournalTransupd.ETG_Estimation = eTG_ChargeCodes.ETG_Estimation;
+        ledgerJournalTransupd.ETGAgreementno = eTG_ChargeCodes.PurchNumberSequence;
+        ledgerJournalTransupd.update();
+        ttscommit;
+        select firstonly forupdate ledgerJournalTableUpd 
+                             where ledgerJournalTableUpd.JournalNum == ledgerJournalTable.JournalNum;
+        ttsbegin;
+        ledgerJournalTableUpd.Approver = 0;
+        ledgerJournalTableUpd.update();
+        ttscommit;
+
+        select firstonly forupdate eTG_ChargeCodesUpd
+                             where eTG_ChargeCodesUpd.ETG_Estimation == eTG_ChargeCodes.ETG_Estimation 
+                                   && eTG_ChargeCodesUpd.RecId       == eTG_ChargeCodes.RecId;
+        ttsbegin;
+        eTG_ChargeCodesUpd.JournalNum = ledgerJournalTable.JournalNum;
+        eTG_ChargeCodesUpd.Estimation = NoYes::Yes;
+        eTG_ChargeCodesUpd.update();
+        ttscommit;
+        return recordsInserted;
+
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>CreateLinesJnl</Name>
+				<Source><![CDATA[
+    public int CreateLinesJnl(ETGLineestimationno eTG_Estimation)
+    {
+        MCRLedgerJournal        journalTable;
+        LedgerJournalTable      ledgerJournalTable,ledgerJournalTableUpd;
+        LedgerJournalTrans      ledgerJournalTransupd;
+        Counter                 recordsInserted;
+        ETG_Parameters          eTG_Parameters;
+        AmountMST               amountdebit;
+        ETG_Chargecodelines     eTG_ChargeCodes,eTG_ChargeCodesUpd;
+        AgreementLine           agreementLine;
+        PurchAgreementHeader    purchAgreementHeader;
+        SalesAgreementHeader    salesAgreementHeader;
+        MarkupTable             markupTable;
+        LedgerDimensionAccount  ledgerAccount,offsetAccount;
+        Voucher                 voucher;
+
+        ttsbegin;
+        select firstonly eTG_ChargeCodes
+                   where eTG_ChargeCodes.ETGLineestimationno == eTG_Estimation ;
+
+        select  firstonly eTG_Parameters;
+
+        journalTable       = new MCRLedgerJournal_Daily(LedgerJournalType::Daily,eTG_Parameters.ETGEstimationLedgerJournalName);
+        ledgerJournalTable = journalTable.createLedgerJournalTable(eTG_Parameters.ETGEstimationLedgerJournalName);
+
+        journalTable.parmLedgerJournalTable(ledgerJournalTable);
+        voucher = NumberSeq::newGetNum(LedgerParameters::numRefJournalNum()).num();
+        journalTable.parmMCRCCGeneralLedgerId(voucher);
+        journalTable.parmLedgerAccountType(LedgerJournalACType::Ledger);
+        journalTable.parmLedgerOffsetAccountType(LedgerJournalACType::Ledger);
+        journalTable.parmCurrencyCode(eTG_ChargeCodes.CurrencyCode);
+        journalTable.parmLineNum();
+
+        select firstonly markupTable 
+                   where markupTable.MarkupCode                  == eTG_ChargeCodes.MarkupCode 
+                    &&   markupTable.ETG_CustomerLedgerDimension != 0 
+                    &&   markupTable.ETG_VendLedgerDimension     != 0;
+
+        select firstonly RecId 
+                    from purchAgreementHeader
+                   where purchAgreementHeader.PurchNumberSequence == eTG_ChargeCodes.PurchNumberSequence
+                    join agreementLine
+                   where agreementLine.Agreement == purchAgreementHeader.RecId;
+
+        if(purchAgreementHeader)
+        {
+            ledgerAccount = LedgerDimensionFacade::serviceCreateLedgerDimension(markupTable.ETG_CustomerLedgerDimension,
+                                                                                agreementLine.DefaultDimension);
+            offsetAccount = LedgerDimensionFacade::serviceCreateLedgerDimension(markupTable.ETG_VendLedgerDimension,
+                                                                                   agreementLine.DefaultDimension);
+        }
+        select firstonly RecId 
+                    from salesAgreementHeader
+                   where salesAgreementHeader.SalesNumberSequence == eTG_ChargeCodes.PurchNumberSequence
+                    join agreementLine
+                   where agreementLine.Agreement                  == salesAgreementHeader.RecId;
+        if(salesAgreementHeader)
+        {
+            ledgerAccount = LedgerDimensionFacade::serviceCreateLedgerDimension(markupTable.ETG_CustomerLedgerDimension,
+                                                                                agreementLine.DefaultDimension);
+            offsetAccount = LedgerDimensionFacade::serviceCreateLedgerDimension(markupTable.ETG_VendLedgerDimension,
+                                                                                agreementLine.DefaultDimension);
+        }
+        journalTable.parmLedgerAccount(ledgerAccount);
+        journalTable.parmledgerOffsetAccount(offsetAccount);
+        journalTable.parmTransDate(DateTimeUtil::getToday(DateTimeUtil::getUserPreferredTimeZone()));
+        journalTable.parmTransTxt(eTG_Parameters.ETGEstimationLedgerJournalName);
+        amountdebit = eTG_ChargeCodes.AmountMST;
+        journalTable.createLedgerJournalTrans(abs(0),abs(amountdebit),LedgerJournalACType::Ledger);
+       
+        recordsInserted++;
+
+        ttscommit;
+
+        journalTable.post(LedgerJournalTable);
+        select firstonly forupdate ledgerJournalTransupd 
+                             where ledgerJournalTransupd.JournalNum == ledgerJournalTable.JournalNum;
+        ttsbegin;
+        ledgerJournalTransupd.ETG_Estimation = eTG_ChargeCodes.ETG_Estimation;
+        if(purchAgreementHeader)
+        {
+            ledgerJournalTransupd.ETGAgreementno = eTG_ChargeCodes.PurchNumberSequence;
+        }
+        if(salesAgreementHeader)
+        {
+            ledgerJournalTransupd.ETGSalesAgreementno = eTG_ChargeCodes.PurchNumberSequence;
+        }
+        ledgerJournalTransupd.ETGLineestimationno = eTG_ChargeCodes.ETGLineestimationno;
+
+        ledgerJournalTransupd.update();
+
+        ttscommit;
+        select firstonly forupdate eTG_ChargeCodesUpd
+                             where eTG_ChargeCodesUpd.ETG_Estimation == eTG_ChargeCodes.ETG_Estimation
+                                   && eTG_ChargeCodesUpd.RecId       == eTG_ChargeCodes.RecId;
+        ttsbegin;
+        eTG_ChargeCodesUpd.JournalNum =  ledgerJournalTable.JournalNum;
+        eTG_ChargeCodesUpd.Estimation =  NoYes::Yes;
+        eTG_ChargeCodesUpd.Posted     =  NoYes::Yes;
+        eTG_ChargeCodesUpd.update();
+        ttscommit;
+        select firstonly forupdate ledgerJournalTableUpd 
+                            where ledgerJournalTableUpd.JournalNum == ledgerJournalTable.JournalNum;
+        ttsbegin;
+        ledgerJournalTableUpd.Approver = 0;
+        ledgerJournalTableUpd.update();
+        ttscommit;
+
+        return recordsInserted;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>inserActualtLines</Name>
+				<Source><![CDATA[
+    public void inserActualtLines(ETGLineestimationno eTG_Estimation)
+    {
+        ETG_Chargecodelines     eTG_Chargecodelines,eTG_ChargecodelinesUpd;
+        ETG_ActualAgreementNew  eTG_ActualAgreement,eTG_ActualAgreementLoc;
+        NumberSeq               numberSeq;
+
+        eTG_ActualAgreement.clear();
+
+        select firstonly eTG_Chargecodelines
+                   where eTG_Chargecodelines.ETGLineestimationno == eTG_Estimation;
+
+        select firstonly  eTG_ActualAgreement order by RecId desc
+                   where eTG_ActualAgreement.ETGLineestimationno == eTG_Estimation;
+            if(eTG_ActualAgreement.Balance > 0.00 || !eTG_ActualAgreement)
+            {
+                eTG_ActualAgreement.PurchNumberSequence         = eTG_Chargecodelines.PurchNumberSequence;
+                eTG_ActualAgreement.ETG_Estimation              = eTG_Chargecodelines.ETG_Estimation;
+                numberSeq                                       = NumberSeq::newGetNum(PurchParameters::numRefActualId());
+                eTG_ActualAgreement.ETG_ActualID                = numberSeq.num();
+                eTG_ActualAgreement.MarkupCode                  = eTG_Chargecodelines.MarkupCode;
+                eTG_ActualAgreement.Value                       = eTG_Chargecodelines.Value;
+                eTG_ActualAgreement.ExchangeRate                = eTG_Chargecodelines.ExchangeRate;
+                eTG_ActualAgreement.CurrencyCode                = eTG_Chargecodelines.CurrencyCode;
+                eTG_ActualAgreement.ReportingExchangeRate       = eTG_Chargecodelines.ReportingExchangeRate;
+                eTG_ActualAgreement.Qty                         = eTG_Chargecodelines.Qty;
+                eTG_ActualAgreement.TransTxt                    = eTG_Chargecodelines.TransTxt;
+                eTG_ActualAgreement.ETG_MarkupCategory          = eTG_Chargecodelines.ETG_MarkupCategory;
+                eTG_ActualAgreement.ETGLineestimationno         = eTG_Chargecodelines.ETGLineestimationno;
+                eTG_ActualAgreement.Estimation                  = eTG_Chargecodelines.Estimation;
+                eTG_ActualAgreement.PurchId                     = eTG_Chargecodelines.PurchId;
+                eTG_ActualAgreement.InvoiceId                   = eTG_Chargecodelines.InvoiceId;
+                eTG_ActualAgreement.Actual                      = NoYes::Yes;
+                eTG_ActualAgreement.ETG_Estimationcharge        = eTG_Chargecodelines.Value;
+                eTG_ActualAgreement.ETGEstimatedQty             = eTG_Chargecodelines.Qty;
+                eTG_ActualAgreement.VendAccount                 = "";
+                eTG_ActualAgreement.Name                        = "";
+                eTG_ActualAgreement.VendPaymTermId              = "";
+                eTG_ActualAgreement.Documentno                  = "";
+                eTG_ActualAgreement.Documentdate                = dateNull();
+                eTG_ActualAgreement.Duedate                     = dateNull();
+                eTG_ActualAgreement.Inoicedate                  = dateNull();
+                eTG_ActualAgreement.JournalInvoiceId            = "";
+                eTG_ActualAgreement.JournalId                   = "";
+                eTG_ActualAgreement.JournalNum                  = "";
+                select eTG_ActualAgreementLoc 
+                    where eTG_ActualAgreementLoc.PurchId            == eTG_Chargecodelines.PurchId &&
+                          eTG_ActualAgreementLoc.ETG_MarkupCategory == eTG_Chargecodelines.ETG_MarkupCategory &&
+                    eTG_ActualAgreementLoc.ETGLineestimationno == eTG_Chargecodelines.ETGLineestimationno;
+                if(!eTG_ActualAgreementLoc)
+                {
+                    eTG_ActualAgreement.Balance     = 0 ;
+                    eTG_ActualAgreement.Eachvalue   = eTG_Chargecodelines.AmountMST/eTG_Chargecodelines.Qty;
+                    eTG_ActualAgreement.AmountMST   = (eTG_Chargecodelines.AmountMST/eTG_Chargecodelines.Qty) * eTG_ActualAgreement.Qty;
+                    eTG_ActualAgreement.Amountinaccountingcurrency  = eTG_Chargecodelines.Amountinaccountingcurrency;
+                    eTG_ActualAgreement.Amountinreportingcurrency   = eTG_Chargecodelines.Amountinreportingcurrency;
+                }
+                else
+                {
+                    select eTG_ActualAgreementLoc order by RecId desc
+                    where eTG_ActualAgreementLoc.PurchId            == eTG_Chargecodelines.PurchId &&
+                          eTG_ActualAgreementLoc.ETG_MarkupCategory == eTG_Chargecodelines.ETG_MarkupCategory &&
+                         eTG_ActualAgreementLoc.ETGLineestimationno == eTG_Chargecodelines.ETGLineestimationno ;
+
+                    eTG_ActualAgreement.Qty = eTG_ActualAgreementLoc.Balance;
+                    eTG_ActualAgreement.Balance     = 0;
+                    eTG_ActualAgreement.Posted      = NoYes::No;
+                    eTG_ActualAgreement.Eachvalue   = eTG_Chargecodelines.AmountMST/eTG_Chargecodelines.Qty;
+                    eTG_ActualAgreement.AmountMST   = (eTG_Chargecodelines.AmountMST/eTG_Chargecodelines.Qty) * eTG_ActualAgreement.Qty;
+                    eTG_ActualAgreement.Amountinaccountingcurrency  = eTG_ActualAgreement.Qty * eTG_ActualAgreement.Eachvalue;
+                    eTG_ActualAgreement.Amountinreportingcurrency   = eTG_ActualAgreement.Qty * eTG_ActualAgreement.Eachvalue ;
+                }
+                eTG_ActualAgreement.insert();
+
+                select firstonly forupdate eTG_ChargecodelinesUpd 
+                                     where eTG_ChargecodelinesUpd.ETGLineestimationno == eTG_Chargecodelines.ETGLineestimationno;
+                ttsbegin;
+                eTG_ChargecodelinesUpd.Actual = NoYes::Yes;
+                eTG_ChargecodelinesUpd.update();
+                ttscommit;
+
+            }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>CreateActualReverseJnl</Name>
+				<Source><![CDATA[
+    public int CreateActualReverseJnl(ETGLineestimationno eTG_Estimation,RefRecId recId)
+    {
+        MCRLedgerJournal        journalTable;
+        LedgerJournalTable      ledgerJournalTable,ledgerJournalTableUpd;
+        LedgerJournalTrans      ledgerJournalTransupd;
+        Counter                 recordsInserted;
+        ETG_Parameters          eTG_Parameters;
+        AmountMST               amountcredit;
+        ETG_Chargecodelines     eTG_ChargeCodes;
+        ETG_ActualagreementNew  eTG_Actualagreement;
+        AgreementLine           agreementLine;
+        PurchAgreementHeader    purchAgreementHeader;
+        SalesAgreementHeader    salesAgreementHeader;
+        MarkupTable             markupTable;
+        LedgerDimensionAccount ledgerAccount,offsetAccount;
+        Voucher                voucher;
+        ETG_ActualAgreementNew eTG_ActualAgreementNew;
+
+        ttsbegin;
+        select firstonly  eTG_ChargeCodes
+                    where eTG_ChargeCodes.ETGLineestimationno == eTG_Estimation ;
+
+        select firstonly eTG_Parameters;
+        select firstonly eTG_ActualAgreementNew 
+                   where eTG_ActualAgreementNew.ETGLineestimationno == eTG_Estimation &&
+                        eTG_ActualAgreementNew.RecId                == recId;
+
+        journalTable = new MCRLedgerJournal_Daily(LedgerJournalType::Daily,eTG_Parameters.ETGEstimationLedgerJournalName);
+        //Instatiate the General Journal Table
+        ledgerJournalTable = journalTable.createLedgerJournalTable(eTG_Parameters.ETGEstimationLedgerJournalName);
+
+        journalTable.parmLedgerJournalTable(ledgerJournalTable);
+        voucher = NumberSeq::newGetNum(LedgerParameters::numRefJournalNum()).num();
+        journalTable.parmMCRCCGeneralLedgerId(voucher);
+        journalTable.parmLedgerAccountType(LedgerJournalACType::Ledger);
+        journalTable.parmLedgerOffsetAccountType(LedgerJournalACType::Ledger);
+        journalTable.parmCurrencyCode(eTG_ChargeCodes.CurrencyCode);
+        journalTable.parmLineNum();
+
+        select firstonly markupTable 
+                   where markupTable.MarkupCode == eTG_ChargeCodes.MarkupCode 
+                         && markupTable.ETG_CustomerLedgerDimension != 0 
+                         && markupTable.ETG_VendLedgerDimension     != 0;
+
+        select firstonly RecId 
+                    from purchAgreementHeader
+                   where purchAgreementHeader.PurchNumberSequence == eTG_ChargeCodes.PurchNumberSequence
+                    join agreementLine
+                   where agreementLine.Agreement == purchAgreementHeader.RecId;
+        if(purchAgreementHeader)
+        {
+            ledgerAccount = LedgerDimensionFacade::serviceCreateLedgerDimension(markupTable.ETG_CustomerLedgerDimension,
+                                                                                agreementLine.DefaultDimension);
+            offsetAccount = LedgerDimensionFacade::serviceCreateLedgerDimension(markupTable.ETG_VendLedgerDimension,
+                                                                                agreementLine.DefaultDimension);
+        }
+        select firstonly RecId 
+                    from salesAgreementHeader
+                   where salesAgreementHeader.SalesNumberSequence == eTG_ChargeCodes.PurchNumberSequence
+                    join agreementLine
+                   where agreementLine.Agreement == salesAgreementHeader.RecId;
+        if(salesAgreementHeader)
+        {
+            ledgerAccount = LedgerDimensionFacade::serviceCreateLedgerDimension(markupTable.ETG_CustomerLedgerDimension,
+                                                                                agreementLine.DefaultDimension);
+            offsetAccount = LedgerDimensionFacade::serviceCreateLedgerDimension(markupTable.ETG_VendLedgerDimension,
+                                                                                agreementLine.DefaultDimension);
+        }
+        journalTable.parmLedgerAccount(ledgerAccount);
+        journalTable.parmledgerOffsetAccount(offsetAccount);
+        journalTable.parmTransDate(DateTimeUtil::getToday(DateTimeUtil::getUserPreferredTimeZone()));
+        journalTable.parmTransTxt(eTG_Parameters.ETGEstimationLedgerJournalName);
+        amountcredit =  eTG_ActualAgreementNew.Qty * eTG_ChargeCodes.Value;
+        journalTable.createLedgerJournalTrans(abs(amountcredit),abs(0),LedgerJournalACType::Ledger);
+       
+        recordsInserted++;
+        ttscommit;
+        journalTable.post(LedgerJournalTable);
+
+        select firstonly forupdate ledgerJournalTransupd 
+                             where ledgerJournalTransupd.JournalNum == ledgerJournalTable.JournalNum;
+        ttsbegin;
+        ledgerJournalTransupd.ETG_Estimation = eTG_ChargeCodes.ETG_Estimation;
+        if(purchAgreementHeader)
+        {
+            ledgerJournalTransupd.ETGAgreementno = eTG_ChargeCodes.PurchNumberSequence;
+        }
+        if(salesAgreementHeader)
+        {
+            ledgerJournalTransupd.ETGSalesAgreementno = eTG_ChargeCodes.PurchNumberSequence;
+        }
+        ledgerJournalTransupd.ETGLineestimationno = eTG_ChargeCodes.ETGLineestimationno;
+        ledgerJournalTransupd.update();
+        select firstonly forupdate ledgerJournalTableUpd 
+                             where ledgerJournalTableUpd.JournalNum == ledgerJournalTable.JournalNum;
+        ledgerJournalTableUpd.Approver = 0;
+        ledgerJournalTableUpd.update();
+        select firstonly forupdate eTG_Actualagreement
+                            where eTG_Actualagreement.ETGLineestimationno == eTG_Estimation &&
+                                   eTG_Actualagreement.RecId == recId ;
+        eTG_Actualagreement.JournalId = ledgerJournalTable.JournalNum;
+        eTG_Actualagreement.update();
+        ttscommit;
+
+        return recordsInserted;
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>CreateActualJnl</Name>
+				<Source><![CDATA[
+    public int CreateActualJnl(ETGLineestimationno eTG_Estimation,RefRecId recId)
+    {
+        MCRLedgerJournal                    journalTable;
+        LedgerJournalTable                  ledgerJournalTable,ledgerJournalTableUpd;
+        LedgerJournalTrans                  ledgerJournalTransupd;
+        Counter                             recordsInserted;
+        ETG_Parameters                      eTG_Parameters;
+        AmountMST                           amountcredit;
+        ETG_ActualagreementNew              eTG_Actualagreement,eTG_ActualagreementUpd;
+        AgreementLine                       agreementLine,agreementLineDim;
+        PurchAgreementHeader                purchAgreementHeader;
+        SalesAgreementHeader                salesAgreementHeader;
+        MarkupTable                         markupTable;
+        LedgerDimensionAccount              ledgerAccount,offsetAccount;
+        DimensionAttributeValueCombination  davc;
+
+        ttsbegin;
+        select firstonly  eTG_Actualagreement
+                    where eTG_Actualagreement.ETGLineestimationno == eTG_Estimation &&
+                          eTG_Actualagreement.RecId               == recId;
+
+        select firstonly eTG_Parameters;
+
+        journalTable = new MCRLedgerJournal_VendInvoiceRegister(LedgerJournalType::VendInvoiceRegister,eTG_Parameters.ETGActualLedgerJournalName);
+        //Instatiate the General Journal Table
+        ledgerJournalTable = journalTable.createLedgerJournalTable(eTG_Parameters.ETGActualLedgerJournalName);
+
+        journalTable.parmLedgerJournalTable(ledgerJournalTable);
+        journalTable.parmMCRCCGeneralLedgerId();
+        journalTable.parmLedgerAccountType(LedgerJournalACType::Vend);
+        journalTable.parmLedgerOffsetAccountType(LedgerJournalACType::Ledger);
+        journalTable.parmCurrencyCode(eTG_Actualagreement.CurrencyCode);
+        journalTable.parmLineNum();
+
+        select firstonly markupTable 
+                   where markupTable.MarkupCode == eTG_Actualagreement.MarkupCode 
+                         && markupTable.ETG_CustomerLedgerDimension != 0 
+                         && markupTable.ETG_VendLedgerDimension     != 0;
+        select firstonly RecId 
+                    from purchAgreementHeader
+                   where purchAgreementHeader.PurchNumberSequence == eTG_Actualagreement.PurchNumberSequence
+                    join agreementLine
+                   where agreementLine.Agreement                  == purchAgreementHeader.RecId;
+
+        select firstonly RecId 
+                    from davc
+                   where davc.DisplayValue == eTG_Actualagreement.VendAccount;
+
+        if(purchAgreementHeader)
+        {
+            ledgerAccount =  LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(eTG_Actualagreement.VendAccount, LedgerJournalACType::Vend);//davc.RecId;//LedgerDimensionFacade::ser(davc.RecId);
+            offsetAccount = LedgerDimensionFacade::serviceCreateLedgerDimension(markupTable.ETG_VendLedgerDimension,
+                                                                                agreementLine.DefaultDimension);
+
+        }
+        select firstonly RecId 
+                    from salesAgreementHeader
+                   where salesAgreementHeader.SalesNumberSequence == eTG_Actualagreement.PurchNumberSequence
+                    join agreementLine
+                   where agreementLine.Agreement                  == salesAgreementHeader.RecId;
+        if(salesAgreementHeader)
+        {
+            ledgerAccount =  LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(eTG_Actualagreement.VendAccount, LedgerJournalACType::Vend);//davc.RecId;//LedgerDimensionFacade::ser(davc.RecId);
+            offsetAccount = LedgerDimensionFacade::serviceCreateLedgerDimension(markupTable.ETG_VendLedgerDimension,
+                                                                                agreementLine.DefaultDimension);
+
+        }
+
+        journalTable.parmLedgerAccount(ledgerAccount);
+        journalTable.parmledgerOffsetAccount(offsetAccount);
+        journalTable.parmTransDate(DateTimeUtil::getToday(DateTimeUtil::getUserPreferredTimeZone()));
+        journalTable.parmTransTxt(eTG_Parameters.ETGEstimationLedgerJournalName);
+        journalTable.parmInvoice(eTG_Actualagreement.JournalInvoiceId);
+        amountcredit = eTG_Actualagreement.AmountMST;
+        journalTable.createLedgerJournalTrans(abs(amountcredit),abs(0),LedgerJournalACType::Ledger);
+       
+        recordsInserted++;
+        ttscommit;
+        if(purchAgreementHeader.RecId)
+        {
+            select * from agreementLineDim 
+                    where agreementLineDim.Agreement == purchAgreementHeader.RecId;
+        }
+        if(salesAgreementHeader.RecId)
+        {
+            select * from agreementLineDim 
+                    where agreementLineDim.Agreement == salesAgreementHeader.RecId;
+        }
+
+        select firstonly forupdate ledgerJournalTransupd 
+                             where ledgerJournalTransupd.JournalNum == ledgerJournalTable.JournalNum;
+        ttsbegin;
+        ledgerJournalTransupd.ETG_Estimation = eTG_Actualagreement.ETG_Estimation;
+        if(purchAgreementHeader)
+        {
+            ledgerJournalTransupd.ETGAgreementno = eTG_Actualagreement.PurchNumberSequence;
+        }
+        if(salesAgreementHeader)
+        {
+            ledgerJournalTransupd.ETGSalesAgreementno = eTG_Actualagreement.PurchNumberSequence;
+        }
+        ledgerJournalTransupd.ETGLineestimationno = eTG_Actualagreement.ETGLineestimationno;
+        ledgerJournalTransupd.ETG_ActualID = eTG_Actualagreement.ETG_ActualID;
+        ledgerJournalTransupd.DefaultDimension = agreementLineDim.DefaultDimension;
+
+        ledgerJournalTransupd.update();
+        ttscommit;
+        journalTable.post(LedgerJournalTable);
+
+        select firstonly forupdate ledgerJournalTableUpd 
+                             where ledgerJournalTableUpd.JournalNum == ledgerJournalTable.JournalNum;
+        ttsbegin;
+        ledgerJournalTableUpd.Approver = 0;
+        ledgerJournalTableUpd.update();
+        ttscommit;
+
+        select firstonly forupdate eTG_ActualagreementUpd
+                             where eTG_ActualagreementUpd.RecId == eTG_Actualagreement.RecId ;
+        if(eTG_ActualagreementUpd)
+        {
+            ttsbegin;
+            eTG_ActualagreementUpd.JournalNum = ledgerJournalTable.JournalNum;
+            eTG_ActualagreementUpd.Posted = NoYes::Yes;
+            eTG_ActualagreementUpd.update();
+            ttscommit;
+        }
+
+        return recordsInserted;
+        
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCustVendOpenTransManager_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// extension class for class <c>CustVendOpenTransManager</c>
+/// </summary>
+[ExtensionOf(classstr(CustVendOpenTransManager))]
+internal final class ETGCustVendOpenTransManager_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>validateMarkedTotalWithinOverUnder</Name>
+				<Source><![CDATA[
+    public boolean validateMarkedTotalWithinOverUnder()
+    {
+        boolean isValid = next validateMarkedTotalWithinOverUnder();
+
+        if(ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+        {
+            this.validateCurrencyETG();
+        }
+
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateCurrencyETG</Name>
+				<Source><![CDATA[
+    public void validateCurrencyETG()
+    {
+        LedgerJournalTrans ledgerJournalTrans;
+        Map markedTransactions;
+        MapEnumerator currentTransaction;
+        SpecTrans currentSpecTrans;
+        CurrencyCode currencyCode;
+
+        if (originator.TableId == tableNum(LedgerJournalTrans))
+        {
+            ledgerJournalTrans = originator;
+        }
+
+        if (specTransManager.getSpecTransCount() != 0
+            && (originator.TableId == tableNum(LedgerJournalTrans) || originator.TableId == tableNum(CustTable)
+                || originator.TableId == tableNum(VendTable)))
+        {
+            markedTransactions = specTransManager.getAllSpecTransMap();
+            currentTransaction = new MapEnumerator(markedTransactions);
+
+            while (currentTransaction.moveNext())
+            {
+                currentSpecTrans = currentTransaction.currentValue();
+                if(!currencyCode)
+                {
+                    currencyCode = currentSpecTrans.Code;
+                }
+                else
+                {
+                    if(currencyCode && currencyCode != currentSpecTrans.Code)
+                    {
+                        DialogButton response = Box::yesNo("@ETG_New:CurrencyMismatched", DialogButton::No);
+
+                        if (response == DialogButton::No)
+                        {
+                            throw Error("@ETG_New:TransactionCanceled");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>populateLedgerJournalTransForTransactionsMarked</Name>
+				<Source><![CDATA[
+    // <summary>
+    // populate ledger journal trans with termo number reference
+    // </summary>
+    // <param name = "_ledgerJournalTrans">LedgerJournalTrans _ledgerJournalTrans</param>
+    protected void populateLedgerJournalTransForTransactionsMarked(LedgerJournalTrans _ledgerJournalTrans)
+    {
+        next populateLedgerJournalTransForTransactionsMarked(_ledgerJournalTrans);
+
+        if(VendParameters::find().ETGEnableTermoNumberFeature == NoYes::Yes)
+        {
+            SpecTrans specTransETG;
+
+            select firstOnly specTransETG where specTransETG.SpecRecId == originator.RecId;
+
+            if(_ledgerJournalTrans.AccountType == LedgerJournalACType::Vend && specTransETG)
+            {
+                _ledgerJournalTrans.ETGTERMONumber       = specTransETG.vendTransOpen().vendTrans().ETGTERMONumber;
+                _ledgerJournalTrans.ETGMotherTERMONumber = ETGTERMONumberTable::findFromTermoNumber(_ledgerJournalTrans.ETGTERMONumber).MotherTERMOReference;
+            }
+            else if(_ledgerJournalTrans.AccountType == LedgerJournalACType::Cust && specTransETG)
+            {
+                _ledgerJournalTrans.ETGTERMONumber       =  specTransETG.custTransOpen().custTrans().ETGTERMONumber;
+                _ledgerJournalTrans.ETGMotherTERMONumber = ETGTERMONumberTable::findFromTermoNumber(_ledgerJournalTrans.ETGTERMONumber).MotherTERMOReference;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

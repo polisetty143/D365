@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGDocuActionArchiveClass_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the DocuActionArchive class to enhance behavior when archiving documents.
+/// Triggers a business event when a document is attached to a purchase agreement.
+/// </summary>
+[ExtensionOf(classStr(DocuActionArchive))]
+final class ETGDocuActionArchiveClass_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>add</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Overrides the base `add` method to send a business event when a document is attached to a purchase agreement.
+    /// </summary>
+    /// <param name="_docuRef">Document reference to be added and evaluated.</param>
+    /// <param name="_filename">The filename of the attached document.</param>
+    void add(DocuRef _docuRef, Filename _filename)
+    {
+        next add(_docuRef,_filename);
+        if(ETGACFParameters::find().EnableDMSIntegration)
+        {
+            if (_docuRef.RefTableId == tableNum(AgreementHeader))
+            {
+                PurchAgreementHeader purchAgreement;
+                SalesAgreementHeader salesAgreement;
+                AgreementHeader agreementHeader = AgreementHeader::find(_docuRef.RefRecId);
+
+
+                if(agreementHeader.moduleType() == ModuleSalesPurch::Sales)
+                {
+                    select salesAgreement
+                    where agreementHeader.RecId == salesAgreement.RecId;
+
+                    if (salesAgreement.RecId)
+                    {
+                       ETGDMSIntDocumentAttachmentEventClass eventClass = ETGDMSIntDocumentAttachmentEventClass::newFromSalesAgreement(salesAgreement, _docuRef);
+                        eventClass.send();
+                    }
+                }
+                else if(agreementHeader.moduleType() == ModuleSalesPurch::Purch)
+                {
+                    select purchAgreement
+                    where agreementHeader.RecId == purchAgreement.RecId;
+
+                    if (purchAgreement.RecId)
+                    {
+                        ETGDMSIntDocumentAttachmentEventClass eventClass = ETGDMSIntDocumentAttachmentEventClass::newFromPurchAgreement(purchAgreement, _docuRef);
+                        eventClass.send();
+                    }
+                }
+                else
+                {
+
+            
+                }
+
+                
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

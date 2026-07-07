@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchAgreementLineForm_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formDataSourceStr(PurchAgreement, ALine))]
+internal final class ETGPurchAgreementLineForm_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>write</Name>
+				<Source><![CDATA[
+    public void write()
+    {
+        next write();
+       
+        ETGACFParameters acfParameters = ETGACFParameters::find();
+ 
+        if(acfParameters.EnableLinetoHeaderCopyFinDIm == NoYes::Yes)
+        {
+            AgreementLine line, agreementLine;
+            PurchAgreementHeader header, headerUpd,currentHeader;
+            FormDataSource fds, fdsHeader;
+
+            line      = this.cursor();
+            header    = line.agreementHeader();
+            fdsHeader = this.formRun().dataSource(formDataSourceStr(PurchAgreement, PurchAgreementHeader));
+        
+            if(line.DefaultDimension != header.DefaultDimension)
+            {
+                select firstonly RecId from agreementLine order by LineNumber asc
+                    where agreementLine.Agreement == header.RecId;
+                if(agreementLine.RecId == line.RecId)
+                {
+                    DialogButton diagBut;
+
+                    str strMessage = 'Do you want to copy financial dimension from line to header?';
+                    str strTitle   = 'Copy financial dimension';
+
+                    diagBut = Box::yesNo(strMessage, DialogButton::No, strTitle);
+
+                    if(diagBut == DialogButton::Yes)
+                    {
+                        RecId currentRecId =  header.RecId;
+                        ttsBegin;
+                        header.skipDataMethods(true);
+                        header.selectForUpdate(true);
+                        header.DefaultDimension = line.DefaultDimension;
+                        header.doUpdate();
+                        ttsCommit;
+                        fdsHeader.reread();
+                        fdsHeader.research(true);
+
+                        currentHeader = PurchAgreementHeader::find(currentRecId);
+                        fdsHeader.findRecord(currentHeader);
+                        
+                        Info("Financial dimesnions has been copied to header.");
+
+                    }
+
+                }
+                   
+            }
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

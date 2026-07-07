@@ -1,0 +1,629 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxForm xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V6">
+	<Name>ETG_AgreementLineNotes</Name>
+	<SourceCode>
+		<Methods xmlns="">
+			<Method>
+				<Name>classDeclaration</Name>
+				<Source><![CDATA[
+[Form]
+public class ETG_AgreementLineNotes extends FormRun
+{
+    AgreementLine   agreementLineInitRecord;
+    FormRun         callerFormRun;
+
+}
+]]></Source>
+			</Method>
+			<Method>
+				<Name>FormMethod1</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    private void FormMethod1()
+    {
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+		<DataSources xmlns="">
+			<DataSource>
+				<Name>ETG_AgreementLineNotes</Name>
+				<Methods>
+					<Method>
+						<Name>initValue</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void initValue()
+        {
+            Args  args = new Args();
+            AgreementLine  agreementLine;
+            agreementLine = element.args().record();
+
+            ETG_AgreementLineNotes.AgreementLine = agreementLine.RecId;
+            ETG_AgreementLineNotes.ItemId        = agreementLine.ItemId;
+            super();
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>isAgreementHavingConfirmations</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// it will return True if Agreement having confirmations
+        /// </summary>
+        public boolean isAgreementHavingConfirmations(RefRecId  _AgreementHeader)
+        {
+            boolean                 isAgreementHavingConfirmations;
+            AgreementHeaderHistory  agreementHeaderHistory;
+
+            select firstonly agreementHeaderHistory
+                where agreementHeaderHistory.AgreementHeader == _AgreementHeader;
+            
+            isAgreementHavingConfirmations  = agreementHeaderHistory.RecId != 0;
+
+            return  isAgreementHavingConfirmations;
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>init</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void init()
+        {
+            boolean         editOrder = true;
+            AgreementLine   agreementLine;
+
+            if (element.args() && element.args().dataset() == tableNum(AgreementLine))
+            {
+                agreementLine = element.args().record();
+                agreementLineInitRecord = element.args().record();
+                callerFormRun = element.args().caller();
+
+                editOrder = !this.isAgreementHavingConfirmations(agreementLine.agreementHeader().RecId);
+
+                ETG_AgreementLineNotes_DS.allowCreate(editOrder);
+                ETG_AgreementLineNotes_DS.allowEdit(editOrder);
+                ETG_AgreementLineNotes_DS.allowDelete(editOrder);
+
+                if(curExt() == "O001" || curExt() == "U008")
+                {
+                    if(editOrder)
+                    {
+                        element.design(0).viewEditMode(ViewEditMode::Edit);
+                    }
+                    //else
+                    //{
+                    //    element.design(0).viewEditMode(ViewEditMode::View);
+                    //}
+                }
+
+                if(curExt() == "O001" || curExt() == "U008")
+                {
+                    ChangeRequest.visible(true);
+                }
+                else
+                {
+                    ChangeRequest.visible(false);
+                }
+
+                if(ETG_Parameters::find().CopyFromMasterMapping == NoYes::Yes)
+                {
+                    CopyFromMaster.visible(true);
+                }
+                else
+                {
+                    CopyFromMaster.visible(false);
+                }
+
+                if(ETG_Parameters::find().CopyContractPluses == NoYes::Yes)
+                {
+                    CopyContract_pulses.visible(true);
+                }
+                else
+                {
+                    CopyContract_pulses.visible(false);
+                }
+                
+            }
+            super();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields />
+			</DataSource>
+		</DataSources>
+		<DataControls xmlns="">
+			<Control>
+				<Name>CopyFromMaster</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        public void clicked()
+        {
+            str PurchaseOrSales;
+            ETG_ACFNotesMappings    acfNotesMapping;
+            ETG_ACFNotesMaster      acfNotesMaster;
+            ETG_AgreementLineNotes  agreementLineNotesNew;
+            Counter                 rowCount =0;
+            ETGPlaceOfDischarge     destination;          
+            
+            super();
+            if(agreementLineInitRecord)
+            {
+                AgreementHeader     agreementHeader = AgreementHeader::find(agreementLineInitRecord.Agreement);
+
+                DimensionAttribute dimensionAttribute = DimensionAttribute::findByName("VERTICAL");
+                DimensionAttributeValueSetItemView dimensionAttributeValueSetItemView;
+
+                select firstonly DisplayValue from dimensionAttributeValueSetItemView
+                    where dimensionAttributeValueSetItemView.DimensionAttributeValueSet == agreementLineInitRecord.DefaultDimension
+                    && dimensionAttributeValueSetItemView.DimensionAttribute == dimensionAttribute.RecId;
+
+
+                if(callerFormRun.name() == formStr(PurchAgreement))
+                {
+                
+                    PurchAgreementHeader        purchAH    = PurchAgreementHeader::find(agreementHeader.RecId);
+                    ETG_PurchaseAgreementHeader etgPurchAheader ;
+                    ETG_PlaceOfDischarge ETG_PlaceOfDischarge_Purch;
+                    
+                
+                    select * from etgPurchAheader
+                        where etgPurchAheader.PurchAgreementId == purchAH.PurchNumberSequence;
+
+                    select firstonly ETG_PlaceOfDischarge_Purch 
+                        where ETG_PlaceOfDischarge_Purch.PlaceOfDischarge == etgPurchAheader.PortOfDischarge;
+             
+                   // destination     = etgPurchAheader.PortOfDischarge;
+                    destination = ETG_PlaceOfDischarge_Purch.Country;
+                    PurchaseOrSales = "Purchase";
+
+                }
+                else if (callerFormRun.name() == formStr(SalesAgreement))
+                {
+                    SalesAgreementHeader        salesAH = SalesAgreementHeader::find(agreementHeader.RecId);
+                    ETG_SalesAgreementHeader    etgSalesAH;
+                    ETG_PlaceOfDischarge        ETG_PlaceOfDischarge_sales;
+
+                    select * from etgSalesAH 
+                        where etgSalesAH.SalesAgreementId == salesAH.SalesNumberSequence;
+
+                    select firstonly ETG_PlaceOfDischarge_sales
+                        where ETG_PlaceOfDischarge_sales.PlaceOfDischarge == etgSalesAH.PortOfDischarge;
+                
+                   // destination     = etgSalesAH.PortOfDischarge;
+                    destination     = ETG_PlaceOfDischarge_sales.Country;
+                    PurchaseOrSales = "Sales";
+                }
+           
+                while select * from acfNotesMaster
+                    where acfNotesMaster.MainCommodity == agreementLineInitRecord.ETGMainCommodity &&
+                        acfNotesMaster.PurchaseorSales == PurchaseOrSales    
+                    join acfNotesMapping
+                    where acfNotesMapping.MainCommodity == agreementLineInitRecord.ETGMainCommodity &&
+                            acfNotesMapping.NoteId        == acfNotesMaster.NoteId &&
+                            acfNotesMapping.Destination   == destination &&
+                            acfNotesMapping.Vertical      == dimensionAttributeValueSetItemView.DisplayValue
+                {
+                    select agreementLineNotesNew
+                        where agreementLineNotesNew.AgreementLine == agreementLineInitRecord.RecId &&
+                              agreementLineNotesNew.ItemId        == agreementLineInitRecord.ItemId&&
+                              agreementLineNotesNew.EnumNotes     == acfNotesMaster.ContractNotesType;
+
+                    if(!agreementLineNotesNew)
+                    {
+                        ttsbegin;
+                        agreementLineNotesNew.clear();
+                        agreementLineNotesNew.AgreementLine = agreementLineInitRecord.RecId;
+                        agreementLineNotesNew.ItemId        = agreementLineInitRecord.ItemId;
+                        agreementLineNotesNew.Description   = acfNotesMaster.ContractNotesDescription;
+                        agreementLineNotesNew.EnumNotes     = acfNotesMaster.ContractNotesType;
+                        agreementLineNotesNew.PrintNotesInContract = NoYes::Yes;
+                        agreementLineNotesNew.AgreementSerialNumber  = acfNotesMapping.SerialNumber;//added new field to print notes by order
+                        agreementLineNotesNew.insert();
+                        ttscommit;
+                        rowCount++;
+                    }
+                }                        
+            }
+            if (rowCount >0)
+            {
+                Info(strFmt("%1 No of records inserted into Agreement lines notes",rowCount));
+            }
+            else
+            {   
+                info("No new records found !");
+            }
+            ETG_AgreementLineNotes_DS.refresh();
+            ETG_AgreementLineNotes_DS.research(true);
+            
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>CopyContract_pulses</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        public void clicked()
+        {
+            str PurchaseOrSales;
+            ETG_ACFNotesMappings    acfNotesMapping;
+            ETG_ACFNotesMaster      acfNotesMaster;
+            ETG_AgreementLineNotes  agreementLineNotesNew;
+            Counter                 rowCount =0;
+            ETGPlaceOfDischarge     destination; 
+            AgreementHeaderDefault    agreementHeaderDefault;
+            
+            super();
+            if(agreementLineInitRecord)
+            {
+                AgreementHeader     agreementHeader = AgreementHeader::find(agreementLineInitRecord.Agreement);
+    
+               
+    
+    
+                if(callerFormRun.name() == formStr(PurchAgreement))
+                {
+                
+                    PurchAgreementHeader        purchAH    = PurchAgreementHeader::find(agreementHeader.RecId);
+                    ETG_PurchaseAgreementHeader etgPurchAheader ;
+                    ETG_PlaceOfDischarge ETG_PlaceOfDischarge_Purch;
+                    
+                
+                    select * from etgPurchAheader
+                        where etgPurchAheader.PurchAgreementId == purchAH.PurchNumberSequence;
+    
+                    select firstonly ETG_PlaceOfDischarge_Purch 
+                        where ETG_PlaceOfDischarge_Purch.PlaceOfDischarge == etgPurchAheader.PortOfDischarge;
+             
+                   // destination     = etgPurchAheader.PortOfDischarge;
+                    destination = ETG_PlaceOfDischarge_Purch.Country;
+                    PurchaseOrSales = "Purchase";
+    
+                }
+                else if (callerFormRun.name() == formStr(SalesAgreement))
+                {
+                    SalesAgreementHeader        salesAH = SalesAgreementHeader::find(agreementHeader.RecId);
+                    ETG_SalesAgreementHeader    etgSalesAH;
+                    ETG_PlaceOfDischarge        ETG_PlaceOfDischarge_sales;
+    
+                    select * from etgSalesAH 
+                        where etgSalesAH.SalesAgreementId == salesAH.SalesNumberSequence;
+    
+                    select firstonly ETG_PlaceOfDischarge_sales
+                        where ETG_PlaceOfDischarge_sales.PlaceOfDischarge == etgSalesAH.PortOfDischarge;
+                
+                   // destination     = etgSalesAH.PortOfDischarge;
+                    destination     = ETG_PlaceOfDischarge_sales.Country;
+                    PurchaseOrSales = "Sales";
+                }
+                select AgreementHeaderDefault where AgreementHeaderDefault.AgreementHeader == agreementHeader.RecId;
+
+                while select * from acfNotesMaster
+                    where     acfNotesMaster.PurchaseorSales == PurchaseOrSales  && 
+                        acfNotesMaster.DataAreaId  ==  curExt() &&
+                       (acfNotesMaster.DeliveryTerm == "" || acfNotesMaster.DeliveryTerm == AgreementHeaderDefault.DeliveryTerm)
+                    
+                {
+                    select agreementLineNotesNew
+                        where agreementLineNotesNew.AgreementLine == agreementLineInitRecord.RecId &&
+                              //agreementLineNotesNew.ItemId        == agreementLineInitRecord.ItemId&&
+                              agreementLineNotesNew.EnumNotes     == acfNotesMaster.ContractNotesType;
+    
+                    if(!agreementLineNotesNew)
+                    {
+                        ttsbegin;
+                        agreementLineNotesNew.clear();
+                        agreementLineNotesNew.AgreementLine = agreementLineInitRecord.RecId;
+                       // agreementLineNotesNew.ItemId        = agreementLineInitRecord.ItemId;
+                        agreementLineNotesNew.Description   = acfNotesMaster.ContractNotesDescription;
+                        agreementLineNotesNew.EnumNotes     = acfNotesMaster.ContractNotesType;
+                        agreementLineNotesNew.PrintNotesInContract = NoYes::Yes;
+                        //agreementLineNotesNew.AgreementSerialNumber  = acfNotesMapping.SerialNumber;//added new field to print notes by order
+                        agreementLineNotesNew.insert();
+                        ttscommit;
+                        rowCount++;
+                    }
+                }                        
+            }
+            if (rowCount >0)
+            {
+                Info(strFmt("%1 No of records inserted into Agreement lines notes",rowCount));
+            }
+            else
+            {   
+                info("No new records found !");
+            }
+            ETG_AgreementLineNotes_DS.refresh();
+            ETG_AgreementLineNotes_DS.research(true);
+            
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ChangeRequest</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void clicked()
+        {
+            super();
+
+            this.formRun().design(ViewEditMode::Edit);
+
+            ETG_AgreementLineNotes_ds.allowEdit(true);
+            ETG_AgreementLineNotes_ds.allowCreate(true);
+            ETG_AgreementLineNotes_ds.allowDelete(true);
+
+            EnumNotes.allowEdit(true);
+            Description.allowEdit(true);
+            ETG_AgreementLineNotes_PrintNotesInContract.allowEdit(true);
+
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+		</DataControls>
+		<Members xmlns="" />
+	</SourceCode>
+	<DataSources>
+		<AxFormDataSource xmlns="">
+			<Name>ETG_AgreementLineNotes</Name>
+			<Table>ETG_AgreementLineNotes</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>AgreementLine</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>AgreementSerialNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Description</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>EnumNotes</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ItemId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PrintNotesInContract</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<InsertIfEmpty>No</InsertIfEmpty>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+	</DataSources>
+	<Design>
+		<Caption xmlns="">@ETG_Labels:ETGAgreementLineNotes</Caption>
+		<Pattern xmlns="">Custom</Pattern>
+		<Style xmlns="">SimpleList</Style>
+		<Controls xmlns="">
+			<AxFormControl xmlns=""
+				i:type="AxFormActionPaneControl">
+				<Name>ActionPane</Name>
+				<ElementPosition>715827882</ElementPosition>
+				<FilterExpression>%1</FilterExpression>
+				<Type>ActionPane</Type>
+				<VerticalSpacing>-1</VerticalSpacing>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormButtonGroupControl">
+						<Name>Copy</Name>
+						<Type>ButtonGroup</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonControl">
+								<Name>CopyFromMaster</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<Type>Button</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Text>Copy from master mapping</Text>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonControl">
+								<Name>CopyContract_pulses</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<Type>Button</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Text>Copy Contract Pulses</Text>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonControl">
+								<Name>ChangeRequest</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<Type>Button</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Text>Change request</Text>
+							</AxFormControl>
+						</Controls>
+						<Caption>Copy </Caption>
+						<DataSource>ETG_AgreementLineNotes</DataSource>
+					</AxFormControl>
+				</Controls>
+				<AlignChild>No</AlignChild>
+				<AlignChildren>No</AlignChildren>
+				<ArrangeMethod>Vertical</ArrangeMethod>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGroupControl">
+				<Name>CustomFilterGroup</Name>
+				<Pattern>CustomAndQuickFilters</Pattern>
+				<PatternVersion>1.1</PatternVersion>
+				<Type>Group</Type>
+				<WidthMode>SizeToAvailable</WidthMode>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl>
+						<Name>QuickFilterControl</Name>
+						<FormControlExtension>
+							<Name>QuickFilterControl</Name>
+							<ExtensionComponents />
+							<ExtensionProperties>
+								<AxFormControlExtensionProperty>
+									<Name>targetControlName</Name>
+									<Type>String</Type>
+									<Value>Grid</Value>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>defaultColumnName</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>placeholderText</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+							</ExtensionProperties>
+						</FormControlExtension>
+					</AxFormControl>
+				</Controls>
+				<ArrangeMethod>HorizontalLeft</ArrangeMethod>
+				<FrameType>None</FrameType>
+				<Style>CustomFilter</Style>
+				<ViewEditMode>Edit</ViewEditMode>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGridControl">
+				<Name>Grid</Name>
+				<ElementPosition>1073741823</ElementPosition>
+				<FilterExpression>%1</FilterExpression>
+				<Type>Grid</Type>
+				<VerticalSpacing>-1</VerticalSpacing>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormComboBoxControl">
+						<Name>EnumNotes</Name>
+						<AutoDeclaration>Yes</AutoDeclaration>
+						<Type>ComboBox</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>EnumNotes</DataField>
+						<DataSource>ETG_AgreementLineNotes</DataSource>
+						<Items />
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>Description</Name>
+						<AutoDeclaration>Yes</AutoDeclaration>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Description</DataField>
+						<DataSource>ETG_AgreementLineNotes</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormCheckBoxControl">
+						<Name>ETG_AgreementLineNotes_PrintNotesInContract</Name>
+						<AutoDeclaration>Yes</AutoDeclaration>
+						<Type>CheckBox</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>PrintNotesInContract</DataField>
+						<DataSource>ETG_AgreementLineNotes</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormIntegerControl">
+						<Name>ETG_AgreementLineNotes_AgreementSerialNumber</Name>
+						<Type>Integer</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>AgreementSerialNumber</DataField>
+						<DataSource>ETG_AgreementLineNotes</DataSource>
+					</AxFormControl>
+				</Controls>
+				<AlternateRowShading>No</AlternateRowShading>
+				<DataSource>ETG_AgreementLineNotes</DataSource>
+				<MultiSelect>No</MultiSelect>
+				<ShowRowLabels>No</ShowRowLabels>
+				<Style>Tabular</Style>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormTabControl">
+				<Name>DescriptionTab</Name>
+				<Type>Tab</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>DescriptionTabpage</Name>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>DescriptionNote</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>Description</DataField>
+								<DataSource>ETG_AgreementLineNotes</DataSource>
+								<DisplayHeight>5</DisplayHeight>
+								<DisplayHeightMode>Fixed</DisplayHeightMode>
+								<DisplayLength>10</DisplayLength>
+							</AxFormControl>
+						</Controls>
+						<Caption>@ETG_Labels:Description</Caption>
+					</AxFormControl>
+				</Controls>
+				<DataSource>ETG_AgreementLineNotes</DataSource>
+			</AxFormControl>
+		</Controls>
+	</Design>
+	<Parts />
+</AxForm>

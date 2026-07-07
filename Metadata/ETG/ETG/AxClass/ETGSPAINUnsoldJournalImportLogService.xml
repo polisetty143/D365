@@ -1,0 +1,260 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSPAINUnsoldJournalImportLogService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Service class for processing the import of Unsold Journal entries in the ETGSPAIN model.
+/// This class reads data from an uploaded Excel file and logs the results of each processed entry.
+/// </summary>
+class ETGSPAINUnsoldJournalImportLogService extends SysOperationServiceBase
+{    
+    ItemId                      itemId;
+    InventSiteId                inventSiteId;
+    InventLocationId            inventLocationId;
+    ETGSPAINPurchOperationId    operationId;
+    InventSerialId              contractId;
+    ETGSPAINInventApplicationId applicationId;
+    int                         rowCounter;
+    UnitOfMeasureSymbol         unit;
+    ETGSPAINUnsoldJournalId     etgspainUnsoldJournalId;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>processOperation</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Main process method that handles the import of data from the Excel file.
+    /// It reads each row of the file and validates the data before creating unsold journal entries.
+    /// </summary>
+    /// <param name="_contract">The contract containing the file stream and other parameters for the process.</param>
+    public void processOperation(ETGSPAINUnsoldJournalImportLogContract _contract)
+    {
+        TransDate                   transDate;               
+        Qty                         qty;        
+        int                         totalRows;
+        int                         totalCells;        
+        int                         cellCounter;
+        InventLocationId            inventLocationIdOutput;        
+        ETGSPAINUnsoldJournalTable  etgspainUnsoldJournalTable;
+        ETGSPAINUnsoldJournalTrans  etgspainUnsoldJournalTrans;
+        boolean                     existsAnyError;
+
+        inventLocationIdOutput      = _contract.parmInventLocationId();
+        etgspainUnsoldJournalId     = _contract.parmETGSPAINUnsoldJournalId();
+        etgspainUnsoldJournalTable  = ETGSPAINUnsoldJournalTable::find(etgspainUnsoldJournalId);
+        
+        using (System.IO.StreamReader reader = new System.IO.StreamReader(_contract.parmInputDataStream()))
+        {
+            OfficeOpenXml.ExcelWorksheet    worksheet;
+            OfficeOpenXml.ExcelRange        cells;
+            OfficeOpenXml.ExcelPackage      package = new OfficeOpenXml.ExcelPackage(_contract.parmInputDataStream());
+       
+            if(package)
+            {
+                worksheet       = package.get_Workbook().get_Worksheets().get_Item(1);
+                cells           = worksheet.Cells;
+                totalRows       = worksheet.Dimension.End.Row ;
+                totalCells      = worksheet.Dimension.End.Column;
+
+                for (rowCounter = 2; rowCounter<= totalRows; rowCounter++)
+                {
+                    transDate           = cells.get_Item(rowCounter, 1).value;
+                    itemId              = cells.get_Item(rowCounter, 2).value;
+                    inventSiteId        = cells.get_Item(rowCounter, 3).value;
+                    inventLocationId    = cells.get_Item(rowCounter, 4).value;
+                    operationId         = cells.get_Item(rowCounter, 5).value;
+                    contractId          = cells.get_Item(rowCounter, 6).value;
+                    applicationId       = cells.get_Item(rowCounter, 7).value;
+                    qty                 = cells.get_Item(rowCounter, 8).value;
+                    unit                = cells.get_Item(rowCounter, 9).value;
+
+                    qty = abs(qty);
+
+                    if (this.validateData())
+                    {
+                        // Comprobamos que exista una transacción para la aplicación y almacén de salida.
+                        InventTrans                 inventTrans;
+                        InventDim                   inventDim;
+                        ETGSPAINUnsoldInventTrans   etgspainUnsoldInventTransOriginal;
+
+                        select firstonly inventTrans
+                            where inventTrans.ETGSPAINInventTransIsUnsold       == NoYes::Yes
+                                && inventTrans.ItemId                           == itemId
+                        exists join inventDim
+                            where inventDim.inventDimId                         == inventTrans.inventDimId
+                                && (!inventSiteId       
+                                    || inventDim.inventSiteId                   == inventSiteId)
+                                && (!inventLocationIdOutput
+                                    || inventDim.InventLocationId               == inventLocationIdOutput)                                
+                                && (!contractId         
+                                    || inventDim.inventSerialId                 == contractId)
+                                && (!applicationId      
+                                    || inventDim.InventDimension1               == applicationId)
+                        exists join etgspainUnsoldInventTransOriginal
+                            where etgspainUnsoldInventTransOriginal.RefRecId    == inventTrans.RecId
+                            && etgspainUnsoldInventTransOriginal.OriginalUnsold == NoYes::Yes;
+
+                        if (inventTrans)
+                        {
+                            etgspainUnsoldJournalTrans.clear();
+                            etgspainUnsoldJournalTrans.initValue();
+                            etgspainUnsoldJournalTrans.initFromETGSPAINUnsoldJournalTable(etgspainUnsoldJournalTable);
+
+                            etgspainUnsoldJournalTrans.ItemId           = itemId;
+                            //etgspainUnsoldJournalTrans.initFromInventTable(InventTable::find(itemId));
+
+                            etgspainUnsoldJournalTrans.TransDate        = transDate ? transDate : today();
+                            etgspainUnsoldJournalTrans.UnsoldQty        = qty;                          
+                            etgspainUnsoldJournalTrans.Unit             = unit;
+                            etgspainUnsoldJournalTrans.LineNum          = ETGSPAINUnsoldJournalTrans::lastLineNum(etgspainUnsoldJournalId) + 1;
+        
+                            // Dimensiones Origen
+                            inventDim.clear();
+                            inventDim.initValue();
+                            inventDim.inventSiteId                      = inventSiteId;
+                            inventDim.InventLocationId                  = inventLocationIdOutput;
+                            inventDim.inventBatchId                     = inventTrans.inventDim().inventBatchId;
+                            inventDim.inventSerialId                    = contractId;
+                            inventDim.InventDimension1                  = applicationId;
+                            
+                            etgspainUnsoldJournalTrans.InventDimId      = InventDim::findOrCreate(inventDim).inventDimId;
+
+                            // Dimensiones Destino
+                            inventDim.clear();
+                            inventDim.initValue();
+                            inventDim.inventSiteId                      = inventSiteId;
+                            inventDim.InventLocationId                  = inventLocationId;
+
+                            inventDim.inventBatchId                     = inventTrans.inventDim().inventBatchId != operationId  ?
+                                                                            operationId                                         : 
+                                                                            inventTrans.inventDim().inventBatchId;                            
+                            
+                            inventDim.inventSerialId                    = contractId;
+                            inventDim.InventDimension1                  = applicationId;
+                            etgspainUnsoldJournalTrans.ToInventDimId    = InventDim::findOrCreate(inventDim).inventDimId;
+                                        
+                            etgspainUnsoldJournalTrans.insert();
+
+                            if (inventTrans.inventDim().inventBatchId != operationId)
+                            {
+                                this.addLog(ETGSPAINInventJournalLineImportLogType::Correct, rowCounter, strFmt("@ETGSPAINLabels:ETGSPAINUnsoldJournalImportLogOperationError", operationId, inventTrans.inventDim().inventBatchId));
+                            }
+
+                            this.addLog(ETGSPAINInventJournalLineImportLogType::Correct, rowCounter, "@ETGSPAINLabels:LineImported");                           
+                        }
+                        else
+						{
+                            this.addLog(ETGSPAINInventJournalLineImportLogType::Error, rowCounter, "@ETGSPAINLabels:ETGSPAINUnsoldJournalImportLogNoTransaction");
+						}
+                    }
+                }
+            }
+        }
+
+        info("@ETGSPAINLabels:FinishImport");
+
+        if (existsAnyError)
+        {
+            warning("@ETGSPAINLabels:ImportedLineWithErrors");
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateData</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Validates the data from each row of the Excel file, ensuring that the item, site, location,
+    /// operation, contract, application, and unit exist in the system.
+    /// </summary>
+    /// <returns>Returns true if all validations pass; otherwise, false.</returns>
+    private boolean validateData()
+    {
+        boolean res = true;
+
+        if (!InventTable::exist(itemId))
+        {
+            this.addLog(ETGSPAINInventJournalLineImportLogType::Error, rowCounter, strFmt("@ETGSPAINLabels:NoExistsItem", itemId));
+            res = false;
+        }
+
+        if (!InventSite::exist(inventSiteId))
+        {
+            this.addLog(ETGSPAINInventJournalLineImportLogType::Error, rowCounter, strFmt("@ETGSPAINLabels:NoExistsSite", inventSiteId));
+            res = false;
+        }
+
+        if (!InventLocation::exist(inventLocationId))
+        {
+            this.addLog(ETGSPAINInventJournalLineImportLogType::Error, rowCounter, strFmt("@ETGSPAINLabels:NoExistsWarehouse", inventLocationId));
+            res = false;
+        }
+                    
+        if (!ETGSPAINPurchOperationTable::exist(operationId))
+        {
+            this.addLog(ETGSPAINInventJournalLineImportLogType::Error, rowCounter, strFmt("@ETGSPAINLabels:NoExistsOperation", operationId));
+            res = false;
+        }
+
+        if (!InventSerial::exist(contractId, itemId))
+        {
+            this.addLog(ETGSPAINInventJournalLineImportLogType::Error, rowCounter, strFmt("@ETGSPAINLabels:NoExistsContractForItem", contractId, itemId));
+            res = false;
+        }
+
+        if (!ETGSPAINInventApplicationTable::exist(applicationId))
+        {
+            this.addLog(ETGSPAINInventJournalLineImportLogType::Error, rowCounter, strFmt("@ETGSPAINLabels:NoExistsApplication", applicationId));
+            res = false;
+        }
+
+        if (!UnitOfMeasure::findBySymbol(unit))
+        {
+            this.addLog(ETGSPAINInventJournalLineImportLogType::Error, rowCounter, strFmt("@ETGSPAINLabels:NoExistsUnit", unit));
+            res = false;
+        }
+
+        if (InventTable::find(itemId).inventTableModuleSales().UnitId != unit)
+        {
+            this.addLog(ETGSPAINInventJournalLineImportLogType::Error, rowCounter, strFmt("@ETGSPAINLabels:NoExistsUnitSales", unit, itemId));
+            res = false;
+        }
+
+        return res;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addLog</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Logs the result of each processed line from the Excel file into the Unsold Journal Import Log table.
+    /// </summary>
+    /// <param name="_type">The type of log entry (e.g., error, success).</param>
+    /// <param name="_lineNum">The line number from the Excel file.</param>
+    /// <param name="_comment">A comment or message describing the result of the processing.</param>
+    private void addLog(ETGSPAINInventJournalLineImportLogType _type, LineNum _lineNum, FreeText  _comment)
+    {
+        ETGSPAINUnsoldJournalImportLogTable   etgspainUnsoldJournalImportLogTable;
+
+        ttsbegin;
+        etgspainUnsoldJournalImportLogTable.clear();
+        etgspainUnsoldJournalImportLogTable.initValue();
+        etgspainUnsoldJournalImportLogTable.JournalId = etgspainUnsoldJournalId;
+        etgspainUnsoldJournalImportLogTable.LineType  = _type;
+        etgspainUnsoldJournalImportLogTable.LineNum   = _lineNum;
+        etgspainUnsoldJournalImportLogTable.Comments  = _comment;
+        etgspainUnsoldJournalImportLogTable.insert();
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

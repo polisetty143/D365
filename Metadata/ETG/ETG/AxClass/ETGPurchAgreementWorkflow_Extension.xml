@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchAgreementWorkflow_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(PurchAgreementWorkflow))]
+internal final class ETGPurchAgreementWorkflow_Extension
+{
+    public boolean isValid = true;
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>submit</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// check validation for trade limit and mandatory fields before submit wf
+    /// </summary>
+    public void submit()
+    {
+        if (ETGACFParameters::find().EnableTradeLimit == NoYes::Yes)
+        {
+            this.validateTradeLimitETG();
+        }
+
+        if (ETGACFParameters::find().EnableMandatoryFields == NoYes::Yes)
+        {
+            FormDataSource purchAgreementHeader_ds                 = FormDataUtil::getFormDataSource(purchAgreementHeader);
+            PurchAgreementWorkflow::validatePurchAgreementWFETG(purchAgreementHeader, purchAgreementHeader_ds.formRun());
+        }
+
+        if (ETGACFParameters::find().EnableDMSIntegration 
+            && BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGDMSReverePurchAgreementIntegrationEventClass)))
+        {
+            AgreementHeaderHistory   agreementHeaderHistory;
+
+            select firstonly agreementHeaderHistory
+                        order by RecId desc
+                          where agreementHeaderHistory.AgreementHeader == purchAgreementHeader.RecId;
+
+            str confirmationnumber  = strFmt("%1-%2", purchAgreementHeader.PurchNumberSequence, agreementHeaderHistory.ConfirmationNumber);
+            str formattedDateTime = DateTimeUtil::toStr(agreementHeaderHistory.CreatedDateTime);
+
+            ETGDMSReverePurchAgreementIntegrationContract contract = new ETGDMSReverePurchAgreementIntegrationContract();
+
+            contract.parmDealNumber(purchAgreementHeader.ETGDMSDealNumbers);
+            contract.parmDataAreaId(curExt());
+            contract.parmOperationType("Agreement Workflow Submit");
+            contract.parmActivityName("Purchase Agreement Workflow Submit");
+            contract.parmDocumentNumber(confirmationnumber);
+            contract.parmDocumentDate(formattedDateTime);
+            contract.parmActivityOwner(purchAgreementHeader.CreatedBy);
+            contract.parmActivityRemarks(strFmt("The Purchase agreement %1 is submitted to workflow",purchAgreementHeader.PurchNumberSequence));
+
+            ETGDMSReverePurchAgreementIntegrationEventClass eventClass = ETGDMSReverePurchAgreementIntegrationEventClass::newFromContract(contract);
+            eventClass.send();
+        }
+
+        next submit();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateTradeLimitETG</Name>
+				<Source><![CDATA[
+    public void validateTradeLimitETG()
+    {
+        if(purchAgreementHeader && purchAgreementHeader.vendTable().ETGApplicableTradeLimit == NoYes::Yes)
+        {
+            ETGACFTradeLimitHelper::processTradeLimitPurch(purchAgreementHeader);
+        }
+
+        if (ETGACFParameters::find().EnableDMSIntegration
+            && BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGDMSReverePurchAgreementIntegrationEventClass)))
+        {
+            AgreementHeaderHistory   agreementHeaderHistory;
+
+            select firstonly agreementHeaderHistory
+                        order by RecId desc
+                          where agreementHeaderHistory.AgreementHeader == purchAgreementHeader.RecId;
+
+            str confirmationnumber  = strFmt("%1-%2", purchAgreementHeader.PurchNumberSequence, agreementHeaderHistory.ConfirmationNumber);
+            str formattedDateTime = DateTimeUtil::toStr(agreementHeaderHistory.CreatedDateTime);
+
+            ETGDMSReverePurchAgreementIntegrationContract contract = new ETGDMSReverePurchAgreementIntegrationContract();
+
+            contract.parmDealNumber(purchAgreementHeader.ETGDMSDealNumbers);
+            contract.parmDataAreaId(curExt());
+            contract.parmOperationType("Agreement Workflow Submit");
+            contract.parmActivityName("Purchase Agreement Workflow Submit");
+            contract.parmDocumentNumber(confirmationnumber);
+            contract.parmDocumentDate(formattedDateTime);
+            contract.parmActivityOwner(purchAgreementHeader.CreatedBy);
+            contract.parmActivityRemarks(strFmt("The Purchase agreement %1 is submitted to workflow",purchAgreementHeader.PurchNumberSequence));
+
+            ETGDMSReverePurchAgreementIntegrationEventClass eventClass = ETGDMSReverePurchAgreementIntegrationEventClass::newFromContract(contract);
+            eventClass.send();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>reSubmit</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// check validation for trade limit and mandatory fields before submit wf
+    /// </summary>
+    public void reSubmit()
+    {
+        if(ETGACFParameters::find().EnableTradeLimit == NoYes::Yes)
+        {
+            this.validateTradeLimitETG();
+        }
+
+        if (ETGACFParameters::find().EnableMandatoryFields == NoYes::Yes)
+        {
+            FormDataSource purchAgreementHeader_ds                 = FormDataUtil::getFormDataSource(purchAgreementHeader);
+            PurchAgreementWorkflow::validatePurchAgreementWFETG(purchAgreementHeader, purchAgreementHeader_ds.formRun());
+        }
+
+        next reSubmit();
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validatePurchAgreementWFETG</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// checks mandatory fields before wf begins
+    /// </summary>
+    /// <param name = "purchAgrHeader"></param>
+    /// <param name = "formRun"></param>
+    /// <returns></returns>
+    public static void validatePurchAgreementWFETG(PurchAgreementHeader purchAgrHeader, FormRun formRun)
+    {
+        AgreementLine agreementLine;
+
+        select RecId, ETG_UnderDeliveryPct, ETG_OverDeliveryPct
+        from agreementLine
+        where agreementLine.Agreement == purchAgrHeader.RecId;
+
+        if (!purchAgrHeader || !agreementLine.RecId)
+        {
+            throw error(strFmt("Purchase agreement %1 cannot be submitted since no lines exist", purchAgrHeader.PurchNumberSequence));
+        }
+
+        if (formRun && formRun.name() == formStr(PurchAgreement))
+        {
+            boolean allValid = ETGSalesAgreementMandatoryValidation::validateFormHeaders(formRun)
+                                && ETGSalesAgreementMandatoryValidation::validateFormLines(formRun);
+
+            if (!allValid)
+            {
+                throw error("@ETG_New:MandatoryFieldsError");
+            }
+        }
+
+        if (agreementLine.ETG_UnderDeliveryPct == 0 && agreementLine.ETG_OverDeliveryPct == 0)
+        {
+            DialogButton diagBut;
+            str strMessage = "@ETG_New:UnderOverDeliveryDialog";
+            str strTitle   = "@ETG_New:OverUnderDeliveryTitle";
+
+            diagBut = Box::yesNo(strMessage, DialogButton::Yes, strTitle);
+
+            if (diagBut == DialogButton::Yes)
+            {
+                throw error("@ETG_New:OverUnderDeliveryWFError");
+            }
+
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

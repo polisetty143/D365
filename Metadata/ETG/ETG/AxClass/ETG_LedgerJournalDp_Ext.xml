@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_LedgerJournalDp_Ext</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///    The <c>ETG_LedgerJournalDp_Ext</c> class declares the variables, tables, and so on, that are used in the
+///    <c>ETG_LedgerJournalDp_Ext</c> report.
+/// </summary>
+class ETG_LedgerJournalDp_Ext
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>LedgerJournalDP_Post_processReport</Name>
+				<Source><![CDATA[
+    [PostHandlerFor(classStr(LedgerJournalDP), methodStr(LedgerJournalDP, processReport))]
+    public static void LedgerJournalDP_Post_processReport(XppPrePostArgs args)
+    {
+        LedgerJournalDP               dpInstance = args.getThis() as LedgerJournalDP;
+        LedgerJournalTmp              TmpTable = dpInstance.getLedgerJournalTmp();
+        Amount                        Netamount ,exrate,TaxAmount;
+        Description1000               Amountinwords;
+        WorkflowTrackingStatusTable   workflowTrackingStatusTable;
+        WorkflowTrackingTable         workflowTrackingTable;
+        Ledgerjournaltable            ledgerjournaltable;
+        CurrencyCode                  fromcurrency,Tocurrency;
+        Amount                        accountcurrency,accountcurrencyloc;
+        str                           originalValue;
+        Description1000               Amountinwordsloc;
+
+        
+        exrate =  LedgerJournalTrans::find(TmpTable.JournalNum,TmpTable.Voucher,false).ExchRate/100;
+        ttsbegin;
+        while select forUpdate TmpTable
+        {
+
+            HcmWorker           hcmWorker;
+            Dirpartytable       dirPartyTable;
+            Ledgerjournaltrans  journalTrans,journalTransloc;
+            TmpTaxWorkTrans     taxTrans;
+
+            if(TmpTable.TotalAmountSumDebit)
+            {
+                Netamount = TmpTable.TotalAmountSumDebit;
+            }
+            else
+            {
+                Netamount = TmpTable.TotalAmountSumCredit;
+            }
+           
+
+            journalTrans = LedgerJournalTrans::find(TmpTable.JournalNum,TmpTable.Voucher,false);
+
+            hcmWorker = HcmWorker::find(journalTrans.Approver);
+            dirPartyTable = DirPartyTable::findRec(hcmWorker.Person);
+            select firstonly taxTrans
+                where taxTrans.SourceTableId == journalTrans.TableId
+                &&  taxTrans.SourceRecId   == journalTrans.RecId;
+
+            TmpTable.ExchangeRate = exrate;
+            TmpTable.Preparedby = LedgerJournalTable::find(TmpTable.JournalNum).CreatedBy;
+            
+            ledgerjournaltable = LedgerJournalTable::find(TmpTable.JournalNum);
+
+            select  firstonly  workflowTrackingStatusTable
+            where  workflowTrackingStatusTable.ContextRecId == ledgerJournalTable.recid;
+
+
+            select firstonly  workflowTrackingTable
+            where workflowTrackingTable.workflowTrackingStatusTable == workflowTrackingStatusTable .recid
+            && workflowTrackingTable.TrackingType ==WorkflowTrackingType::Submission;
+
+            TmpTable.Checkedby = workflowTrackingTable.User;
+ 
+            select firstonly workflowTrackingTable order by workflowTrackingTable.recid desc
+            where workflowTrackingTable.workflowTrackingStatusTable == workflowTrackingStatusTable .recid
+            && workflowTrackingTable.TrackingType ==WorkflowTrackingType::Approval;
+
+            TmpTable.ApprovedBy = workflowTrackingTable.user;
+
+            
+            TmpTable.TaxAmount  = abs(journalTrans.totalTaxAmountSingleLine());
+            TaxAmount = abs(journalTrans.totalTaxAmountSingleLine());
+            Netamount  = Netamount; 
+            Amountinwords = Global::numeralsToTxt_EN(Netamount);
+            Amountinwords = strReplace(Amountinwords,'***','');
+            Amountinwords = strReplace(Amountinwords,'and 00/100','');
+
+            TmpTable.AmountInWords = TmpTable.CurrencyCode + Amountinwords;
+            TmpTable.CompanyLogo        = FormLetter::companyLogo();
+
+            // NS--Financial dimension values are printing along with main account in the voucher print
+            container    mainaccount        = str2con(TmpTable.AccountNum, '|');
+            TmpTable.MainAccount            = conPeek(mainaccount,1);
+            Tocurrency                      = Ledger::accountingCurrency(CompanyInfo::current());
+            TmpTable.Accountingcurrencycode = Tocurrency;
+            fromcurrency                    = TmpTable.CurrencyCode;
+
+            if(TmpTable.TotalAmountSumCredit)
+            {
+                accountcurrency = TmpTable.TotalAmountSumCredit;
+            }
+            else
+            {
+                accountcurrency = TmpTable.TotalAmountSumDebit;
+            }
+
+            select * from journalTransloc where journalTransloc.Voucher == TmpTable.Voucher
+                        && journalTransloc.CurrencyCode == fromcurrency;
+
+            TmpTable.Accountingcurrency = accountcurrency * journalTransloc.ExchRate/100;
+
+            accountcurrencyloc = TmpTable.Accountingcurrency;
+            Amountinwordsloc = Global::numeralsToTxt_EN(accountcurrencyloc);
+            Amountinwordsloc = strReplace(Amountinwordsloc,'***','');
+            Amountinwordsloc = strReplace(Amountinwordsloc,'and 00/100','');
+            TmpTable.ETGAmountInWords   = TmpTable.Accountingcurrencycode + Amountinwordsloc;
+            //NE--Financial dimension values are printing along with main account in the voucher print
+            TmpTable.update();
+
+        }
+
+
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

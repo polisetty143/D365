@@ -1,0 +1,326 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGProdTable_Form_EventHandler</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public final class ETGProdTable_Form_EventHandler
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>ProdTable_ETGSalesId_OnLookup</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///lookup for sales id
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(ProdTable, ProdTable_ETGSalesId), FormControlEventType::Lookup)]
+    public static void ProdTable_ETGSalesId_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        Prodtable           prod    = sender.formRun().dataSource(formDataSourceStr(ProdTable, ProdTable)).cursor();
+        Query query = new Query();
+        query.allowCrossCompany(true);
+        query.addCompanyRange(prod.ETGParentEntity);
+
+        QueryBuildDataSource qbds = query.addDataSource(tableNum(SalesTable));
+        qbds.addRange(fieldNum(SalesTable,SalesStatus)) .value(queryValue(enum2Str(SalesStatus::Backorder)));
+        qbds.addSortField(fieldNum(SalesTable, CreatedDateTime), SortOrder::Descending);
+        SysTableLookup sysTableLookup = SysTableLookup::newParameters(tableNum(SalesTable), sender);
+
+        sysTableLookup.addLookupfield(fieldNum(SalesTable, SalesId), true);
+        sysTableLookup.addLookupfield(fieldNum(SalesTable, CustAccount));
+
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.performFormLookup();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ProdTable_ETGItemId_OnLookup</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    /// <summary>
+    ///
+  
+    [FormControlEventHandler(formControlStr(ProdTable, ProdTable_ETGItemId), FormControlEventType::Lookup)]
+    public static void ProdTable_ETGItemId_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        Prodtable           prod    = sender.formRun().dataSource(formDataSourceStr(ProdTable, ProdTable)).cursor();
+        if (!prod.ETGSalesId)
+        {
+            warning("Please select Sales Order first.");
+            return;
+        }
+        Query query = new Query();
+        query.allowCrossCompany(true);
+        query.addCompanyRange(prod.ETGParentEntity);
+
+        QueryBuildDataSource qbdsSalesLine = query.addDataSource(tableNum(SalesLine));
+        qbdsSalesLine.addRange(fieldNum(SalesLine, SalesId)).value(queryValue(prod.ETGSalesId));
+
+        SysTableLookup sysTableLookup = SysTableLookup::newParameters(tableNum(SalesLine), sender);
+        sysTableLookup.addLookupfield(fieldNum(SalesLine,InventTransId));
+        sysTableLookup.addLookupfield(fieldNum(SalesLine,LineNum));
+        sysTableLookup.addLookupfield(fieldNum(SalesLine, ItemId));
+        sysTableLookup.addLookupMethod(tableMethodStr(SalesLine,itemName));
+        
+
+
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.performFormLookup();
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ProdTable_OnActivated</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataSourceEventHandler(formDataSourceStr(ProdTable, ProdTable), FormDataSourceEventType::Activated)]
+    public static void ProdTable_OnActivated(FormDataSource sender, FormDataSourceEventArgs e)
+    {
+        FormRun formRun = sender.formRun(); 
+        ProdTable       prod    = sender.cursor();
+        FormControl salesIdCtrl = formRun.design().controlName("ProdTable_ETGSalesId");
+        FormControl itemIdCtrl = formRun.design().controlName("ProdTable_ETGItemId");
+        boolean editable = prod.ETGSalesId == "";
+        boolean editable1 = prod.ETGItemId == "";
+
+        salesIdCtrl.allowEdit(editable);
+        itemIdCtrl.allowEdit(editable1);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ProdTable_ETGSalesId_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(ProdTable, ProdTable_ETGSalesId), FormControlEventType::Modified)]
+    public static void ProdTable_ETGSalesId_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        FormRun formRun = sender.formRun();
+        FormDataSource ds = formRun.dataSource(formDataSourceStr(ProdTable, ProdTable));
+        ProdTable prod = ds.cursor();
+
+        // Clear ItemId if SalesId changes
+        if (prod.orig().ETGSalesId != prod.ETGSalesId)
+        {
+            prod.ETGItemId = '';
+            ds.refresh();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ProdTable_ETGItemId_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(ProdTable, ProdTable_ETGItemId), FormControlEventType::Modified)]
+    public static void ProdTable_ETGItemId_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        FormRun formRun = sender.formRun();
+        FormDataSource prodDS = formRun.dataSource(formDataSourceStr(ProdTable, ProdTable));
+        ProdTable prod = prodDS.cursor();
+        ProdTable       prodParent;
+
+        if(ETGCanadaParameters::find().EnableSubContractingPO && prod.ETGIsSubContractingOrder)
+        {
+
+            changecompany(prod.ETGParentEntity)
+            {
+                prodParent           = ProdTable::find(prod.ETGParentProdId, true);
+            }
+            SalesLine            markSalesline       = ETGProdTable_Form_EventHandler::findMatchingSalesLine(prodParent,prod.ETGParentEntity,prod.ETGSalesId,prod.ETGItemId);
+            if (markSalesline)
+            {
+                // Mark PO and SO
+                ETGProdTable_Form_EventHandler::markPO(prod, markSalesline);
+
+                ttsbegin;
+                prod.ETGSalesId     =   markSalesline.SalesId;
+                prod.ETGItemId      =   markSalesline.ItemId;
+               //prod.InventTransId  =  markSalesline.InventTransId;
+                prodDS.write();
+                ttscommit;
+
+                //update Salesid on Parent ProdId as well
+
+                changecompany(prod.ETGParentEntity)
+                {
+                    ttsbegin;
+                    //prodParent.selectForUpdate(true);
+                    prodParent.reread();
+                    prodParent.ETGSalesId       = markSalesline.SalesId;
+                    prodParent.ETGItemId        = markSalesline.ItemId;
+                    
+                    prodParent.update();
+                    ttscommit;
+                }
+            }
+            else
+            {
+                Error(strFmt("@ETG_New:SalesLineDoesntExists", prod.ETGSalesId));
+
+                ttsbegin;
+                prod.ETGSalesId         = "";
+                prod.ETGItemId          = "";
+                prodDS.write();
+                ttscommit;
+
+               // update the production order in parent entity
+
+                changecompany(prod.ETGParentEntity)
+                {
+                    ttsbegin;
+                    prodParent.ETGSalesId         = "";
+                    prodParent.ETGItemId          = "";
+                    prodParent.update();
+                    ttscommit;
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>markPO</Name>
+				<Source><![CDATA[
+    public static void markPO(ProdTable _prod, SalesLine   _markSalesline)
+    {
+        changecompany(_prod.ETGParentEntity)
+        {
+            InventTransId         issueInventTransId, receiptInventTransId;
+            ProdTable           parentProd  = ProdTable::find(_prod.ETGParentProdId);
+            // SalesLine            markSalesline       = this.findMatchingSalesLine(parentProd);
+            issueInventTransId   = _markSalesline.InventTransId;
+            receiptInventTransId = parentProd.InventTransId;
+ 
+            InventTransOriginId receiptInventTransOriginId =
+            InventTransOrigin::findByInventTransId(receiptInventTransId).RecId;
+            InventTrans         receiptInventTrans         =
+            InventTrans::findByInventTransOrigin(receiptInventTransOriginId);
+ 
+            InventTransOriginId issueInventTransOriginId =
+            InventTransOrigin::findByInventTransId(issueInventTransId).RecId;
+
+            InventTrans         issueInventTrans ;
+            InventTransOrigin   inventTransOrigin_loc;
+
+            select firstonly issueInventTrans
+                join inventTransOrigin_loc
+                where inventTransOrigin_loc.RecId         ==  issueInventTrans.InventTransOrigin
+                   && inventTransOrigin_loc.InventTransId == issueInventTransId
+                    && issueInventTrans.StatusIssue  == StatusIssue::OnOrder;
+
+            if (!issueInventTrans.RecId)
+            {
+                throw error("@ETG_New:AlreadymarkedError");
+            }
+
+            TmpInventTransMark      tmpInventTransMark;
+ 
+            InventTransMarkCollection   collection = TmpInventTransMark::markingCollection(
+            InventTransOrigin::find(receiptInventTransOriginId),
+            receiptInventTrans.inventDim(),
+            receiptInventTrans.Qty);
+ 
+            collection.insertCollectionToTmpTable(tmpInventTransMark);
+ 
+            select firstonly tmpInventTransMark
+            where tmpInventTransMark.InventTransOrigin == issueInventTrans.InventTransOrigin
+                && tmpInventTransMark.InventDimId       == issueInventTrans.InventDimId;
+ 
+            if (tmpInventTransMark.RecId != 0)
+            {
+                Qty receiptQty = abs(receiptInventTrans.Qty);
+                Qty issueQty   = abs(issueInventTrans.Qty);
+                Qty qtyToMark = min(receiptQty, issueQty);
+
+                tmpInventTransMark.Qty = -qtyToMark;
+                tmpInventTransMark.QtyMarkNow =  -qtyToMark;
+
+                if(receiptQty >= issueQty)
+                {
+                    tmpInventTransMark.QtyRemain -= tmpInventTransMark.QtyMarkNow;
+                }
+                else
+                {
+                    tmpInventTransMark.QtyRemain = abs(receiptInventTrans.Qty) - abs(tmpInventTransMark.QtyRemain);
+                }
+
+                Map mapUpdated = new Map(Types::Int64, Types::Record);
+                mapUpdated.insert(tmpInventTransMark.RecId, tmpInventTransMark);
+
+                TmpInventTransMark::updateTmpMark(
+                receiptInventTransOriginId,
+                receiptInventTrans.inventDim(),
+                receiptInventTrans.Qty,
+                mapUpdated.pack());
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>findMatchingSalesLine</Name>
+				<Source><![CDATA[
+    public static  SalesLine findMatchingSalesLine(ProdTable prodTable, LegalEntityDataAreaId   comp,SalesId  _salesId,InventTransId _inventTransId)
+    {
+        changecompany(comp)
+        {
+            SalesLine        salesLine, matchedLine;
+            InventDim        prodDim, salesDim;
+            //ItemId           itemId = prodTable.ETGItemId;
+
+            // 1. Get ProdTable InventDim
+            prodDim = InventDim::find(prodTable.InventDimId);
+
+            // 3. Loop SalesLines for same SalesId + ItemId
+            while select salesLine
+            where salesLine.SalesId == _salesId
+            //&& salesLine.ItemId  == _itemid
+            && salesLine.InventTransId == _inventTransId
+            {
+                salesDim = InventDim::find(salesLine.InventDimId);
+                if(InventDim::isInventDimEqual(salesDim, prodDim))
+                {
+
+                    matchedLine = salesLine;
+                    break;
+                }
+            }
+
+            return matchedLine;
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,485 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_FixedAssetsDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+  /// 
+  /// </summary>
+ [
+    SRSReportParameterAttribute(classStr(ETG_FixedAssetsContract))
+ ]
+    class ETG_FixedAssetsDP extends SrsReportDataProviderPreProcessTempDB
+   
+{
+    ETGFixedAssetsTmp               eTGFixedAssetsTmp;
+    ETGSRSReportMultiParametersTmp  ssrsReportMultiParametersTmp;
+    StartDate                       startDate;
+    EndDate                         endDate, enddatefy ;
+    DefaultDimensionView            defaultDimesnionView;
+    AmountMST                       acquisitionPriorYears,Amountcon;
+    AmountMST                       acquisitionThisYear;
+    AssetTable                      assetTable;
+    AssetBook                       assetBook;
+    AssetTrans                      assetTrans, assetTrans1;
+    DimensionAttributeValueSet      dimensionAttributeValueSet;
+    AmountMST                       depreciationThisYear,DepAmt,AcmDep,ResidualPer;
+    AmountMST                       accumulatedDepreciation,Num;
+    AssetStatementRowName           rowName;
+    AssetStatementRow               assetStatementRow;
+    FiscalCalendarYear              fiscalCalendarYear ;
+    FiscalCalendarPeriod            fiscalCalendarPeriod,fiscalCalendarPeriod1;
+    AssetDepreciationProfile        assetDepreciationProfile ;
+    OMOperatingUnit                 oMOperatingUnit;
+    DirPartyTable                   dirPartyTable;
+    HcmWorker                       hcmWorker;
+    DirPerson                       dirperson;
+
+    AssetParameters                 assetParameters;
+    AssetLedgerAccounts             assetLedgerAccounts;
+    MainAccount                     mainAccount;
+    DimensionAttributeValueCombination  dimCombination;
+
+    int pos;
+   
+
+   
+
+    
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>geteTGFixedAssetsTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tablestr(ETGFixedAssetsTmp))]
+    public ETGFixedAssetsTmp geteTGFixedAssetsTmp()
+    {
+        select eTGFixedAssetsTmp;
+        return eTGFixedAssetsTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+
+    {
+
+        ETG_FixedAssetsContract  contract    = this.parmDataContract() as ETG_FixedAssetsContract;
+        startDate                            = contract.parmStartDate();
+        endDate                              = contract.parmEndDate();
+        
+       
+
+        while select * from assetTrans
+            group by assetTable.AssetId, assetTable.Name, assetTable.Barcode, assetTable.Make, assetTable.Model, assetTable.UnitOfMeasure,
+                     assetTable.MajorType, assetTable.Department, assetTable.WorkerResponsible, assetTable.Quantity,assetTable.AssetGroup,assetTable.SerialNum
+            order by assetTable.AssetId, assetTable.Name, assetTable.Barcode, assetTable.Make, assetTable.Model, assetTable.UnitOfMeasure,
+                     assetTable.MajorType, assetTable.Department, assetTable.WorkerResponsible, assetTable.Quantity,assetTable.AssetGroup,assetTable.SerialNum
+            join assettable
+            where assetTable.AssetId    == assetTrans.AssetId
+                //&& assetTrans.TransDate  >= startDate
+                //&& assetTrans.TransDate  <= endDate
+        {
+            eTGFixedAssetsTmp.AssetTag          =   assetTable.Barcode;
+            eTGFixedAssetsTmp.Make              =   assetTable.Make;
+            eTGFixedAssetsTmp.Model             =   assetTable.Model;
+            eTGFixedAssetsTmp.AssetGroup        =   assetTable.AssetGroup;
+            eTGFixedAssetsTmp.SerialNumber         = assetTable.SerialNum;
+
+            select * from assetBook
+                where assetBook.AssetId == assetTable.AssetId;
+
+            
+
+            eTGFixedAssetsTmp.AssetCode         =   assetTable.AssetId;
+            eTGFixedAssetsTmp.Quantity          =   assetTable.Quantity;
+            eTGFixedAssetsTmp.UoM               =   assetTable.UnitOfMeasure;
+            eTGFixedAssetsTmp.AssetDescription  =   assettable.Name;
+            eTGFixedAssetsTmp.AssetClass        =   assettable.MajorType;
+           
+           
+
+            select firstonly oMOperatingUnit
+                where oMOperatingUnit.RecId    ==   assetTable.Department;
+            select firstonly hcmWorker
+                where hcmWorker.RecId == assetTable.WorkerResponsible;
+            select firstonly dirperson
+                where dirperson.RecId  == hcmWorker.Person;
+            select firstonly assetDepreciationProfile
+                where assetDepreciationProfile.Profile == assetBook.DepreciationProfile;
+            
+            select firstonly Name from fiscalCalendarYear
+                where fiscalCalendarYear.StartDate <= startDate//DateTimeUtil::date(assettable.CreatedDateTime)
+                   && fiscalCalendarYear.EndDate   >= endDate ;//DateTimeUtil::date(assettable.CreatedDateTime);
+
+            
+           
+            eTGFixedAssetsTmp.AccountingPeriod           =   fiscalCalendarYear.Name;
+            eTGFixedAssetsTmp.DepartmentName             =   oMOperatingUnit.Name;
+            eTGFixedAssetsTmp.PersonResponsibleName      =   dirperson.NameAlias;
+            eTGFixedAssetsTmp.AcquisitionDate            =   assetBook.AcquisitionDate;
+            eTGFixedAssetsTmp.PlacedInService            =   assetBook.UsedFromDate;
+            eTGFixedAssetsTmp.CompanyLogo                =   FormLetter::companyLogo();
+            eTGFixedAssetsTmp.AccountingCurrency         =   Ledger::findByLegalEntity(CompanyInfo::find().RecId).AccountingCurrency ;
+            eTGFixedAssetsTmp.SaleValue                  =   assetBook.SaleValue;
+            eTGFixedAssetsTmp.DisposalDate               =   assetBook.DisposalDate;
+            eTGFixedAssetsTmp.ServiceLife                =   assetBook.ServiceLife;
+            eTGFixedAssetsTmp.ScrapValue                 =   assetBook.ScrapValue;
+            //eTGFixedAssetsTmp.AccountingPeriod  =   int2Str(year(startDate)) + '-' + subStr(int2Str(year(endDate)),3, 2);
+            eTGFixedAssetsTmp.DepreciationName           =   assetDepreciationProfile.Name;
+
+            //eTGFixedAssetsTmp.ResidualPercentage = eTGFixedAssetsTmp.ScrapValue/ResidualPer;
+            //ResidualPer = (eTGFixedAssetsTmp.Amount + eTGFixedAssetsTmp.Addition + eTGFixedAssetsTmp.Revaluation)*100;
+
+               
+               
+            assetTrans1.clear() ;
+            select sum(AmountMST) from assetTrans1
+                where assetTrans1.AssetId   == assettable.AssetId
+                   && assetTrans1.TransDate <  startDate
+                   &&(assetTrans1.TransType == AssetTransType::Acquisition
+                   || assetTrans1.TransType == AssetTransType::AcqThisYear
+                   || assetTrans1.TransType == AssetTransType::AcquisitionAdj
+                   || assetTrans1.TransType == AssetTransType::Revaluation) ;
+
+            eTGFixedAssetsTmp.Amount            = assetTrans1.AmountMST ;
+
+            assetTrans1.clear() ;
+            select sum(AmountMST) from assetTrans1
+                where assetTrans1.AssetId   == assettable.AssetId
+                   && assetTrans1.TransDate >=  startDate
+                   && assetTrans1.TransDate <=  endDate
+                   &&(assetTrans1.TransType == AssetTransType::Acquisition
+                   || assetTrans1.TransType == AssetTransType::AcqThisYear
+                   || assetTrans1.TransType == AssetTransType::AcquisitionAdj) ;
+
+            eTGFixedAssetsTmp.Addition            = assetTrans1.AmountMST ;
+
+            assetTrans1.clear() ;
+            select sum(AmountMST) from assetTrans1
+                where assetTrans1.AssetId   == assettable.AssetId
+                   && assetTrans1.TransDate >=  startDate
+                   && assetTrans1.TransDate <=  endDate
+                   && assetTrans1.TransType == AssetTransType::Revaluation ;
+
+            eTGFixedAssetsTmp.Revaluation            = assetTrans1.AmountMST ;
+
+            assetTrans1.clear() ;
+            select sum(AmountMST) from assetTrans1
+                where assetTrans1.AssetId   == assettable.AssetId
+                && assetTrans1.TransDate    <= endDate
+                && (assetTrans1.TransType   == AssetTransType::Depreciation
+                ||  assetTrans1.TransType   == AssetTransType::DepreciationAdj
+                ||  assetTrans1.TransType   == AssetTransType::DepAdjThisYear
+                ||  assetTrans1.TransType   == AssetTransType::DepThisYear);
+
+            eTGFixedAssetsTmp.AccumulatedDepreciation      = abs (assetTrans1.AmountMST) ;
+                    
+
+            assetTrans1.clear() ;
+            select DefaultDimension from assetTrans1
+                order by assetTrans1.TransDate desc
+                where assetTrans1.AssetId   == assettable.AssetId
+                && assetTrans1.TransType == AssetTransType::Acquisition ;
+
+            if (assetTrans1.DefaultDimension)
+            {
+                defaultDimesnionView.clear() ;
+                select firstonly defaultDimesnionView
+                    where defaultDimesnionView.Name             == "Item"
+                       && defaultDimesnionView.DefaultDimension == assetTrans1.DefaultDimension;
+
+                eTGFixedAssetsTmp.Commodity   = defaultDimesnionView.DisplayValue;
+
+                defaultDimesnionView.clear() ;
+                select firstonly defaultDimesnionView
+                    where defaultDimesnionView.Name             == "Locations"
+                       && defaultDimesnionView.DefaultDimension == assetTrans1.DefaultDimension;
+
+                eTGFixedAssetsTmp.Location   = defaultDimesnionView.DisplayValue;
+
+                defaultDimesnionView.clear() ;
+                select firstonly defaultDimesnionView
+                    where defaultDimesnionView.Name             == "Vertical"
+                       && defaultDimesnionView.DefaultDimension == assetTrans1.DefaultDimension;
+
+                eTGFixedAssetsTmp.Vertical   = defaultDimesnionView.DisplayValue;
+
+                defaultDimesnionView.clear() ;
+                select firstonly defaultDimesnionView
+                    where defaultDimesnionView.Name             == "BusinessUnit"
+                       && defaultDimesnionView.DefaultDimension == assetTrans1.DefaultDimension;
+
+                eTGFixedAssetsTmp.BusinessUnit = defaultDimesnionView.DisplayValue;
+
+            }
+
+            select RecId from fiscalCalendarYear
+                where fiscalCalendarYear.Name       == eTGFixedAssetsTmp.AccountingPeriod ;
+            if (fiscalCalendarYear.RecId)
+            {                
+                select * from fiscalCalendarPeriod1
+                    where fiscalCalendarPeriod1.FiscalCalendarYear == fiscalCalendarYear.RecId
+                    && fiscalCalendarPeriod1.Type                 == 1
+                    && fiscalCalendarPeriod1.EndDate              == endMth(endDate) ;
+
+                while select fiscalCalendarPeriod
+                    order by fiscalCalendarPeriod.Month asc
+                    where fiscalCalendarPeriod.FiscalCalendarYear   == fiscalCalendarYear.RecId
+                       && fiscalCalendarPeriod.Type                 == 1
+                       && fiscalCalendarPeriod.Month                <= fiscalCalendarPeriod1.Month
+                {
+                    if (fiscalCalendarPeriod.Month  == fiscalCalendarPeriod1.Month)
+                    {
+                        enddatefy = endDate ;
+                    }
+                    else
+                    {
+                        enddatefy = fiscalCalendarPeriod.EndDate ;
+                    }
+                    if (fiscalCalendarPeriod.Month  == 0)
+                    {
+                        assetTrans1.clear() ;
+                        select sum(AmountMST) from assetTrans1
+                            where assetTrans1.AssetId   == assettable.AssetId
+                               && assetTrans1.TransDate >= fiscalCalendarPeriod.StartDate
+                               && assetTrans1.TransDate <= enddatefy
+                               && (assetTrans1.TransType == AssetTransType::Depreciation
+                               ||  assetTrans1.TransType == AssetTransType::DepreciationAdj
+                               ||  assetTrans1.TransType == AssetTransType::DepAdjThisYear
+                               ||  assetTrans1.TransType == AssetTransType::DepThisYear);
+
+                        eTGFixedAssetsTmp.Dep1          = assetTrans1.AmountMST * -1 ;
+                        eTGFixedAssetsTmp.Dep1Visiable  = NoYes::Yes ;
+                        
+                    }
+
+                    if (fiscalCalendarPeriod.Month  == 1)
+                    {
+                        assetTrans1.clear() ;
+                        select sum(AmountMST) from assetTrans1
+                            where assetTrans1.AssetId   == assettable.AssetId
+                               && assetTrans1.TransDate >= fiscalCalendarPeriod.StartDate
+                               && assetTrans1.TransDate <= enddatefy
+                               && (assetTrans1.TransType == AssetTransType::Depreciation
+                               ||  assetTrans1.TransType == AssetTransType::DepreciationAdj
+                               ||  assetTrans1.TransType == AssetTransType::DepAdjThisYear
+                               ||  assetTrans1.TransType == AssetTransType::DepThisYear);
+
+                        eTGFixedAssetsTmp.Dep2          = assetTrans1.AmountMST * -1 ;
+                        eTGFixedAssetsTmp.Dep2Visiable  = NoYes::Yes ;
+                    }
+                    if (fiscalCalendarPeriod.Month  == 2)
+                    {
+                        assetTrans1.clear() ;
+                        select sum(AmountMST) from assetTrans1
+                            where assetTrans1.AssetId   == assettable.AssetId
+                               && assetTrans1.TransDate >= fiscalCalendarPeriod.StartDate
+                               && assetTrans1.TransDate <= enddatefy
+                               && (assetTrans1.TransType == AssetTransType::Depreciation
+                               ||  assetTrans1.TransType == AssetTransType::DepreciationAdj
+                               ||  assetTrans1.TransType == AssetTransType::DepAdjThisYear
+                               ||  assetTrans1.TransType == AssetTransType::DepThisYear);
+
+                      
+                        eTGFixedAssetsTmp.Dep3          = assetTrans1.AmountMST * -1 ;
+                        eTGFixedAssetsTmp.Dep3Visiable  = NoYes::Yes ;
+                    }
+                    if (fiscalCalendarPeriod.Month  == 3)
+                    {
+                        assetTrans1.clear() ;
+                        select sum(AmountMST) from assetTrans1
+                            where assetTrans1.AssetId   == assettable.AssetId
+                               && assetTrans1.TransDate >= fiscalCalendarPeriod.StartDate
+                               && assetTrans1.TransDate <= enddatefy
+                               && (assetTrans1.TransType == AssetTransType::Depreciation
+                               ||  assetTrans1.TransType == AssetTransType::DepreciationAdj
+                               ||  assetTrans1.TransType == AssetTransType::DepAdjThisYear
+                               ||  assetTrans1.TransType == AssetTransType::DepThisYear);
+
+                        eTGFixedAssetsTmp.Dep4          = assetTrans1.AmountMST * -1;
+                        eTGFixedAssetsTmp.Dep4Visiable  = NoYes::Yes ;
+                    }
+                    if (fiscalCalendarPeriod.Month  == 4)
+                    {
+                        assetTrans1.clear() ;
+                        select sum(AmountMST) from assetTrans1
+                            where assetTrans1.AssetId   == assettable.AssetId
+                               && assetTrans1.TransDate >= fiscalCalendarPeriod.StartDate
+                               && assetTrans1.TransDate <= enddatefy
+                               && (assetTrans1.TransType == AssetTransType::Depreciation
+                               ||  assetTrans1.TransType == AssetTransType::DepreciationAdj
+                               ||  assetTrans1.TransType == AssetTransType::DepAdjThisYear
+                               ||  assetTrans1.TransType == AssetTransType::DepThisYear);
+                   
+                        eTGFixedAssetsTmp.Dep5  = assetTrans1.AmountMST * -1;
+                        eTGFixedAssetsTmp.Dep5Visiable  = NoYes::Yes ;
+                    }
+                    if (fiscalCalendarPeriod.Month  == 5)
+                    {
+                        assetTrans1.clear() ;
+                        select sum(AmountMST) from assetTrans1
+                            where assetTrans1.AssetId   == assettable.AssetId
+                               && assetTrans1.TransDate >= fiscalCalendarPeriod.StartDate
+                               && assetTrans1.TransDate <= fiscalCalendarPeriod.EndDate
+                               && (assetTrans1.TransType == AssetTransType::Depreciation
+                               ||  assetTrans1.TransType == AssetTransType::DepreciationAdj
+                               ||  assetTrans1.TransType == AssetTransType::DepAdjThisYear
+                               ||  assetTrans1.TransType == AssetTransType::DepThisYear);
+
+                        eTGFixedAssetsTmp.Dep6          = assetTrans1.AmountMST * -1;
+                        eTGFixedAssetsTmp.Dep6Visiable  = NoYes::Yes ;
+                    }
+                    if (fiscalCalendarPeriod.Month  == 6)
+                    {
+                        assetTrans1.clear() ;
+                        select sum(AmountMST) from assetTrans1
+                            where assetTrans1.AssetId   == assettable.AssetId
+                               && assetTrans1.TransDate >= fiscalCalendarPeriod.StartDate
+                               && assetTrans1.TransDate <= enddatefy
+                               && (assetTrans1.TransType == AssetTransType::Depreciation
+                               ||  assetTrans1.TransType == AssetTransType::DepreciationAdj
+                               ||  assetTrans1.TransType == AssetTransType::DepAdjThisYear
+                               ||  assetTrans1.TransType == AssetTransType::DepThisYear);
+
+                        
+
+                        eTGFixedAssetsTmp.Dep7          = assetTrans1.AmountMST * -1;
+                        eTGFixedAssetsTmp.Dep7Visiable  = NoYes::Yes ;
+                    }
+                    if (fiscalCalendarPeriod.Month  == 7)
+                    {
+                        assetTrans1.clear() ;
+                        select sum(AmountMST) from assetTrans1
+                            where assetTrans1.AssetId   == assettable.AssetId
+                               && assetTrans1.TransDate >= fiscalCalendarPeriod.StartDate
+                               && assetTrans1.TransDate <= enddatefy
+                               && (assetTrans1.TransType == AssetTransType::Depreciation
+                               ||  assetTrans1.TransType == AssetTransType::DepreciationAdj
+                               ||  assetTrans1.TransType == AssetTransType::DepAdjThisYear
+                               ||  assetTrans1.TransType == AssetTransType::DepThisYear);
+
+                        eTGFixedAssetsTmp.Dep8          = assetTrans1.AmountMST * -1;
+                        eTGFixedAssetsTmp.Dep8Visiable  = NoYes::Yes ;
+                    }
+                    if (fiscalCalendarPeriod.Month  == 8)
+                    {
+                        assetTrans1.clear() ;
+                        select sum(AmountMST) from assetTrans1
+                            where assetTrans1.AssetId   == assettable.AssetId
+                               && assetTrans1.TransDate >= fiscalCalendarPeriod.StartDate
+                               && assetTrans1.TransDate <= enddatefy
+                               && (assetTrans1.TransType == AssetTransType::Depreciation
+                               ||  assetTrans1.TransType == AssetTransType::DepreciationAdj
+                               ||  assetTrans1.TransType == AssetTransType::DepAdjThisYear
+                               ||  assetTrans1.TransType == AssetTransType::DepThisYear);
+                        
+                        eTGFixedAssetsTmp.Dep9          = assetTrans1.AmountMST * -1;
+                        eTGFixedAssetsTmp.Dep9Visiable  = NoYes::Yes ;
+                    }
+                    if (fiscalCalendarPeriod.Month  == 9)
+                    {
+                        assetTrans1.clear() ;
+                        select sum(AmountMST) from assetTrans1
+                            where assetTrans1.AssetId   == assettable.AssetId
+                               && assetTrans1.TransDate >= fiscalCalendarPeriod.StartDate
+                               && assetTrans1.TransDate <= enddatefy
+                               && (assetTrans1.TransType == AssetTransType::Depreciation
+                               ||  assetTrans1.TransType == AssetTransType::DepreciationAdj
+                               ||  assetTrans1.TransType == AssetTransType::DepAdjThisYear
+                               ||  assetTrans1.TransType == AssetTransType::DepThisYear);
+
+                        eTGFixedAssetsTmp.Dep10          = assetTrans1.AmountMST * -1;
+                        eTGFixedAssetsTmp.Dep10Visiable  = NoYes::Yes ;
+                    }
+                    if (fiscalCalendarPeriod.Month  == 10)
+                    {
+                        assetTrans1.clear() ;
+                        select sum(AmountMST) from assetTrans1
+                            where assetTrans1.AssetId   == assettable.AssetId
+                               && assetTrans1.TransDate >= fiscalCalendarPeriod.StartDate
+                               && assetTrans1.TransDate <= enddatefy
+                               && (assetTrans1.TransType == AssetTransType::Depreciation
+                               ||  assetTrans1.TransType == AssetTransType::DepreciationAdj
+                               ||  assetTrans1.TransType == AssetTransType::DepAdjThisYear
+                               ||  assetTrans1.TransType == AssetTransType::DepThisYear);
+
+                        eTGFixedAssetsTmp.Dep11          = assetTrans1.AmountMST * -1;
+                        eTGFixedAssetsTmp.Dep11Visiable  = NoYes::Yes ;
+                    }
+                    if (fiscalCalendarPeriod.Month  == 11)
+                    {
+                        assetTrans1.clear() ;
+                        select sum(AmountMST) from assetTrans1
+                            where assetTrans1.AssetId   == assettable.AssetId
+                               && assetTrans1.TransDate >= fiscalCalendarPeriod.StartDate
+                               && assetTrans1.TransDate <= enddatefy
+                               && (assetTrans1.TransType == AssetTransType::Depreciation
+                               ||  assetTrans1.TransType == AssetTransType::DepreciationAdj
+                               ||  assetTrans1.TransType == AssetTransType::DepAdjThisYear
+                               ||  assetTrans1.TransType == AssetTransType::DepThisYear);
+  
+                        eTGFixedAssetsTmp.Dep12          = assetTrans1.AmountMST * -1;
+                        eTGFixedAssetsTmp.Dep12Visiable  = NoYes::Yes ;
+                      
+                    }
+                }
+            }
+
+
+            // --> ADD THIS BLOCK FOR METHOD 2 BEFORE insert()
+            assetParameters = AssetParameters::find();
+            assetLedgerAccounts.clear();
+            mainAccount.clear();
+            dimCombination.clear();
+
+            // Look up the posting profile setup for this Asset Group and Book (e.g., Acquisition account)
+            // It uses AccountRelation for the group name and AccountCode::Group to specify it's a group setup
+            select firstonly LedgerDimension from assetLedgerAccounts
+                where assetLedgerAccounts.PostingProfile == assetBook.PostingProfile // It's better to use the profile from the Book
+                   && assetLedgerAccounts.AccountRelation == assetTable.AssetGroup
+                && assetLedgerAccounts.AccountCode    == TableGroupAll::GroupId
+                   && assetLedgerAccounts.BookId         == assetBook.BookId
+                   && assetLedgerAccounts.TransType      == AssetTransType::Acquisition; // Corrected Enum
+
+            if (assetLedgerAccounts.LedgerDimension)
+            {
+                // Find the dimension combination record using the LedgerDimension RecId
+                dimCombination = DimensionAttributeValueCombination::find(assetLedgerAccounts.LedgerDimension);
+                
+                // Find the Main Account using the RecId stored on the combination record
+                select firstonly Name from mainAccount
+                    where mainAccount.RecId == dimCombination.MainAccount;
+                
+                // --- String Manipulation to remove "Gross block -" ---
+                // Find the position of the hyphen '-' in the Main Account Name
+                // --- String Manipulation to remove "Gross block -" ---
+                // Find the position of the hyphen '-' in the Main Account Name
+                pos = strScan(mainAccount.Name, '-', 1, strLen(mainAccount.Name));
+                
+                if (pos > 0)
+                {
+                    // If a hyphen is found, extract everything AFTER the hyphen and trim empty spaces using strLTrim and strRTrim
+                    eTGFixedAssetsTmp.Name = strLTrim(strRTrim(subStr(mainAccount.Name, pos + 1, strLen(mainAccount.Name) - pos)));
+                }
+                else
+                {
+                    // If no hyphen is found, just use the normal name
+                    eTGFixedAssetsTmp.Name = mainAccount.Name;
+                }
+            }
+            
+            eTGFixedAssetsTmp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

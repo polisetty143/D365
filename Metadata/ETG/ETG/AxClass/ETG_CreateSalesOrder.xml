@@ -1,0 +1,328 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_CreateSalesOrder</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_CreateSalesOrder
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>createSalesTable</Name>
+				<Source><![CDATA[
+    public static SalesTable createSalesTable(AgreementReference _agreementReference,PurchId _purchId)
+    {
+        SalesAgreementHeader        salesAgreementHeader;      
+        ETG_SalesAgreementHeader    salesAgreementHeaderTrade;
+
+        SalesTable              salesTable;
+        CustTable               custTable;
+        CustAccount             custAccount;
+        NumberSeq               numberSeq;
+        SalesId                 salesID;
+        try
+        {
+            select firstonly * from salesAgreementHeader
+                where salesAgreementHeader.RecId == _agreementReference.DerivedAgreement
+            join salesAgreementHeaderTrade
+                where salesAgreementHeaderTrade.SalesAgreementId == salesAgreementHeader.SalesNumberSequence;
+           
+            salesTable.clear();
+            numberSeq = NumberSeq::newGetNum(SalesParameters::numRefSalesId());
+            numberSeq.used();
+            salesTable.SalesId = numberSeq.num();
+            salesID = salesTable.SalesId;
+          
+            salesTable.initValue();
+          
+            salesTable.CustAccount = salesAgreementHeader.CustAccount;            
+            salesTable.initFromCustTable();
+            salesTable.InterCompanyCompanyId = curExt();
+            salesTable.InterCompanyPurchId   = _purchId;
+            salesTable.InterCompanyOrder     =  NoYes::Yes;  
+            salesTable.SkipUpdate            = InterCompanySkipUpdate::Both;
+            salesTable.insert();
+            ETG_CreateSalesOrder::createSalesTrade(salesTable.SalesId,salesAgreementHeaderTrade);
+            info(strFmt('Third party sales order %1 created successfully',salesTable.SalesId));
+                      
+        }
+        catch(Exception::Error)
+        {
+            ttsabort;
+        }
+
+        return salesTable;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createSalesTrade</Name>
+				<Source><![CDATA[
+    public static void createSalesTrade(SalesId _salesId,ETG_SalesAgreementHeader _salesAgreementHeaderTrade)
+    {       
+        ETG_SalesTableTrade            salesTableTrade;
+        ETG_SalesAgreementNotes        salesAgreementNotes;
+        ETG_SalesAgreementQualityGrp   SalesAgreementQualityGrp;
+        ETG_SalesTableNotes            salesTableNotes;
+        ETG_SalesTableQualityGrp       salesQtyGrp;
+
+        salesTableTrade.SalesId                           = _salesId;
+        salesTableTrade.AdvanceDue                        = _salesAgreementHeaderTrade.AdvanceDue;
+        salesTableTrade.BuyerAccountNum                   = _salesAgreementHeaderTrade.BuyerAccountNum;
+        salesTableTrade.BuyerDeliveryAddress              = _salesAgreementHeaderTrade.BuyerDeliveryAddress;
+        salesTableTrade.BuyerBank                         = _salesAgreementHeaderTrade.BuyerBank;
+        salesTableTrade.SellerAccountNum                  = _salesAgreementHeaderTrade.SellerAccountNum;
+        salesTableTrade.SellerBank                        = _salesAgreementHeaderTrade.SellerBank;
+        salesTableTrade.SellerDeliveryAddress             = _salesAgreementHeaderTrade.SellerDeliveryAddress;
+     //   salesTableTrade.CommissionType                    = _salesAgreementHeaderTrade.CommissionType;
+        salesTableTrade.Consignee                         = _salesAgreementHeaderTrade.Consignee;
+        salesTableTrade.CustomImport                      = _salesAgreementHeaderTrade.CustomImport;
+        salesTableTrade.DeliveryDescription               = _salesAgreementHeaderTrade.DeliveryDescription;
+    //    salesTableTrade.DisplayTotalCalculatedCommission  = _salesAgreementHeaderTrade.DisplayTotalCalculatedCommission;
+        salesTableTrade.FromDatePort                      = _salesAgreementHeaderTrade.FromDatePort;
+        salesTableTrade.Future                            = _salesAgreementHeaderTrade.Future;
+        salesTableTrade.ImportDate                        = _salesAgreementHeaderTrade.ImportDate;
+        salesTableTrade.Notes                             = _salesAgreementHeaderTrade.Notes;
+        salesTableTrade.Notifytodifferentparty            = _salesAgreementHeaderTrade.Notifytodifferentparty;
+        salesTableTrade.Number                            = _salesAgreementHeaderTrade.Number;
+        salesTableTrade.OnAccountOf                       = _salesAgreementHeaderTrade.OnAccountOf;
+        salesTableTrade.PortOfDischarge                   = _salesAgreementHeaderTrade.PortOfDischarge;
+        salesTableTrade.PortOfLoading                     = _salesAgreementHeaderTrade.PortOfLoading;
+        salesTableTrade.PricingFromDate                   = _salesAgreementHeaderTrade.PricingFromDate;
+        salesTableTrade.PricingMonth                      = _salesAgreementHeaderTrade.PricingMonth;
+        salesTableTrade.PricingTodate                     = _salesAgreementHeaderTrade.PricingTodate;
+        salesTableTrade.TermPaymDescription               = _salesAgreementHeaderTrade.TermPaymDescription;
+        salesTableTrade.TermsOfDelDescription             = _salesAgreementHeaderTrade.TermsOfDelDescription;
+        salesTableTrade.QuantityConditions                = _salesAgreementHeaderTrade.QuantityConditions;
+        salesTableTrade.Through                           = _salesAgreementHeaderTrade.Through;
+        salesTableTrade.ToDatePort                        = _salesAgreementHeaderTrade.ToDatePort;
+       // salesTableTrade.TypeValue                         = _salesAgreementHeaderTrade.TypeValue;
+        salesTableTrade.Buyersecondarybank                = _salesAgreementHeaderTrade.Buyersecondarybank;
+        salesTableTrade.Sellersecondarybank               = _salesAgreementHeaderTrade.Sellersecondarybank;
+        salesTableTrade.PortOfDischargeDesc               = _salesAgreementHeaderTrade.PortOfDischargeDesc;
+        salesTableTrade.PortOfLoadingDesc                 = _salesAgreementHeaderTrade.PortOfLoadingDesc;
+        salesTableTrade.Name                              = _salesAgreementHeaderTrade.Name;
+        salesTableTrade.Address                           = _salesAgreementHeaderTrade.Address;
+        salesTableTrade.insert();
+
+        while select EnumNotes,Description from salesAgreementNotes
+                where salesAgreementNotes.SalesAgreementId == _salesAgreementHeaderTrade.SalesAgreementId
+        {
+            salesTableNotes.SalesId          = _salesId;
+            salesTableNotes.EnumNotes        = salesAgreementNotes.EnumNotes;
+            salesTableNotes.Description      = salesAgreementNotes.Description;
+            salesTableNotes.insert();
+        }
+
+        while select GroupId from SalesAgreementQualityGrp
+            where SalesAgreementQualityGrp.SalesAgreementId == _salesAgreementHeaderTrade.SalesAgreementId
+        {
+            salesQtyGrp.SalesId  = _salesId;
+            salesQtyGrp.GroupId  = SalesAgreementQualityGrp.GroupId;
+            salesQtyGrp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createPurchTrade</Name>
+				<Source><![CDATA[
+    public static void createPurchTrade(PurchId _purchId,ETG_PurchaseAgreementHeader  _purchAgreementTrade)
+    {
+        ETG_PurchTableTrade              purchTrade;
+        ETG_PurchAgreementNotes          purchAgreementNotes;
+        ETG_PurchaseAgreementQualityGrp  PurchaseAgreementQualityGrp;
+        ETG_PurchTableNotes              purchTableNotes;
+        ETG_PurchTableQualityGrp         purchTableQualityGrp;
+        ;
+        if(_purchAgreementTrade)
+        {
+            purchTrade.PurchId                           = _purchId;
+            purchTrade.AdvanceDue                        = _purchAgreementTrade.AdvanceDue;
+            purchTrade.BuyerAccountNum                   = _purchAgreementTrade.BuyerAccountNum;
+            purchTrade.BuyerDeliveryAddress              = _purchAgreementTrade.BuyerDeliveryAddress;
+            purchTrade.BuyerBank                         = _purchAgreementTrade.BuyerBank;
+            purchTrade.SellerAccountNum                  = _purchAgreementTrade.SellerAccountNum;
+            purchTrade.SellerBank                        = _purchAgreementTrade.SellerBank;
+            purchTrade.SellerDeliveryAddress             = _purchAgreementTrade.SellerDeliveryAddress;
+           // purchTrade.CommissionType                    = _purchAgreementTrade.CommissionType;
+            purchTrade.Consignee                         = _purchAgreementTrade.Consignee;
+            purchTrade.CustomImport                      = _purchAgreementTrade.CustomImport;
+            purchTrade.DeliveryDescription               = _purchAgreementTrade.DeliveryDescription;
+        //    purchTrade.DisplayTotalCalculatedCommission  = _purchAgreementTrade.DisplayTotalCalculatedCommission;
+            purchTrade.FromDatePort                      = _purchAgreementTrade.FromDatePort;
+            purchTrade.Future                            = _purchAgreementTrade.Future;
+            purchTrade.ImportDate                        = _purchAgreementTrade.ImportDate;
+            purchTrade.Notes                             = _purchAgreementTrade.Notes;
+            purchTrade.Notifytodifferentparty            = _purchAgreementTrade.Notifytodifferentparty;
+            purchTrade.Number                            = _purchAgreementTrade.Number;
+            purchTrade.OnAccountOf                       = _purchAgreementTrade.OnAccountOf;
+            purchTrade.PortOfDischarge                   = _purchAgreementTrade.PortOfDischarge;
+            purchTrade.PortOfLoading                     = _purchAgreementTrade.PortOfLoading;
+            purchTrade.PricingFromDate                   = _purchAgreementTrade.PricingFromDate;
+            purchTrade.PricingMonth                      = _purchAgreementTrade.PricingMonth;
+            purchTrade.PricingTodate                     = _purchAgreementTrade.PricingTodate;
+            purchTrade.TermPaymDescription               = _purchAgreementTrade.TermPaymDescription;
+            purchTrade.TermsOfDelDescription             = _purchAgreementTrade.TermsOfDelDescription;
+            purchTrade.QuantityConditions                = _purchAgreementTrade.QuantityConditions;
+            purchTrade.Through                           = _purchAgreementTrade.Through;
+            purchTrade.ToDatePort                        = _purchAgreementTrade.ToDatePort;
+         //   purchTrade.TypeValue                         = _purchAgreementTrade.TypeValue;
+            purchTrade.BuyerSecondaryBank                = _purchAgreementTrade.BuyerSecondaryBank;
+            purchTrade.SellerSecondaryBank               = _purchAgreementTrade.SellerSecondaryBank;
+            purchTrade.PortOfDischargeDesc               = _purchAgreementTrade.PortOfDischargeDesc;
+            purchTrade.PortOfLoadingDesc                 = _purchAgreementTrade.PortOfLoadingDesc;
+            purchTrade.Name                              = _purchAgreementTrade.Name;
+            purchTrade.Address                           = _purchAgreementTrade.Address;
+            purchTrade.insert();
+        }
+
+         
+        while select EnumNotes,Description from purchAgreementNotes
+                where purchAgreementNotes.PurchAgreementId == _purchAgreementTrade.PurchAgreementId
+        {
+            purchTableNotes.PurchId          = _purchId;
+            purchTableNotes.EnumNotes        = purchAgreementNotes.EnumNotes;
+            purchTableNotes.Description      = purchAgreementNotes.Description;
+            purchTableNotes.insert();
+        }
+
+        while select GroupId from PurchaseAgreementQualityGrp
+            where PurchaseAgreementQualityGrp.PurchAgreementId == _purchAgreementTrade.PurchAgreementId
+        {
+            purchTableQualityGrp.PurchId         = _purchId;
+            purchTableQualityGrp.GroupId         = PurchaseAgreementQualityGrp.GroupId;
+            purchTableQualityGrp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createSalesLine</Name>
+				<Source><![CDATA[
+    public static SalesLine createSalesLine(AgreementLineQuantityCommitment _agreementLine,PurchLine _purchLine)
+    {
+        SalesLine               salesLine;
+        ETG_SalesLineNotes      salesLineNotes;
+        ETG_AgreementLineNotes  agreementLineNotes;
+        SalesTable              salesTable = SalesTable::find(_purchLine.purchTable().InterCompanySalesId);
+
+        salesLine.SalesId       = salesTable.SalesId;
+        salesLine.initFromSalesTable(salesTable);
+        salesLine.initFromAgreementLine(_agreementLine);
+        salesLine.ItemId            = _agreementLine.ItemId;
+        salesLine.SalesQty          = _purchLine.PurchQty;
+        salesLine.itemIdChanged();
+        salesLine.SalesPrice        = _agreementLine.PricePerUnit;        
+        salesLine.LineAmount        = salesLine.calcLineAmount(salesLine.SalesQty);
+      //  salesLine.InterCompanyInventTransId = _purchLine.InventTransId;
+       // salesLine.InterCompanyOrigin        =   InterCompanyOrigin:;
+      //  salesLine.SkipUpdate                = InterCompanySkipUpdate::Both;
+        salesLine.insert();
+
+        while select EnumNotes,Description,ItemId from agreementLineNotes
+                where agreementLineNotes.AgreementLine == _agreementLine.RecId
+        {
+            salesLineNotes.InventTransId = salesLine.InventTransId;
+            salesLineNotes.EnumNotes     = agreementLineNotes.EnumNotes;
+            salesLineNotes.Description   = agreementLineNotes.Description;
+            salesLineNotes.ItemId        = agreementLineNotes.ItemId;
+            salesLineNotes.insert();
+        }
+
+        return salesLine;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createPurchTable</Name>
+				<Source><![CDATA[
+    public static PurchTable createPurchTable(AgreementReference _agreementReference,SalesId _salesId)
+    {
+        PurchAgreementHeader            purchAgreementHeader;
+        ETG_PurchaseAgreementHeader     purchAgreementHeaderTrade;
+
+        PurchTable              purchTable;
+        VendTable               vendTable;
+        NumberSeq               numberSeq;
+      
+        try
+        {
+            select firstonly * from purchAgreementHeader
+                where purchAgreementHeader.RecId == _agreementReference.DerivedAgreement
+            join purchAgreementHeaderTrade
+                where purchAgreementHeaderTrade.PurchAgreementId == purchAgreementHeader.PurchNumberSequence;
+           
+            purchTable.clear();
+            numberSeq = NumberSeq::newGetNum(PurchParameters::numRefPurchaseOrderId());
+            numberSeq.used();
+            purchTable.PurchId = numberSeq.num();
+           
+            purchTable.initValue();
+            vendTable               = VendTable::find(purchAgreementHeader.VendAccount);
+            purchTable.OrderAccount = purchAgreementHeader.VendAccount;
+            purchTable.initFromVendTable(vendTable);
+            purchTable.InterCompanyCompanyId = curExt();
+            purchTable.InterCompanySalesId   = _salesId;
+            purchTable.InterCompanyOrder     =  NoYes::Yes;
+            purchTable.SkipUpdate            = InterCompanySkipUpdate::Both;
+            purchTable.insert();
+            ETG_CreateSalesOrder::createPurchTrade(purchTable.PurchId,purchAgreementHeaderTrade);
+            info(strFmt('Third party purchase order %1 created successfully',purchTable.PurchId));
+                      
+        }
+        catch(Exception::Error)
+        {
+            ttsabort;
+        }
+
+        return purchTable;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createPurchLine</Name>
+				<Source><![CDATA[
+    public static PurchLine createPurchLine(AgreementLineQuantityCommitment _agreementLine,SalesLine _salesLine)
+    {
+        PurchLine               purchLine;
+        ETG_PurchLineNotes      purchLineNotes;
+        ETG_AgreementLineNotes  agreementLineNotes;
+        PurchTable              purchTable = PurchTable::find(_salesLine.salesTable().SalesId);
+
+        purchLine.PurchId       = purchTable.PurchId;
+        purchLine.initFromPurchTable(purchTable);
+        purchLine.initFromAgreementLine(_agreementLine);
+        purchLine.ItemId            = _agreementLine.ItemId;
+        purchLine.PurchQty          = _salesLine.SalesQty;
+        purchLine.itemIdChanged();
+        purchLine.PurchPrice        = _agreementLine.PricePerUnit;     
+        purchLine.LineAmount        = purchLine.calcLineAmount(purchLine.PurchQty);
+        purchLine.InterCompanyInventTransId = _salesLine.InventTransId;
+        purchLine.InterCompanyOrigin        = InterCompanyOrigin::Derived;
+        purchLine.createLine(true,false,false,false,false,false);
+
+        while select EnumNotes,Description,ItemId from agreementLineNotes
+             where agreementLineNotes.AgreementLine == _agreementLine.RecId
+        {
+            purchLineNotes.InventTransId = purchLine.InventTransId;
+            purchLineNotes.EnumNotes     = agreementLineNotes.EnumNotes;
+            purchLineNotes.Description   = agreementLineNotes.Description;
+            purchLineNotes.ItemId        = agreementLineNotes.ItemId;
+            purchLineNotes.insert();
+        }
+
+        return purchLine;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

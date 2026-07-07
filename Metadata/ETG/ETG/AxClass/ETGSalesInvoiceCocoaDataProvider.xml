@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesInvoiceCocoaDataProvider</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(ETGSalesInvoiceCocoaContract))]
+class ETGSalesInvoiceCocoaDataProvider extends  SRSReportDataProviderPreProcessTempDB
+
+{
+    ETGSalesInvoiceCocoaHeaderTmp           ETGSalesInvoiceCocoaHeaderTmp;
+    ETGSalesInvoiceCocoaLineTmp             ETGSalesInvoiceCocoaLineTmp;
+    RecId                                   _RecId;
+    CustInvoiceJour                         CustInvoiceJour;
+    CustInvoiceTrans                        custInvoiceTrans;
+    SalesTable                              salesTable;
+    ETG_SalesTableTrade                     ETG_SalesTableTrade;
+    ETGSalesShipmentCocoa                  ETGSalesShipmentCocoa;
+    SalesLine                               salesLine;
+    PaymTerm                                PaymTerm;
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGSalesInvoiceCocoaHeaderTmp</Name>
+				<Source><![CDATA[
+    [SrsReportDataSetAttribute(tableStr(ETGSalesInvoiceCocoaHeaderTmp))]
+    public ETGSalesInvoiceCocoaHeaderTmp getETGSalesInvoiceCocoaHeaderTmp()
+    {
+        select * from ETGSalesInvoiceCocoaHeaderTmp;
+        return ETGSalesInvoiceCocoaHeaderTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getETGSalesInvoiceCocoaLineTmp</Name>
+				<Source><![CDATA[
+    [SrsReportDataSetAttribute(tableStr(ETGSalesInvoiceCocoaLineTmp))]
+    public ETGSalesInvoiceCocoaLineTmp getETGSalesInvoiceCocoaLineTmp()
+    {
+        select * from ETGSalesInvoiceCocoaLineTmp;
+        return ETGSalesInvoiceCocoaLineTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ProcessReport</Name>
+				<Source><![CDATA[
+    public void ProcessReport()
+    {
+        CompanyInfo      CompanyInfo = CompanyInfo::find();
+        
+        ETGSalesInvoiceCocoaContract   Contract;
+
+        Contract            = this.parmDataContract();
+
+        _RecId              = contract.parmRecId();
+
+        select  CustInvoiceJour
+            where CustInvoiceJour.RecId == _RecId;
+
+        select  salestable
+            join ETG_SalesTableTrade
+            where ETG_SalesTableTrade.SalesId == salesTable.SalesId
+            && SalesTable.SalesId == CustInvoiceJour.SalesId;
+
+
+        select * from ETGSalesShipmentCocoa
+            where ETGSalesShipmentCocoa.RefInvoiceId == CustInvoiceJour.InvoiceId;
+
+        select * from salesline
+            where salesLine.SalesId== salesTable.SalesId;
+
+        ETGSalesInvoiceCocoaHeaderTmp.clear();
+        ETGSalesInvoiceCocoaHeaderTmp.initValue();
+        ETGSalesInvoiceCocoaHeaderTmp.CompanyName   = CompanyInfo.Name;
+        ETGSalesInvoiceCocoaHeaderTmp.CompanyLogo   = CompanyImage::findByRecord(CompanyInfo).Image;
+        ETGSalesInvoiceCocoaHeaderTmp.CompanyAddress = 'Tressury Office : Marcony,Abidjan - Ivory Coast';
+        ETGSalesInvoiceCocoaHeaderTmp.CompanyTelephone = "Tel: +255 27 21 26 61 80";
+        ETGSalesInvoiceCocoaHeaderTmp.Heading   = 'SALES INVOICE';
+        ETGSalesInvoiceCocoaHeaderTmp.InvoiceDate   = CustInvoiceJour.InvoiceDate;
+        ETGSalesInvoiceCocoaHeaderTmp.Email         = CompanyInfo.email();
+        ETGSalesInvoiceCocoaHeaderTmp.InvoiceNo     = CustInvoiceJour.InvoiceId;
+        ETGSalesInvoiceCocoaHeaderTmp.Seller        = CompanyInfo.Name;
+        ETGSalesInvoiceCocoaHeaderTmp.Buyer         = CustTable::find(CustInvoiceJour.OrderAccount).name();
+           // +'\n'+CustTable::find(CustInvoiceJour).address();
+        ETGSalesInvoiceCocoaHeaderTmp.RoutingBank   = BankAccountTable::find(ETG_SalesTableTrade.BuyerBank).Name+'\n'+BankAccountTable::find(ETG_SalesTableTrade.BuyerBank).AccountNum;
+        ETGSalesInvoiceCocoaHeaderTmp.BankDetails   = BankAccountTable::find(ETG_SalesTableTrade.SellerBank).Name+'\n'+BankAccountTable::find(ETG_SalesTableTrade.SellerBank).AccountNum;
+        ETGSalesInvoiceCocoaHeaderTmp.BLNo          = CustInvoiceJour.ETG_BLnumber;
+        ETGSalesInvoiceCocoaHeaderTmp.BLDate        = CustInvoiceJour.ETG_BLDate;
+        ETGSalesInvoiceCocoaHeaderTmp.VesselName    = ETGSalesShipmentCocoa.Vessel;
+        ETGSalesInvoiceCocoaHeaderTmp.PortOfDischarge   = ETG_SalesTableTrade.PortOfDischarge;
+        ETGSalesInvoiceCocoaHeaderTmp.PortOfLoading = ETG_SalesTableTrade.PortOfLoading;
+        ETGSalesInvoiceCocoaHeaderTmp.IncoTerms     = salesLine.DlvTerm;
+        ETGSalesInvoiceCocoaHeaderTmp.OTNumber      = InventDim::find(salesLine.InventDimId).inventSerialId;
+        ETGSalesInvoiceCocoaHeaderTmp.Origin        = enum2Str(salesLine.SalesSalesOrderCreationMethod);
+        ETGSalesInvoiceCocoaHeaderTmp.Crop          = ETGSalesShipmentCocoa.ETGCrop;
+        //ETGSalesInvoiceCocoaHeaderTmp.Quality          = '';
+        ETGSalesInvoiceCocoaHeaderTmp.Packing          = ETGSalesShipmentCocoa.ETGPacking;
+        ETGSalesInvoiceCocoaHeaderTmp.Contact          = ETGSalesShipmentCocoa.ACFContractNUMBER;
+
+        select PaymTerm
+            where PaymTerm.PaymTermId == salesTable.Payment;
+        ETGSalesInvoiceCocoaHeaderTmp.PaymentTerm = PaymTerm.Description;
+        ETGSalesInvoiceCocoaHeaderTmp.insert();
+
+        while select * from custInvoicetrans
+            where custInvoiceTrans.InvoiceId == CustInvoiceJour.InvoiceId
+        {
+            ETGSalesShipmentCocoa                   ETGSalesShipmentCocoaLine;
+            ETGSalesShipmentCashew                  ETGSalesShipmentCashewLine;
+
+            select ETGSalesShipmentCocoaLine
+                where ETGSalesShipmentCocoaLine.RefInvoiceId == custInvoiceTrans.InvoiceId
+                &&      ETGSalesShipmentCocoaLine.CustInvoiceTrans  == custInvoiceTrans.RecId;
+
+            select ETGSalesShipmentCashewLine
+                where ETGSalesShipmentCashewLine.RefInvoiceId == custInvoiceTrans.InvoiceId
+                &&      ETGSalesShipmentCashewLine.CustInvoiceTrans  == custInvoiceTrans.RecId;
+
+            ETGSalesInvoiceCocoaLineTmp.clear();
+            ETGSalesInvoiceCocoaLineTmp.initValue();
+            ETGSalesInvoiceCocoaLineTmp.Description = InventTable::find(custInvoiceTrans.ItemId).itemName();
+            ETGSalesInvoiceCocoaLineTmp.BLNumber    = CustInvoiceJour.ETG_BLnumber;
+            ETGSalesInvoiceCocoaLineTmp.ContactNo   = ETGSalesShipmentCocoaLine.ACFContractNumber;
+            ETGSalesInvoiceCocoaLineTmp.LotNo       = ETGSalesShipmentCocoaLine.LotsNumber;
+            ETGSalesInvoiceCocoaLineTmp.Bags        = ETGSalesShipmentCashewLine.Bags;
+            ETGSalesInvoiceCocoaLineTmp.GrossWt     = ETGSalesShipmentCashewLine.GrossWeight;
+            ETGSalesInvoiceCocoaLineTmp.NetWeight   = ETGSalesShipmentCashewLine.NetWeight;
+            ETGSalesInvoiceCocoaLineTmp.AmountEuro       = custInvoiceTrans.LineAmount;
+            ETGSalesInvoiceCocoaLineTmp.Price       = custInvoiceTrans.SalesPrice;
+            ETGSalesInvoiceCocoaLineTmp.AmountInWrds    = Global::numeralsToTxt_FR(CustInvoiceJour.InvoiceAmount);
+            ETGSalesInvoiceCocoaLineTmp.AmountInWrds = subStr(ETGSalesInvoiceCocoaLineTmp.AmountInWrds,1,strLen(ETGSalesInvoiceCocoaLineTmp.AmountInWrds)-6);
+            ETGSalesInvoiceCocoaLineTmp.insert();
+        }
+
+        
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

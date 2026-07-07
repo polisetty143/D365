@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchTableGSTDetails</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGPurchTableGSTDetails
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getGSTDetail</Name>
+				<Source><![CDATA[
+/// <summary>
+/// GST calculation 
+/// </summary>
+/// <param name = "_journal"></param>
+/// <returns></returns>
+  public static Map getGSTDetail(Common _journal)
+  {
+     const str                               GST = 'GST';
+     Map                                     taxDetailsMap;
+     ITaxDocument                            taxDocument;
+     ITaxDocumentLine                        taxDocumentLine;
+     TaxDocumentExtension_IN                 taxDocumentExtension;
+     ITaxDocumentComponentLine               taxDocumentComponentLine;
+     ITaxDocumentLineEnumerator              taxDocumentLineEnumerator;
+     ITaxDocumentComponentLineEnumerator     componentLines;
+
+     taxDetailsMap = new Map(Types::Container, Types::Container);
+
+     if(_journal)
+     {
+        taxDocument = TaxBusinessService::getTaxDocumentBySource(_journal.TableId, _journal.RecId);
+
+        if(taxDocument is Object)
+        {
+           if(taxDocument)
+           {
+              if(taxDocument.getGUID())
+              {
+                  taxDocumentExtension = TaxDocumentExtension_in::findByTaxDocument(taxDocument.getGUID());
+              }
+              taxDocumentLineEnumerator = taxDocument.lines();
+              while(taxDocumentLineEnumerator.moveNext())
+              {
+                  taxDocumentLine = taxDocumentLineEnumerator.current();
+                  // Only process GST tax
+                  componentLines = taxDocumentLine.componentLines(GST);
+                  while(componentLines.moveNext())
+                  {
+                      taxDocumentComponentLine = componentLines.current();
+                      if(!taxDetailsMap.exists([taxDocumentLine.sourceTableId(), taxDocumentLine.sourceRecId(), taxDocumentComponentLine.metaData().taxComponent()]))
+                      {
+                          taxDetailsMap.insert([taxDocumentLine.sourceTableId(), taxDocumentLine.sourceRecId(), taxDocumentComponentLine.metaData().taxComponent()],
+                          [taxDocumentComponentLine.getMeasure(TaxEngineModelLineMeasuresConstants::TaxRate).value().value(), taxDocumentComponentLine.getMeasure(TaxEngineModelLineMeasuresConstants::TaxAmount).value().value(),
+                          taxDocumentLine.getFieldValue(TaxEngineModelFieldsConstants::HSNCode) ? taxDocumentLine.getFieldValue(TaxEngineModelFieldsConstants::HSNCode) : taxDocumentLine.getFieldValue(TaxEngineModelFieldsConstants::SAC)]);
+                      }
+                  }
+              }
+           }
+        }
+     }
+     return taxDetailsMap;
+  }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

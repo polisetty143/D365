@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchLineDataEventHandler</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGPurchLineDataEventHandler
+{
+    
+    static Amount lastLineAmount;
+    static Qty    lastPurchQty;
+    static real   lastPriceUnit;
+
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>recalcPrice</Name>
+				<Source><![CDATA[
+    public static void recalcPrice(PurchLine _purchLine)
+    {
+        if (_purchLine.LineAmount != 0 && _purchLine.PurchQty != 0)
+        {
+            real calculatedPrice = (_purchLine.LineAmount * _purchLine.PriceUnit) / _purchLine.PurchQty;
+
+            if (_purchLine.PurchPrice != calculatedPrice)
+            {
+                _purchLine.PurchPrice = calculatedPrice;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>PurchLine_LineAmount_OnModified</Name>
+				<Source><![CDATA[
+    [FormDataFieldEventHandler(formDataFieldStr(PurchTable, PurchLine, LineAmount), FormDataFieldEventType::Modified)]
+    public static void PurchLine_LineAmount_OnModified(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        FormDataSource  purchLine_ds = sender.datasource();
+        PurchLine       purchLine    = purchLine_ds.cursor() as PurchLine;
+
+        ETGPurchLineDataEventHandler::lastLineAmount = purchLine.LineAmount;
+        ETGPurchLineDataEventHandler::lastPurchQty   = purchLine.PurchQty;
+        ETGPurchLineDataEventHandler::lastPriceUnit  = purchLine.PriceUnit;
+
+        ETGPurchLineDataEventHandler::recalcPrice(purchLine);
+        purchLine_ds.refresh();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>InventDim_InventSiteId_OnValidated</Name>
+				<Source><![CDATA[
+    [FormDataFieldEventHandler(formDataFieldStr(PurchTable, InventDim, InventSiteId), FormDataFieldEventType::Validated)]
+    public static void InventDim_InventSiteId_OnValidated(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        FormDataSource  inventDim_ds = sender.datasource();
+        FormDataSource  purchLine_ds = inventDim_ds.formRun().dataSource(formDataSourceStr(PurchTable, PurchLine));
+        PurchLine       purchLine    = purchLine_ds.cursor() as PurchLine;
+
+        Amount  lineAmt   = ETGPurchLineDataEventHandler::lastLineAmount;
+        Qty     purchQty  = purchLine.PurchQty  != 0 ? purchLine.PurchQty  : ETGPurchLineDataEventHandler::lastPurchQty;
+        real    priceUnit = purchLine.PriceUnit != 0 ? purchLine.PriceUnit : ETGPurchLineDataEventHandler::lastPriceUnit;
+
+        if (lineAmt != 0 && purchQty != 0)
+        {
+            real calculatedPrice = (lineAmt * priceUnit) / purchQty;
+
+            purchLine.PurchPrice = calculatedPrice;
+            purchLine.LineAmount = lineAmt;
+
+            purchLine_ds.research(false);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>PurchLine_OnActivated</Name>
+				<Source><![CDATA[
+    [FormDataSourceEventHandler(formDataSourceStr(PurchTable, PurchLine), FormDataSourceEventType::Activated)]
+    public static void PurchLine_OnActivated(FormDataSource sender, FormDataSourceEventArgs e)
+    {
+        PurchLine purchLine = sender.cursor() as PurchLine;
+
+        Amount  lineAmt   = ETGPurchLineDataEventHandler::lastLineAmount;
+        Qty     purchQty  = purchLine.PurchQty  != 0 ? purchLine.PurchQty  : ETGPurchLineDataEventHandler::lastPurchQty;
+        real    priceUnit = purchLine.PriceUnit != 0 ? purchLine.PriceUnit : ETGPurchLineDataEventHandler::lastPriceUnit;
+
+        if (lineAmt != 0 && purchQty != 0)
+        {
+            real calculatedPrice = (lineAmt * priceUnit) / purchQty;
+
+            if (purchLine.PurchPrice != calculatedPrice)
+            {
+                purchLine.PurchPrice = calculatedPrice;
+                sender.refresh();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>PurchLine_OnValidatingWrite</Name>
+				<Source><![CDATA[
+    [FormDataSourceEventHandler(formDataSourceStr(PurchTable, PurchLine), FormDataSourceEventType::ValidatingWrite)]
+    public static void PurchLine_OnValidatingWrite(FormDataSource sender, FormDataSourceEventArgs e)
+    {
+        PurchLine purchLine = sender.cursor() as PurchLine;
+
+        Amount  lineAmt   = ETGPurchLineDataEventHandler::lastLineAmount;
+        Qty     purchQty  = purchLine.PurchQty  != 0 ? purchLine.PurchQty  : ETGPurchLineDataEventHandler::lastPurchQty;
+        real    priceUnit = purchLine.PriceUnit != 0 ? purchLine.PriceUnit : ETGPurchLineDataEventHandler::lastPriceUnit;
+
+        if (lineAmt != 0 && purchQty != 0)
+        {
+            real calculatedPrice = (lineAmt * priceUnit) / purchQty;
+            purchLine.PurchPrice = calculatedPrice;
+            purchLine.LineAmount = lineAmt;
+
+            sender.refresh();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

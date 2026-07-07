@@ -1,0 +1,445 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_CopyPurchAgreementData</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_CopyPurchAgreementData extends RunBase
+{
+    VendAccount             vendAccount;
+    Name                    agreementClassification;
+    EffectiveDate           effectiveDate;
+    ExpirationDate          expirationDate;
+    DialogField             dialogFieldAccountId;
+    DialogField             dialogFieldClassification;
+    DialogField             dialogFieldEffective;
+    DialogField             dialogFieldExpiration;
+    PurchAgreementHeader    purchAgreementHeader,purchAgreementHeaderNew;
+    AgreementLineQuantityCommitment AgreementLineQuantityCommitment,AgreementLineQuantityCommitmentFrom;
+    AgreementLine           agreementLine,agreementLineNew;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args _args)
+    {
+        if(_args.record())
+        {
+            ETG_CopyPurchAgreementData   purchAgreementData = new ETG_CopyPurchAgreementData();
+            if(purchAgreementData.prompt())
+            {
+                purchAgreementData.copyAgreementData(_args);
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dialog</Name>
+				<Source><![CDATA[
+    Object dialog()
+    {
+        Dialog dialog = super();
+ 
+        dialog.caption("Copy agreement data");
+        //Dialog          dialog  = new Dialog("Copy agreement data");
+        dialogFieldAccountId = dialog.addField(extendedTypeStr(VendAccount));
+        dialogFieldClassification  = dialog.addField(extendedTypeStr(Name), "Purchase agreement classification");
+        dialogFieldEffective = dialog.addField(extendedTypeStr(EffectiveDate));
+        dialogFieldExpiration = dialog.addField(extendedTypeStr(ExpirationDate));
+        FormBuildstringControl           control;
+        FormBuildDateControl             effetiveDateControl;
+        
+        control = dialogFieldClassification.control();
+        effetiveDateControl = dialogFieldEffective.control();
+        effetiveDateControl.registerOverrideMethod(methodStr(FormDateControl, modified), methodStr(ETG_CopyPurchAgreementData, modifyEffectiveDate), this);
+        // Override lookup method
+        control.registerOverrideMethod(methodStr(FormStringControl, lookup), methodStr(ETG_CopyPurchAgreementData,lookup), this);
+        // making mandatory
+        dialogFieldAccountId.mandatory_RU(true);
+        dialogFieldClassification.mandatory_RU(true);
+        dialogFieldEffective.mandatory_RU(true);
+        dialogFieldExpiration.mandatory_RU(true);
+        return dialog;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getFromDialog</Name>
+				<Source><![CDATA[
+    boolean getFromDialog()
+    {
+        vendAccount     = dialogFieldAccountId.value();
+        agreementClassification = dialogFieldClassification.value();
+        effectiveDate   = dialogFieldEffective.value();
+        ExpirationDate  = dialogFieldExpiration.value();
+ 
+        return true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validate</Name>
+				<Source><![CDATA[
+    boolean validate(Object _calledFrom = null)
+    {
+        boolean ret;
+ 
+        ret = super(_calledFrom);
+ 
+        if (!vendAccount || !agreementClassification
+            || !effectiveDate || !ExpirationDate)
+        {
+            ret = checkFailed("Mandatory fields must be filled");
+        }
+ 
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>copyAgreementData</Name>
+				<Source><![CDATA[
+    public void copyAgreementData(Args _args)
+    {
+        VendTable                   vendTable;
+        AgreementHeaderDefault      agreementHeaderDefaultNew;
+        PurchAgreementHeaderDefault purchAgreementHeaderDefaultNew;
+        AgreementClassification     agreementClassificationNew;
+        AgreementLineDefault        AgreementLineDefaultNew;
+        PurchAgreementCertification purchAgreementCertificationNew;
+        PurchAgreementSubcontractor PurchAgreementSubcontractorNew,PurchAgreementSubcontractor;
+        TMSPurchAgreementHeader     TMSPurchAgreementHeaderNew,TMSPurchAgreementHeader;
+        ETG_PurchaseAgreementHeader ETG_PurchaseAgreementHeaderNew,ETG_PurchaseAgreementHeader;
+        ETG_AgreementLineQualityGrp ETG_AgreementLineQualityGrpNew,ETG_AgreementLineQualityGrp;
+        ETGAgrrementQualitySpecsLine ETGAgrrementQualitySpecsLineNew,ETGAgrrementQualitySpecsLine;
+        ETG_AgreementLineNotes       ETG_AgreementLineNotesNew,ETG_AgreementLineNotes;
+        ETG_ChargeCodes             etg_chargeCodes,etg_chargeCodesNew;
+        BankAccountTable            BankAccountTable;
+        VendBankAccount             VendBankAccount;
+        NumberSequenceReference numberSequenceReference;
+        NumberSeq num;
+
+        purchAgreementHeader = _args.record();
+
+        ttsbegin;
+        agreementClassificationNew = AgreementClassification::findPurchClassification(agreementClassification);
+        // NumberSeq num = NumberSeq::newGetNum(NumberSequenceReference::find(PurchParameters::numRefPurchAgreementId().NumberSequenceId));
+
+        select * from numberSequenceReference where numberSequenceReference.NumberSequenceId == PurchParameters::numRefPurchAgreementId().NumberSequenceId;
+        num = NumberSeq::newGetNum(numberSequenceReference);
+
+        purchAgreementHeaderNew.initValue();
+        purchAgreementHeaderNew.VendAccount = vendAccount;
+        vendTable   = VendTable::find(vendAccount);
+        purchAgreementHeaderNew.initFromVendTable(vendTable);
+        purchAgreementHeaderNew.AgreementClassification = agreementClassificationNew.RecId;
+        purchAgreementHeaderNew.PurchNumberSequence = num.num();//PurchAgreementId
+        purchAgreementHeaderNew.DocumentExternalReference   = purchAgreementHeader.DocumentExternalReference;
+        purchAgreementHeaderNew.PrimaryResponsibleWorker  =  purchAgreementHeader.PrimaryResponsibleWorker;//worker
+        purchAgreementHeaderNew.DocumentTitle   = purchAgreementHeader.DocumentTitle;
+        purchAgreementHeaderNew.DefaultAgreementLineEffectiveDate   = effectiveDate;
+        purchAgreementHeaderNew.DefaultAgreementLineExpirationDate  = expirationDate;
+        //purchAgreementHeaderNew.AgreementState  = AgreementState::OnHold; 
+        purchAgreementHeaderNew.DefaultDimension    = purchAgreementHeader.DefaultDimension; // for this need to get logic
+        purchAgreementHeaderNew.insert();
+
+        agreementHeaderDefaultNew.initFromVendTable(vendTable);
+        agreementHeaderDefaultNew.AgreementHeader   = purchAgreementHeaderNew.RecId; 
+        //agreementHeaderDefaultNew.pay   = purchAgreementHeaderNew;
+
+        agreementHeaderDefault   agreementHeaderDefault; // local decLaration
+        select agreementHeaderDefault where agreementHeaderDefault.AgreementHeader == purchAgreementHeader.RecId;
+        
+        info(strFmt('%1', purchAgreementHeader.RecId));
+       
+
+        agreementHeaderDefaultNew.PaymentTerms = agreementHeaderDefault.PaymentTerms;
+        agreementHeaderDefaultNew.DeliveryTerm = agreementHeaderDefault.DeliveryTerm;
+        agreementHeaderDefaultNew.DeliveryMode = agreementHeaderDefault.DeliveryMode;
+           
+        agreementHeaderDefaultNew.insert();
+
+        purchAgreementHeaderDefaultNew.PurchaseAgreementHeader  = purchAgreementHeaderNew.RecId;       
+        purchAgreementHeaderDefaultNew.initFromVendTable(vendTable);
+        purchAgreementHeaderDefaultNew.insert();
+
+        purchAgreementCertificationNew.PurchAgreementHeader = purchAgreementHeaderNew.RecId;
+        purchAgreementCertificationNew.VendTable    = vendTable.AccountNum;
+        purchAgreementCertificationNew.insert();
+
+        PurchAgreementSubcontractorNew.PurchAgreementHeader = purchAgreementHeaderNew.RecId;
+        select firstonly PurchAgreementSubcontractor
+            where PurchAgreementSubcontractor.PurchAgreementHeader == purchAgreementHeader.RecId;
+        if(PurchAgreementSubcontractor.RecId)
+        {
+            PurchAgreementSubcontractorNew.Description  = PurchAgreementSubcontractor.Description;
+            PurchAgreementSubcontractorNew.EndDate      = expirationDate;
+            PurchAgreementSubcontractorNew.StartDate    = effectiveDate;
+            PurchAgreementSubcontractorNew.VendTable    = vendTable.AccountNum;
+            PurchAgreementSubcontractorNew.PercentParticipation = PurchAgreementSubcontractor.PercentParticipation;
+            PurchAgreementSubcontractorNew.SubcontractorID  = PurchAgreementSubcontractor.SubcontractorID;
+            PurchAgreementSubcontractorNew.insert();
+        }
+        
+
+
+        TMSPurchAgreementHeaderNew.RefRecId = purchAgreementHeaderNew.RecId;
+        select TMSPurchAgreementHeader
+            where TMSPurchAgreementHeader.RefRecId == purchAgreementHeader.RecId;
+        if(TMSPurchAgreementHeader.RecId)
+        {
+            TMSPurchAgreementHeaderNew.CarrierCode  = TMSPurchAgreementHeader.CarrierCode;
+            TMSPurchAgreementHeaderNew.CarrierGroupCode = TMSPurchAgreementHeader.CarrierGroupCode;
+            TMSPurchAgreementHeaderNew.CarrierServiceCode   = TMSPurchAgreementHeader.CarrierServiceCode;
+            TMSPurchAgreementHeaderNew.ModeCode     = TMSPurchAgreementHeader.ModeCode;
+            TMSPurchAgreementHeaderNew.RouteConfigCode      = TMSPurchAgreementHeader.RouteConfigCode;
+            TMSPurchAgreementHeaderNew.TransportationTemplateId = TMSPurchAgreementHeader.TransportationTemplateId;
+            TMSPurchAgreementHeaderNew.insert();
+        }
+
+        ETG_PurchaseAgreementHeaderNew.PurchAgreementId    = purchAgreementHeaderNew.PurchNumberSequence;
+        select ETG_PurchaseAgreementHeader
+            where ETG_PurchaseAgreementHeader.PurchAgreementId == purchAgreementHeader.PurchNumberSequence;
+        if(ETG_PurchaseAgreementHeader.RecId)
+        {
+            ETG_PurchaseAgreementHeaderNew.DeliveryDescription      = ETG_PurchaseAgreementHeader.DeliveryDescription;
+            //ETG_PurchaseAgreementHeaderNew.TermPaymDescription      = PaymTerm::find(agreementHeaderDefaultNew.PaymentTerms).Description;//ETG_PurchaseAgreementHeader.TermPaymDescription;
+            
+            
+            ETG_PurchaseAgreementHeaderNew.Future                   = ETG_PurchaseAgreementHeader.Future;
+            ETG_PurchaseAgreementHeaderNew.Consignee                = ETG_PurchaseAgreementHeader.Consignee;
+            ETG_PurchaseAgreementHeaderNew.OnAccountOf              = ETG_PurchaseAgreementHeader.OnAccountOf;
+            ETG_PurchaseAgreementHeaderNew.Notes                    = ETG_PurchaseAgreementHeader.Notes;
+            ETG_PurchaseAgreementHeaderNew.Through                  = ETG_PurchaseAgreementHeader.Through;
+            ETG_PurchaseAgreementHeaderNew.Notifytodifferentparty   = ETG_PurchaseAgreementHeader.Notifytodifferentparty;
+            ETG_PurchaseAgreementHeaderNew.BuyerBank                = ETG_PurchaseAgreementHeader.BuyerBank;
+            ETG_PurchaseAgreementHeaderNew.SellerBank               = vendTable.BankAccount;//ETG_PurchaseAgreementHeader.SellerBank;
+            ETG_PurchaseAgreementHeaderNew.SellerAccountNum         = vendTable.AccountNum;//ETG_PurchaseAgreementHeader.SellerAccountNum;
+            ETG_PurchaseAgreementHeaderNew.PricingMonth             = ETG_PurchaseAgreementHeader.PricingMonth;
+            ETG_PurchaseAgreementHeaderNew.PricingFromDate          = effectiveDate;//ETG_PurchaseAgreementHeader.PricingFromDate;
+            ETG_PurchaseAgreementHeaderNew.PricingTodate            = expirationDate;//ETG_PurchaseAgreementHeader.PricingTodate;
+            ETG_PurchaseAgreementHeaderNew.AdvanceDue               = ETG_PurchaseAgreementHeader.AdvanceDue;
+            ETG_PurchaseAgreementHeaderNew.FromDatePort             = effectiveDate;//ETG_PurchaseAgreementHeader.FromDatePort;
+            ETG_PurchaseAgreementHeaderNew.ToDatePort               = expirationDate;////ETG_PurchaseAgreementHeader.ToDatePort;
+            ETG_PurchaseAgreementHeaderNew.PortOfLoading            = ETG_PurchaseAgreementHeader.PortOfLoading;
+            ETG_PurchaseAgreementHeaderNew.PortOfDischarge          = ETG_PurchaseAgreementHeader.PortOfDischarge;
+            ETG_PurchaseAgreementHeaderNew.CustomImport             = ETG_PurchaseAgreementHeader.CustomImport;
+            ETG_PurchaseAgreementHeaderNew.ImportDate               = effectiveDate;//ETG_PurchaseAgreementHeader.ImportDate;
+            ETG_PurchaseAgreementHeaderNew.Number                   = ETG_PurchaseAgreementHeader.Number;
+            ETG_PurchaseAgreementHeaderNew.CommissionType           = ETG_PurchaseAgreementHeader.CommissionType;
+            ETG_PurchaseAgreementHeaderNew.TypeValue                = ETG_PurchaseAgreementHeader.TypeValue;
+            ETG_PurchaseAgreementHeaderNew.DisplayTotalCalculatedCommission = ETG_PurchaseAgreementHeader.DisplayTotalCalculatedCommission;
+            ETG_PurchaseAgreementHeaderNew.TermsOfDelDescription        = DlvTerm::find(agreementHeaderDefaultNew.DeliveryTerm).Txt;//ETG_PurchaseAgreementHeader.TermsOfDelDescription;
+            ETG_PurchaseAgreementHeaderNew.PurchPoolId                  = ETG_PurchaseAgreementHeader.PurchPoolId;
+            ETG_PurchaseAgreementHeaderNew.BuyerAccountNum              = ETG_PurchaseAgreementHeader.BuyerAccountNum;
+            ETG_PurchaseAgreementHeaderNew.BuyerDeliveryAddress         = ETG_PurchaseAgreementHeader.BuyerDeliveryAddress;
+            ETG_PurchaseAgreementHeaderNew.SellerDeliveryAddress        = vendTable.postalAddress().RecId;//ETG_PurchaseAgreementHeader.SellerDeliveryAddress;
+                       
+            
+            ETG_PurchaseAgreementHeaderNew.BuyerSecondaryBank           = ETG_PurchaseAgreementHeader.BuyerSecondaryBank;
+            ETG_PurchaseAgreementHeaderNew.SellerSecondaryBank          = ETG_PurchaseAgreementHeader.SellerSecondaryBank;
+            ETG_PurchaseAgreementHeaderNew.Name                         = ETG_PurchaseAgreementHeader.Name;
+            ETG_PurchaseAgreementHeaderNew.Address                      = ETG_PurchaseAgreementHeader.Address;
+            ETG_PurchaseAgreementHeaderNew.PortOfLoadingDesc                = ETG_PurchaseAgreementHeader.PortOfLoadingDesc;
+            ETG_PurchaseAgreementHeaderNew.PortOfDischargeDesc              = ETG_PurchaseAgreementHeader.PortOfDischargeDesc;
+            ETG_PurchaseAgreementHeaderNew.ShipperBuyer                     = ETG_PurchaseAgreementHeader.ShipperBuyer;
+            ETG_PurchaseAgreementHeaderNew.BrokerName                       = ETG_PurchaseAgreementHeader.BrokerName;
+            ETG_PurchaseAgreementHeaderNew.QuantityConditions               = ETG_PurchaseAgreementHeader.QuantityConditions;
+            ETG_PurchaseAgreementHeaderNew.AgreementType                    = ETG_PurchaseAgreementHeader.AgreementType;
+            ETG_PurchaseAgreementHeaderNew.PackingGroup                     = ETG_PurchaseAgreementHeader.PackingGroup;
+            ETG_PurchaseAgreementHeaderNew.PermitNumber                     = ETG_PurchaseAgreementHeader.PermitNumber;
+            BankAccountTable     = BankAccountTable::find(ETG_PurchaseAgreementHeaderNew.BuyerBank);
+            ETG_PurchaseAgreementHeaderNew.BuyerSecondaryBank = BankAccountTable.AccountNum + '\n'+BankAccountTable.SWIFTNo+'\n'+BankAccountTable.postalAddress().Address;
+            VendBankAccount     = VendBankAccount::find(ETG_PurchaseAgreementHeaderNew.SellerAccountNum,ETG_PurchaseAgreementHeaderNew.SellerBank);
+            ETG_PurchaseAgreementHeaderNew.SellerSecondaryBank = VendBankAccount.AccountNum + '\n'+VendBankAccount.SWIFTNo+'\n'+VendBankAccount.logisticsPostalAddress().Address;
+            
+            ETG_PurchaseAgreementHeaderNew.insert();
+        }
+
+        while select agreementLine
+            where agreementLine.Agreement == purchAgreementHeader.RecId
+        {
+            AgreementLineQuantityCommitment.initValue();
+            AgreementLineQuantityCommitment.Agreement = purchAgreementHeaderNew.RecId;
+            AgreementLineQuantityCommitment.initFromAgreementHeader(purchAgreementHeaderNew);
+
+            AgreementLineQuantityCommitment.AgreedReleaseLineMaxAmount     = agreementLine.AgreedReleaseLineMaxAmount;
+            AgreementLineQuantityCommitment.AgreedReleaseLineMinAmount     = agreementLine.AgreedReleaseLineMinAmount;
+            AgreementLineQuantityCommitment.Category                       = agreementLine.Category;
+            AgreementLineQuantityCommitment.ETG_DerivedTP                  = agreementLine.ETG_DerivedTP;
+            AgreementLineQuantityCommitment.ETG_IsGrossWeight              = agreementLine.ETG_IsGrossWeight;
+            AgreementLineQuantityCommitment.ETG_IsThirdParty               = agreementLine.ETG_IsThirdParty;
+            AgreementLineQuantityCommitment.ETG_ItemAlternativeName        = agreementLine.ETG_ItemAlternativeName;
+            AgreementLineQuantityCommitment.ETG_ItemQuantityGroup          = agreementLine.ETG_ItemQuantityGroup;
+            AgreementLineQuantityCommitment.ETG_OverDeliveryPct            = agreementLine.ETG_OverDeliveryPct;
+            AgreementLineQuantityCommitment.ETG_PriceType                  = agreementLine.ETG_PriceType;
+            AgreementLineQuantityCommitment.ETG_ReleaseOrderLowerLimit     = agreementLine.ETG_ReleaseOrderLowerLimit;
+            AgreementLineQuantityCommitment.ETG_ReleaseOrderUpperLimit     = agreementLine.ETG_ReleaseOrderUpperLimit;
+            AgreementLineQuantityCommitment.ETG_ToleranceAction            = agreementLine.ETG_ToleranceAction;
+            AgreementLineQuantityCommitment.ETG_UnderDeliveryPct           = agreementLine.ETG_UnderDeliveryPct;
+            AgreementLineQuantityCommitment.EffectiveDate                  = effectiveDate;
+            AgreementLineQuantityCommitment.ExpirationDate                 = expirationDate;
+            AgreementLineQuantityCommitment.InstanceRelationType           = agreementLine.InstanceRelationType;
+            AgreementLineQuantityCommitment.InterCompanySkipUpdate         = agreementLine.InterCompanySkipUpdate;
+            AgreementLineQuantityCommitment.InventDimDataAreaId            = agreementLine.InventDimDataAreaId;
+            AgreementLineQuantityCommitment.InventDimId                    = agreementLine.InventDimId;
+            //AgreementLineQuantityCommitment.IsDeleted                      = agreementLine.IsDeleted;
+            AgreementLineQuantityCommitment.IsMaxEnforced                  = agreementLine.IsMaxEnforced;
+            //AgreementLineQuantityCommitment.IsModified                     = agreementLine.IsModified;
+            AgreementLineQuantityCommitment.IsPriceInformationMandatory    = agreementLine.IsPriceInformationMandatory;
+            AgreementLineQuantityCommitment.ItemDataAreaId                 = agreementLine.ItemDataAreaId;
+            AgreementLineQuantityCommitment.ItemId                         = agreementLine.ItemId;
+            AgreementLineQuantityCommitment.ETGMainCommodity               = agreementLine.ETGMainCommodity;//Main Commodity
+            AgreementLineQuantityCommitment.DefaultDimension               = agreementLine.DefaultDimension;// dimension
+            AgreementLineQuantityCommitment.LineDiscountPercent            = agreementLine.LineDiscountPercent;
+            AgreementLineQuantityCommitment.LineNumber                     = agreementLine.LineNumber;
+            //AgreementLineQuantityCommitment.PSNCalendarDays                = agreementLine.PSNLeadTime;
+            //AgreementLineQuantityCommitment.PSNLeadTime                    = agreementLine.PSNLeadTime;
+            select AgreementLineQuantityCommitmentFrom
+                where AgreementLineQuantityCommitmentFrom.RecId == agreementLine.RecId;
+            AgreementLineQuantityCommitment.CommitedQuantity    = AgreementLineQuantityCommitmentFrom.CommitedQuantity;
+            AgreementLineQuantityCommitment.LineDiscountAmount  = AgreementLineQuantityCommitmentFrom.LineDiscountAmount;
+            AgreementLineQuantityCommitment.PdsCWCommitedQuantity   = AgreementLineQuantityCommitmentFrom.PdsCWCommitedQuantity;
+            AgreementLineQuantityCommitment.PricePerUnit        = AgreementLineQuantityCommitmentFrom.PricePerUnit;
+            AgreementLineQuantityCommitment.PriceUnit   = AgreementLineQuantityCommitmentFrom.PriceUnit;
+            AgreementLineQuantityCommitment.ProductUnitOfMeasure    = AgreementLineQuantityCommitmentFrom.ProductUnitOfMeasure;
+            AgreementLineQuantityCommitment.doinsert();
+
+            select agreementLineNew 
+                where agreementLineNew.RecId == AgreementLineQuantityCommitment.RecId;
+            AgreementLineDefaultNew.AgreementLine   = agreementLineNew.RecId;
+            AgreementLineDefaultNew.initFromAgreementLine(agreementLineNew);
+            //AgreementLineDefaultNew.initFromSalesAgreementHeaderDefault( // Sales agreement header
+            AgreementLineDefaultNew.insert();
+
+          while select ETG_AgreementLineNotes
+                where ETG_AgreementLineNotes.AgreementLine == agreementLine.RecId
+
+            {
+
+                ETG_AgreementLineNotesNew.AgreementLine = agreementLineNew.RecId;
+                ETG_AgreementLineNotesNew.EnumNotes     = ETG_AgreementLineNotes.EnumNotes;
+                ETG_AgreementLineNotesNew.Description    = ETG_AgreementLineNotes.Description;
+                ETG_AgreementLineNotesNew.PrintNotesInContract = ETG_AgreementLineNotes.PrintNotesInContract;
+                ETG_AgreementLineNotesNew.insert();
+
+            }
+
+            while select ETG_AgreementLineQualityGrp
+                where ETG_AgreementLineQualityGrp.AgreementLine == agreementLine.RecId
+            {
+                ETG_AgreementLineQualityGrpNew.AgreementLine = agreementLineNew.RecId;
+                ETG_AgreementLineQualityGrpNew.GroupId  = ETG_AgreementLineQualityGrp.GroupId;
+                ETG_AgreementLineQualityGrpNew.insert();
+
+                while select ETGAgrrementQualitySpecsLine
+           where ETGAgrrementQualitySpecsLine.AgreementLineRefrecid ==ETG_AgreementLineQualityGrp.AgreementLine &&
+            ETGAgrrementQualitySpecsLine.GroupID == ETG_AgreementLineQualityGrp.GroupId
+                {
+                    ETGAgrrementQualitySpecsLineNew.AgreementLineRefrecid=ETG_AgreementLineQualityGrpNew.AgreementLine;
+                    ETGAgrrementQualitySpecsLineNew.GroupID             = ETG_AgreementLineQualityGrpNew.GroupId;
+                    ETGAgrrementQualitySpecsLineNew.SubGrpId            =ETGAgrrementQualitySpecsLine.SubGrpId;
+                   // ETGAgrrementQualitySpecsLineNew.                    =ETGAgrrementQualitySpecsLine.;
+                    ETGAgrrementQualitySpecsLineNew.SubGroupDescription = ETGAgrrementQualitySpecsLine.SubGroupDescription;
+                    ETGAgrrementQualitySpecsLineNew.MeasurementType     = ETGAgrrementQualitySpecsLine.MeasurementType;
+                    ETGAgrrementQualitySpecsLineNew.Increment          = ETGAgrrementQualitySpecsLine.Increment;
+                    ETGAgrrementQualitySpecsLineNew.FixedValue         = ETGAgrrementQualitySpecsLine.FixedValue;
+                    ETGAgrrementQualitySpecsLineNew.MinRange           = ETGAgrrementQualitySpecsLine.MinRange;
+                    ETGAgrrementQualitySpecsLineNew.MaxRange             = ETGAgrrementQualitySpecsLine.MaxRange;
+                    ETGAgrrementQualitySpecsLineNew.insert();
+                }
+
+            }
+
+        }
+        
+
+
+        // Estimation details coping
+        while select etg_chargeCodes
+            where etg_chargeCodes.PurchNumberSequence   == purchAgreementHeader.PurchNumberSequence
+        {
+            num = NumberSeq::newGetNum(PurchParameters::numReEstimstion());
+            etg_chargeCodesNew.PurchNumberSequence      = purchAgreementHeaderNew.PurchNumberSequence;
+            etg_chargeCodesNew.MarkupCode               = etg_chargeCodes.MarkupCode;
+            etg_chargeCodesNew.CurrencyCode             = etg_chargeCodesNew.CurrencyCode;
+            etg_chargeCodesNew.Value                    = etg_chargeCodesNew.Value;
+            etg_chargeCodesNew.ExchangeRate             = etg_chargeCodesNew.ExchangeRate;
+            etg_chargeCodesNew.AmountMST                = etg_chargeCodesNew.AmountMST;
+            etg_chargeCodesNew.Qty                      = etg_chargeCodesNew.Qty;
+            etg_chargeCodesNew.TransTxt                 = etg_chargeCodesNew.TransTxt;
+            etg_chargeCodesNew.ETG_Estimation           = num.num();//etg_chargeCodesNew.ETG_Estimation;
+            etg_chargeCodesNew.ETG_MarkupCategory       = etg_chargeCodesNew.ETG_MarkupCategory;
+            etg_chargeCodesNew.Estimation               = etg_chargeCodesNew.Estimation;
+            etg_chargeCodesNew.Actual                   = etg_chargeCodesNew.Actual;
+            //etg_chargeCodesNew.Posted
+            //etg_chargeCodesNew.JournalNum
+            etg_chargeCodesNew.Amountinaccountingcurrency   = etg_chargeCodesNew.Amountinaccountingcurrency;
+            etg_chargeCodesNew.Amountinreportingcurrency    = etg_chargeCodesNew.Amountinreportingcurrency;
+            etg_chargeCodesNew.ReportingExchangeRate        = etg_chargeCodesNew.ReportingExchangeRate;
+            etg_chargeCodesNew.insert();
+        }
+        info(strFmt("Agreement %1 created",purchAgreementHeaderNew.PurchNumberSequence));
+        ttscommit;
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>lookup</Name>
+				<Source><![CDATA[
+    public void lookup(FormStringControl _control)
+    {
+        Query                   query = new Query();
+        QueryBuildDataSource    queryBuildDataSource;
+        SysTableLookup          sysTableLookup = SysTableLookup::newParameters(tableNum(AgreementClassification),_control);
+ 
+        sysTableLookup.addLookupField(fieldNum(AgreementClassification, Name));
+        if (isConfigurationkeyEnabled(configurationKeyNum(PublicSector)))
+        {
+            sysTableLookup.addLookupField(fieldNum(AgreementClassification, Description_PSN));
+        }
+         
+        queryBuildDataSource = query.addDataSource(tableNum(AgreementClassification));
+        queryBuildDataSource.addRange(fieldNum(AgreementClassification,AgreementRelationType)).value(queryValue(tableNum(PurchAgreementHeader)));
+        sysTableLookup.parmQuery(query);
+ 
+        sysTableLookup.performFormLookup();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>modifyEffectiveDate</Name>
+				<Source><![CDATA[
+    public boolean modifyEffectiveDate(FormDateControl _control)
+    {
+        boolean ret = _control.modified();
+        if (ret)
+        {
+            if(ETGACFParameters::find().EnableExpirationDateOptionalContracts == NoYes::Yes)
+            {
+                if (_control.valueStr())
+                {
+                    dialogFieldExpiration.value(DateTimeUtil::date(DateTimeUtil::addYears(_control.dateValue(), 3)));
+                }
+            }
+
+           
+        }
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,833 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGGMCReportDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(ETGGMCReportContract))]
+internal final class ETGGMCReportDP extends SRSReportDataProviderBase
+{
+    ETGGMCTableTemp etggmctableTemp, etggmctableTempCheck;
+    str reportName = 'GMR';
+    Notes strSalesDiscount, strPurchaseDiscount, strSDCost, strDirectCost, strMmFV, strMmSIT, strOtherIncome, strInsuranceClaimRecId;
+    Notes strTotalCost, strRealisedExchangeAdjustment, strGC, strDepreciation, strAdminCostAndBankCharges, strStaffCost, strUnrealizedForex, strOtherCost, strEBITDA, strOtherFinCosts, strInterestIncome, strInterestExpense, strNetEBITDA;
+   
+    container conSalesDiscount, conPurchaseDiscount, conSDCost, conDirectCost, conMmFV, conMmSIT, conOtherIncome, conInsuranceClaimRecId;
+    container conTotalCost, conRealisedExchangeAdjustment, conGC, conDepreciation, conAdminCostAndBankCharges, conStaffCost, conUnrealizedForex, conOtherCost, conEBITDA, conOtherFinCosts, conInterestIncome, conInterestExpense, conNetEBITDA;
+    ETGACFParameters acfParam;
+    ETGGMCTableTempNonInvoice ETGGMCTableTempNonInvoice;
+
+    FromDate fromDate;
+    ToDate   toDate;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGGMCTableTemp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETGGMCTableTemp))]
+    public ETGGMCTableTemp getETGGMCTableTemp()
+    {
+        return etggmctableTemp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateTotalForMainAccounts</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method accepts parameters and calculates the total amount after matching MainAccountId, ReportId, ReportPerticularId and SubledgerVoucher
+    /// </summary>
+    /// <param name = "mainAccountListStr"></param>
+    /// <param name = "contract"></param>
+    /// <param name = "invoiceQty"></param>
+    /// <param name = "contractQty"></param>
+    /// <param name = "conLedgerVoucher"></param>
+    /// <returns>totalAmount</returns>
+    private Amount calculateTotalForMainAccounts(String255 mainAccountListStr, str contract, Qty invoiceQty, Qty contractQty, container conLedgerVoucher)
+    {
+        Amount totalAmount = 0;
+        Amount totalCost = 0;
+        ETGGMRReportView reportView;
+        GeneralJournalAccountEntry gjae;
+        ETGPowerBIReportGLMappingTable glMappingTable;
+
+        if(contractQty == 0)
+        {
+            return 0;
+        }
+
+        for (int counter = 1; counter <= conLen(conLedgerVoucher); counter++)
+        {
+            str voucher = conPeek(conLedgerVoucher, counter);
+
+            select sum(AccountingCurrencyAmount) from reportView
+            exists join glMappingTable
+            where glMappingTable.MainAccountId == reportView.MainAccountId
+                && glMappingTable.ReportId == reportName
+                && glMappingTable.ReportPerticularId == mainAccountListStr
+                && reportView.SubledgerVoucher == voucher;
+
+            totalAmount = reportView.AccountingCurrencyAmount;
+        }
+        
+        totalAmount = totalAmount * invoiceQty/ contractQty;
+
+        return totalAmount;
+        //Amount totalAmount = 0;
+        //Amount totalCost = 0;
+        //ETGGMRReportView reportView;
+        //GeneralJournalAccountEntry gjae;
+        //ETGPowerBIReportGLMappingTable glMappingTable;
+
+        //for (int counter = 1; counter <= conLen(conLedgerVoucher); counter++)
+        //{
+        //    str voucher = conPeek(conLedgerVoucher, counter);
+
+        //    while select AccountingCurrencyAmount from reportView
+        //    exists join glMappingTable
+        //    where glMappingTable.MainAccountId == reportView.MainAccountId
+        //        && glMappingTable.ReportId == reportName
+        //        && glMappingTable.ReportPerticularId == mainAccountListStr
+        //        && reportView.SubledgerVoucher == voucher
+        //    {
+        //        totalAmount += reportView.AccountingCurrencyAmount;
+        //    }
+
+        //}
+        //if(contractQty == 0)
+        //{
+        //    return 0;
+        //}
+        //else
+        //{
+        //    totalAmount = totalAmount * invoiceQty/ contractQty;
+        //}
+        //return totalAmount;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getMainAccountDetails</Name>
+				<Source><![CDATA[
+    public void getMainAccountDetails(CustInvoiceJour custInvJour, CustInvoiceTrans custInvoiceTrans)
+    {
+        String50 contract;
+        Qty contractQty;
+        container conLedgerVoucher;
+        CustInvoiceJour custInvJourSum;
+        CustInvoiceJour custInvoiceJourLoc;
+        int counter = 1;
+        CustInvoiceTrans custInvTrans;
+      
+        contract    = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(custInvJour.DefaultDimension, acfParam.Contract);
+
+        select sum(Qty) from custInvTrans
+            exists join custInvJourSum
+            where custInvJourSum.InvoiceId == custInvTrans.InvoiceId
+            && custInvJourSum.DataAreaId == custInvTrans.DataAreaId
+            && custInvJourSum.ETGContractNum == contract
+            && custInvJourSum.DataAreaId == curExt()
+            && custInvJourSum.InvoiceDate >= fromDate && custInvJourSum.InvoiceDate <= toDate;
+
+        contractQty = custInvTrans.Qty;
+
+        while select LedgerVoucher, InvoiceId, DataAreaId from custInvoiceJourLoc
+            where custInvoiceJourLoc.ETGContractNum == contract
+             && custInvoiceJourLoc.InvoiceDate >= fromDate && custInvoiceJourLoc.InvoiceDate <= toDate
+        {
+            conLedgerVoucher = conIns(conLedgerVoucher, counter, custInvoiceJourLoc.LedgerVoucher);
+            counter++;
+        }
+
+        etggmctableTemp.ContractQty                 = contractQty;
+        etggmctableTemp.InvoiceQty                  = custInvoiceTrans.Qty;
+        etggmctableTemp.SalesDiscount               = this.calculateTotalForMainAccounts(strSalesDiscount,              contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher) ;
+        etggmctableTemp.PurchDiscount               = this.calculateTotalForMainAccounts(strPurchaseDiscount,           contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher) ;
+        etggmctableTemp.SDCost                      = this.calculateTotalForMainAccounts(strSDCost,                     contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher) ;
+        etggmctableTemp.DirectCost                  = this.calculateTotalForMainAccounts(strDirectCost,                 contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher) ;
+        etggmctableTemp.MmFV                        = this.calculateTotalForMainAccounts(strMmFV,                       contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher) ;
+        etggmctableTemp.MmSIT                       = this.calculateTotalForMainAccounts(strMmSIT,                      contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher) ;
+        etggmctableTemp.InsuranceClaimRecId         = this.calculateTotalForMainAccounts(strInsuranceClaimRecId,        contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher);
+        etggmctableTemp.RealisedExchangeAdjustment  = this.calculateTotalForMainAccounts(strRealisedExchangeAdjustment, contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher);
+        etggmctableTemp.Depreciation                = this.calculateTotalForMainAccounts(strDepreciation,               contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher);
+        etggmctableTemp.AdminCostAndBankCharges     = this.calculateTotalForMainAccounts(strAdminCostAndBankCharges,    contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher);
+        etggmctableTemp.CostStaff                   = this.calculateTotalForMainAccounts(strStaffCost,                  contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher);
+        etggmctableTemp.UnrealizedForex             = this.calculateTotalForMainAccounts(strUnrealizedForex,            contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher);
+        etggmctableTemp.OtherFinanceCostsLC         = this.calculateTotalForMainAccounts(strOtherFinCosts,              contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher);
+        etggmctableTemp.InterestIncome              = this.calculateTotalForMainAccounts(strInterestIncome,             contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher);
+        etggmctableTemp.InterestExpense             = this.calculateTotalForMainAccounts(strInterestExpense,            contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher);
+    
+        etggmctableTemp.TotalCost                   = (etggmctableTemp.PurchaseCost + etggmctableTemp.SalesDiscount+etggmctableTemp.PurchDiscount+etggmctableTemp.SDCost+ etggmctableTemp.DirectCost+etggmctableTemp.MmFV+ etggmctableTemp.MmSIT + etggmctableTemp.InsuranceClaimRecId);
+        etggmctableTemp.GC                          = (etggmctableTemp.LineAmount -  etggmctableTemp.TotalCost - etggmctableTemp.RealisedExchangeAdjustment);
+        etggmctableTemp.OtherCost                   = (etggmctableTemp.Depreciation + etggmctableTemp.AdminCostAndBankCharges + etggmctableTemp.CostStaff + etggmctableTemp.UnrealizedForex );
+        etggmctableTemp.EBITDA                      = etggmctableTemp.GC - etggmctableTemp.OtherCost;
+        etggmctableTemp.NetEBITDA                   = etggmctableTemp.EBITDA - (etggmctableTemp.OtherFinanceCostsLC + etggmctableTemp.InterestIncome + etggmctableTemp.InterestExpense);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initializeMainAccount</Name>
+				<Source><![CDATA[
+    private void initializeMainAccount()
+    {
+        ETGGMRReportMainAccountName gmrReportMainAccountName;
+
+        select firstonly gmrReportMainAccountName where gmrReportMainAccountName.DataAreaId == curExt();
+
+        strSalesDiscount              = gmrReportMainAccountName.SALESDISCOUNT;
+        strPurchaseDiscount           = gmrReportMainAccountName.PURCHASEDISCOUNT;
+        strSDCost                     = gmrReportMainAccountName.SNDCOST;
+        strDirectCost                 = gmrReportMainAccountName.DIRECTCOST;
+        strMmFV                       = gmrReportMainAccountName.M2MFV;
+        strMmSIT                      = gmrReportMainAccountName.M2MSIT;
+        strInsuranceClaimRecId        = gmrReportMainAccountName.OTHERINCOMEINSURANCESLAINCOME;
+        strTotalCost                  = gmrReportMainAccountName.TOTALCOST;
+        strRealisedExchangeAdjustment = gmrReportMainAccountName.REALISEDEXCHANGEADJUSTMENT;
+        strGC                         = gmrReportMainAccountName.GC;
+        strDepreciation               = gmrReportMainAccountName.DEPRECIATION;
+        strAdminCostAndBankCharges    = gmrReportMainAccountName.ADMINCOSTANDBANKCHARGES;
+        strStaffCost                  = gmrReportMainAccountName.STAFFCOST;
+        strUnrealizedForex            = gmrReportMainAccountName.UNREALIZEDFOREX;
+        strOtherCost                  = gmrReportMainAccountName.OTHERCOST;
+        strEBITDA                     = gmrReportMainAccountName.EBITDA;
+        strOtherFinCosts              = gmrReportMainAccountName.OTHERFINCOSTS;
+        strInterestIncome             = gmrReportMainAccountName.INTERESTINCOME;
+        strInterestExpense            = gmrReportMainAccountName.INTERESTEXPENSE;
+        strNetEBITDA                  = gmrReportMainAccountName.NETEBITDA;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getMainAccountStrByPerticularId</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method returns a container having Main accounts from powerBIReportGLMappingTable corresponding to the perticularId passed
+    /// </summary>
+    /// <param name = "perticularId"></param>
+    /// <returns></returns>
+    public str getMainAccountStrByPerticularId(str perticularId)
+    {
+        ETGPowerBIReportGLMappingTable powerBIReportGLMappingTable;
+        container mainAccountCon;
+        int counter = 1;
+
+        while select MainAccountId from powerBIReportGLMappingTable
+        where powerBIReportGLMappingTable.ReportId == 'GMR'
+            && powerBIReportGLMappingTable.ReportPerticularId == perticularId
+        {
+            mainAccountCon = conIns(mainAccountCon, counter, powerBIReportGLMappingTable.MainAccountId);
+            counter++;
+        }
+
+        return con2Str(mainAccountCon, ';');
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        CustInvoiceJour custInvoiceJour;
+        CustInvoiceTrans custInvoiceTrans;
+        CustTable custTable;
+        SalesLine salesLine;
+        SalesTable salesTable;
+        ETG_SalesTableTrade salesTableTrade;
+        AgreementHeader agreementHeader;
+        InventTrans inventTrans;
+        InventTransOrigin inventTransOrigin;
+        SalesAgreementHeader salesAgreementHeader;
+        
+        Query query;
+        QueryRun                            queryRun;
+        QueryBuildDataSource                qbdsCustInvoiceJour, qbdsCustInvoiceTrans,qbdsSalesTable;
+        QueryBuildDataSource                qbdsSalesAgreementHeader;
+        QueryBuildRange                     qbrToDate;
+        ETGGMCTableTemp                     gmrReportTemp,gmrReportTemploc;
+        ETGGMCTableTempNonInvoice           gmrReportTempNonInvoice;
+
+        RecordInsertList                     recordgmrReportTemp;
+        recordgmrReportTemp = new RecordInsertList(tableNum(ETGGMCTableTemp));
+
+        ETGACFParameters acfParameters = ETGACFParameters::find();
+
+        ETGGMCReportContract contract = this.parmDataContract() as ETGGMCReportContract;
+
+        fromDate = contract.parmFromDate();
+        toDate   = contract.parmPerDate();
+
+        acfParam = ETGACFParameters::find();
+
+        delete_from gmrReportTemp;
+        delete_from gmrReportTempNonInvoice;
+
+        query           =   new query();
+        qbdsCustInvoiceJour  =   query.addDataSource(tableNum(CustInvoiceJour));
+        qbdsCustInvoiceTrans   =   qbdsCustInvoiceJour.addDataSource(tableNum(CustInvoiceTrans));
+        qbdsCustInvoiceTrans.joinMode(JoinMode::InnerJoin);
+        qbdsCustInvoiceTrans.relations(true);
+
+        if(fromDate && toDate)
+        {
+            if(toDate < fromDate)
+            {
+                throw Error(strFmt("To date %1 can not be less than from date %2", toDate, fromDate));
+            }
+            qbdsCustInvoiceJour.addRange(fieldNum(CustInvoiceJour, InvoiceDate)).value(queryRange(fromDate, toDate));
+        }
+        else
+        {
+            qbdsCustInvoiceJour.addRange(fieldNum(CustInvoiceJour, InvoiceDate)).value(
+                strFmt("<=%1", date2Str(toDate, 123, DateMonth::Digits2, DateSeparator::Slash, DateDay::Digits2, DateSeparator::Slash, DateYear::Digits4)));
+        }
+
+        qbdsCustInvoiceJour.addRange(fieldNum(CustInvoiceJour, SalesId)).value(SysQuery::valueNotEmptyString());
+    
+        this.initializeMainAccount();
+
+        queryRun = new QueryRun(query);
+
+        while (queryRun.next())
+        {
+            custInvoiceJour = queryRun.get(tableNum(CustInvoiceJour));
+            custInvoiceTrans = queryRun.get(tableNum(CustInvoiceTrans));
+            
+            select firstonly custTable
+                where custTable.AccountNum == custInvoiceJour.InvoiceAccount;
+                
+            salesLine = custInvoiceTrans.salesLine();
+            salesTable = custInvoiceJour.salesTable();
+    
+            select firstonly salesTableTrade
+             where salesTableTrade.SalesId == salesTable.SalesId;
+
+            salesAgreementHeader.clear();
+            agreementHeader.clear();
+            if (salesTable.MatchingAgreement)
+            {
+                select firstonly agreementHeader
+                    where agreementHeader.RecId == salesTable.MatchingAgreement;
+            }
+            if(agreementHeader.RecId)
+            {
+                select firstonly salesAgreementHeader
+                     where agreementHeader.RecId == salesAgreementHeader.RecId;
+            }
+           
+            
+           
+            etggmctableTemp.clear();
+
+            etggmctableTemp.AccountNum     = custTable.AccountNum;
+            etggmctableTemp.InvoiceAccount = custInvoiceJour.InvoiceId;
+            etggmctableTemp.InvoiceDate    = custInvoiceTrans.InvoiceDate;
+
+            etggmctableTemp.ETGMonth = strFmt('%1/%2',
+                mthName(mthOfYr(custInvoiceTrans.InvoiceDate)),
+                subStr(int2str(year(custInvoiceTrans.InvoiceDate)), 3, 2));
+
+            etggmctableTemp.ORIGIN        = custInvoiceTrans.inventDim().InventColorId;
+            etggmctableTemp.DESTINATION   = salesTableTrade.CountryOfFinalDestination;
+            etggmctableTemp.SalesParty    = custTable.name();
+
+            Amount purchCost;
+            select firstonly RecId from inventTransOrigin
+                 where inventTransOrigin.InventTransId == custInvoiceTrans.InventTransId;
+
+            if (inventTransOrigin.RecId)
+            {
+
+                while select inventTrans
+                where inventTrans.InvoiceId == custInvoiceTrans.InvoiceId
+                 && inventTrans.ItemId == custInvoiceTrans.ItemId
+                && inventTrans.InventTransOrigin == inventTransOrigin.RecId
+                {
+                    purchCost += abs(inventTrans.costValue());
+                }
+            }
+
+            etggmctableTemp.PurchaseCost = purchCost;
+
+            etggmctableTemp.ContractNo = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(salesTable.DefaultDimension, acfParameters.Contract);
+            etggmctableTemp.ItemId = custInvoiceTrans.ItemId;
+            etggmctableTemp.ItemDesc = custInvoiceTrans.Name;
+
+         
+            //accountNum  = SalesAgreementHeader::findAgreementId(contract).CustAccount;
+            etggmctableTemp.AgreementNum = salesAgreementHeader.SalesNumberSequence;
+
+
+           
+
+            etggmctableTemp.Vertical = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(
+                salesLine.DefaultDimension, acfParameters.Vertical);
+
+            etggmctableTemp.SubVertical = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(
+                salesLine.DefaultDimension, acfParameters.SubVertical);
+
+            etggmctableTemp.MainCommodity = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(
+                salesLine.DefaultDimension, acfParameters.MainCommodity);
+
+            etggmctableTemp.SubCommodity = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(
+                salesLine.DefaultDimension, acfParameters.SubCommodity);
+
+            etggmctableTemp.SalesQty     = custInvoiceTrans.Qty;
+            etggmctableTemp.SalesUnit    = custInvoiceTrans.SalesUnit;
+            etggmctableTemp.LineAmount   = custInvoiceTrans.LineAmountMST;
+
+            if(etggmctableTemp.SalesQty < 0)
+            {
+                etggmctableTemp.PurchaseCost =  etggmctableTemp.PurchaseCost * (-1);
+            }
+
+            //QTY in MT code
+            str                      fromUnit,toUnit;
+            UnitOfMeasure            fromUnitOfMeasure, toUnitOfMeasure;
+            InventTableModule        inventTableModule;
+            InventTable              inventTableloc;
+            UnitOfMeasureConversion  unitOfMeasureConversion;
+            inventTableloc       = InventTable::find(custInvoiceTrans.ItemId);
+            fromUnit             = custInvoiceTrans.SalesUnit;
+            fromUnitOfMeasure    = UnitOfMeasure::findBySymbol(fromUnit);
+            boolean           isvaild;
+ 
+            while select unitOfMeasureConversion
+                where unitOfMeasureConversion.FromUnitOfMeasure  == fromUnitOfMeasure.RecId
+            {
+                toUnit   = UnitOfMeasure::find(unitOfMeasureConversion.ToUnitOfMeasure).Symbol;
+ 
+                if(unitOfMeasureConversion.FromUnitOfMeasure  == fromUnitOfMeasure.RecId && unitOfMeasureConversion.Product == 0)
+                {
+                    if(fromUnit == toUnit && toUnit == "@ETG_New:MT")
+                    {
+                        etggmctableTemp.ETGMT = etggmctableTemp.SalesQty;
+                        isvaild = true;
+                    }
+                    else if(fromUnit  && toUnit == "@ETG_New:MT")
+                    {
+                        etggmctableTemp.ETGMT = unitOfMeasureConversion.Factor * etggmctableTemp.SalesQty;
+                        isvaild = true;
+                    }
+                }
+                else
+                {
+                    if(!isvaild)
+                    {
+                        select firstonly  unitOfMeasureConversion
+                            where unitOfMeasureConversion.Product  == inventTableloc.Product
+                            &&   unitOfMeasureConversion.FromUnitOfMeasure == fromUnitOfMeasure.RecId;
+                        if(fromUnit == toUnit && toUnit == "@ETG_New:MT")
+                        {
+                            etggmctableTemp.ETGMT = etggmctableTemp.SalesQty;
+                        }
+                        else if(fromUnit  && toUnit == "@ETG_New:MT")
+                        {
+                            etggmctableTemp.ETGMT = unitOfMeasureConversion.Factor * etggmctableTemp.SalesQty;
+                        }
+                    }
+                    if(etggmctableTemp.ETGMT == 0 && fromUnit =="MT")
+                    {
+                        etggmctableTemp.ETGMT  = etggmctableTemp.SalesQty;
+                    }
+                }
+            }
+                    
+            this.getMainAccountDetails(custInvoiceJour, custInvoiceTrans);
+            
+            //etggmctableTemp.insert();
+            recordgmrReportTemp.add(etggmctableTemp);
+
+        }
+        recordgmrReportTemp.insertDatabase();
+
+        this.insertNonInvoiceDataView();
+
+        ttsbegin;
+
+        this.groupByNonInvoiceData();
+
+        ttscommit;
+
+        //CustInvoiceJour    custInvoiceJourLoc;
+        //container          conLedgerVoucher;
+        //int                 counter = 1;
+
+        //while select sum(SalesQty), ContractNo, Vertical, SubVertical, MainCommodity, SubCommodity   from gmrReportTemp
+        //    group by gmrReportTemp.ContractNo,
+        //             gmrReportTemp.Vertical,
+        //             gmrReportTemp.SubVertical,
+        //             gmrReportTemp.MainCommodity,
+        //             gmrReportTemp.SubCommodity 
+        //    where gmrReportTemp.InvoiceAccount != ''
+        //{
+        //    if(gmrReportTemp.ContractNo != "O001SC_000255")
+        //    {
+        //        continue;
+        //    }
+
+        //    if(gmrReportTemp.SalesQty == 0)
+        //    {
+        //        select firstonly forupdate gmrReportTemploc  where gmrReportTemploc.ContractNo    == gmrReportTemp.ContractNo
+        //                                                    &&  gmrReportTemploc.Vertical     == gmrReportTemp.Vertical
+        //                                                    &&  gmrReportTemploc.SubVertical  == gmrReportTemp.SubVertical
+        //                                                    && gmrReportTemploc.MainCommodity == gmrReportTemp.MainCommodity
+        //                                                    && gmrReportTemploc.SubCommodity  == gmrReportTemp.SubCommodity
+        //                                                    && gmrReportTemploc.SalesQty > 0;
+
+        //        while select LedgerVoucher, InvoiceId, DataAreaId from custInvoiceJourLoc
+        //        where custInvoiceJourLoc.ETGContractNum == gmrReportTemp.ContractNo
+        //         && custInvoiceJourLoc.InvoiceDate >= fromDate && custInvoiceJourLoc.InvoiceDate <= toDate
+        //            {
+        //                conLedgerVoucher = conIns(conLedgerVoucher, counter, custInvoiceJourLoc.LedgerVoucher);
+        //                counter++;
+        //            }
+
+
+        //        Qty contractQty = gmrReportTemploc.SalesQty;
+        //        Qty invoiceQty  = gmrReportTemploc.SalesQty;
+
+        //      //  etggmctableTemp.ContractQty                 = 
+        //      //  etggmctableTemp.InvoiceQty                  = gmrReportTemploc.SalesQty;
+
+        //        gmrReportTemploc.SalesDiscount               = this.calculateTotalForMainAccounts(strSalesDiscount,              gmrReportTemploc.ContractNo, invoiceQty, contractQty, conLedgerVoucher) ;
+        //        gmrReportTemploc.UnrealizedForex             = this.calculateTotalForMainAccounts(strUnrealizedForex,            gmrReportTemploc.ContractNo, invoiceQty, contractQty, conLedgerVoucher) ;
+
+        //        /*etggmctableTemp.PurchDiscount               = this.calculateTotalForMainAccounts(strPurchaseDiscount,           contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher) ;
+        //        etggmctableTemp.SDCost                      = this.calculateTotalForMainAccounts(strSDCost,                     contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher) ;
+        //        etggmctableTemp.DirectCost                  = this.calculateTotalForMainAccounts(strDirectCost,                 contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher) ;
+        //        etggmctableTemp.MmFV                        = this.calculateTotalForMainAccounts(strMmFV,                       contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher) ;
+        //        etggmctableTemp.MmSIT                       = this.calculateTotalForMainAccounts(strMmSIT,                      contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher) ;
+        //        etggmctableTemp.InsuranceClaimRecId         = this.calculateTotalForMainAccounts(strInsuranceClaimRecId,        contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher);
+        //        etggmctableTemp.RealisedExchangeAdjustment  = this.calculateTotalForMainAccounts(strRealisedExchangeAdjustment, contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher);
+        //        etggmctableTemp.Depreciation                = this.calculateTotalForMainAccounts(strDepreciation,               contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher);
+        //        etggmctableTemp.AdminCostAndBankCharges     = this.calculateTotalForMainAccounts(strAdminCostAndBankCharges,    contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher);
+        //        etggmctableTemp.CostStaff                   = this.calculateTotalForMainAccounts(strStaffCost,                  contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher);
+        //        etggmctableTemp.UnrealizedForex             = this.calculateTotalForMainAccounts(strUnrealizedForex,            contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher);
+        //        etggmctableTemp.OtherFinanceCostsLC         = this.calculateTotalForMainAccounts(strOtherFinCosts,              contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher);
+        //        etggmctableTemp.InterestIncome              = this.calculateTotalForMainAccounts(strInterestIncome,             contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher);
+        //        etggmctableTemp.InterestExpense             = this.calculateTotalForMainAccounts(strInterestExpense,            contract, custInvoiceTrans.Qty, contractQty, conLedgerVoucher);
+
+        //        etggmctableTemp.TotalCost                   = (etggmctableTemp.PurchaseCost + etggmctableTemp.SalesDiscount+etggmctableTemp.PurchDiscount+etggmctableTemp.SDCost+ etggmctableTemp.DirectCost+etggmctableTemp.MmFV+ etggmctableTemp.MmSIT + etggmctableTemp.InsuranceClaimRecId);
+        //        etggmctableTemp.GC                          = (etggmctableTemp.LineAmount -  etggmctableTemp.TotalCost - etggmctableTemp.RealisedExchangeAdjustment);
+        //        etggmctableTemp.OtherCost                   = (etggmctableTemp.Depreciation + etggmctableTemp.AdminCostAndBankCharges + etggmctableTemp.CostStaff + etggmctableTemp.UnrealizedForex );
+        //        etggmctableTemp.EBITDA                      = etggmctableTemp.GC - etggmctableTemp.OtherCost;
+        //        etggmctableTemp.NetEBITDA                   = etggmctableTemp.EBITDA - (etggmctableTemp.OtherFinanceCostsLC + etggmctableTemp.InterestIncome + etggmctableTemp.InterestExpense);*/
+        //        ttsbegin;
+        //        gmrReportTemploc.update();
+        //        ttscommit;
+
+        //    }
+
+
+      //  }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>groupByNonInvoiceData</Name>
+				<Source><![CDATA[
+    public void groupByNonInvoiceData()
+    {
+        while select 
+            sum(SalesDiscount),
+             sum(PurchDiscount),
+             sum(SDCost),
+             sum(DirectCost),
+             sum(MmFV),
+             sum(MmSIT),
+             sum(InsuranceClaimRecId),
+             sum(RealisedExchangeAdjustment),
+             sum(Depreciation),
+             sum(AdminCostAndBankCharges),
+             sum(CostStaff),
+             sum(UnrealizedForex),
+             sum(OtherFinanceCostsLC),
+             sum(InterestIncome),
+             sum(InterestExpense),
+            ContractNo, Vertical, SubVertical, MainCommodity, SubCommodity from
+            ETGGMCTableTempNonInvoice
+            group by ETGGMCTableTempNonInvoice.ContractNo, 
+            ETGGMCTableTempNonInvoice.Vertical, ETGGMCTableTempNonInvoice.SubVertical,
+            ETGGMCTableTempNonInvoice.MainCommodity, ETGGMCTableTempNonInvoice.SubCommodity
+        {
+            select firstonly RecId from etggmctableTempCheck
+                where etggmctableTempCheck.ContractNo == ETGGMCTableTempNonInvoice.ContractNo
+                    && etggmctableTempCheck.Vertical == ETGGMCTableTempNonInvoice.Vertical
+                && etggmctableTempCheck.SubVertical == ETGGMCTableTempNonInvoice.SubVertical
+                && etggmctableTempCheck.MainCommodity == ETGGMCTableTempNonInvoice.MainCommodity
+                && etggmctableTempCheck.SubCommodity == ETGGMCTableTempNonInvoice.SubCommodity;
+
+            //if(true)
+           if(etggmctableTempCheck.RecId)
+            {
+                while select forupdate etggmctableTemp
+                where etggmctableTemp.ContractNo == ETGGMCTableTempNonInvoice.ContractNo
+                    && etggmctableTemp.Vertical == ETGGMCTableTempNonInvoice.Vertical
+                    && etggmctableTemp.SubVertical == ETGGMCTableTempNonInvoice.SubVertical
+                    && etggmctableTemp.MainCommodity == ETGGMCTableTempNonInvoice.MainCommodity
+                    && etggmctableTemp.SubCommodity == ETGGMCTableTempNonInvoice.SubCommodity
+                {
+                    //if(false)
+                    if(etggmctableTemp.ContractQty != 0)
+                    {
+              
+                        etggmctableTemp.SalesDiscount              = etggmctableTemp.SalesDiscount              + (ETGGMCTableTempNonInvoice.SalesDiscount              * etggmctableTemp.InvoiceQty / etggmctableTemp.ContractQty);
+                        etggmctableTemp.PurchDiscount              = etggmctableTemp.PurchDiscount              + (ETGGMCTableTempNonInvoice.PurchDiscount              * etggmctableTemp.InvoiceQty / etggmctableTemp.ContractQty);
+                        etggmctableTemp.SDCost                     = etggmctableTemp.SDCost                     + (ETGGMCTableTempNonInvoice.SDCost                     * etggmctableTemp.InvoiceQty / etggmctableTemp.ContractQty);
+                        etggmctableTemp.MmFV                       = etggmctableTemp.MmFV                       + (ETGGMCTableTempNonInvoice.MmFV                       * etggmctableTemp.InvoiceQty / etggmctableTemp.ContractQty);
+                        etggmctableTemp.MmSIT                      = etggmctableTemp.MmSIT                      + (ETGGMCTableTempNonInvoice.MmSIT                      * etggmctableTemp.InvoiceQty / etggmctableTemp.ContractQty);
+                        etggmctableTemp.InsuranceClaimRecId        = etggmctableTemp.InsuranceClaimRecId        + (ETGGMCTableTempNonInvoice.InsuranceClaimRecId        * etggmctableTemp.InvoiceQty / etggmctableTemp.ContractQty);
+                        etggmctableTemp.RealisedExchangeAdjustment = etggmctableTemp.RealisedExchangeAdjustment + (ETGGMCTableTempNonInvoice.RealisedExchangeAdjustment * etggmctableTemp.InvoiceQty / etggmctableTemp.ContractQty);
+                        etggmctableTemp.Depreciation               = etggmctableTemp.Depreciation               + (ETGGMCTableTempNonInvoice.Depreciation               * etggmctableTemp.InvoiceQty / etggmctableTemp.ContractQty);
+                        etggmctableTemp.AdminCostAndBankCharges    = etggmctableTemp.AdminCostAndBankCharges    + (ETGGMCTableTempNonInvoice.AdminCostAndBankCharges    * etggmctableTemp.InvoiceQty / etggmctableTemp.ContractQty);
+                        etggmctableTemp.CostStaff                  = etggmctableTemp.CostStaff                  + (ETGGMCTableTempNonInvoice.CostStaff                  * etggmctableTemp.InvoiceQty / etggmctableTemp.ContractQty);
+                        etggmctableTemp.UnrealizedForex            = etggmctableTemp.UnrealizedForex            + (ETGGMCTableTempNonInvoice.UnrealizedForex            * etggmctableTemp.InvoiceQty / etggmctableTemp.ContractQty);
+                        etggmctableTemp.OtherFinanceCostsLC        = etggmctableTemp.OtherFinanceCostsLC        + (ETGGMCTableTempNonInvoice.OtherFinanceCostsLC        * etggmctableTemp.InvoiceQty / etggmctableTemp.ContractQty);
+                        etggmctableTemp.InterestIncome             = etggmctableTemp.InterestIncome             + (ETGGMCTableTempNonInvoice.InterestIncome             * etggmctableTemp.InvoiceQty / etggmctableTemp.ContractQty);
+                        etggmctableTemp.InterestExpense            = etggmctableTemp.InterestExpense            + (ETGGMCTableTempNonInvoice.InterestExpense            * etggmctableTemp.InvoiceQty / etggmctableTemp.ContractQty);
+                        etggmctableTemp.DirectCost                 = etggmctableTemp.DirectCost                 + (ETGGMCTableTempNonInvoice.DirectCost                 * etggmctableTemp.InvoiceQty / etggmctableTemp.ContractQty);
+                    }
+
+                    etggmctableTemp.TotalCost = (etggmctableTemp.PurchaseCost + etggmctableTemp.SalesDiscount +
+                                                 etggmctableTemp.PurchDiscount +
+                                                 etggmctableTemp.SDCost +
+                                                 etggmctableTemp.DirectCost +
+                                                 etggmctableTemp.MmFV +
+                                                 etggmctableTemp.MmSIT +
+                                                 etggmctableTemp.InsuranceClaimRecId);
+
+                    etggmctableTemp.GC        = etggmctableTemp.LineAmount - etggmctableTemp.TotalCost - etggmctableTemp.RealisedExchangeAdjustment;
+                    etggmctableTemp.OtherCost = etggmctableTemp.Depreciation +
+                                                etggmctableTemp.AdminCostAndBankCharges +
+                                                etggmctableTemp.CostStaff +
+                                                etggmctableTemp.UnrealizedForex;
+
+                    etggmctableTemp.EBITDA    = etggmctableTemp.GC - etggmctableTemp.OtherCost;
+                    etggmctableTemp.NetEBITDA = etggmctableTemp.EBITDA - (etggmctableTemp.OtherFinanceCostsLC + etggmctableTemp.InterestIncome + etggmctableTemp.InterestExpense);
+                    etggmctableTemp.update();
+                }
+            }
+            else
+            {
+                etggmctableTemp.clear();
+                etggmctableTemp.ContractNo                 = ETGGMCTableTempNonInvoice.ContractNo;
+                etggmctableTemp.Vertical                   = ETGGMCTableTempNonInvoice.Vertical;
+                etggmctableTemp.SubVertical                = ETGGMCTableTempNonInvoice.SubVertical;
+                etggmctableTemp.MainCommodity              = ETGGMCTableTempNonInvoice.MainCommodity;
+                etggmctableTemp.SubCommodity               = ETGGMCTableTempNonInvoice.SubCommodity;
+                etggmctableTemp.AccountNum                 = ETGGMCTableTempNonInvoice.AccountNum;
+                etggmctableTemp.SalesDiscount              = ETGGMCTableTempNonInvoice.SalesDiscount;
+                etggmctableTemp.PurchDiscount              = ETGGMCTableTempNonInvoice.PurchDiscount;
+                etggmctableTemp.SDCost                     = ETGGMCTableTempNonInvoice.SDCost;
+                etggmctableTemp.MmFV                       = ETGGMCTableTempNonInvoice.MmFV;
+                etggmctableTemp.MmSIT                      = ETGGMCTableTempNonInvoice.MmSIT;
+                etggmctableTemp.InsuranceClaimRecId        = ETGGMCTableTempNonInvoice.InsuranceClaimRecId;
+                etggmctableTemp.DirectCost                 = ETGGMCTableTempNonInvoice.DirectCost;
+                etggmctableTemp.RealisedExchangeAdjustment = ETGGMCTableTempNonInvoice.RealisedExchangeAdjustment;
+                etggmctableTemp.Depreciation               = ETGGMCTableTempNonInvoice.Depreciation;
+                etggmctableTemp.AdminCostAndBankCharges    = ETGGMCTableTempNonInvoice.AdminCostAndBankCharges;
+                etggmctableTemp.CostStaff                  = ETGGMCTableTempNonInvoice.CostStaff;
+                etggmctableTemp.UnrealizedForex            = ETGGMCTableTempNonInvoice.UnrealizedForex;
+                etggmctableTemp.OtherFinanceCostsLC        = ETGGMCTableTempNonInvoice.OtherFinanceCostsLC;
+                etggmctableTemp.InterestIncome             = ETGGMCTableTempNonInvoice.InterestIncome;
+                etggmctableTemp.InterestExpense            = ETGGMCTableTempNonInvoice.InterestExpense;
+               
+                etggmctableTemp.TotalCost = (etggmctableTemp.PurchaseCost + etggmctableTemp.SalesDiscount +
+                                         etggmctableTemp.PurchDiscount +
+                                         etggmctableTemp.SDCost +
+                                         etggmctableTemp.DirectCost +
+                                         etggmctableTemp.MmFV +
+                                         etggmctableTemp.MmSIT +
+                                         etggmctableTemp.InsuranceClaimRecId);
+
+                etggmctableTemp.GC        = - etggmctableTemp.TotalCost - etggmctableTemp.RealisedExchangeAdjustment;
+                etggmctableTemp.OtherCost = etggmctableTemp.Depreciation +
+                                        etggmctableTemp.AdminCostAndBankCharges +
+                                        etggmctableTemp.CostStaff +
+                                        etggmctableTemp.UnrealizedForex;
+
+                etggmctableTemp.EBITDA    = etggmctableTemp.GC - etggmctableTemp.OtherCost;
+                etggmctableTemp.NetEBITDA = etggmctableTemp.EBITDA - (etggmctableTemp.OtherFinanceCostsLC + etggmctableTemp.InterestIncome + etggmctableTemp.InterestExpense);
+                etggmctableTemp.insert();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertNonInvoiceDataView</Name>
+				<Source><![CDATA[
+    public void insertNonInvoiceDataView()
+    {
+        CustInvoiceJour                     custInvJour;
+        RefRecId                            ledgerDimRecId, defDim;
+        MainAccountNum                      mainAccountId;
+        ETGPowerBIReportGLMappingTable      glMappingTable;
+        ETGGMRReportView                    gmrReportView;
+        ETGGMRReportMainAccountName         gmrReportMainAccountName;
+        ETGVertical                         vertiCal;
+        ETGSubVertical                      subVertical;
+        ETGCommodity                        mainCommodity;
+        ETGSubCommodity                     subCommodity;
+        String50                            contract, accountNum;
+        ETGACFParameters                    acfParameters = ETGACFParameters::find();
+        ETGGMCReportContract                reportContract      = this.parmDataContract() as ETGGMCReportContract;
+        DataAreaId                          companyId;
+
+        RecordInsertList                     recordgmrReportNonInvoiceTemp;
+        recordgmrReportNonInvoiceTemp = new RecordInsertList(tableNum(ETGGMCTableTempNonInvoice));
+
+        select firstonly gmrReportMainAccountName where gmrReportMainAccountName.DataAreaId == curExt();
+
+        companyId = curExt();
+
+        while select gmrReportView
+                where gmrReportView.AccountingDate >= fromDate
+                    && gmrReportView.AccountingDate <= toDate
+                    && gmrReportView.SubledgerVoucherDataAreaId == companyId
+              //notexists join custInvJour
+              //  where custInvJour.LedgerVoucher == gmrReportView.SubledgerVoucher
+        {
+
+            select firstonly SalesId, RecId from custInvJour
+                where custInvJour.LedgerVoucher == gmrReportView.SubledgerVoucher
+                && custInvJour.DataAreaId == companyId;
+
+            if(custInvJour.RecId && custInvJour.SalesId) 
+            {
+                continue;
+            }
+
+            mainAccountId = gmrReportView.MainAccountId;
+            defDim        = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(gmrReportView.LedgerDimension);
+
+            
+            contract = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(defDim, acfParameters.Contract);
+
+            if(!contract || contract == "NA")
+            {
+                contract = "DPC-99999";
+            }
+
+            vertiCal      = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(defDim, acfParameters.Vertical);
+            subVertical   = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(defDim, acfParameters.BusinessUnit);
+            mainCommodity = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(defDim, acfParameters.MainCommodity);
+            subCommodity  = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(defDim, acfParameters.SubCommodity);
+            
+           
+            accountNum  = SalesAgreementHeader::findAgreementId(contract).CustAccount;
+               
+            while select glMappingTable
+                where glMappingTable.MainAccountId == mainAccountId
+                    && glMappingTable.ReportId == "GMR"
+                    //&& glMappingTable.ReportPerticularId == 'S&D COST' 
+            {
+                ETGGMCTableTempNonInvoice.clear();
+                ETGGMCTableTempNonInvoice.ContractNo    = contract;
+                ETGGMCTableTempNonInvoice.Vertical      = vertiCal;
+                ETGGMCTableTempNonInvoice.SubVertical   = subVertical;
+                ETGGMCTableTempNonInvoice.MainCommodity = mainCommodity;
+                ETGGMCTableTempNonInvoice.SubCommodity  = subCommodity;
+                ETGGMCTableTempNonInvoice.AccountNum    = accountNum;
+
+                //if(strScan(gmrReportView.LedgerAccount, "Nutrisco", 1, strLen(gmrReportView.LedgerAccount))  > 0
+                //    && strScan(gmrReportView.LedgerAccount, "COCOA", 1, strLen(gmrReportView.LedgerAccount)) > 0 )
+                //{
+
+                //    Notes mainAccountIdTemp = "62000000,62010000,62010100,62010101,62010200,62010201,62010300,62010301,62010400,62010401,62010500,62010501,62020000,62020001,62020002,62030000,62030001,62040000,62040001,62050000,62050100,62050101,62050200,62050201,62050300,62050301,62050400,62050401,62050500,62050501,62050600,62050601,62050700,62050701,62050800,62050801,62050900,62050901,62051000,62051001,62051100,62051101,62051200,62051201,62051300,62051301,62051400,62051401,62060000,62060100,62060101,62060200,62060201,62060300,62060301,62060400,62060401,62060500,62060501,62060600,62060601,62060700,62060701,62060800,62060801,62060900,62060901,62061000,62061001,62070000,62070100,62070101,62070200,62070201,62080000,62080100,62080101,62080200,62080201,62080300,62080301,62090000,62090100,62090101,62090102,62090200,62090201,62090300,62090301,62090302,62100000,62100001,62110000,62110001,62120000,62120100,62120101,62120200,62120201,62120300,62120301,62130000,62130001,62140000,62140001,62150000,62150001,62160000,62160001,62170000,62170001,62180000,62180001,62190000,62190001,62190002,62190100,62190101,62200000,62200001,62210000,62210001,62210002,62210003,62220000,62220001,62230000,62230001,62240000,62240001,62250000,62250001,62260000,62260001,62270000,62270001,62280000,62280001,62290000,62290001,62300000,62300001,62310000,62310001,62320000,62320001";
+
+                //    if(strScan(mainAccountIdTemp, mainAccountId, 1, strLen(mainAccountIdTemp))  > 0
+                //        && glMappingTable.ReportPerticularId == gmrReportMainAccountName.SNDCOST)
+                //    {
+                //        Info("Check");
+                //    }
+                //}
+
+                //transaction have some issue 62150001,62150001,62150001,62150001,62150001,62150001,62150001,62150001,62150001,62150001,62320001, 62320001,62320001,62320001,62320001,62320001,62320001,62320001,62320001,62320001,62320001,62320001,62320001,62320001,62320001,62320001,62320001,62320001
+               
+                if(glMappingTable.ReportPerticularId == gmrReportMainAccountName.SALESDISCOUNT)
+                {
+                    ETGGMCTableTempNonInvoice.SalesDiscount = gmrReportView.AccountingCurrencyAmount;
+                }
+                if(glMappingTable.ReportPerticularId == gmrReportMainAccountName.PURCHASEDISCOUNT)
+                {
+                    ETGGMCTableTempNonInvoice.PurchDiscount = gmrReportView.AccountingCurrencyAmount;
+                }
+                if(glMappingTable.ReportPerticularId == gmrReportMainAccountName.SNDCOST)
+                {
+                    ETGGMCTableTempNonInvoice.SDCost = gmrReportView.AccountingCurrencyAmount;
+                }
+                if(glMappingTable.ReportPerticularId == gmrReportMainAccountName.DIRECTCOST)
+                {
+                    ETGGMCTableTempNonInvoice.DirectCost = gmrReportView.AccountingCurrencyAmount;
+                }
+                if(glMappingTable.ReportPerticularId == gmrReportMainAccountName.M2MFV)
+                {
+                    ETGGMCTableTempNonInvoice.MmFV = gmrReportView.AccountingCurrencyAmount;
+                }
+                if(glMappingTable.ReportPerticularId == gmrReportMainAccountName.M2MSIT)
+                {
+                    ETGGMCTableTempNonInvoice.MmSIT = gmrReportView.AccountingCurrencyAmount;
+                }
+                if(glMappingTable.ReportPerticularId == gmrReportMainAccountName.OTHERINCOMEINSURANCESLAINCOME)
+                {
+                    ETGGMCTableTempNonInvoice.InsuranceClaimRecId = gmrReportView.AccountingCurrencyAmount;
+                }
+                if(glMappingTable.ReportPerticularId == gmrReportMainAccountName.REALISEDEXCHANGEADJUSTMENT)
+                {
+                    ETGGMCTableTempNonInvoice.RealisedExchangeAdjustment = gmrReportView.AccountingCurrencyAmount;
+                }
+                if(glMappingTable.ReportPerticularId == gmrReportMainAccountName.DEPRECIATION)
+                {
+                    ETGGMCTableTempNonInvoice.Depreciation = gmrReportView.AccountingCurrencyAmount;
+                }
+                if(glMappingTable.ReportPerticularId == gmrReportMainAccountName.ADMINCOSTANDBANKCHARGES)
+                {
+                    ETGGMCTableTempNonInvoice.AdminCostAndBankCharges = gmrReportView.AccountingCurrencyAmount;
+                }
+                if(glMappingTable.ReportPerticularId == gmrReportMainAccountName.STAFFCOST)
+                {
+                    ETGGMCTableTempNonInvoice.CostStaff = gmrReportView.AccountingCurrencyAmount;
+                }
+                if(glMappingTable.ReportPerticularId == gmrReportMainAccountName.UNREALIZEDFOREX)
+                {
+                    ETGGMCTableTempNonInvoice.UnrealizedForex = gmrReportView.AccountingCurrencyAmount;
+                }
+                if(glMappingTable.ReportPerticularId == gmrReportMainAccountName.OTHERFINCOSTS)
+                {
+                    ETGGMCTableTempNonInvoice.OtherFinanceCostsLC = gmrReportView.AccountingCurrencyAmount;
+                }
+                if(glMappingTable.ReportPerticularId == gmrReportMainAccountName.INTERESTINCOME)
+                {
+                    ETGGMCTableTempNonInvoice.InterestIncome = gmrReportView.AccountingCurrencyAmount;
+                }
+                if(glMappingTable.ReportPerticularId == gmrReportMainAccountName.INTERESTEXPENSE)
+                {
+                    ETGGMCTableTempNonInvoice.InterestExpense = gmrReportView.AccountingCurrencyAmount;
+                }
+
+               
+                recordgmrReportNonInvoiceTemp.add(ETGGMCTableTempNonInvoice);
+                //ETGGMCTableTempNonInvoice.insert();
+                    
+            }
+        }
+        recordgmrReportNonInvoiceTemp.insertDatabase();
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

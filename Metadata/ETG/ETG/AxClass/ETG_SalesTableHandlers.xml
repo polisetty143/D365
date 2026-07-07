@@ -1,0 +1,404 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesTableHandlers</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_SalesTableHandlers
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>ButtonInterCompanyPurchTableTP_OnClicked</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(SalesTable, ButtonInterCompanyPurchTableTP), FormControlEventType::Clicked)]
+    public static void ButtonInterCompanyPurchTableTP_OnClicked(FormControl sender, FormControlEventArgs e)
+    {
+        SalesTable        salesTable = sender.formRun().dataSource('SalesTable').cursor();
+        PurchTable        purchtable;
+
+        MenuFunction menuFunction = new MenuFunction(menuitemdisplaystr(PurchTable), MenuItemType::Display);
+        Args args  = new Args();
+        purchtable = PurchTable::find(salesTable.ETG_TPPurchId);
+        args.record(purchtable);
+        menuFunction.run(args);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createLookup</Name>
+				<Source><![CDATA[
+    /*[FormControlEventHandler(formControlStr(SalesTable, SellerDeliveryRef), FormControlEventType::Lookup)]
+    public static void  SellerDeliveryRef_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+      
+        ETG_SalesTableHandlers::createLookup(sender);
+        FormControlCancelableSuperEventArgs cancelableArgs = e as FormControlCancelableSuperEventArgs;
+        cancelableArgs.CancelSuperCall();
+    }*/
+
+    private static void createLookup(FormReferenceGroupControl _ctrl)
+    {
+        SysReferenceTableLookup     sysTableLookup  = SysReferenceTableLookup::newParameters(tablenum(LogisticsPostalAddress), _ctrl);
+        Query                       lookupQuery = new Query();
+        QuerybuildDatasource        qbd, qbd1, qbd2;
+ 
+        qbd     = lookupQuery.addDataSource(tablenum(LogisticsPostalAddress));
+        qbd1    = qbd.addDataSource(tablenum(DirPartyLocation));
+        qbd1.addLink(fieldNum(LogisticsPostalAddress, Location), fieldNum(DirPartyLocation, Location));
+        qbd1.joinMode(JoinMode::InnerJoin);
+ 
+        qbd2 = qbd1.addDataSource(tablenum(CompanyInfo));
+        qbd2.addLink(fieldNum(DirPartyLocation, Party), (fieldNum(CompanyInfo, RecId)));
+        qbd2.joinMode(JoinMode::InnerJoin);
+ 
+        qbd2.addRange(fieldnum(CompanyInfo, DataArea)).value(SysQuery::value(curext()));
+      
+        sysTableLookup.addLookupfield(fieldNum(LogisticsPostalAddress, Location));
+        sysTableLookup.addLookupfield(fieldNum(LogisticsPostalAddress, Street));
+       
+        sysTableLookup.parmQuery(lookupQuery);
+        sysTableLookup.performFormLookup();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>SalesLine_ETGRefSalesId_OnLookup</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// lookup method for reference sales order
+    /// </summary>
+    [FormControlEventHandler(formControlStr(SalesTable, SalesLine_ETGRefSalesId), FormControlEventType::Lookup)]
+    public static void SalesLine_ETGRefSalesId_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        Query query = new Query();
+        QueryBuildDataSource queryBuildDataSource;
+        QueryBuildRange queryBuildRange,qbr;
+        FormRun     formRun = sender.formRun();
+        SalesTable  salesTable = formRun.dataSource(1).cursor();
+
+        SysTableLookup sysTableLookup = SysTableLookup::newParameters(tableNum(SalesTable), sender);
+ 
+        sysTableLookup.addLookupField(fieldNum(SalesTable, SalesId));
+        sysTableLookup.addLookupField(fieldNum(SalesTable, CustAccount));        
+        sysTableLookup.addLookupField(fieldNum(SalesTable, SalesName));
+ 
+        queryBuildDataSource = query.addDataSource(tableNum(SalesTable));
+        
+        //queryBuildRange = queryBuildDataSource.addRange(fieldNum(SalesTable, SalesId));
+        //queryBuildRange.value(SysQuery::valueNot(salesTable.SalesId));
+
+        qbr = queryBuildDataSource.addRange(fieldNum(SalesTable, CustAccount));
+        qbr.value(salesTable.CustAccount);
+        qbr.status(RangeStatus::Locked);
+
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.performFormLookup();
+
+        FormControlCancelableSuperEventArgs ce = e as FormControlCancelableSuperEventArgs;
+        ce.CancelSuperCall();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>BuyerDeliveryRef_OnLookup</Name>
+				<Source><![CDATA[
+    [FormControlEventHandler(formControlStr(SalesTable, BuyerDeliveryRef), FormControlEventType::Lookup)]
+    public static void  BuyerDeliveryRef_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        FormDataSource          salesTable_ds       = sender.formRun().dataSource('ETG_SalesTableTrade');
+        ETG_SalesTableTrade    salesTableTradeETG   = salesTable_ds.cursor();
+      
+        ETG_SalesTableHandlers::buyerLookup(sender,salesTableTradeETG.BuyerAccountNum);
+ 
+        FormControlCancelableSuperEventArgs cancelableArgs = e as FormControlCancelableSuperEventArgs;
+        cancelableArgs.CancelSuperCall();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buyerLookup</Name>
+				<Source><![CDATA[
+    private static void buyerLookup(FormReferenceGroupControl _ctrl,CustAccount _custAccount)
+    {
+        SysReferenceTableLookup     sysTableLookup  = SysReferenceTableLookup::newParameters(tablenum(LogisticsPostalAddress), _ctrl);
+        Query                       lookupQuery = new Query();
+        QuerybuildDatasource        qbd, qbd1, qbd2;
+ 
+        qbd     = lookupQuery.addDataSource(tablenum(LogisticsPostalAddress));
+        qbd1    = qbd.addDataSource(tablenum(DirPartyLocation));
+        qbd1.addLink(fieldNum(LogisticsPostalAddress, Location), fieldNum(DirPartyLocation, Location));
+        qbd1.joinMode(JoinMode::InnerJoin);
+ 
+        qbd2 = qbd1.addDataSource(tablenum(CustTable));
+        qbd2.addLink(fieldNum(DirPartyLocation, Party), (fieldNum(CustTable, Party)));
+        qbd2.joinMode(JoinMode::InnerJoin);
+ 
+        qbd2.addRange(fieldnum(CustTable, AccountNum)).value(SysQuery::value(_custAccount));
+      
+        sysTableLookup.addLookupfield(fieldNum(LogisticsPostalAddress, Location));
+        sysTableLookup.addLookupfield(fieldNum(LogisticsPostalAddress, Street));
+       
+        sysTableLookup.parmQuery(lookupQuery);
+        sysTableLookup.performFormLookup();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETG_SalesLineQualityGrp_GroupId_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(SalesTable, ETG_SalesLineQualityGrp_GroupId), FormControlEventType::Modified)]
+    public static void ETG_SalesLineQualityGrp_GroupId_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        SalesLine                          salesLine;
+        ETG_PostPackingQualityGrp          postPackingQualityGrp;
+        ETG_QualitySubGrpView              qualitySubGrpView;
+        Name        grpId   = sender.valueStr();
+
+        FormDataSource  salesLine_ds   = sender.formRun().dataSource(formDataSourceStr(SalesTable,SalesLine))  as FormDataSource;
+        salesLine                      = salesLine_ds.cursor();
+        
+        while select * from qualitySubGrpView
+            where qualitySubGrpView.GroupID == grpId
+        {
+            postPackingQualityGrp.MinRange       = qualitySubGrpView.MinRange;
+            postPackingQualityGrp.MaxRange       = qualitySubGrpView.MaxRange;
+            postPackingQualityGrp.AdjustmentType = qualitySubGrpView.AdjustmentType;
+            postPackingQualityGrp.Increment      = qualitySubGrpView.Increment;
+            postPackingQualityGrp.FixedValue     = qualitySubGrpView.FixedValue;
+            postPackingQualityGrp.SubGroupID     = qualitySubGrpView.SubGroupID;
+            postPackingQualityGrp.InventTransId  = salesLine.InventTransId;
+            postPackingQualityGrp.GroupID               = qualitySubGrpView.GroupID;
+            postPackingQualityGrp.GroupDescription      = qualitySubGrpView.GroupDescription;
+            postPackingQualityGrp.SubGroupDescription   = qualitySubGrpView.SubGroupDescription;
+            postPackingQualityGrp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>Notifytodifferentparty_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(SalesTable, Notifytodifferentparty), FormControlEventType::Modified)]
+    public static void Notifytodifferentparty_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        ETG_SalesTableTrade salesTableTradeETG = sender.formRun().dataSource().cursor();
+        FormRun             element       = sender.formRun(); 
+        FormControl         NotifyName   = element.design(0).controlName('NotifyName');
+        FormControl         NotifyAddress   = element.design(0).controlName('NotifyAddress');
+ 
+        if(salesTableTradeETG.Notifytodifferentparty == NoYes::Yes)
+        {
+            NotifyName.enabled(true);
+            NotifyAddress.enabled(true);
+        }
+        else if(salesTableTradeETG.Notifytodifferentparty == NoYes::No)
+        {
+            salesTableTradeETG.Name = '';
+            salesTableTradeETG.Address = '';
+            NotifyName.enabled(false);
+            NotifyAddress.enabled(false);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ShipmentTabPage_OnPageActivated</Name>
+				<Source><![CDATA[
+    [FormControlEventHandler(formControlStr(SalesTable, ShipmentTabPage), FormControlEventType::PageActivated)]
+    public static void ShipmentTabPage_OnPageActivated(FormControl sender, FormControlEventArgs e)
+    {
+        ETG_SalesTableTrade salesTableTradeETG = sender.formRun().dataSource().cursor();
+        FormRun             element       = sender.formRun();
+        FormControl         NotifyName   = element.design(0).controlName('NotifyName');
+        FormControl         NotifyAddress   = element.design(0).controlName('NotifyAddress');
+ 
+        if(salesTableTradeETG.Notifytodifferentparty == NoYes::Yes)
+        {
+            NotifyName.enabled(true);
+            NotifyAddress.enabled(true);
+        }
+        else if(salesTableTradeETG.Notifytodifferentparty == NoYes::No)
+        {
+            salesTableTradeETG.Name = '';
+            salesTableTradeETG.Address = '';
+            NotifyName.enabled(false);
+            NotifyAddress.enabled(false);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>BuyerBankString_OnModified</Name>
+				<Source><![CDATA[
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(SalesTable, BuyerBankString), FormControlEventType::Modified)]
+    public static void BuyerBankString_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        ETG_SalesTableTrade salesTabletradeETG = sender.formRun().dataSource(FormDataSourcestr(SalesTable, ETG_SalesTableTrade)).cursor();
+        FormDataSource      ETG_SalesTableTrade_ds =  sender.formRun().dataSource(FormDataSourcestr(SalesTable, ETG_SalesTableTrade));
+        salesTabletradeETG.BuyerSecondaryBank = salesTabletradeETG.BuyerBank;
+
+        if (salesTabletradeETG.BuyerSecondaryBank == '' || salesTabletradeETG.BuyerBank == '')
+        {
+            ETG_SalesTableTrade_ds.object(fieldNum(ETG_SalesTableTrade, BuyerSecondaryBank)).allowEdit(true);
+        }
+        else
+        {
+            ETG_SalesTableTrade_ds.object(fieldNum(ETG_SalesTableTrade, BuyerSecondaryBank)).allowEdit(false);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>SellerBankString_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(SalesTable, SellerBankString), FormControlEventType::Modified)]
+    public static void SellerBankString_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        ETG_SalesTableTrade salesTabletradeETG = sender.formRun().dataSource(FormDataSourcestr(SalesTable, ETG_SalesTableTrade)).cursor();
+        FormDataSource      ETG_SalesTableTrade_ds =  sender.formRun().dataSource(FormDataSourcestr(SalesTable, ETG_SalesTableTrade));
+        salesTabletradeETG.SellerSecondaryBank = salesTabletradeETG.SellerBank;
+
+        if (salesTabletradeETG.SellerSecondaryBank == '' || salesTabletradeETG.SellerBank == '')
+        {
+            ETG_SalesTableTrade_ds.object(fieldNum(ETG_SalesTableTrade, SellerSecondaryBank)).allowEdit(true);
+        }
+        else
+        {
+            ETG_SalesTableTrade_ds.object(fieldNum(ETG_SalesTableTrade, SellerSecondaryBank)).allowEdit(false);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>Through_OnLookup</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(SalesTable, Through), FormControlEventType::Lookup)]
+    public static void Through_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        SysTableLookup          sysTableLookup = SysTableLookup::newParameters(tableNum(VendTable),sender);
+        Query                   q   = new Query();
+        QueryBuildDataSource    qbds,qbds1,qbds2,qbds3;
+        QueryBuildRange         qbr;
+       
+        qbds   = q.addDataSource(tableNum(VendTable));
+        qbds2 = qbds.addDataSource(tableNum(VendGroup));
+        qbds2.joinMode(JoinMode::InnerJoin);
+        qbds2.relations(true);
+        qbds3    = qbds.addDataSource(tableNum(DirPartyTable)) ;
+        qbds3.joinMode(JoinMode::InnerJoin);
+        qbds3.addLink(fieldNum(VendTable, Party), fieldNum(DirPartyTable, RecId));
+        
+        
+        qbr     = qbds2.addRange(fieldNum(VendGroup,ETG_Broker));
+        qbr.value(queryValue(NoYes::Yes));
+        
+        sysTableLookup.addLookupfield(fieldNum(VendTable,AccountNum));
+        sysTableLookup.addLookupfield(fieldNum(VendTable,vendgroup));
+        sysTableLookup.addLookupfield(fieldNum(VendTable, Party), false);
+        
+        SysTableLookup.parmQuery(q);
+        SysTableLookup.performFormLookup();
+        FormControlCancelableSuperEventArgs ce = e as FormControlCancelableSuperEventArgs;
+       
+        ce.CancelSuperCall();
+ 
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>PlaceOfLoading_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    [FormControlEventHandler(formControlStr(SalesTable, PlaceOfLoading), FormControlEventType::Modified)]
+    public static void PlaceOfLoading_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        ETG_SalesTableTrade salesTabletradeETG = sender.formRun().dataSource(FormDataSourcestr(SalesTable, ETG_SalesTableTrade)).cursor();
+        FormDataSource      ETG_SalesTableTrade_ds =  sender.formRun().dataSource(FormDataSourcestr(SalesTable, ETG_SalesTableTrade));
+        ETG_PlaceOfLoading  placeofLoading;
+        
+        select firstonly placeofLoading
+            where placeofLoading.PlaceOfLoading == salesTabletradeETG.PortOfLoading;
+        salesTabletradeETG.PortOfLoadingDesc = placeofLoading.Description;
+
+        if (salesTabletradeETG.PortOfLoadingDesc == '' || salesTabletradeETG.PortOfLoading == '')
+        {
+            ETG_SalesTableTrade_ds.object(fieldNum(ETG_SalesTableTrade, PortOfLoadingDesc)).allowEdit(true);
+        }
+        else
+        {
+            ETG_SalesTableTrade_ds.object(fieldNum(ETG_SalesTableTrade, PortOfLoadingDesc)).allowEdit(false);
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>PlaceOfDischarge_OnModified</Name>
+				<Source><![CDATA[
+    [FormControlEventHandler(formControlStr(SalesTable, PlaceOfDischarge), FormControlEventType::Modified)]
+    public static void PlaceOfDischarge_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        ETG_SalesTableTrade salesTabletradeETG = sender.formRun().dataSource(FormDataSourcestr(SalesTable, ETG_SalesTableTrade)).cursor();
+        FormDataSource      ETG_SalesTableTrade_ds =  sender.formRun().dataSource(FormDataSourcestr(SalesTable, ETG_SalesTableTrade));
+        ETG_PlaceOfDischarge   placeofDischarge;
+        
+        select firstonly placeofDischarge
+            where placeofDischarge.PlaceOfDischarge == salesTabletradeETG.PortOfDischarge;
+        salesTabletradeETG.PortOfDischargeDesc = placeofDischarge.Description;
+
+        if (salesTabletradeETG.PortOfDischargeDesc == '' || salesTabletradeETG.PortOfDischarge == '')
+        {
+            ETG_SalesTableTrade_ds.object(fieldNum(ETG_SalesTableTrade, PortOfDischargeDesc)).allowEdit(true);
+        }
+        else
+        {
+            ETG_SalesTableTrade_ds.object(fieldNum(ETG_SalesTableTrade, PortOfDischargeDesc)).allowEdit(false);
+        }
+    }
+
+    /// <summary>
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGBLNumberOnModified</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGBLNumberOnModified
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>ETG_BLNumber_OnModified</Name>
+				<Source><![CDATA[
+    //NS--04-04-2025 Once the user mention the BL number, System shuold create new serial number
+    //for all the items mentioned in the product receipt form, and should auto populate on line level.
+    /// <summary>
+    ///for all the items mentioned in the product receipt form, and should auto populate on line level.
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(PurchEditLines, ETG_BLDate), FormControlEventType::Modified)]
+    public static void ETG_BLNumber_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        if (ETGACFParameters::find().BLNumberAutomation)
+        {
+
+            PurchParmTable  purchParmTable;
+            PurchParmLine   purchParmLine;
+            DialogButton    diagBut;
+            InventSerial    inventSerial;
+            InventDim       inventDim;
+            FormDataSource  purchParmTable_ds   = sender.formRun().dataSource(formDataSourceStr(PurchEditLines,purchParmTable))  as FormDataSource;
+            purchParmTable                      = purchParmTable_ds.cursor();
+            FormDataSource  purchParmLine_ds    = sender.formRun().dataSource(formDataSourceStr(PurchEditLines,purchParmLine))  as FormDataSource;
+            purchParmLine                       = purchParmLine_ds.cursor();
+
+            str           strMessage ="@ETG_New:BlnumbertoSerialNumberCopy";
+
+            diagBut = Box::yesNoCancel(strMessage, DialogButton::No);
+
+            if (diagBut == DialogButton::No)
+            {
+                EcoResProduct     ecoResProduct = EcoResProduct::find(InventTable::find(purchParmLine.ItemId).Product);
+                if(ecoResProduct.ProductType == EcoResProductType::Item)
+                {
+                     
+                    while select purchParmLine where purchParmLine.ParmId ==  purchParmTable.ParmId
+                    {
+                        ttsbegin;
+                        inventDim                 =  InventDim::find(purchParmLine.InventDimId);
+                        inventDim.InventSerialId  = purchParmTable.ETG_BLnumber;
+                        inventDim                 = InventDim::findOrCreate(inventDim);
+                        purchParmLine.InventDimId = inventDim.inventDimId;
+                        purchParmLine.update();
+                        ttscommit;
+                    }
+                
+                }
+
+                info("@ETG_New:canceled");
+
+            }
+            else if(diagBut == DialogButton::Yes)
+            {
+                EcoResProduct     ecoResProduct = EcoResProduct::find(InventTable::find(purchParmLine.ItemId).Product);
+
+                if(ecoResProduct.ProductType == EcoResProductType::Item)
+                {
+
+                    while select purchParmLine where purchParmLine.ParmId ==  purchParmTable.ParmId
+                    {
+                        ttsbegin;
+                        inventDim                 =  InventDim::find(purchParmLine.InventDimId);
+                        inventDim.InventSerialId  = purchParmTable.ETG_BLnumber;
+                        inventDim                 = InventDim::findOrCreate(inventDim);
+                        purchParmLine.InventDimId = inventDim.inventDimId;
+                        purchParmLine.update();
+                        ttscommit;
+
+                        if(!inventSerial::exist(purchParmTable.ETG_BLnumber,purchParmLine.ItemId)&& purchParmTable.ETG_BLnumber != "")
+                        {
+                            inventSerial.InventSerialId = purchParmTable.ETG_BLnumber;
+                            inventSerial.ProdDate       = purchParmTable.ETG_BLDate;
+                            inventSerial.Description    = purchParmTable.PurchId;
+                            inventSerial.ItemId         = purchParmLine.ItemId;
+                            inventSerial.insert();
+                        }
+                    }
+                }
+                purchParmLine_ds.refresh();
+                purchParmLine_ds.research();
+
+            }
+        }
+
+    }
+    //NS--04-04-2025 Once the user mention the BL number, System shuold create new serial number
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

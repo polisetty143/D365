@@ -1,0 +1,294 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGProdJournalCheckPost_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(ProdJournalCheckPost))]
+internal final class ETGProdJournalCheckPost_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>checkJournal</Name>
+				<Source><![CDATA[
+    public boolean checkJournal(JournalTransList _journalTransList)
+    {
+        boolean ret = next checkJournal(_journalTransList);
+
+        if(ret && ETGCanadaParameters::find().EnableBINValidation == NoYes::Yes)
+        {
+            ProdJournalTable        prodJournalTable = journalTableData.journalTable();
+            InventDim               inventDim;
+            ProdJournalProd         prodJournalProd;
+            InventTable             inventTable;
+
+            if(prodJournalTable.JournalType == ProdJournalType::ReportFinished)
+            {
+                
+                while select sum(QtyGood) from prodJournalProd
+                    group by inventDim.InventLocationId, inventDim.wMSLocationId
+                where prodJournalProd.JournalId == prodJournalTable.JournalId
+                join inventDim
+                    where inventDim.InventDimId == prodJournalProd.InventDimId
+                join inventTable
+                    where inventTable.ItemId == prodJournalProd.ItemId
+                       && inventTable.GrossDepth > 0
+                       && inventTable.grossHeight > 0
+                       && inventTable.grossWidth > 0
+                {
+                    WMSLocation wmsLocation = WMSLocation::find(inventdim.WmsLocationid ,inventdim.inventLocationId);
+ 
+                    if((abs(prodJournalProd.QtyGood) * inventTable.UnitVolume) > wmsLocation.freeVolume())
+                    {
+                        ret = checkFailed(strFmt("@ETG_New:BInQtyValidationMovement",inventdim.wMSLocationId));
+                    }
+                }
+            }
+
+            if(prodJournalTable.JournalType == ProdJournalType::Picklist)
+            {
+                while select sum(QtyGood) from prodJournalProd
+                    group by inventDim.InventLocationId, inventDim.wMSLocationId
+                where prodJournalProd.JournalId == prodJournalTable.JournalId
+                    && prodJournalProd.QtyGood < 0
+                join inventDim
+                    where inventDim.InventDimId == prodJournalProd.InventDimId
+                join inventTable
+                    where inventTable.ItemId == prodJournalProd.ItemId
+                       && inventTable.GrossDepth > 0
+                       && inventTable.grossHeight > 0
+                       && inventTable.grossWidth > 0
+                {
+                    WMSLocation wmsLocation = WMSLocation::find(inventdim.WmsLocationid ,inventdim.inventLocationId);
+ 
+                    if((abs(prodJournalProd.QtyGood) * inventTable.UnitVolume) > wmsLocation.freeVolume())
+                    {
+                        ret = checkFailed(strFmt("@ETG_New:BInQtyValidationMovement",inventdim.wMSLocationId));
+                    }
+                }
+            }
+        }
+
+        if(ret && ETGCanadaParameters::find().EnableProdJournalValidations == NoYes::Yes)
+        {
+            ProdJournalTable        prodJournalTable = journalTableData.journalTable();
+            ProdTable prodtable = ProdTable::find(prodJournalTable.ProdId);
+
+            if(prodtable.ETGChildProdId && prodJournalTable.ETGSubcontractingJournalNumber)
+            {
+                ProdJournalTable prodJournaltableSubcon;
+
+                select crosscompany prodJournaltableSubcon
+                    where prodJournaltableSubcon.JournalId == prodJournalTable.ETGSubcontractingJournalNumber;
+
+                if(prodJournaltableSubcon.Posted == NoYes::No)
+                {
+                    ret = checkFailed(strFmt("@ETG_New:SubcontractingJournalNumberNotPosted",prodJournaltableSubcon.JournalId));
+                }
+
+                if(prodJournalTable.JournalType == ProdJournalType::Picklist)
+                {
+                    ProdJournalBOM prodJournalBOM,prodJournalBOMCheck;
+
+                    while select prodJournalBOM
+                        where prodJournalBOM.JournalId == prodJournalTable.journalID
+                    {
+                        select crosscompany prodJournalBOMCheck
+                            where prodJournalBOMCheck.JournalId == prodJournalTable.ETGSubcontractingJournalNumber
+                            && prodJournalBOMCheck.ItemId == prodJournalBOM.ItemId;
+
+                        if(prodJournalBOMCheck)
+                        {
+                            if(prodJournalBOMCheck.BOMConsump != prodJournalBOM.BOMConsump)
+                            {
+                                ret = checkFailed(strFmt("@ETG_New:QTYForItemNotSame",prodJournalBOM.ItemId,prodJournalTable.ETGSubcontractingJournalNumber));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postJournal</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Abhinav Post Journal method of prodJournalCheckPost
+    /// </summary>
+    /// <param name = "_journalTransList"></param>
+    protected void postJournal(JournalTransList _journalTransList)
+    {
+        ttsbegin;
+        next postJournal(_journalTransList);
+
+        if(ETGCanadaParameters::find().EnableSubContractingPO == NoYes::Yes)
+        {
+            ProdJournalTable        prodJournalTable = journalTableData.journalTable();
+            ProdTable               prodTable = ProdTable::find(prodJournalTable.ProdId);
+            str                     currectCompany = curExt();
+
+            if(prodTable && prodTable.ETGIsSubContractingOrder && prodTable.ETGParentProdId && (prodJournalTable.JournalType == ProdJournalType::Picklist || prodJournalTable.JournalType == ProdJournalType::ReportFinished) && prodJournalTable.ETGIsManual == NoYes::Yes)
+            {
+                changecompany(prodTable.ETGParentEntity)
+                {
+                    ProdJournalTable         prodJournalTableNew;
+                    ProdJournalBOM           prodJournalBOM;
+                    ProdJournalProd          prodJournalProd;
+                    JournalTableData         journalTableData;
+                    
+                    ProdTable prodTableParent = ProdTable::find(prodTable.ETGParentProdId);
+
+                    prodJournalTableNew.clear();
+                    buf2Buf(prodJournalTable,prodJournalTableNew);
+                    prodJournalTableNew.initValue();
+                    journalTableData                    = JournalTableData::newTable(prodJournalTableNew);
+                    prodJournalTableNew.JournalId       = journalTableData.nextJournalId();
+                    prodJournalTableNew.ProdId          = prodTableParent.ProdId;
+                    prodJournalTableNew.VoucherDraw     = JournalVoucherDraw::Post;
+                    prodJournalTableNew.VoucherSeqRecId = NumberSequenceTable::find(ProdParameters::numRefProdJournalVoucherId().NumberSequenceId).RecId;
+                    prodJournalTableNew.SystemBlocked   = NoYes::No;
+                    prodJournalTableNew.SessionId = 0;
+                    prodJournalTableNew.ETGSubcontractingJournalNumber = prodJournalTable.JournalId;
+                    prodJournalTableNew.ETGIsManual = NoYes::No;
+                    prodJournalTableNew.insert();
+
+                    int LineCount = 1;
+                   
+                    changecompany(currectCompany)
+                    {
+                        ProdJournalBOM          prodJournalBOMLines;
+                        ProdJournalProd         prodJournalProdLines;
+                        if(prodJournalTable.JournalType == ProdJournalType::Picklist)
+                        {
+                            while select prodJournalBOMLines
+                                where prodJournalBOMLines.JournalId == prodJournalTable.JournalId
+                            {
+                                InventDim inventDimParent =  InventDim::find(prodJournalBOMLines.InventDimId);
+
+                                changecompany(prodTable.ETGParentEntity)
+                                {
+                                    prodJournalBOM.clear();
+                                    prodJournalBOM.initValue();
+                                    prodJournalBom.ItemId           = prodJournalBOMLines.ItemId;
+                                    prodJournalBOM.JournalId        = prodJournalTableNew.JournalId;
+                                    prodJournalBOM.initFromInventTable(InventTable::find(prodJournalBOM.ItemId));
+                                    prodJournalBom.ProdId           = prodTableParent.ProdId;
+                                    prodJournalBom.LineNum          = LineCount;
+                                    prodJournalBom.InventDimId      =  InventDim::findOrCreate(inventDimParent).inventDimId;
+                                    prodJournalBom.TransDate        = systemDateGet();
+                                    prodJournalBom.BOMUnitId        = prodJournalBOMLines.BOMUnitId;
+                                    prodJournalBom.BOMConsump       = prodJournalBOMLines.BOMConsump;
+                                    prodJournalBom.InventConsump    = prodJournalBOMLines.InventConsump;
+
+                                    if (prodJournalBOM.validateWrite())
+                                    {
+                                        prodJournalBom.insert();
+                                    }
+                                    else
+                                    {
+                                        throw Error(strFmt('Error in validating line in %1 Item Id - %2',prodTable.ETGParentEntity,prodJournalBOMLines.ItemId));
+                                    }
+                                }
+                                LineCount++;
+                            }
+                        }
+                        else if(prodJournalTable.JournalType == ProdJournalType::ReportFinished)
+                        {
+                            while select prodJournalProdLines
+                                where prodJournalProdLines.JournalId == prodJournalTable.JournalId
+                            {
+                                InventDim inventDimParent =  InventDim::find(prodJournalProdLines.InventDimId);
+
+                                changecompany(prodTable.ETGParentEntity)
+                                {
+                                    prodJournalProd.clear();
+                                    buf2Buf(prodJournalProdLines,prodJournalProd);
+                                    prodJournalProd.initValue();
+                                    prodJournalProd.JournalId = prodJournalTableNew.JournalId;
+                                    prodJournalProd.ProdId = prodTableParent.ProdId;
+                                    prodJournalProd.ItemId = prodJournalProdLines.ItemId;
+                                    prodJournalProd.QtyGood = prodJournalProdLines.QtyGood;
+                                    prodJournalProd.TransDate = systemDateGet();
+                                    prodJournalProd.InventDimId = InventDim::findOrCreate(inventDimParent).inventDimId;
+                                    prodJournalProd.ProdFinished        = prodJournalProdLines.ProdFinished;
+                                    
+                                    prodJournalProd.InventTransId   =  ProdJournalCheckPost::getInventTransId(prodJournalProd);
+                                    if(!prodJournalProd.InventTransId)
+                                    {
+                                        prodJournalProd.InventTransId = prodTableParent.InventTransId;
+                                    }
+
+                                    prodJournalProd.Voucher =  new JournalVoucherNum(journalTableData).getNew(false);
+                                    prodJournalProd.insert();
+                                }
+                                LineCount++;
+                            }
+                        }
+                    }
+
+
+
+                    ttsBegin;
+                    prodJournalTableNew.selectForUpdate(true);
+                    prodJournalTableNew.NumOfLines =  LineCount - 1;
+                    prodJournalTableNew.update();
+                    ttscommit;
+
+                    ttsbegin;
+                    prodJournalTable.selectForUpdate(true);
+                    prodJournalTable.ETGParentEntityJournalNumber = prodJournalTableNew.JournalId;
+                    prodJournalTableNew.update();
+                    ttscommit;
+                }
+            }
+        }
+        ttscommit;
+        //CE
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getInventTransId</Name>
+				<Source><![CDATA[
+    public static InventTransId getInventTransId(ProdJournalProd buffer)
+    {
+        ProdJournalProd             prodJournalProd = buffer;
+        ProdTable                   prodTable;
+        InventMovement              movement;
+        PmfProdCoBy                 pmfProdCoBy;
+
+        if (!(prodJournalProd.ProdId && prodJournalProd.ItemId))
+        {
+            return '';
+        }
+
+        if (prodJournalProd.isCoBy())
+        {
+            pmfProdCoBy = PmfProdCoBy::findByProdItemDim(
+                prodJournalProd.ProdId,
+                prodJournalProd.ItemId,
+                '');
+            return pmfProdCoBy.InventTransId;
+        }
+        else if (prodJournalProd.PmfProductType == PmfProductType::Formula)
+        {
+            prodTable = prodJournalProd.prodTable();
+            movement = prodJournalProd.inventMovementChild(prodTable);
+            return movement.transId();
+        }
+
+        return '';
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

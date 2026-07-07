@@ -1,0 +1,2223 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_GeneralJournalIntegration</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_GeneralJournalIntegration
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>postInvoice</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// General journals aginst customer is posted based on doc type INV
+    /// </summary>
+    /// <param name="_arapMsgHeaderPosting">
+    /// staging table header buffer is the parameter _arapMsgHeaderPosting
+    /// </param>
+    /// <remarks>
+    /// Single line GJ will be posted irrespective of charges or multiple line from CXC, header net amount will be considered final
+    /// Offeset account for the posting will be selected based on Commodity (Revenue account of the item group of commodity)
+    /// </remarks>
+    public str postInvoice(str _ARAPRef)
+    {
+        str arAPRef = _ARAPRef;
+        ETG_ARAP_MSGHEADER headerMsg;
+        ETG_ARAP_MSGLINES linesMsg;
+        LedgerJournalTable ledgerJournalTable, ledgerJournalTableVal;
+        LedgerJournalTrans ledgerJournalTrans;
+        LedgerJournalName ledgerJournalName;
+        CustTable custTable, custTableLoc;
+        VendTable vendTable;
+        NumberSeq numberseq;
+        Voucher voucher;
+        DimensionDynamicAccount ledgerDim;
+        str integrationMessage;
+        ETGIntegrationJournalTypes journalTypes;
+        ETG_CXCERPBusinessUnitMapping businessUnitMap;
+        ETG_CXCERPCostCenterMapping costCenterMap;
+        InventTable inventTableLoc;
+        InventPosting inventPosting, inventPostingLoc;
+        ETGIntegrationDocumentCause integrationDocumentCause;
+        VendPaymFee vendPaymFee;
+        str mainAccount;
+
+        try
+        {
+            ttsbegin;
+            select forupdate headerMsg where headerMsg.ETGARAPREF == arAPRef
+             && headerMsg.ETGIntegrationsStatus == ETGIntegrationStatus::Unprocessed;
+  
+            changecompany(headerMsg.ETGLegalEntity)
+            {
+                select * from journalTypes
+                   where journalTypes.ETGDocuType == headerMsg.ETGDocuType;
+                select firstonly ledgerJournalName
+                    where ledgerJournalName.JournalName == journalTypes.ETGJournalType;
+                select firstonly businessUnitMap
+                    where businessUnitMap.ETGCXCProfitCenter == headerMsg.ETGPROFITCENTERGR;
+                select firstonly costCenterMap
+                    where costCenterMap.ETGCXCProfitCenter == headerMsg.ETGPROFITCENTERGR;
+                // Header
+                ledgerJournalTable = null;
+                ledgerJournalTable.company(headerMsg.ETGLegalEntity);
+                ledgerJournalTable.JournalName = ledgerJournalName.JournalName;
+                ledgerJournalTable.initFromLedgerJournalName();
+                ledgerJournalTable.NumberSequenceTable = ledgerJournalName.NumberSequenceTable;
+                ledgerJournalTable.insert();
+                if (ledgerJournalTable.RecId)
+                {
+                    select * from linesMsg
+                        where linesMsg.AxIntegrationHeaderRecId == headerMsg.AXHeaderRecId;
+                    {
+                        // Line
+                        ledgerJournalTrans = null;
+                        ledgerJournalTrans.Company = headerMsg.ETGLegalEntity;
+                        ledgerJournalTrans.JournalNum = ledgerJournalTable.JournalNum;
+                        ledgerJournalTrans.TransDate = str2Date(headerMsg.AXDocDate, 321);
+                        ledgerJournalTrans.DocumentDate = str2Date(headerMsg.AXDocDate, 321);
+                        ledgerJournalTrans.Due = str2Date(headerMsg.AXDueDate, 321);
+                        ledgerJournalTrans.LineNum = LedgerJournalTrans::lastLineNum(ledgerJournalTrans.JournalNum);
+
+                        voucher = new JournalVoucherNum(JournalTableData::newTable(ledgerJournalTable)).getNew(true);
+                        ledgerJournalTrans.Voucher = voucher;
+                        ledgerJournalTrans.CurrencyCode = linesMsg.ETGCURRENCY;
+                        ledgerJournalTrans.Txt = linesMsg.ETGDESCRIPTION + "QTY" + headerMsg.AXTotalQty;
+                        ledgerJournalTrans.Qty = str2Num(headerMsg.AXTotalQty);                       
+
+                        ledgerJournalTrans.AmountCurDebit = abs(str2Num(headerMsg.AXNetAmount));
+                        ledgerJournalTrans.Invoice = headerMsg.ETGARAPREF;
+                        ledgerJournalTrans.Payment = headerMsg.ETGPAYMTERMS;
+                        ledgerJournalTrans.ETGIntegrationContractNumber = headerMsg.ETGCONTRACTNUMBER;
+                        ledgerJournalTrans.ExchRate = this.validateExchRate(headerMsg.RecId);
+                        ledgerJournalTrans.PostingProfile = "GEN";
+                        ledgerJournalTrans.TaxItemGroup = "ALL";
+                        ledgerJournalTrans.TaxGroup = linesMsg.ETGTAXCODE;
+                        ledgerJournalTrans.taxAmountJournal();
+
+                        select * from custTable where custTable.ETGCxcCounterPartyMapping == headerMsg.ETGCOUNTERPARTY;
+                        ledgerJournalTrans.AccountType = LedgerJournalACType::Cust;
+                        ledgerDim = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(custTable.AccountNum, LedgerJournalACType::Cust);
+                        ledgerJournalTrans.LedgerDimension = ledgerDim;
+                        mainAccount = null;
+
+                        if(headerMsg.ETGDOCUMENTCAUSE == "washout Invoice"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Washout Correction"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Bypass Invoice"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Circle Invoice")
+                        {
+                            ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+
+                            select firstonly integrationDocumentCause
+                            where integrationDocumentCause.ETGDocumentCause == headerMsg.ETGDOCUMENTCAUSE;
+                            
+                            mainAccount = integrationDocumentCause.ETGLedgerCode;
+                        }
+                        else
+                        {
+                            if((mainAccount == "") && (linesMsg.ETGLINETYPE == "Inventory" || linesMsg.ETGLINETYPE == "Financial"))
+                            {
+                                inventTableLoc = InventTable::find(linesMsg.ETGCOMMODITY);
+                                select * from custTableLoc where custTableLoc.AccountNum == custTable.AccountNum;
+
+                                select * from inventPosting where inventPosting.ItemRelation == inventTableLoc.itemGroupId()
+                                    && inventPosting.InventAccountType == InventAccountType::SalesRevenue
+                                    && inventPosting.CustVendRelation == custTableLoc.CustGroup
+                                    && inventPosting.ItemCode == InventPostingItemCode::GroupId
+                                    && inventPosting.CustVendCode == TableGroupAll::GroupId;
+                                if(inventPosting)
+                                {
+                                    ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                    mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(inventPosting.LedgerDimension).MainAccountId;
+                                }
+                                if(!inventPosting)
+                                {
+                                    select * from inventPostingLoc where inventPostingLoc.ItemRelation == inventTableLoc.itemGroupId()
+                                        && inventPostingLoc.InventAccountType == InventAccountType::SalesRevenue
+                                        && inventPostingLoc.CustVendRelation == ""
+                                        && inventPostingLoc.ItemCode == InventPostingItemCode::GroupId
+                                        && inventPostingLoc.CustVendCode == TableGroupAll::All;
+                                    if(inventPostingLoc)
+                                    {
+                                        ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                        mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(inventPostingLoc.LedgerDimension).MainAccountId;
+                                    }
+                                }
+                            }
+                            else if((mainAccount == "") && (linesMsg.ETGLINETYPE  == "MiscCharges"))
+                            {
+                                select * from vendPaymFee
+                                where vendPaymFee.FeeId == linesMsg.ETGCOSTCODE;
+                                if(vendPaymFee)
+                                {
+                                    ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                    mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(vendPaymFee.LedgerDimension).MainAccountId;
+                                }
+                            }
+                        }
+                         
+                        DimensionDynamicAccount ledgerDimension;
+                        container cont = [businessUnitMap.ETGERPVerticle,
+                                          businessUnitMap.ETGERPBusinessUnit,
+                                          "",linesMsg.ETGCOMMODITY, "","","", "",
+                                          costCenterMap.ETGERPCostCenter,"",""];
+                        ledgerDimension = this.validGenerateLedgerDimension(mainAccount, cont);
+                        ledgerJournalTrans.OffsetLedgerDimension = ledgerDimension;
+                        ledgerJournalTrans.DefaultDimension = this.createDefaultDimension(businessUnitMap.ETGERPVerticle,businessUnitMap.ETGERPBusinessUnit,costCenterMap.ETGERPCostCenter,linesMsg.ETGCOMMODITY);
+                        ledgerJournalTrans.insert();
+                        
+                    }
+                    select * from ledgerJournalTableVal
+                        where ledgerJournalTableVal.JournalNum == ledgerJournalTable.JournalNum;
+                    if(ledgerJournalTableVal.Posted == NoYes::No)
+                    {
+                        LedgerJournalCheckPost journalCheckPost;
+                        journalCheckPost = LedgerJournalCheckPost::newLedgerJournalTable(ledgerJournalTableVal, NoYes::Yes);
+                        if(journalCheckPost.validate())
+                        {
+                            journalCheckPost.run();
+                        }
+                    }
+                    headerMsg.ETGIntegrationsStatus = ETGIntegrationStatus::Processed;
+                    headerMsg.update();
+                    ttscommit;
+                }
+            }
+        }
+        catch(Exception::Error)
+        {
+            SysInfoLogEnumerator infoLogEnum;
+            SysInfologMessageStruct infoMessageStruct;
+
+            infoLogEnum = SysInfoLogEnumerator::newData(infolog.infologData());
+            while(infoLogEnum.moveNext())
+            {
+                infoMessageStruct = SysInfologMessageStruct::construct(infoLogEnum.currentMessage());
+                integrationMessage = integrationMessage + infoMessageStruct.message() + '\n';
+            }
+        }
+        if(integrationMessage != "")
+        {
+            return integrationMessage;
+        }
+        else
+        {
+            return "";
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validGenerateLedgerDimension</Name>
+				<Source><![CDATA[
+    public DimensionDynamicAccount validGenerateLedgerDimension(MainAccountNum _mainAccountId, container _conData)
+    {
+        #define.Vertical('VERTICALVALUE')
+        #define.BusinessUnit('BUSINESSUNITVALUE')
+        #define.LineofBusinesss('LINE_OF_BUSINESSSVALUE')
+        #define.ProductService('PRODUCT_SERVICEVALUE')
+        #define.PlantWarehouseOffice('PLANT_WAREHOUSE_OFFICEVALUE')
+        #define.Department('DEPARTMENTVALUE')
+        #define.InterCompany('INTERCOMPANYVALUE')
+        #define.Contract('CONTRACTVALUE')
+        #define.ProfitCenter('PROFITCENTERVALUE')
+        #define.Vessel('VESSELVALUE')
+        #define.Project('PROJECTVALUE')
+
+        RecId dimAttId_MainAccount;
+        MainAccount mainAccount;
+
+        DimensionAttribute dimensionAttribute;
+        DimensionAttributeValue dimensionAttributeValue;
+        DimensionSetSegmentName DimensionSet;
+        DimensionStorage dimStorage;
+
+        LedgerAccountContract ledgerAccountContract = new LedgerAccountContract();
+        DimensionAttributeValueContract valueContract;
+
+        List valueContracts = new List(Types::Class);
+
+        DimensionAttributeValueCombination dimensionAttributeValueCombination;
+
+        mainAccount = MainAccount::findByMainAccountId(_mainAccountId);
+
+        while select DimensionValueColumnName from dimensionAttribute
+            where dimensionAttribute.DimensionValueColumnName == #Vertical
+            || dimensionAttribute.DimensionValueColumnName == #BusinessUnit
+            || dimensionAttribute.DimensionValueColumnName == #LineofBusinesss
+            || dimensionAttribute.DimensionValueColumnName == #ProductService
+            || dimensionAttribute.DimensionValueColumnName == #PlantWarehouseOffice
+            || dimensionAttribute.DimensionValueColumnName == #Department
+            || dimensionAttribute.DimensionValueColumnName == #InterCompany
+            || dimensionAttribute.DimensionValueColumnName == #Contract
+            || dimensionAttribute.DimensionValueColumnName == #ProfitCenter
+            || dimensionAttribute.DimensionValueColumnName == #Vessel
+            || dimensionAttribute.DimensionValueColumnName == #Project
+
+        {
+            switch(dimensionAttribute.DimensionValueColumnName)
+            {
+                case #Vertical:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,1));
+                    break;
+                case #BusinessUnit:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,2));
+                    break;
+                case #LineofBusinesss:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,3));
+                    break;
+                case #ProductService:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,4));
+                    break;
+                case #PlantWarehouseOffice:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,5));
+                    break;
+                case #Department:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,6));
+                    break;
+                case #InterCompany:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,7));
+                    break;
+                case #Contract:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,8));
+                    break;
+                case #ProfitCenter:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,9));
+                    break;
+                case #Vessel:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,11));
+                    break;
+                case #Project:
+                    dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, conPeek(_conData,10));
+                    break;
+            }
+            if(dimensionAttributeValue)
+            {
+                valueContract = new DimensionAttributeValueContract();
+                valueContract.parmName(dimensionAttribute.Name);
+                valueContract.parmValue(dimensionAttributeValue.CachedDisplayValue);
+                valueContracts.addEnd(valueContract);
+            }
+        }
+        ledgerAccountContract.parmMainAccount(_mainAccountId);
+        ledgerAccountContract.parmValues(valueContracts);
+        dimStorage = DimensionServiceProvider::buildDimensionStorageForLedgerAccount(ledgerAccountContract);
+        dimensionAttributeValueCombination = DimensionAttributeValueCombination::find(dimStorage.save());
+
+        return dimensionAttributeValueCombination.RecId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateForIntegartion</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Below code is for integration validations.
+    /// </summary>
+    /// <param name = "_referenceRecId"></param>
+    /// <returns></returns>
+    public container validateForIntegartion(ETG_ARAP_MSGHEADER _headerValidate)
+    {
+        //int64 _reference = _referenceRecId;
+        ETG_ARAP_MSGHEADER headerValidate; //= _headerValidate;
+
+        ETG_ARAP_MSGHEADER  headerValidateLoc;
+        ETG_ARAP_MSGLINES linesValidate;
+        CustTable custTableValidate;
+        VendTable VendTableValidate;
+        Currency currency;
+        PaymTerm paymTerm;
+        InventTable inventTable;
+        DimensionAttribute dimensionAttribute;
+        DimensionAttributeValue dimensionAttributeValue;
+        ETG_CXCERPBusinessUnitMapping businessUnitMapping;
+        ETG_CXCERPCostCenterMapping costCenterMapping;
+        VendPaymFee vendPaymFee;
+        TaxGroupHeading taxGroupHeading;
+        ETGIntegrationCogsLedger cogsLedgerVCH;
+        str integrationMessage;
+        container con;
+        
+        select forupdate headerValidate where headerValidate.RecId == _headerValidate.RecId;
+        changecompany(headerValidate.ETGLegalEntity)
+        {
+            if(headerValidate)
+            {
+                // Code added to validate the duplicate invoice check - Start
+                select firstonly headerValidateLoc
+                where headerValidateLoc.ETGARAPREF == headerValidate.ETGARAPREF
+                    && headerValidateLoc.ETGIntegrationsStatus == ETGIntegrationStatus::Processed;
+
+                if(headerValidateLoc)
+                {
+                    con += str2con("Invoice " +  headerValidateLoc.ETGARAPREF + " is already posted in D365.");
+                }
+                // Code added to validate the duplicate invoice check - End
+
+                if(str2Num(headerValidate.AXNetAmount) == 0.00)
+                {
+                    con += str2con("Invoice " +  headerValidate.ETGARAPREF + " is attached with Zero Amount.");
+                }
+                // Start customer and vendor validation
+                if(substr(headerValidate.ETGCOUNTERPARTY,1,2) == "GC" || substr(headerValidate.ETGCOUNTERPARTY,1,1) == "C")
+                {
+                    select firstonly custTableValidate
+                    where custTableValidate.ETGCxcCounterPartyMapping == headerValidate.ETGCOUNTERPARTY
+                        && custTableValidate.DataAreaId == headerValidate.ETGLegalEntity;
+                    if(!custTableValidate)
+                    {
+                        con += str2con("Counter party " + headerValidate.ETGCOUNTERPARTY + " is not mapped from CXC/fusion in D365 customer details.");
+                    }
+                }
+                else if(substr(headerValidate.ETGCOUNTERPARTY,1,2) == "GV" || substr(headerValidate.ETGCOUNTERPARTY,1,1) == "V")
+                {
+                    select * from VendTableValidate
+                where VendTableValidate.ETGCxcCounterPartyMapping == headerValidate.ETGCOUNTERPARTY
+                        && VendTableValidate.DataAreaId == headerValidate.ETGLegalEntity;
+
+                    if(!VendTableValidate)
+                    {
+                        con += str2con("Counter party " + headerValidate.ETGCOUNTERPARTY + " is not mapped from CXC/fusion in D365 vendor details.");
+                    }
+                    select * from cogsLedgerVCH where cogsLedgerVCH.CounterPartyGroup == VendTableValidate.VendGroup;
+                    if(!cogsLedgerVCH)
+                    {
+                        con += str2con("COGS Ledger account is not available For the Vendor Group %1", VendTableValidate.VendGroup);
+                    }
+                }
+                select firstonly currency
+                    where currency.CurrencyCode == headerValidate.ETGCurrency;
+                   
+                if(!currency)
+                {
+                    con += str2con("Currency code " + headerValidate.ETGCurrency + " is not available in D365.");
+                }
+                select firstonly paymTerm
+                    where paymTerm.PaymTermId == headerValidate.ETGPAYMTERMS
+                   && paymTerm.DataAreaId == headerValidate.ETGLegalEntity;
+                if(!paymTerm)
+                {
+                    con += str2con("Payment terms " + headerValidate.ETGPAYMTERMS + " is not available in D365.");
+                }
+                select firstonly linesValidate
+                  where linesValidate.AxIntegrationHeaderRecId == headerValidate.AXHeaderRecId;
+                select firstonly inventTable
+                    where inventTable.ItemId == linesValidate.ETGCOMMODITY;
+                if(!inventTable)
+                {
+                    con += str2con("Commodity " + linesValidate.ETGCOMMODITY + " is not available in D365.");
+                }
+                select firstonly dimensionAttribute
+                  where dimensionAttribute.Name == "Item";
+
+                select firstonly dimensionAttributeValue
+                    where dimensionAttributeValue.DimensionAttribute == dimensionAttribute.RecId
+                      && dimensionAttributeValue.DisplayValue == linesValidate.ETGCOMMODITY;
+                if(!dimensionAttributeValue)
+                {
+                    con += str2con("Item financial dimension " + linesValidate.ETGCOMMODITY + " is not available in D365.");
+                }
+                select firstonly businessUnitMapping
+                where businessUnitMapping.ETGLegalEntity == headerValidate.ETGLegalEntity
+                && businessUnitMapping.ETGCXCProfitCenter == headerValidate.ETGPROFITCENTERGR;
+
+                select firstonly dimensionAttribute
+                  where dimensionAttribute.Name == "BusinessUnit";
+
+                select firstonly dimensionAttributeValue
+                    where dimensionAttributeValue.DimensionAttribute == dimensionAttribute.RecId
+                      && dimensionAttributeValue.DisplayValue == businessUnitMapping.ETGERPBusinessUnit;
+                if(!dimensionAttributeValue)
+                {
+                    con += str2con("Business unit financial dimension " + businessUnitMapping.ETGERPBusinessUnit + " is not available in D365.");
+                }
+                select firstonly costCenterMapping
+                where costCenterMapping.ETGLegalEntity == headerValidate.ETGLegalEntity
+                && costCenterMapping.ETGCXCProfitCenter == headerValidate.ETGPROFITCENTERGR;
+
+                select firstonly dimensionAttribute
+                  where dimensionAttribute.Name == "ProfitCenter";
+
+                select firstonly dimensionAttributeValue
+                    where dimensionAttributeValue.DimensionAttribute == dimensionAttribute.RecId
+                      && dimensionAttributeValue.DisplayValue == costCenterMapping.ETGERPCostCenter;
+                if(!dimensionAttributeValue)
+                {
+                    con += str2con("CostCenter financial dimension " + costCenterMapping.ETGCXCProfitCenter + " is not available in D365.");
+                }
+                if(linesValidate.ETGTAXCODE != "")
+                {
+                    select firstonly taxGroupHeading
+                    where taxGroupHeading.TaxGroup == linesValidate.ETGTAXCODE;
+                    if(!taxGroupHeading)
+                    {
+                        con += str2con("Sales tax group " + linesValidate.ETGTAXCODE + " is not available in D365.");
+                    }
+                }
+                if(linesValidate.ETGLINETYPE == "MiscCharges")
+                {
+                    select firstonly vendPaymFee
+                    where vendPaymFee.FeeId == linesValidate.ETGCOSTCODE;
+                    if(!vendPaymFee)
+                    {
+                        con += str2con("Payment fee " + linesValidate.ETGCOSTCODE + " is not available in D365.");
+                    }
+                }
+
+            }
+        }
+        return con;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateErrorLog</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calling the integration validation and creating the posting invoices.
+    /// </summary>
+    /// <param name = "_referenceRecId"></param>
+    public void updateErrorLog(int64 _referenceRecId)
+    {
+        str log;
+        int64 _reference = _referenceRecId;
+      
+        ETG_ARAP_MSGHEADER headerValidate;
+
+        ttsbegin;
+        select forupdate headerValidate where headerValidate.RecId == _reference;
+
+        if(headerValidate)
+        {
+            headerValidate.ETGLOG = con2Str(this.validateForIntegartion(headerValidate));
+           
+            if(headerValidate.ETGLOG != "")
+            {
+                headerValidate.ETGIntegrationsStatus = ETGIntegrationStatus::Error;
+                headerValidate.update();
+            }
+            else if(headerValidate.ETGLOG == "" && headerValidate.ETGDocuType == "INV" && headerValidate.ETGDOCUMENTCAUSE != "Secondary Cost Invoice")
+            {
+                headerValidate.ETGLOG = this.postInvoice(headerValidate.ETGARAPREF);
+            }
+            else if(headerValidate.ETGLOG == "" && headerValidate.ETGDocuType == "INV" && headerValidate.ETGDOCUMENTCAUSE == "Secondary Cost Invoice")
+            {
+                headerValidate.ETGLOG = this.postInvoice_MultiLines(headerValidate.ETGARAPREF);
+            }
+            else if(headerValidate.ETGLOG == "" && headerValidate.ETGDocuType == "VCH")
+            {
+                headerValidate.ETGLOG = this.PostVCH(headerValidate.ETGARAPREF);
+            }
+            else if(headerValidate.ETGLOG == "" && headerValidate.ETGDocuType == "ARCN" && headerValidate.ETGDOCUMENTCAUSE != "Secondary Cost Invoice")
+            {
+                headerValidate.ETGLOG = this.PostARCN(headerValidate.ETGARAPREF);
+            }
+            else if(headerValidate.ETGLOG == "" && headerValidate.ETGDocuType == "ARCN" && headerValidate.ETGDOCUMENTCAUSE == "Secondary Cost Invoice")
+            {
+                headerValidate.ETGLOG = this.PostARCN_MultiLines(headerValidate.ETGARAPREF);
+            }
+            else if(headerValidate.ETGLOG == "" && headerValidate.ETGDocuType == "ARDN" && headerValidate.ETGDOCUMENTCAUSE != "Secondary Cost Invoice")
+            {
+                headerValidate.ETGLOG = this.PostARDN(headerValidate.ETGARAPREF);
+            }
+            else if(headerValidate.ETGLOG == "" && headerValidate.ETGDocuType == "ARDN" && headerValidate.ETGDOCUMENTCAUSE == "Secondary Cost Invoice")
+            {
+                headerValidate.ETGLOG = this.PostARDN_MultiLines(headerValidate.ETGARAPREF);
+            }
+            else if(headerValidate.ETGLOG == "" && headerValidate.ETGDocuType == "APDN")
+            {
+                headerValidate.ETGLOG = this.PostAPDN(headerValidate.ETGARAPREF);
+            }
+            else if(headerValidate.ETGLOG == "" && headerValidate.ETGDocuType == "APCN")
+            {
+                headerValidate.ETGLOG = this.PostAPCN(headerValidate.ETGARAPREF);
+            }
+            else
+            {
+                if(headerValidate.ETGIntegrationsStatus == ETGIntegrationStatus::Unprocessed)
+                {
+                    ttsbegin;
+                    headerValidate.ETGIntegrationsStatus = ETGIntegrationStatus::Processed;
+                    headerValidate.update();
+                    ttscommit;
+                }
+            }
+            //}
+        }
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateExchRate</Name>
+				<Source><![CDATA[
+    // <summary>
+    /// Exchange rate validation
+    /// </summary>
+    /// <param name = "_recId"></param>
+    /// <returns></returns>/
+    public ExchRate validateExchRate(int64 _recId)
+    {
+        int64 _reference = _recId;
+        ETG_ARAP_MSGHEADER headerValidate;
+        Ledger ledgerOrg;
+        ExchangeRateCurrencyPair exchangeRateCurrencyPair;
+        ExchangeRate exchangeRate;
+        LedgerJournalTrans ledgerJournalTrans;
+        ExchRate exchRate, exchValue, exchValueCount;
+
+        select * from headerValidate where headerValidate.RecId == _reference;
+        if(headerValidate)
+        {
+            select firstonly ledgerOrg
+                where ledgerOrg.AccountingCurrency == headerValidate.ETGCurrency
+                && ledgerOrg.Name == headerValidate.ETGLegalEntity;
+            if(ledgerOrg)
+            {
+                exchValue = str2Num(headerValidate.AXExchRate);
+            }
+            else
+            {
+                select firstonly ledgerOrg
+                    where ledgerOrg.AccountingCurrency != headerValidate.ETGCurrency
+                    && ledgerOrg.Name == headerValidate.ETGLegalEntity;
+
+                if(ledgerOrg)
+                {
+                    if(str2Date(headerValidate.AXDocDate, 321) == today())
+                    {
+                        select * from exchangeRateCurrencyPair
+                        where exchangeRateCurrencyPair.ExchangeRateType == ledgerOrg.DefaultExchangeRateType
+                        && exchangeRateCurrencyPair.FromCurrencyCode == headerValidate.ETGCurrency
+                            && exchangeRateCurrencyPair.ToCurrencyCode == ledgerOrg.AccountingCurrency;
+
+                        if(exchangeRateCurrencyPair)
+                        {
+                            exchRate = exchangeRate::findByDate(exchangeRateCurrencyPair.RecId,
+                                           str2Date(headerValidate.AXDocDate, 321)).ExchangeRate;
+                            if(!exchRate)
+                            {
+                                throw error("Exchange rate of Currency"+  headerValidate.ETGCurrency +" is not available in D365.");
+                            }
+                        }
+                    }
+                    else if(str2Date(headerValidate.AXDocDate,321) != today())
+                    {
+                        select * from exchangeRateCurrencyPair
+                        where exchangeRateCurrencyPair.ExchangeRateType == ledgerOrg.DefaultExchangeRateType
+                        && exchangeRateCurrencyPair.FromCurrencyCode == headerValidate.ETGCurrency
+                            && exchangeRateCurrencyPair.ToCurrencyCode == ledgerOrg.AccountingCurrency;
+
+                        if(exchangeRateCurrencyPair)
+                        {
+                            exchRate = exchangeRate::findByDate(exchangeRateCurrencyPair.RecId,
+                                           str2Date(headerValidate.AXDocDate, 321)).ExchangeRate;
+                            if(!exchRate)
+                            {
+                                throw error("Exchange rate of Currency"+  headerValidate.ETGCurrency +" is not available in D365.");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if(exchValue)
+        {
+            return exchValue*100;
+        }
+        else
+        {
+            if(exchRate)
+            {
+                exchValueCount = exchRate/100;
+            }
+            return exchValueCount*100;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>PostVCH</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name = "_ARAPRef"></param>
+    /// <returns></returns>
+    public str PostVCH(str _ARAPRef)
+    {
+        str arAPRef = _ARAPRef;
+        ETG_ARAP_MSGHEADER headerMsg;
+        ETG_ARAP_MSGLINES linesMsg;
+        LedgerJournalTable ledgerJournalTable,ledgerJournalTableVal;
+        LedgerJournalTrans ledgerJournalTrans;
+        LedgerJournalName ledgerJournalName;
+        CustTable custTable, custTableLoc;
+        VendTable vendTable, vendTableLoc;
+        NumberSeq numberseq;
+        Voucher voucher;
+        DimensionDynamicAccount ledgerDim;
+        str integrationMessage;
+        ETGIntegrationJournalTypes journalTypes;
+        ETG_CXCERPBusinessUnitMapping businessUnitMap;
+        ETG_CXCERPCostCenterMapping costCenterMap;
+        InventTable inventTableLoc;
+        InventPosting inventPosting, inventPostingLoc;
+        ETGIntegrationDocumentCause integrationDocumentCause;
+        VendPaymFee vendPaymFee;
+        ETGIntegrationCogsLedger cogsLedgerVCH;
+        str mainAccount;
+
+        try
+        {
+            ttsbegin;
+            select forupdate headerMsg where headerMsg.ETGARAPREF == arAPRef
+            && headerMsg.ETGIntegrationsStatus == ETGIntegrationStatus::Unprocessed;
+
+            changecompany(headerMsg.ETGLegalEntity)
+            {
+                select * from journalTypes
+                where journalTypes.ETGDocuType == headerMsg.ETGDocuType;
+                select firstonly ledgerJournalName
+                where ledgerJournalName.JournalName == journalTypes.ETGJournalType;
+                select firstonly businessUnitMap
+                where businessUnitMap.ETGCXCProfitCenter == headerMsg.ETGPROFITCENTERGR;
+                select firstonly costCenterMap
+                where costCenterMap.ETGCXCProfitCenter == headerMsg.ETGPROFITCENTERGR;
+                // Header
+                ledgerJournalTable = null;
+                ledgerJournalTable.company(headerMsg.ETGLegalEntity);
+                ledgerJournalTable.JournalName = ledgerJournalName.JournalName;
+                ledgerJournalTable.initFromLedgerJournalName();
+                ledgerJournalTable.NumberSequenceTable = ledgerJournalName.NumberSequenceTable;
+                ledgerJournalTable.insert();
+                if (ledgerJournalTable.RecId)
+                {
+                    while select * from linesMsg
+                 where linesMsg.AxIntegrationHeaderRecId == headerMsg.AXHeaderRecId
+                    {
+                        // Line
+                        ledgerJournalTrans = null;
+                        ledgerJournalTrans.Company = headerMsg.ETGLegalEntity;
+                        ledgerJournalTrans.JournalNum = ledgerJournalTable.JournalNum;
+                        ledgerJournalTrans.TransDate = str2Date(headerMsg.AXDocDate, 321);
+                        ledgerJournalTrans.DocumentDate = str2Date(headerMsg.AXDocDate, 321);
+                        ledgerJournalTrans.Due = str2Date(headerMsg.AXDueDate, 321);
+                        ledgerJournalTrans.LineNum = LedgerJournalTrans::lastLineNum(ledgerJournalTrans.JournalNum);
+
+                        voucher = new JournalVoucherNum(JournalTableData::newTable(ledgerJournalTable)).getNew(true);
+                        ledgerJournalTrans.Voucher = voucher;
+                        ledgerJournalTrans.CurrencyCode = linesMsg.ETGCURRENCY;
+                        ledgerJournalTrans.Txt = linesMsg.ETGDESCRIPTION + "QTY" + headerMsg.AXTotalQty;
+                        ledgerJournalTrans.Qty = str2Num(headerMsg.AXTotalQty);
+
+                       // ledgerJournalTrans.AmountCurCredit = abs(str2Num(linesMsg.AxAmount));
+                        if(str2num(linesMsg.AxAmount) > 0)
+                        {
+                            ledgerJournalTrans.AmountCurCredit = abs(str2num(linesMsg.AxAmount));
+                            ledgerJournalTrans.AmountCurDebit = 0.00;
+                        }
+                        else if(str2num(linesMsg.AxAmount) < 0)
+                        {
+                            ledgerJournalTrans.AmountCurDebit = abs(str2num(linesMsg.AxAmount));
+                            ledgerJournalTrans.AmountCurCredit = 0.00;
+                        }
+                       
+                        ledgerJournalTrans.Invoice = headerMsg.ETGARAPREF;
+                        ledgerJournalTrans.Payment = headerMsg.ETGPAYMTERMS;
+                        ledgerJournalTrans.ETGIntegrationContractNumber = headerMsg.ETGCONTRACTNUMBER;
+                        ledgerJournalTrans.ExchRate = this.validateExchRate(headerMsg.RecId);
+                        ledgerJournalTrans.PostingProfile = "GEN";
+                        ledgerJournalTrans.TaxItemGroup = "ALL";
+                        ledgerJournalTrans.TaxGroup = linesMsg.ETGTAXCODE;
+                        ledgerJournalTrans.taxAmountJournal();
+
+                        select * from vendTable where vendTable.ETGCxcCounterPartyMapping == headerMsg.ETGCOUNTERPARTY;
+                        ledgerJournalTrans.AccountType = LedgerJournalACType::Vend;
+                        ledgerDim = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(vendTable.AccountNum, LedgerJournalACType::Vend);
+                        ledgerJournalTrans.LedgerDimension = ledgerDim;
+
+                        mainAccount = null;
+                        if(headerMsg.ETGDOCUMENTCAUSE == "washout Invoice"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Washout Correction"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Bypass Invoice"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Circle Invoice")
+                        {
+                            ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+
+                            select firstonly integrationDocumentCause
+                            where integrationDocumentCause.ETGDocumentCause == headerMsg.ETGDOCUMENTCAUSE;
+                            mainAccount = integrationDocumentCause.ETGLedgerCode;
+                        }
+                        else
+                        {
+                            if((mainAccount == "") && (linesMsg.ETGLINETYPE == "Inventory" || linesMsg.ETGLINETYPE == "Financial"))
+                            {
+                                select * from cogsLedgerVCH where cogsLedgerVCH.CounterPartyGroup == vendTable.VendGroup;
+                                if(cogsLedgerVCH)
+                                {
+                                    ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                    mainAccount = cogsLedgerVCH.LedgerCode;
+                                }
+                            }
+                            else if((mainAccount == "") && (linesMsg.ETGLINETYPE  == "MiscCharges"))
+                            {
+                                select * from vendPaymFee
+                                    where vendPaymFee.FeeId == linesMsg.ETGCOSTCODE;
+                                if(vendPaymFee)
+                                {
+                                    ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                    mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(vendPaymFee.LedgerDimension).MainAccountId;
+                                }
+                            }
+                        }
+                        DimensionDynamicAccount ledgerDimension;
+                        container cont = [businessUnitMap.ETGERPVerticle,
+                                          businessUnitMap.ETGERPBusinessUnit,
+                                          "",linesMsg.ETGCOMMODITY, "","","", "",
+                                          costCenterMap.ETGERPCostCenter,"",""];
+                        ledgerDimension = this.validGenerateLedgerDimension(mainAccount, cont);
+                        ledgerJournalTrans.OffsetLedgerDimension = ledgerDimension;
+                        ledgerJournalTrans.DefaultDimension = this.createDefaultDimension(businessUnitMap.ETGERPVerticle,businessUnitMap.ETGERPBusinessUnit,costCenterMap.ETGERPCostCenter,linesMsg.ETGCOMMODITY);
+                        ledgerJournalTrans.insert();
+                    }
+                
+                    select * from ledgerJournalTableVal
+                        where ledgerJournalTableVal.JournalNum == ledgerJournalTable.JournalNum;
+                    if(ledgerJournalTableVal.Posted == NoYes::No)
+                    {
+                        LedgerJournalCheckPost journalCheckPost;
+                        journalCheckPost = LedgerJournalCheckPost::newLedgerJournalTable(ledgerJournalTableVal, NoYes::Yes);
+                        if(journalCheckPost.validate())
+                        {
+                            journalCheckPost.run();
+                        }
+                    }
+                    headerMsg.ETGIntegrationsStatus = ETGIntegrationStatus::Processed;
+                    headerMsg.update();
+                    ttscommit;
+                }
+            }
+               
+        }
+        catch(Exception::Error)
+        {
+            SysInfoLogEnumerator infoLogEnum;
+            SysInfologMessageStruct infoMessageStruct;
+            infoLogEnum = SysInfoLogEnumerator::newData(infolog.infologData());
+
+            while(infoLogEnum.moveNext())
+            {
+                infoMessageStruct = SysInfologMessageStruct::construct(infoLogEnum.currentMessage());
+                integrationMessage = integrationMessage + infoMessageStruct.message() + '\n';
+            }
+            ttsbegin;
+            headerMsg.ETGLOG = integrationMessage;
+            headerMsg.ETGIntegrationsStatus = ETGIntegrationStatus::Error;
+            headerMsg.update();
+            ttscommit;
+        }
+        if(integrationMessage != "")
+        {
+            return integrationMessage;
+        }
+        else
+        {
+            return "";
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>PostARCN</Name>
+				<Source><![CDATA[
+    public str PostARCN(str _ARAPRef)
+    {
+        str arAPRef = _ARAPRef;
+        ETG_ARAP_MSGHEADER headerMsg;
+        ETG_ARAP_MSGLINES linesMsg;
+        LedgerJournalTable ledgerJournalTable, ledgerJournalTableVal;
+        LedgerJournalTrans ledgerJournalTrans;
+        LedgerJournalName ledgerJournalName;
+        CustTable custTable, custTableLoc;
+        VendTable vendTable;
+        NumberSeq numberseq;
+        Voucher voucher;
+        DimensionDynamicAccount ledgerDim;
+        str integrationMessage;
+        ETGIntegrationJournalTypes journalTypes;
+        ETG_CXCERPBusinessUnitMapping businessUnitMap;
+        ETG_CXCERPCostCenterMapping costCenterMap;
+        InventTable inventTableLoc;
+        InventPosting inventPosting, inventPostingLoc;
+        ETGIntegrationDocumentCause integrationDocumentCause;
+        VendPaymFee vendPaymFee;
+        str mainAccount;
+
+        try
+        {
+            ttsbegin;
+            select forupdate headerMsg where headerMsg.ETGARAPREF == arAPRef
+            && headerMsg.ETGIntegrationsStatus == ETGIntegrationStatus::Unprocessed;
+
+            changecompany(headerMsg.ETGLegalEntity)
+            {
+                select * from journalTypes
+                  where journalTypes.ETGDocuType == headerMsg.ETGDocuType;
+                select firstonly ledgerJournalName
+                  where ledgerJournalName.JournalName == journalTypes.ETGJournalType;
+                select firstonly businessUnitMap
+                  where businessUnitMap.ETGCXCProfitCenter == headerMsg.ETGPROFITCENTERGR;
+                select firstonly costCenterMap
+                  where costCenterMap.ETGCXCProfitCenter == headerMsg.ETGPROFITCENTERGR;
+                // Header
+                ledgerJournalTable = null;
+                ledgerJournalTable.company(headerMsg.ETGLegalEntity);
+                ledgerJournalTable.JournalName = ledgerJournalName.JournalName;
+                ledgerJournalTable.initFromLedgerJournalName();
+                ledgerJournalTable.NumberSequenceTable = ledgerJournalName.NumberSequenceTable;
+                ledgerJournalTable.insert();
+                if (ledgerJournalTable.RecId)
+                {
+                    select * from linesMsg
+                 where linesMsg.AxIntegrationHeaderRecId == headerMsg.AXHeaderRecId;
+                    {
+                        // Line
+                        ledgerJournalTrans = null;
+                        ledgerJournalTrans.Company = headerMsg.ETGLegalEntity;
+                        ledgerJournalTrans.JournalNum = ledgerJournalTable.JournalNum;
+                        ledgerJournalTrans.TransDate = str2Date(headerMsg.AXDocDate, 321);
+                        ledgerJournalTrans.DocumentDate = str2Date(headerMsg.AXDocDate, 321);
+                        ledgerJournalTrans.Due = str2Date(headerMsg.AXDueDate, 321);
+                        ledgerJournalTrans.LineNum = LedgerJournalTrans::lastLineNum(ledgerJournalTrans.JournalNum);
+
+                        voucher = new JournalVoucherNum(JournalTableData::newTable(ledgerJournalTable)).getNew(true);
+                        ledgerJournalTrans.Voucher = voucher;
+                        ledgerJournalTrans.CurrencyCode = linesMsg.ETGCURRENCY;
+                        ledgerJournalTrans.Txt = linesMsg.ETGDESCRIPTION + "QTY" + headerMsg.AXTotalQty;
+                        ledgerJournalTrans.Qty = str2Num(headerMsg.AXTotalQty);                       
+                        ledgerJournalTrans.AmountCurCredit = abs(str2Num(headerMsg.AXNetAmount));
+                        ledgerJournalTrans.Invoice = headerMsg.ETGARAPREF;
+                        ledgerJournalTrans.Payment = headerMsg.ETGPAYMTERMS;
+                        ledgerJournalTrans.ETGIntegrationContractNumber = headerMsg.ETGCONTRACTNUMBER;
+                        ledgerJournalTrans.ExchRate = this.validateExchRate(headerMsg.RecId);
+                        ledgerJournalTrans.PostingProfile = "GEN";
+                        ledgerJournalTrans.TaxItemGroup = "ALL";
+                        ledgerJournalTrans.TaxGroup = linesMsg.ETGTAXCODE;
+                        ledgerJournalTrans.taxAmountJournal();
+
+                        select * from custTable where custTable.ETGCxcCounterPartyMapping == headerMsg.ETGCOUNTERPARTY;
+                        ledgerJournalTrans.AccountType = LedgerJournalACType::Cust;
+                        ledgerDim = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(custTable.AccountNum, LedgerJournalACType::Cust);
+                        ledgerJournalTrans.LedgerDimension = ledgerDim;
+                        mainAccount = null;
+
+                        if(headerMsg.ETGDOCUMENTCAUSE == "washout Invoice"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Washout Correction"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Bypass Invoice"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Circle Invoice")
+                        {
+                            ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+
+                            select firstonly integrationDocumentCause
+                               where integrationDocumentCause.ETGDocumentCause == headerMsg.ETGDOCUMENTCAUSE;
+                            
+                            mainAccount = integrationDocumentCause.ETGLedgerCode;
+                        }
+                        else
+                        {
+                            if((mainAccount == "") &&  (linesMsg.ETGLINETYPE == "Inventory" || linesMsg.ETGLINETYPE == "Financial"))
+                            {
+                                inventTableLoc = InventTable::find(linesMsg.ETGCOMMODITY);
+                                select * from custTableLoc where custTableLoc.AccountNum == custTable.AccountNum;
+
+                                select * from inventPosting where inventPosting.ItemRelation == inventTableLoc.itemGroupId()
+                                && inventPosting.InventAccountType == InventAccountType::SalesRevenue
+                                && inventPosting.CustVendRelation == custTableLoc.CustGroup
+                                && inventPosting.ItemCode == InventPostingItemCode::GroupId
+                                && inventPosting.CustVendCode == TableGroupAll::GroupId;
+                                if(inventPosting)
+                                {
+                                    ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                    mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(inventPosting.LedgerDimension).MainAccountId;
+                                }
+                                else if(!inventPosting)
+                                {
+                                    select * from inventPostingLoc where inventPostingLoc.ItemRelation == inventTableLoc.itemGroupId()
+                                    && inventPostingLoc.InventAccountType == InventAccountType::SalesRevenue
+                                    && inventPostingLoc.CustVendRelation == ""
+                                    && inventPostingLoc.ItemCode == InventPostingItemCode::GroupId
+                                    && inventPostingLoc.CustVendCode == TableGroupAll::All;
+                                    if(inventPostingLoc)
+                                    {
+                                        ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                        mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(inventPostingLoc.LedgerDimension).MainAccountId;
+                                    }
+                                }
+                            }
+                            else if((mainAccount == "") && (linesMsg.ETGLINETYPE  == "MiscCharges"))
+                            {
+                                select * from vendPaymFee
+                                    where vendPaymFee.FeeId == linesMsg.ETGCOSTCODE;
+                                if(vendPaymFee)
+                                {
+                                    ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                    mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(vendPaymFee.LedgerDimension).MainAccountId;
+                                }
+                            }
+                        }
+                        DimensionDynamicAccount ledgerDimension;
+                        container cont = [businessUnitMap.ETGERPVerticle,
+                                          businessUnitMap.ETGERPBusinessUnit,
+                                          "",linesMsg.ETGCOMMODITY, "","","", "",
+                                          costCenterMap.ETGERPCostCenter,"",""];
+                        ledgerDimension = this.validGenerateLedgerDimension(mainAccount, cont);
+                        ledgerJournalTrans.OffsetLedgerDimension = ledgerDimension;
+                        ledgerJournalTrans.DefaultDimension = this.createDefaultDimension(businessUnitMap.ETGERPVerticle,businessUnitMap.ETGERPBusinessUnit,costCenterMap.ETGERPCostCenter,linesMsg.ETGCOMMODITY);
+                        ledgerJournalTrans.insert();
+                    }
+                    select * from ledgerJournalTableVal
+                        where ledgerJournalTableVal.JournalNum == ledgerJournalTable.JournalNum;
+                    if(ledgerJournalTableVal.Posted == NoYes::No)
+                    {
+                        LedgerJournalCheckPost journalCheckPost;
+                        journalCheckPost = LedgerJournalCheckPost::newLedgerJournalTable(ledgerJournalTableVal, NoYes::Yes);
+                        if(journalCheckPost.validate())
+                        {
+                            journalCheckPost.run();
+                        }
+                    }
+                    headerMsg.ETGIntegrationsStatus = ETGIntegrationStatus::Processed;
+                    headerMsg.update();
+                    ttscommit;
+                }
+            }
+        }
+        catch(Exception::Error)
+        {
+            SysInfoLogEnumerator infoLogEnum;
+            SysInfologMessageStruct infoMessageStruct;
+            infoLogEnum = SysInfoLogEnumerator::newData(infolog.infologData());
+            while(infoLogEnum.moveNext())
+            {
+                infoMessageStruct = SysInfologMessageStruct::construct(infoLogEnum.currentMessage());
+                integrationMessage = integrationMessage + infoMessageStruct.message() + '\n';
+            }
+        }
+        if(integrationMessage != "")
+        {
+            return integrationMessage;
+        }
+        else
+        {
+            return "";
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>PostARCN_MultiLines</Name>
+				<Source><![CDATA[
+    public str PostARCN_MultiLines(str _ARAPRef)
+    {
+        str arAPRef = _ARAPRef;
+        ETG_ARAP_MSGHEADER headerMsg;
+        ETG_ARAP_MSGLINES linesMsg;
+        LedgerJournalTable ledgerJournalTable, ledgerJournalTableVal;
+        LedgerJournalTrans ledgerJournalTrans;
+        LedgerJournalName ledgerJournalName;
+        CustTable custTable, custTableLoc;
+        VendTable vendTable;
+        NumberSeq numberseq;
+        Voucher voucher;
+        DimensionDynamicAccount ledgerDim;
+        str integrationMessage;
+        ETGIntegrationJournalTypes journalTypes;
+        ETG_CXCERPBusinessUnitMapping businessUnitMap;
+        ETG_CXCERPCostCenterMapping costCenterMap;
+        InventTable inventTableLoc;
+        InventPosting inventPosting, inventPostingLoc;
+        ETGIntegrationDocumentCause integrationDocumentCause;
+        VendPaymFee vendPaymFee;
+        str mainAccount;
+
+        try
+        {
+            ttsbegin;
+            select forupdate headerMsg where headerMsg.ETGARAPREF == arAPRef
+            && headerMsg.ETGIntegrationsStatus == ETGIntegrationStatus::Unprocessed;
+
+            changecompany(headerMsg.ETGLegalEntity)
+            {
+                select * from journalTypes
+                  where journalTypes.ETGDocuType == headerMsg.ETGDocuType;
+                select firstonly ledgerJournalName
+                  where ledgerJournalName.JournalName == journalTypes.ETGJournalType;
+                select firstonly businessUnitMap
+                  where businessUnitMap.ETGCXCProfitCenter == headerMsg.ETGPROFITCENTERGR;
+                select firstonly costCenterMap
+                  where costCenterMap.ETGCXCProfitCenter == headerMsg.ETGPROFITCENTERGR;
+                // Header
+                ledgerJournalTable = null;
+                ledgerJournalTable.company(headerMsg.ETGLegalEntity);
+                ledgerJournalTable.JournalName = ledgerJournalName.JournalName;
+                ledgerJournalTable.initFromLedgerJournalName();
+                ledgerJournalTable.NumberSequenceTable = ledgerJournalName.NumberSequenceTable;
+                ledgerJournalTable.insert();
+                if (ledgerJournalTable.RecId)
+                {
+                   while select * from linesMsg
+                 where linesMsg.AxIntegrationHeaderRecId == headerMsg.AXHeaderRecId
+                    {
+                        // Line
+                        ledgerJournalTrans = null;
+                        ledgerJournalTrans.Company = headerMsg.ETGLegalEntity;
+                        ledgerJournalTrans.JournalNum = ledgerJournalTable.JournalNum;
+                        ledgerJournalTrans.TransDate = str2Date(headerMsg.AXDocDate, 321);
+                        ledgerJournalTrans.DocumentDate = str2Date(headerMsg.AXDocDate, 321);
+                        ledgerJournalTrans.Due = str2Date(headerMsg.AXDueDate, 321);
+                        ledgerJournalTrans.LineNum = LedgerJournalTrans::lastLineNum(ledgerJournalTrans.JournalNum);
+
+                        voucher = new JournalVoucherNum(JournalTableData::newTable(ledgerJournalTable)).getNew(true);
+                        ledgerJournalTrans.Voucher = voucher;
+                        ledgerJournalTrans.CurrencyCode = linesMsg.ETGCURRENCY;
+                        ledgerJournalTrans.Txt = linesMsg.ETGDESCRIPTION + "QTY" + headerMsg.AXTotalQty;
+                        ledgerJournalTrans.Qty = str2Num(headerMsg.AXTotalQty);
+                        ledgerJournalTrans.AmountCurCredit = abs(str2Num(linesMsg.AxAmount));
+                        ledgerJournalTrans.Invoice = headerMsg.ETGARAPREF;
+                        ledgerJournalTrans.Payment = headerMsg.ETGPAYMTERMS;
+                        ledgerJournalTrans.ETGIntegrationContractNumber = headerMsg.ETGCONTRACTNUMBER;
+                        ledgerJournalTrans.ExchRate = this.validateExchRate(headerMsg.RecId);
+                        ledgerJournalTrans.PostingProfile = "GEN";
+                        ledgerJournalTrans.TaxItemGroup = "ALL";
+                        ledgerJournalTrans.TaxGroup = linesMsg.ETGTAXCODE;
+                        ledgerJournalTrans.taxAmountJournal();
+
+                        select * from custTable where custTable.ETGCxcCounterPartyMapping == headerMsg.ETGCOUNTERPARTY;
+                        ledgerJournalTrans.AccountType = LedgerJournalACType::Cust;
+                        ledgerDim = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(custTable.AccountNum, LedgerJournalACType::Cust);
+                        ledgerJournalTrans.LedgerDimension = ledgerDim;
+                        mainAccount = null;
+
+                        if(headerMsg.ETGDOCUMENTCAUSE == "washout Invoice"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Washout Correction"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Bypass Invoice"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Circle Invoice")
+                        {
+                            ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+
+                            select firstonly integrationDocumentCause
+                               where integrationDocumentCause.ETGDocumentCause == headerMsg.ETGDOCUMENTCAUSE;
+                            
+                            mainAccount = integrationDocumentCause.ETGLedgerCode;
+                        }
+                        else
+                        {
+                            if((mainAccount == "") &&  (linesMsg.ETGLINETYPE == "Inventory" || linesMsg.ETGLINETYPE == "Financial"))
+                            {
+                                inventTableLoc = InventTable::find(linesMsg.ETGCOMMODITY);
+                                select * from custTableLoc where custTableLoc.AccountNum == custTable.AccountNum;
+
+                                select * from inventPosting where inventPosting.ItemRelation == inventTableLoc.itemGroupId()
+                                && inventPosting.InventAccountType == InventAccountType::SalesRevenue
+                                && inventPosting.CustVendRelation == custTableLoc.CustGroup
+                                && inventPosting.ItemCode == InventPostingItemCode::GroupId
+                                && inventPosting.CustVendCode == TableGroupAll::GroupId;
+                                if(inventPosting)
+                                {
+                                    ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                    mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(inventPosting.LedgerDimension).MainAccountId;
+                                }
+                                else if(!inventPosting)
+                                {
+                                    select * from inventPostingLoc where inventPostingLoc.ItemRelation == inventTableLoc.itemGroupId()
+                                    && inventPostingLoc.InventAccountType == InventAccountType::SalesRevenue
+                                    && inventPostingLoc.CustVendRelation == ""
+                                    && inventPostingLoc.ItemCode == InventPostingItemCode::GroupId
+                                    && inventPostingLoc.CustVendCode == TableGroupAll::All;
+                                    if(inventPostingLoc)
+                                    {
+                                        ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                        mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(inventPostingLoc.LedgerDimension).MainAccountId;
+                                    }
+                                }
+                            }
+                            else if((mainAccount == "") && (linesMsg.ETGLINETYPE  == "MiscCharges"))
+                            {
+                                select * from vendPaymFee
+                                    where vendPaymFee.FeeId == linesMsg.ETGCOSTCODE;
+                                if(vendPaymFee)
+                                {
+                                    ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                    mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(vendPaymFee.LedgerDimension).MainAccountId;
+                                }
+                            }
+                        }
+                        DimensionDynamicAccount ledgerDimension;
+                        container cont = [businessUnitMap.ETGERPVerticle,
+                                          businessUnitMap.ETGERPBusinessUnit,
+                                          "",linesMsg.ETGCOMMODITY, "","","", "",
+                                          costCenterMap.ETGERPCostCenter,"",""];
+                        ledgerDimension = this.validGenerateLedgerDimension(mainAccount, cont);
+                        ledgerJournalTrans.OffsetLedgerDimension = ledgerDimension;
+                        ledgerJournalTrans.DefaultDimension = this.createDefaultDimension(businessUnitMap.ETGERPVerticle,businessUnitMap.ETGERPBusinessUnit,costCenterMap.ETGERPCostCenter,linesMsg.ETGCOMMODITY);
+                        ledgerJournalTrans.insert();
+                    }
+                    select * from ledgerJournalTableVal
+                        where ledgerJournalTableVal.JournalNum == ledgerJournalTable.JournalNum;
+                    if(ledgerJournalTableVal.Posted == NoYes::No)
+                    {
+                        LedgerJournalCheckPost journalCheckPost;
+                        journalCheckPost = LedgerJournalCheckPost::newLedgerJournalTable(ledgerJournalTableVal, NoYes::Yes);
+                        if(journalCheckPost.validate())
+                        {
+                            journalCheckPost.run();
+                        }
+                    }
+                    headerMsg.ETGIntegrationsStatus = ETGIntegrationStatus::Processed;
+                    headerMsg.update();
+                    ttscommit;
+                }
+            }
+        }
+        catch(Exception::Error)
+        {
+            SysInfoLogEnumerator infoLogEnum;
+            SysInfologMessageStruct infoMessageStruct;
+            infoLogEnum = SysInfoLogEnumerator::newData(infolog.infologData());
+            while(infoLogEnum.moveNext())
+            {
+                infoMessageStruct = SysInfologMessageStruct::construct(infoLogEnum.currentMessage());
+                integrationMessage = integrationMessage + infoMessageStruct.message() + '\n';
+            }
+        }
+        if(integrationMessage != "")
+        {
+            return integrationMessage;
+        }
+        else
+        {
+            return "";
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>PostARDN</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name = "_ARAPRef"></param>
+    /// <returns></returns>
+    public str PostARDN(str _ARAPRef)
+    {
+        str arAPRef = _ARAPRef;
+        ETG_ARAP_MSGHEADER headerMsg;
+        ETG_ARAP_MSGLINES linesMsg;
+        LedgerJournalTable ledgerJournalTable, ledgerJournalTableVal;
+        LedgerJournalTrans ledgerJournalTrans;
+        LedgerJournalName ledgerJournalName;
+        CustTable custTable, custTableLoc;
+        VendTable vendTable;
+        NumberSeq numberseq;
+        Voucher voucher;
+        DimensionDynamicAccount ledgerDim;
+        str integrationMessage;
+        ETGIntegrationJournalTypes journalTypes;
+        ETG_CXCERPBusinessUnitMapping businessUnitMap;
+        ETG_CXCERPCostCenterMapping costCenterMap;
+        InventTable inventTableLoc;
+        InventPosting inventPosting, inventPostingLoc;
+        ETGIntegrationDocumentCause integrationDocumentCause;
+        VendPaymFee vendPaymFee;
+        str mainAccount;
+
+        try
+        {
+            ttsbegin;
+            select forupdate headerMsg where headerMsg.ETGARAPREF == arAPRef
+            && headerMsg.ETGIntegrationsStatus == ETGIntegrationStatus::Unprocessed;
+
+            changecompany(headerMsg.ETGLegalEntity)
+            {
+                select * from journalTypes
+                  where journalTypes.ETGDocuType == headerMsg.ETGDocuType;
+                select firstonly ledgerJournalName
+                  where ledgerJournalName.JournalName == journalTypes.ETGJournalType;
+                select firstonly businessUnitMap
+                  where businessUnitMap.ETGCXCProfitCenter == headerMsg.ETGPROFITCENTERGR;
+                select firstonly costCenterMap
+                  where costCenterMap.ETGCXCProfitCenter == headerMsg.ETGPROFITCENTERGR;
+                // Header
+                ledgerJournalTable = null;
+                ledgerJournalTable.company(headerMsg.ETGLegalEntity);
+                ledgerJournalTable.JournalName = ledgerJournalName.JournalName;
+                ledgerJournalTable.initFromLedgerJournalName();
+                ledgerJournalTable.NumberSequenceTable = ledgerJournalName.NumberSequenceTable;
+                ledgerJournalTable.insert();
+                if (ledgerJournalTable.RecId)
+                {
+                     select * from linesMsg
+                 where linesMsg.AxIntegrationHeaderRecId == headerMsg.AXHeaderRecId;
+                    {
+                        // Line
+                        ledgerJournalTrans = null;
+                        ledgerJournalTrans.Company = headerMsg.ETGLegalEntity;
+                        ledgerJournalTrans.JournalNum = ledgerJournalTable.JournalNum;
+                        ledgerJournalTrans.TransDate = str2Date(headerMsg.AXDocDate, 321);
+                        ledgerJournalTrans.DocumentDate = str2Date(headerMsg.AXDocDate, 321);
+                        ledgerJournalTrans.Due = str2Date(headerMsg.AXDueDate, 321);
+                        ledgerJournalTrans.LineNum = LedgerJournalTrans::lastLineNum(ledgerJournalTrans.JournalNum);
+
+                        voucher = new JournalVoucherNum(JournalTableData::newTable(ledgerJournalTable)).getNew(true);
+                        ledgerJournalTrans.Voucher = voucher;
+                        ledgerJournalTrans.CurrencyCode = linesMsg.ETGCURRENCY;
+                        ledgerJournalTrans.Txt = linesMsg.ETGDESCRIPTION + "QTY" + headerMsg.AXTotalQty;
+                        ledgerJournalTrans.Qty = str2Num(headerMsg.AXTotalQty);                        
+                        ledgerJournalTrans.AmountCurDebit = abs(str2Num(headerMsg.AXNetAmount));
+                        ledgerJournalTrans.Invoice = headerMsg.ETGARAPREF;
+                        ledgerJournalTrans.Payment = headerMsg.ETGPAYMTERMS;
+                        ledgerJournalTrans.ETGIntegrationContractNumber = headerMsg.ETGCONTRACTNUMBER;
+                        ledgerJournalTrans.ExchRate = this.validateExchRate(headerMsg.RecId);
+                        ledgerJournalTrans.PostingProfile = "GEN";
+                        ledgerJournalTrans.TaxItemGroup = "ALL";
+                        ledgerJournalTrans.TaxGroup = linesMsg.ETGTAXCODE;
+                        ledgerJournalTrans.taxAmountJournal();
+
+                        select * from custTable where custTable.ETGCxcCounterPartyMapping == headerMsg.ETGCOUNTERPARTY;
+                        ledgerJournalTrans.AccountType = LedgerJournalACType::Cust;
+                        ledgerDim = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(custTable.AccountNum, LedgerJournalACType::Cust);
+                        ledgerJournalTrans.LedgerDimension = ledgerDim;
+                        mainAccount = null;
+
+                        if(headerMsg.ETGDOCUMENTCAUSE == "washout Invoice"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Washout Correction"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Bypass Invoice"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Circle Invoice")
+                        {
+                            ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+
+                            select firstonly integrationDocumentCause
+                              where integrationDocumentCause.ETGDocumentCause == headerMsg.ETGDOCUMENTCAUSE;
+                            mainAccount = integrationDocumentCause.ETGLedgerCode;
+                        }
+                        else
+                        {
+                            if((mainAccount == "") && (linesMsg.ETGLINETYPE == "Inventory" || linesMsg.ETGLINETYPE == "Financial"))
+                            {
+                                inventTableLoc = InventTable::find(linesMsg.ETGCOMMODITY);
+                                select * from custTableLoc where custTableLoc.AccountNum == custTable.AccountNum;
+
+                                select * from inventPosting where inventPosting.ItemRelation == inventTableLoc.itemGroupId()
+                                    && inventPosting.InventAccountType == InventAccountType::SalesRevenue
+                                    && inventPosting.CustVendRelation == custTableLoc.CustGroup
+                                    && inventPosting.ItemCode == InventPostingItemCode::GroupId
+                                    && inventPosting.CustVendCode == TableGroupAll::GroupId;
+                                if(inventPosting)
+                                {
+                                    ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                    mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(inventPosting.LedgerDimension).MainAccountId;
+                                }
+                                else if(!inventPosting)
+                                {
+                                    select * from inventPostingLoc where inventPostingLoc.ItemRelation == inventTableLoc.itemGroupId()
+                                        && inventPostingLoc.InventAccountType == InventAccountType::SalesRevenue
+                                        && inventPostingLoc.CustVendRelation == ""
+                                        && inventPostingLoc.ItemCode == InventPostingItemCode::GroupId
+                                        && inventPostingLoc.CustVendCode == TableGroupAll::All;
+                                    if(inventPostingLoc)
+                                    {
+                                        ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                        mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(inventPostingLoc.LedgerDimension).MainAccountId;
+                                    }
+                                    else
+                                    {
+                                        Info(strFmt("Ledger account is not available for the Commodity group %1", linesMsg.ETGCOMMODITY));
+                                    }
+                                }
+                            }
+                            else if((mainAccount == "") && (linesMsg.ETGLINETYPE  == "MiscCharges"))
+                            {
+                                select * from vendPaymFee
+                                    where vendPaymFee.FeeId == linesMsg.ETGCOSTCODE;
+                                if(vendPaymFee)
+                                {
+                                    ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                    mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(vendPaymFee.LedgerDimension).MainAccountId;
+                                }
+                            }
+                        }
+                        DimensionDynamicAccount ledgerDimension;
+                        container cont = [businessUnitMap.ETGERPVerticle,
+                                          businessUnitMap.ETGERPBusinessUnit,
+                                          "",linesMsg.ETGCOMMODITY, "","","", "",
+                                          costCenterMap.ETGERPCostCenter,"",""];
+                        ledgerDimension = this.validGenerateLedgerDimension(mainAccount, cont);
+                        ledgerJournalTrans.OffsetLedgerDimension = ledgerDimension;
+                        ledgerJournalTrans.DefaultDimension = this.createDefaultDimension(businessUnitMap.ETGERPVerticle,businessUnitMap.ETGERPBusinessUnit,costCenterMap.ETGERPCostCenter,linesMsg.ETGCOMMODITY);
+                        ledgerJournalTrans.insert();
+                    }
+                    select * from ledgerJournalTableVal
+                        where ledgerJournalTableVal.JournalNum == ledgerJournalTable.JournalNum;
+                    if(ledgerJournalTableVal.Posted == NoYes::No)
+                    {
+                        LedgerJournalCheckPost journalCheckPost;
+                        journalCheckPost = LedgerJournalCheckPost::newLedgerJournalTable(ledgerJournalTableVal, NoYes::Yes);
+                        if(journalCheckPost.validate())
+                        {
+                            journalCheckPost.run();
+                        }
+                    }
+                    headerMsg.ETGIntegrationsStatus = ETGIntegrationStatus::Processed;
+                    headerMsg.update();
+                    ttscommit;
+                }
+            }
+        }
+        catch(Exception::Error)
+        {
+            SysInfoLogEnumerator infoLogEnum;
+            SysInfologMessageStruct infoMessageStruct;
+            infoLogEnum = SysInfoLogEnumerator::newData(infolog.infologData());
+            while(infoLogEnum.moveNext())
+            {
+                infoMessageStruct = SysInfologMessageStruct::construct(infoLogEnum.currentMessage());
+                integrationMessage = integrationMessage + infoMessageStruct.message() + '\n';
+            }
+        }
+        if(integrationMessage != "")
+        {
+            return integrationMessage;
+        }
+        else
+        {
+            return "";
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>PostARDN_MultiLines</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name = "_ARAPRef"></param>
+    /// <returns></returns>
+    public str PostARDN_MultiLines(str _ARAPRef)
+    {
+        str arAPRef = _ARAPRef;
+        ETG_ARAP_MSGHEADER headerMsg;
+        ETG_ARAP_MSGLINES linesMsg;
+        LedgerJournalTable ledgerJournalTable, ledgerJournalTableVal;
+        LedgerJournalTrans ledgerJournalTrans;
+        LedgerJournalName ledgerJournalName;
+        CustTable custTable, custTableLoc;
+        VendTable vendTable;
+        NumberSeq numberseq;
+        Voucher voucher;
+        DimensionDynamicAccount ledgerDim;
+        str integrationMessage;
+        ETGIntegrationJournalTypes journalTypes;
+        ETG_CXCERPBusinessUnitMapping businessUnitMap;
+        ETG_CXCERPCostCenterMapping costCenterMap;
+        InventTable inventTableLoc;
+        InventPosting inventPosting, inventPostingLoc;
+        ETGIntegrationDocumentCause integrationDocumentCause;
+        VendPaymFee vendPaymFee;
+        str mainAccount;
+
+        try
+        {
+            ttsbegin;
+            select forupdate headerMsg where headerMsg.ETGARAPREF == arAPRef
+            && headerMsg.ETGIntegrationsStatus == ETGIntegrationStatus::Unprocessed;
+
+            changecompany(headerMsg.ETGLegalEntity)
+            {
+                select * from journalTypes
+                  where journalTypes.ETGDocuType == headerMsg.ETGDocuType;
+                select firstonly ledgerJournalName
+                  where ledgerJournalName.JournalName == journalTypes.ETGJournalType;
+                select firstonly businessUnitMap
+                  where businessUnitMap.ETGCXCProfitCenter == headerMsg.ETGPROFITCENTERGR;
+                select firstonly costCenterMap
+                  where costCenterMap.ETGCXCProfitCenter == headerMsg.ETGPROFITCENTERGR;
+                // Header
+                ledgerJournalTable = null;
+                ledgerJournalTable.company(headerMsg.ETGLegalEntity);
+                ledgerJournalTable.JournalName = ledgerJournalName.JournalName;
+                ledgerJournalTable.initFromLedgerJournalName();
+                ledgerJournalTable.NumberSequenceTable = ledgerJournalName.NumberSequenceTable;
+                ledgerJournalTable.insert();
+                if (ledgerJournalTable.RecId)
+                {
+                   while select * from linesMsg
+                 where linesMsg.AxIntegrationHeaderRecId == headerMsg.AXHeaderRecId
+                    {
+                        // Line
+                        ledgerJournalTrans = null;
+                        ledgerJournalTrans.Company = headerMsg.ETGLegalEntity;
+                        ledgerJournalTrans.JournalNum = ledgerJournalTable.JournalNum;
+                        ledgerJournalTrans.TransDate = str2Date(headerMsg.AXDocDate, 321);
+                        ledgerJournalTrans.DocumentDate = str2Date(headerMsg.AXDocDate, 321);
+                        ledgerJournalTrans.Due = str2Date(headerMsg.AXDueDate, 321);
+                        ledgerJournalTrans.LineNum = LedgerJournalTrans::lastLineNum(ledgerJournalTrans.JournalNum);
+
+                        voucher = new JournalVoucherNum(JournalTableData::newTable(ledgerJournalTable)).getNew(true);
+                        ledgerJournalTrans.Voucher = voucher;
+                        ledgerJournalTrans.CurrencyCode = linesMsg.ETGCURRENCY;
+                        ledgerJournalTrans.Txt = linesMsg.ETGDESCRIPTION + "QTY" + headerMsg.AXTotalQty;
+                        ledgerJournalTrans.Qty = str2Num(headerMsg.AXTotalQty);
+                        ledgerJournalTrans.AmountCurDebit = abs(str2Num(linesMsg.AxAmount));
+                        ledgerJournalTrans.Invoice = headerMsg.ETGARAPREF;
+                        ledgerJournalTrans.Payment = headerMsg.ETGPAYMTERMS;
+                        ledgerJournalTrans.ETGIntegrationContractNumber = headerMsg.ETGCONTRACTNUMBER;
+                        ledgerJournalTrans.ExchRate = this.validateExchRate(headerMsg.RecId);
+                        ledgerJournalTrans.PostingProfile = "GEN";
+                        ledgerJournalTrans.TaxItemGroup = "ALL";
+                        ledgerJournalTrans.TaxGroup = linesMsg.ETGTAXCODE;
+                        ledgerJournalTrans.taxAmountJournal();
+
+                        select * from custTable where custTable.ETGCxcCounterPartyMapping == headerMsg.ETGCOUNTERPARTY;
+                        ledgerJournalTrans.AccountType = LedgerJournalACType::Cust;
+                        ledgerDim = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(custTable.AccountNum, LedgerJournalACType::Cust);
+                        ledgerJournalTrans.LedgerDimension = ledgerDim;
+                        mainAccount = null;
+
+                        if(headerMsg.ETGDOCUMENTCAUSE == "washout Invoice"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Washout Correction"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Bypass Invoice"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Circle Invoice")
+                        {
+                            ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+
+                            select firstonly integrationDocumentCause
+                              where integrationDocumentCause.ETGDocumentCause == headerMsg.ETGDOCUMENTCAUSE;
+                            mainAccount = integrationDocumentCause.ETGLedgerCode;
+                        }
+                        else
+                        {
+                            if((mainAccount == "") && (linesMsg.ETGLINETYPE == "Inventory" || linesMsg.ETGLINETYPE == "Financial"))
+                            {
+                                inventTableLoc = InventTable::find(linesMsg.ETGCOMMODITY);
+                                select * from custTableLoc where custTableLoc.AccountNum == custTable.AccountNum;
+
+                                select * from inventPosting where inventPosting.ItemRelation == inventTableLoc.itemGroupId()
+                                    && inventPosting.InventAccountType == InventAccountType::SalesRevenue
+                                    && inventPosting.CustVendRelation == custTableLoc.CustGroup
+                                    && inventPosting.ItemCode == InventPostingItemCode::GroupId
+                                    && inventPosting.CustVendCode == TableGroupAll::GroupId;
+                                if(inventPosting)
+                                {
+                                    ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                    mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(inventPosting.LedgerDimension).MainAccountId;
+                                }
+                                else if(!inventPosting)
+                                {
+                                    select * from inventPostingLoc where inventPostingLoc.ItemRelation == inventTableLoc.itemGroupId()
+                                        && inventPostingLoc.InventAccountType == InventAccountType::SalesRevenue
+                                        && inventPostingLoc.CustVendRelation == ""
+                                        && inventPostingLoc.ItemCode == InventPostingItemCode::GroupId
+                                        && inventPostingLoc.CustVendCode == TableGroupAll::All;
+                                    if(inventPostingLoc)
+                                    {
+                                        ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                        mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(inventPostingLoc.LedgerDimension).MainAccountId;
+                                    }
+                                    else
+                                    {
+                                        Info(strFmt("Ledger account is not available for the Commodity group %1", linesMsg.ETGCOMMODITY));
+                                    }
+                                }
+                            }
+                            else if((mainAccount == "") && (linesMsg.ETGLINETYPE  == "MiscCharges"))
+                            {
+                                select * from vendPaymFee
+                                    where vendPaymFee.FeeId == linesMsg.ETGCOSTCODE;
+                                if(vendPaymFee)
+                                {
+                                    ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                    mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(vendPaymFee.LedgerDimension).MainAccountId;
+                                }
+                            }
+                        }
+                        DimensionDynamicAccount ledgerDimension;
+                        container cont = [businessUnitMap.ETGERPVerticle,
+                                          businessUnitMap.ETGERPBusinessUnit,
+                                          "",linesMsg.ETGCOMMODITY, "","","", "",
+                                          costCenterMap.ETGERPCostCenter,"",""];
+                        ledgerDimension = this.validGenerateLedgerDimension(mainAccount, cont);
+                        ledgerJournalTrans.OffsetLedgerDimension = ledgerDimension;
+                        ledgerJournalTrans.DefaultDimension = this.createDefaultDimension(businessUnitMap.ETGERPVerticle,businessUnitMap.ETGERPBusinessUnit,costCenterMap.ETGERPCostCenter,linesMsg.ETGCOMMODITY);
+                        ledgerJournalTrans.insert();
+                    }
+                    select * from ledgerJournalTableVal
+                        where ledgerJournalTableVal.JournalNum == ledgerJournalTable.JournalNum;
+                    if(ledgerJournalTableVal.Posted == NoYes::No)
+                    {
+                        LedgerJournalCheckPost journalCheckPost;
+                        journalCheckPost = LedgerJournalCheckPost::newLedgerJournalTable(ledgerJournalTableVal, NoYes::Yes);
+                        if(journalCheckPost.validate())
+                        {
+                            journalCheckPost.run();
+                        }
+                    }
+                    headerMsg.ETGIntegrationsStatus = ETGIntegrationStatus::Processed;
+                    headerMsg.update();
+                    ttscommit;
+                }
+            }
+        }
+        catch(Exception::Error)
+        {
+            SysInfoLogEnumerator infoLogEnum;
+            SysInfologMessageStruct infoMessageStruct;
+            infoLogEnum = SysInfoLogEnumerator::newData(infolog.infologData());
+            while(infoLogEnum.moveNext())
+            {
+                infoMessageStruct = SysInfologMessageStruct::construct(infoLogEnum.currentMessage());
+                integrationMessage = integrationMessage + infoMessageStruct.message() + '\n';
+            }
+        }
+        if(integrationMessage != "")
+        {
+            return integrationMessage;
+        }
+        else
+        {
+            return "";
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>PostAPDN</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name = "_ARAPRef"></param>
+    /// <returns></returns>
+    public str PostAPDN(str _ARAPRef)
+    {
+        str arAPRef = _ARAPRef;
+        ETG_ARAP_MSGHEADER headerMsg;
+        ETG_ARAP_MSGLINES linesMsg;
+        LedgerJournalTable ledgerJournalTable, ledgerJournalTableVal;
+        LedgerJournalTrans ledgerJournalTrans;
+        LedgerJournalName ledgerJournalName;
+        CustTable custTable, custTableLoc;
+        VendTable vendTable, vendTableLoc;
+        NumberSeq numberseq;
+        Voucher voucher;
+        DimensionDynamicAccount ledgerDim;
+        str integrationMessage;
+        ETGIntegrationJournalTypes journalTypes;
+        ETG_CXCERPBusinessUnitMapping businessUnitMap;
+        ETG_CXCERPCostCenterMapping costCenterMap;
+        InventTable inventTableLoc;
+        InventPosting inventPosting, inventPostingLoc;
+        ETGIntegrationDocumentCause integrationDocumentCause;
+        VendPaymFee vendPaymFee;
+        ETGIntegrationCogsLedger cogsLedgerAPDN;
+        str mainAccount;
+
+        try
+        {
+            ttsbegin;
+            select forupdate headerMsg where headerMsg.ETGARAPREF == arAPRef
+            && headerMsg.ETGIntegrationsStatus == ETGIntegrationStatus::Unprocessed;
+
+            changecompany(headerMsg.ETGLegalEntity)
+            {
+                select * from journalTypes
+                   where journalTypes.ETGDocuType == headerMsg.ETGDocuType;
+                select firstonly ledgerJournalName
+                   where ledgerJournalName.JournalName == journalTypes.ETGJournalType;
+                select firstonly businessUnitMap
+                   where businessUnitMap.ETGCXCProfitCenter == headerMsg.ETGPROFITCENTERGR;
+                select firstonly costCenterMap
+                   where costCenterMap.ETGCXCProfitCenter == headerMsg.ETGPROFITCENTERGR;
+                // Header
+                ledgerJournalTable = null;
+                ledgerJournalTable.company(headerMsg.ETGLegalEntity);
+                ledgerJournalTable.JournalName = ledgerJournalName.JournalName;
+                ledgerJournalTable.initFromLedgerJournalName();
+                ledgerJournalTable.NumberSequenceTable = ledgerJournalName.NumberSequenceTable;
+                ledgerJournalTable.insert();
+                if (ledgerJournalTable.RecId)
+                {
+                    while select * from linesMsg
+                 where linesMsg.AxIntegrationHeaderRecId == headerMsg.AXHeaderRecId
+                    {
+                        // Line
+                        ledgerJournalTrans = null;
+                        ledgerJournalTrans.Company = headerMsg.ETGLegalEntity;
+                        ledgerJournalTrans.JournalNum = ledgerJournalTable.JournalNum;
+                        ledgerJournalTrans.TransDate = str2Date(headerMsg.AXDocDate, 321);
+                        ledgerJournalTrans.DocumentDate = str2Date(headerMsg.AXDocDate, 321);
+                        ledgerJournalTrans.Due = str2Date(headerMsg.AXDueDate, 321);
+                        ledgerJournalTrans.LineNum = LedgerJournalTrans::lastLineNum(ledgerJournalTrans.JournalNum);
+
+                        voucher = new JournalVoucherNum(JournalTableData::newTable(ledgerJournalTable)).getNew(true);
+                        ledgerJournalTrans.Voucher = voucher;
+                        ledgerJournalTrans.CurrencyCode = linesMsg.ETGCURRENCY;
+                        ledgerJournalTrans.Txt = linesMsg.ETGDESCRIPTION + "QTY" + headerMsg.AXTotalQty;
+                        ledgerJournalTrans.Qty = str2Num(headerMsg.AXTotalQty);
+
+                        if(str2num(linesMsg.AxAmount) > 0)  
+                        {
+                            ledgerJournalTrans.AmountCurCredit = abs(str2num(linesMsg.AxAmount));
+                            ledgerJournalTrans.AmountCurDebit = 0.00;
+                        }
+                        else if(str2num(linesMsg.AxAmount) < 0)
+                        {
+                            ledgerJournalTrans.AmountCurDebit = abs(str2num(linesMsg.AxAmount));
+                            ledgerJournalTrans.AmountCurCredit = 0.00;
+                        }
+
+                       // ledgerJournalTrans.AmountCurDebit = abs(str2Num(headerMsg.AXNetAmount));
+                        ledgerJournalTrans.Invoice = headerMsg.ETGARAPREF;
+                        ledgerJournalTrans.Payment = headerMsg.ETGPAYMTERMS;
+                        ledgerJournalTrans.ETGIntegrationContractNumber = headerMsg.ETGCONTRACTNUMBER;
+                        ledgerJournalTrans.ExchRate = this.validateExchRate(headerMsg.RecId);
+                        ledgerJournalTrans.PostingProfile = "GEN";
+                        ledgerJournalTrans.TaxItemGroup = "ALL";
+                        ledgerJournalTrans.TaxGroup = linesMsg.ETGTAXCODE;
+                        ledgerJournalTrans.taxAmountJournal();
+
+                        select * from vendTable where vendTable.ETGCxcCounterPartyMapping == headerMsg.ETGCOUNTERPARTY;
+                        ledgerJournalTrans.AccountType = LedgerJournalACType::Vend;
+                        ledgerDim = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(vendTable.AccountNum, LedgerJournalACType::Vend);
+                        ledgerJournalTrans.LedgerDimension = ledgerDim;
+                        mainAccount = null;
+
+                        if(headerMsg.ETGDOCUMENTCAUSE == "washout Invoice"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Washout Correction"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Bypass Invoice"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Circle Invoice")
+                        {
+                            ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+
+                            select firstonly integrationDocumentCause
+                              where integrationDocumentCause.ETGDocumentCause == headerMsg.ETGDOCUMENTCAUSE;
+                            mainAccount = integrationDocumentCause.ETGLedgerCode;
+                        }
+                        else
+                        {
+                            if((mainAccount == "") && (linesMsg.ETGLINETYPE == "Inventory" || linesMsg.ETGLINETYPE == "Financial"))
+                            {
+                                inventTableLoc = InventTable::find(linesMsg.ETGCOMMODITY);
+
+                                select * from cogsLedgerAPDN where cogsLedgerAPDN.CounterPartyGroup == vendTable.VendGroup;
+
+                                if(cogsLedgerAPDN)
+                                {
+                                    ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                    mainAccount = cogsLedgerAPDN.LedgerCode;
+                                }
+                            }
+                            if((mainAccount == "") && (linesMsg.ETGLINETYPE  == "MiscCharges"))
+                            {
+                                select * from vendPaymFee
+                                    where vendPaymFee.FeeId == linesMsg.ETGCOSTCODE;
+                                if(vendPaymFee)
+                                {
+                                    ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                    mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(vendPaymFee.LedgerDimension).MainAccountId;
+                                }
+                            }
+                        }
+                        DimensionDynamicAccount ledgerDimension;
+                        container cont = [businessUnitMap.ETGERPVerticle,
+                                          businessUnitMap.ETGERPBusinessUnit,
+                                          "",linesMsg.ETGCOMMODITY, "","","", "",
+                                          costCenterMap.ETGERPCostCenter,"",""];
+                        ledgerDimension = this.validGenerateLedgerDimension(mainAccount, cont);
+                        ledgerJournalTrans.OffsetLedgerDimension = ledgerDimension;
+                        ledgerJournalTrans.DefaultDimension = this.createDefaultDimension(businessUnitMap.ETGERPVerticle,businessUnitMap.ETGERPBusinessUnit,costCenterMap.ETGERPCostCenter,linesMsg.ETGCOMMODITY);
+                        ledgerJournalTrans.insert();
+                    }
+                    select * from ledgerJournalTableVal
+                        where ledgerJournalTableVal.JournalNum == ledgerJournalTable.JournalNum;
+                    if(ledgerJournalTableVal.Posted == NoYes::No)
+                    {
+                        LedgerJournalCheckPost journalCheckPost;
+                        journalCheckPost = LedgerJournalCheckPost::newLedgerJournalTable(ledgerJournalTableVal, NoYes::Yes);
+                        if(journalCheckPost.validate())
+                        {
+                            journalCheckPost.run();
+                        }
+                    }
+                    headerMsg.ETGIntegrationsStatus = ETGIntegrationStatus::Processed;
+                    headerMsg.update();
+                    ttscommit;
+                }
+            }
+        }
+        catch(Exception::Error)
+        {
+            SysInfoLogEnumerator infoLogEnum;
+            SysInfologMessageStruct infoMessageStruct;
+            infoLogEnum = SysInfoLogEnumerator::newData(infolog.infologData());
+            while(infoLogEnum.moveNext())
+            {
+                infoMessageStruct = SysInfologMessageStruct::construct(infoLogEnum.currentMessage());
+                integrationMessage = integrationMessage + infoMessageStruct.message() + '\n';
+            }
+        }
+        if(integrationMessage != "")
+        {
+            return integrationMessage;
+        }
+        else
+        {
+            return "";
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>PostAPCN</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name = "_ARAPRef"></param>
+    /// <returns></returns>
+    public str PostAPCN(str _ARAPRef)
+    {
+        str arAPRef = _ARAPRef;
+        ETG_ARAP_MSGHEADER headerMsg;
+        ETG_ARAP_MSGLINES linesMsg;
+        LedgerJournalTable ledgerJournalTable, ledgerJournalTableVal;
+        LedgerJournalTrans ledgerJournalTrans;
+        LedgerJournalName ledgerJournalName;
+        CustTable custTable, custTableLoc;
+        VendTable vendTable, vendTableLoc;
+        NumberSeq numberseq;
+        Voucher voucher;
+        DimensionDynamicAccount ledgerDim;
+        str integrationMessage;
+        ETGIntegrationJournalTypes journalTypes;
+        ETG_CXCERPBusinessUnitMapping businessUnitMap;
+        ETG_CXCERPCostCenterMapping costCenterMap;
+        InventTable inventTableLoc;
+        InventPosting inventPosting, inventPostingLoc;
+        ETGIntegrationDocumentCause integrationDocumentCause;
+        VendPaymFee vendPaymFee;
+        ETGIntegrationCogsLedger cogsLedgerAPCN;
+        str mainAccount;
+
+        try
+        {
+            ttsbegin;
+            select forupdate headerMsg where headerMsg.ETGARAPREF == arAPRef
+            && headerMsg.ETGIntegrationsStatus == ETGIntegrationStatus::Unprocessed;
+
+            changecompany(headerMsg.ETGLegalEntity)
+            {
+                select * from journalTypes
+                   where journalTypes.ETGDocuType == headerMsg.ETGDocuType;
+                select firstonly ledgerJournalName
+                   where ledgerJournalName.JournalName == journalTypes.ETGJournalType;
+                select firstonly businessUnitMap
+                   where businessUnitMap.ETGCXCProfitCenter == headerMsg.ETGPROFITCENTERGR;
+                select firstonly costCenterMap
+                   where costCenterMap.ETGCXCProfitCenter == headerMsg.ETGPROFITCENTERGR;
+                // Header
+                ledgerJournalTable = null;
+                ledgerJournalTable.company(headerMsg.ETGLegalEntity);
+                ledgerJournalTable.JournalName = ledgerJournalName.JournalName;
+                ledgerJournalTable.initFromLedgerJournalName();
+                ledgerJournalTable.NumberSequenceTable = ledgerJournalName.NumberSequenceTable;
+                ledgerJournalTable.insert();
+                if (ledgerJournalTable.RecId)
+                {
+                     while select * from linesMsg
+                      where linesMsg.AxIntegrationHeaderRecId == headerMsg.AXHeaderRecId
+                    {
+                        // Line
+                        ledgerJournalTrans = null;
+                        ledgerJournalTrans.Company = headerMsg.ETGLegalEntity;
+                        ledgerJournalTrans.JournalNum = ledgerJournalTable.JournalNum;
+                        ledgerJournalTrans.TransDate = str2Date(headerMsg.AXDocDate, 321);
+                        ledgerJournalTrans.DocumentDate = str2Date(headerMsg.AXDocDate, 321);
+                        ledgerJournalTrans.Due = str2Date(headerMsg.AXDueDate, 321);
+                        ledgerJournalTrans.LineNum = LedgerJournalTrans::lastLineNum(ledgerJournalTrans.JournalNum);
+
+                        voucher = new JournalVoucherNum(JournalTableData::newTable(ledgerJournalTable)).getNew(true);
+                        ledgerJournalTrans.Voucher = voucher;
+                        ledgerJournalTrans.CurrencyCode = linesMsg.ETGCURRENCY;
+                        ledgerJournalTrans.Txt = linesMsg.ETGDESCRIPTION + "QTY" + headerMsg.AXTotalQty;
+                        ledgerJournalTrans.Qty = str2Num(headerMsg.AXTotalQty);
+
+                        if(str2num(linesMsg.AxAmount) > 0)
+                        {
+                            ledgerJournalTrans.AmountCurCredit = abs(str2num(linesMsg.AxAmount));
+                            ledgerJournalTrans.AmountCurDebit = 0.00;
+                        }
+                        else if(str2num(linesMsg.AxAmount) < 0)
+                        {
+                            ledgerJournalTrans.AmountCurDebit = abs(str2num(linesMsg.AxAmount));
+                            ledgerJournalTrans.AmountCurCredit = 0.00;
+                        }
+                      
+                       // ledgerJournalTrans.AmountCurCredit = abs(str2Num(headerMsg.AXNetAmount));
+                        ledgerJournalTrans.Invoice = headerMsg.ETGARAPREF;
+                        ledgerJournalTrans.Payment = headerMsg.ETGPAYMTERMS;
+                        ledgerJournalTrans.ETGIntegrationContractNumber = headerMsg.ETGCONTRACTNUMBER;
+                        ledgerJournalTrans.ExchRate = this.validateExchRate(headerMsg.RecId);
+                        ledgerJournalTrans.PostingProfile = "GEN";
+                        ledgerJournalTrans.TaxItemGroup = "ALL";
+                        ledgerJournalTrans.TaxGroup = linesMsg.ETGTAXCODE;
+                        ledgerJournalTrans.taxAmountJournal();
+
+                        select * from vendTable where vendTable.ETGCxcCounterPartyMapping == headerMsg.ETGCOUNTERPARTY;
+                        ledgerJournalTrans.AccountType = LedgerJournalACType::Vend;
+                        ledgerDim = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(vendTable.AccountNum, LedgerJournalACType::Vend);
+                        ledgerJournalTrans.LedgerDimension = ledgerDim;
+                        mainAccount = null;
+
+                        if(headerMsg.ETGDOCUMENTCAUSE == "washout Invoice"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Washout Correction"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Bypass Invoice"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Circle Invoice")
+                        {
+                            ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                            select firstonly integrationDocumentCause
+                               where integrationDocumentCause.ETGDocumentCause == headerMsg.ETGDOCUMENTCAUSE;
+
+                            mainAccount = integrationDocumentCause.ETGLedgerCode;
+                        }
+                        else
+                        {
+                            if((mainAccount == "") && (linesMsg.ETGLINETYPE == "Inventory" || linesMsg.ETGLINETYPE == "Financial"))
+                            {
+                                inventTableLoc = InventTable::find(linesMsg.ETGCOMMODITY);
+
+                                select * from cogsLedgerAPCN where cogsLedgerAPCN.CounterPartyGroup == vendTable.VendGroup;
+                                if(cogsLedgerAPCN)
+                                {
+                                    ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                    mainAccount = cogsLedgerAPCN.LedgerCode;
+                                }
+                            }
+                            else if((mainAccount == "") && (linesMsg.ETGLINETYPE  == "MiscCharges"))
+                            {
+                                select * from vendPaymFee
+                                where vendPaymFee.FeeId == linesMsg.ETGCOSTCODE;
+                                if(vendPaymFee)
+                                {
+                                    ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                    mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(vendPaymFee.LedgerDimension).MainAccountId;
+                                }
+                            }
+                        }
+                        DimensionDynamicAccount ledgerDimension;
+                        container cont = [businessUnitMap.ETGERPVerticle,
+                                          businessUnitMap.ETGERPBusinessUnit,
+                                          "",linesMsg.ETGCOMMODITY, "","","", "",
+                                          costCenterMap.ETGERPCostCenter,"",""];
+                        ledgerDimension = this.validGenerateLedgerDimension(mainAccount, cont);
+                        ledgerJournalTrans.OffsetLedgerDimension = ledgerDimension;
+                        ledgerJournalTrans.DefaultDimension = this.createDefaultDimension(businessUnitMap.ETGERPVerticle,businessUnitMap.ETGERPBusinessUnit,costCenterMap.ETGERPCostCenter,linesMsg.ETGCOMMODITY);
+                        ledgerJournalTrans.insert();
+                    }
+                    select * from ledgerJournalTableVal
+                        where ledgerJournalTableVal.JournalNum == ledgerJournalTable.JournalNum;
+                    if(ledgerJournalTableVal.Posted == NoYes::No)
+                    {
+                        LedgerJournalCheckPost journalCheckPost;
+                        journalCheckPost = LedgerJournalCheckPost::newLedgerJournalTable(ledgerJournalTableVal, NoYes::Yes);
+                        if(journalCheckPost.validate())
+                        {
+                            journalCheckPost.run();
+                        }
+                    }
+                    headerMsg.ETGIntegrationsStatus = ETGIntegrationStatus::Processed;
+                    headerMsg.update();
+                    ttscommit;
+                }
+            }
+        }
+        catch(Exception::Error)
+        {
+            SysInfoLogEnumerator infoLogEnum;
+            SysInfologMessageStruct infoMessageStruct;
+
+            infoLogEnum = SysInfoLogEnumerator::newData(infolog.infologData());
+            while(infoLogEnum.moveNext())
+            {
+                infoMessageStruct = SysInfologMessageStruct::construct(infoLogEnum.currentMessage());
+                integrationMessage = integrationMessage + infoMessageStruct.message() + '\n';
+            }
+        }
+        if(integrationMessage != "")
+        {
+            return integrationMessage;
+        }
+        else
+        {
+            return "";
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postInvoice_MultiLines</Name>
+				<Source><![CDATA[
+    public str postInvoice_MultiLines(str _ARAPRef)
+    {
+        str arAPRef = _ARAPRef;
+        ETG_ARAP_MSGHEADER headerMsg;
+        ETG_ARAP_MSGLINES linesMsg;
+        LedgerJournalTable ledgerJournalTable, ledgerJournalTableVal;
+        LedgerJournalTrans ledgerJournalTrans;
+        LedgerJournalName ledgerJournalName;
+        CustTable custTable, custTableLoc;
+        VendTable vendTable;
+        NumberSeq numberseq;
+        Voucher voucher;
+        DimensionDynamicAccount ledgerDim;
+        str integrationMessage;
+        ETGIntegrationJournalTypes journalTypes;
+        ETG_CXCERPBusinessUnitMapping businessUnitMap;
+        ETG_CXCERPCostCenterMapping costCenterMap;
+        InventTable inventTableLoc;
+        InventPosting inventPosting, inventPostingLoc;
+        ETGIntegrationDocumentCause integrationDocumentCause;
+        VendPaymFee vendPaymFee;
+        str mainAccount;
+
+        try
+        {
+            ttsbegin;
+            select forupdate headerMsg where headerMsg.ETGARAPREF == arAPRef
+             && headerMsg.ETGIntegrationsStatus == ETGIntegrationStatus::Unprocessed;
+  
+            changecompany(headerMsg.ETGLegalEntity)
+            {
+                select * from journalTypes
+                   where journalTypes.ETGDocuType == headerMsg.ETGDocuType;
+                select firstonly ledgerJournalName
+                    where ledgerJournalName.JournalName == journalTypes.ETGJournalType;
+                select firstonly businessUnitMap
+                    where businessUnitMap.ETGCXCProfitCenter == headerMsg.ETGPROFITCENTERGR;
+                select firstonly costCenterMap
+                    where costCenterMap.ETGCXCProfitCenter == headerMsg.ETGPROFITCENTERGR;
+                // Header
+                ledgerJournalTable = null;
+                ledgerJournalTable.company(headerMsg.ETGLegalEntity);
+                ledgerJournalTable.JournalName = ledgerJournalName.JournalName;
+                ledgerJournalTable.initFromLedgerJournalName();
+                ledgerJournalTable.NumberSequenceTable = ledgerJournalName.NumberSequenceTable;
+                ledgerJournalTable.insert();
+                if (ledgerJournalTable.RecId)
+                {
+                    while select * from linesMsg
+                        where linesMsg.AxIntegrationHeaderRecId == headerMsg.AXHeaderRecId
+                    {
+                        // Line
+                        ledgerJournalTrans = null;
+                        ledgerJournalTrans.Company = headerMsg.ETGLegalEntity;
+                        ledgerJournalTrans.JournalNum = ledgerJournalTable.JournalNum;
+                        ledgerJournalTrans.TransDate = str2Date(headerMsg.AXDocDate, 321);
+                        ledgerJournalTrans.DocumentDate = str2Date(headerMsg.AXDocDate, 321);
+                        ledgerJournalTrans.Due = str2Date(headerMsg.AXDueDate, 321);
+                        ledgerJournalTrans.LineNum = LedgerJournalTrans::lastLineNum(ledgerJournalTrans.JournalNum);
+
+                        voucher = new JournalVoucherNum(JournalTableData::newTable(ledgerJournalTable)).getNew(true);
+                        ledgerJournalTrans.Voucher = voucher;
+                        ledgerJournalTrans.CurrencyCode = linesMsg.ETGCURRENCY;
+                        ledgerJournalTrans.Txt = linesMsg.ETGDESCRIPTION + "QTY" + headerMsg.AXTotalQty;
+                        ledgerJournalTrans.Qty = str2Num(headerMsg.AXTotalQty);
+
+                        ledgerJournalTrans.AmountCurDebit = abs(str2Num(linesMsg.AxAmount));
+                        ledgerJournalTrans.Invoice = headerMsg.ETGARAPREF;
+                        ledgerJournalTrans.Payment = headerMsg.ETGPAYMTERMS;
+                        ledgerJournalTrans.ETGIntegrationContractNumber = headerMsg.ETGCONTRACTNUMBER;
+                        ledgerJournalTrans.ExchRate = this.validateExchRate(headerMsg.RecId);
+                        ledgerJournalTrans.PostingProfile = "GEN";
+                        ledgerJournalTrans.TaxItemGroup = "ALL";
+                        ledgerJournalTrans.TaxGroup = linesMsg.ETGTAXCODE;
+                        ledgerJournalTrans.taxAmountJournal();
+
+                        select * from custTable where custTable.ETGCxcCounterPartyMapping == headerMsg.ETGCOUNTERPARTY;
+                        ledgerJournalTrans.AccountType = LedgerJournalACType::Cust;
+                        ledgerDim = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(custTable.AccountNum, LedgerJournalACType::Cust);
+                        ledgerJournalTrans.LedgerDimension = ledgerDim;
+                        mainAccount = null;
+
+                        if(headerMsg.ETGDOCUMENTCAUSE == "washout Invoice"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Washout Correction"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Bypass Invoice"
+                            ||headerMsg.ETGDOCUMENTCAUSE == "Circle Invoice")
+                        {
+                            ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+
+                            select firstonly integrationDocumentCause
+                            where integrationDocumentCause.ETGDocumentCause == headerMsg.ETGDOCUMENTCAUSE;
+                            
+                            mainAccount = integrationDocumentCause.ETGLedgerCode;
+                        }
+                        else
+                        {
+                            if((mainAccount == "") && (linesMsg.ETGLINETYPE == "Inventory" || linesMsg.ETGLINETYPE == "Financial"))
+                            {
+                                inventTableLoc = InventTable::find(linesMsg.ETGCOMMODITY);
+                                select * from custTableLoc where custTableLoc.AccountNum == custTable.AccountNum;
+
+                                select * from inventPosting where inventPosting.ItemRelation == inventTableLoc.itemGroupId()
+                                    && inventPosting.InventAccountType == InventAccountType::SalesRevenue
+                                    && inventPosting.CustVendRelation == custTableLoc.CustGroup
+                                    && inventPosting.ItemCode == InventPostingItemCode::GroupId
+                                    && inventPosting.CustVendCode == TableGroupAll::GroupId;
+                                if(inventPosting)
+                                {
+                                    ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                    mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(inventPosting.LedgerDimension).MainAccountId;
+                                }
+                                if(!inventPosting)
+                                {
+                                    select * from inventPostingLoc where inventPostingLoc.ItemRelation == inventTableLoc.itemGroupId()
+                                        && inventPostingLoc.InventAccountType == InventAccountType::SalesRevenue
+                                        && inventPostingLoc.CustVendRelation == ""
+                                        && inventPostingLoc.ItemCode == InventPostingItemCode::GroupId
+                                        && inventPostingLoc.CustVendCode == TableGroupAll::All;
+                                    if(inventPostingLoc)
+                                    {
+                                        ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                        mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(inventPostingLoc.LedgerDimension).MainAccountId;
+                                    }
+                                }
+                            }
+                            else if((mainAccount == "") && (linesMsg.ETGLINETYPE  == "MiscCharges"))
+                            {
+                                select * from vendPaymFee
+                                where vendPaymFee.FeeId == linesMsg.ETGCOSTCODE;
+                                if(vendPaymFee)
+                                {
+                                    ledgerJournalTrans.OffsetAccountType = LedgerJournalACType::Ledger;
+                                    mainAccount = LedgerDimensionFacade::getMainAccountFromLedgerDimension(vendPaymFee.LedgerDimension).MainAccountId;
+                                }
+                            }
+                        }
+                         
+                        DimensionDynamicAccount ledgerDimension;
+                        container cont = [businessUnitMap.ETGERPVerticle,
+                                          businessUnitMap.ETGERPBusinessUnit,
+                                          "",linesMsg.ETGCOMMODITY, "","","", "",
+                                          costCenterMap.ETGERPCostCenter,"",""];
+                        ledgerDimension = this.validGenerateLedgerDimension(mainAccount, cont);
+                        ledgerJournalTrans.OffsetLedgerDimension = ledgerDimension;
+                        ledgerJournalTrans.DefaultDimension = this.createDefaultDimension(businessUnitMap.ETGERPVerticle,businessUnitMap.ETGERPBusinessUnit,costCenterMap.ETGERPCostCenter,linesMsg.ETGCOMMODITY);
+                        ledgerJournalTrans.insert();
+                        
+                    }
+                    select * from ledgerJournalTableVal
+                        where ledgerJournalTableVal.JournalNum == ledgerJournalTable.JournalNum;
+                    if(ledgerJournalTableVal.Posted == NoYes::No)
+                    {
+                        LedgerJournalCheckPost journalCheckPost;
+                        journalCheckPost = LedgerJournalCheckPost::newLedgerJournalTable(ledgerJournalTableVal, NoYes::Yes);
+                        if(journalCheckPost.validate())
+                        {
+                            journalCheckPost.run();
+                        }
+                    }
+                    headerMsg.ETGIntegrationsStatus = ETGIntegrationStatus::Processed;
+                    headerMsg.update();
+                    ttscommit;
+                }
+            }
+        }
+        catch(Exception::Error)
+        {
+            SysInfoLogEnumerator infoLogEnum;
+            SysInfologMessageStruct infoMessageStruct;
+
+            infoLogEnum = SysInfoLogEnumerator::newData(infolog.infologData());
+            while(infoLogEnum.moveNext())
+            {
+                infoMessageStruct = SysInfologMessageStruct::construct(infoLogEnum.currentMessage());
+                integrationMessage = integrationMessage + infoMessageStruct.message() + '\n';
+            }
+        }
+        if(integrationMessage != "")
+        {
+            return integrationMessage;
+        }
+        else
+        {
+            return "";
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createDefaultDimension</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name = "vertical"></param>
+    /// <param name = "businessUnit"></param>
+    /// <param name = "profitCenter"></param>
+    /// <returns></returns>
+    public DimensionDefault createDefaultDimension(str vertical, str businessUnit, str profitCenter, str product_Service)
+    {
+        DimensionAttributeValueSetStorage   valueSetStorage = new DimensionAttributeValueSetStorage();
+        DimensionDefault                    result;
+        int                     i;
+        DimensionAttribute      dimensionAttribute;
+        DimensionAttributeValue dimensionAttributeValue;
+    
+        container               conAttr = ["Vertical","BusinessUnit","ProfitCenter", "Product_Service"];
+    
+        container               conValue = [vertical, businessUnit, profitCenter, product_Service];
+    
+        str                     dimValue;
+    
+        for (i = 1; i <= conLen(conAttr); i++)
+        {
+            dimensionAttribute = dimensionAttribute::findByName(conPeek(conAttr,i));
+            if (dimensionAttribute.RecId == 0)
+            {
+                continue;
+            }
+            dimValue = conPeek(conValue,i);
+            if (dimValue != "")
+            {
+                dimensionAttributeValue = dimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute,dimValue,false,true);
+                valueSetStorage.addItem(dimensionAttributeValue);
+            }
+        }
+    
+        result = valueSetStorage.save();
+        //It reutrns the value of type DimensionDefault
+        return result;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

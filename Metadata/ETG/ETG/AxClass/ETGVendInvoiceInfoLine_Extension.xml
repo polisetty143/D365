@@ -1,0 +1,234 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGVendInvoiceInfoLine_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension class for table <c>VendInvoiceInfoLine</c>
+/// </summary>
+[ExtensionOf(tableStr(VendInvoiceInfoLine))]
+internal final class ETGVendInvoiceInfoLine_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>validateWrite</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method overides validateWrite to call validateTermoNumberUsage() method
+    //// when TERMONumberFeature is Enabled
+    /// </summary>
+    /// <returns>boolean</returns>
+    public boolean validateWrite()
+    {
+        boolean isValid = next validateWrite();
+        if(isValid && VendParameters::find().ETGEnableTermoNumberFeature == NoYes::Yes)
+        {
+            this.validateTermoNumberUsage();
+        }
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initFromPurchLine</Name>
+				<Source><![CDATA[
+    void initFromPurchLine(PurchLine _purchLine)
+    {
+        next initFromPurchLine(_purchLine);
+
+      //  this.ETGCrDrJrnRateCardDiffAmount = this.getCrDrNoteDiffAmtPartailGRN(_purchLine);;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getCrDrNoteDiffAmtPartailGRN</Name>
+				<Source><![CDATA[
+    public LineAmount getCrDrNoteDiffAmtPartailGRN()
+    {
+        Amount grnAmt, poAmt;
+        PurchLine purchLine;
+        VendPackingSlipTrans packingSlipTrans;
+
+        purchLine = PurchLine::findInventTransId(this.InventTransId);
+
+        if(purchLine)
+        {
+            select firstonly Qty, ValueMST, RecId from packingSlipTrans
+            where packingSlipTrans.InventTransId == purchLine.InventTransId
+                && packingSlipTrans.OrigPurchid == purchLine.PurchId
+                && packingSlipTrans.ItemId == purchLine.ItemId;
+
+            if(!packingSlipTrans.RecId)
+            {
+                return 0;
+            }
+        }
+        grnAmt = packingSlipTrans.ValueMST;
+
+        poAmt = packingSlipTrans.Qty * purchLine.PurchPrice;
+
+        return poAmt - grnAmt;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insert</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method overrides insert method to assign LineAmount to TermoValueUsage value
+    /// </summary>
+    /// <param name = "_defaultRelatedTables"></param>
+    public void insert(boolean _defaultRelatedTables)
+    {
+        if(VendParameters::find().ETGEnableTermoNumberFeature == NoYes::Yes)
+        {
+            this.ETGTermoValueUsageReal = this.LineAmount;
+        }
+        next insert(_defaultRelatedTables);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>termoValueUsage</Name>
+				<Source><![CDATA[
+    [SysClientCacheDataMethodAttribute(false)]
+    public static display int termoValueUsage(VendInvoiceInfoLine _vendInvoiceInfoLine)
+    {
+        return real2int(_vendInvoiceInfoLine.LineAmount);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>displayCrDrNoteDiffAmtPartailGRN</Name>
+				<Source><![CDATA[
+    [SysClientCacheDataMethodAttribute(false)]
+    public static display LineAmount displayCrDrNoteDiffAmtPartailGRN(VendInvoiceInfoLine _vendInvoiceInfoLine)
+    {
+        LineAmount lineAmtLoc;
+        if(ETGACFParameters::find().EnablePTBFContractsPurch == NoYes::Yes)
+        {
+            lineAmtLoc = _vendInvoiceInfoLine.getCrDrNoteDiffAmtPartailGRN();
+        }
+        else
+        {
+            lineAmtLoc = 0;
+        }
+
+        return lineAmtLoc;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateTermoNumberUsage</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method makes TERMO Value usage field mandatory when TERMONumber is entered(not null)
+    /// </summary>
+    public void validateTermoNumberUsage()
+    {
+        VendInvoiceInfoLine  vendInvoiceInfoLine = this;
+        ETGTermonumbertable  termoNumberTable;
+        ETGTermonumbertable  termoNumberMother;
+        VendInvoiceInfoTable vendInvoiceInfoTable = vendInvoiceInfoLine.vendInvoiceInfoTable();
+
+        if(vendInvoiceInfoTable.ETGTERMONumber == "")
+        {
+            return;
+        }
+
+        if(vendInvoiceInfoTable && vendInvoiceInfoLine.ETGTermoValueUsageReal == 0 )
+        {
+            throw error(strFmt("@ETG_New:TERMOValueUsageValidationMandatory", vendInvoiceInfoTable.ETGTERMONumber));
+        }
+
+        termoNumberTable = ETGTERMONumberTable::findFromTermoNumber(vendInvoiceInfoTable.ETGTERMONumber);
+     
+        if(termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Regular || termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Mother)
+        {
+            if(this.LineAmount > termoNumberTable.RemainingTermoValueReal)
+            {
+                throw error(strFmt("@ETG_New:TERMOValueUsageValidationRemainingTERMOValue",
+                this.LineAmount,
+                termoNumberTable.RemainingTermoValueReal,
+                vendInvoiceInfoTable.ETGTERMONumber));
+            }
+            if(this.LineAmount > termoNumberTable.TermoValueReal)
+            {
+                throw error(strFmt("@ETG_New:TERMOValueUsageValidationTERMOValue",
+                this.LineAmount,
+                termoNumberTable.TermoValueReal,
+                vendInvoiceInfoTable.ETGTERMONumber));
+            }
+            if(this.ETGTermoValueUsageReal > this.LineAmount)
+            {
+                throw error(strFmt("@ETG_New:TERMOValueUsageValidationLineAmount",
+                this.ETGTermoValueUsageReal,
+                this.LineAmount,
+                vendInvoiceInfoTable.ETGTERMONumber));
+            }
+        }
+
+        if(termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Child)
+        {
+            termoNumberMother = ETGTERMONumberTable::findFromTermoNumber(termoNumberTable.MotherTERMOReference, true);
+
+            if(this.LineAmount > termoNumberMother.RemainingTermoValueReal)
+            {
+                throw error(strFmt("@ETG_New:ChildTERMOValueUsageValidationRemainingTERMOValue",
+                this.LineAmount,
+                termoNumberMother.RemainingTermoValueReal,
+                vendInvoiceInfoTable.ETGTERMONumber));
+            }
+            if(this.LineAmount > termoNumberMother.TermoValueReal)
+            {
+                throw error(strFmt("@ETG_New:ChildTERMOValueUsageValidationTERMOValue",
+                this.LineAmount,
+                termoNumberMother.TermoValueReal,
+                vendInvoiceInfoTable.ETGTERMONumber));
+            }
+            if(this.ETGTermoValueUsageReal > this.LineAmount)
+            {
+                throw error(strFmt("@ETG_New:TERMOValueUsageValidationLineAmount",
+                this.ETGTermoValueUsageReal,
+                this.LineAmount,
+                vendInvoiceInfoTable.ETGTERMONumber));
+            }
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>displayCrDrNoteAmountPayable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Abhinav - 03022025
+    /// Display method to show amount payable
+    /// </summary>
+    /// <param name = "_vendInvoiceInfoLine"></param>
+    /// <returns></returns>
+    [SysClientCacheDataMethodAttribute(false)]
+    public static display LineAmount displayCrDrNoteAmountPayable(VendInvoiceInfoLine _vendInvoiceInfoLine)
+    {
+        if(ETGACFParameters::find().EnablePTBFContractsPurch == NoYes::Yes)
+        {
+            return _vendInvoiceInfoLine.LineAmount + _vendInvoiceInfoLine.ETGCrDrJrnAmt;
+        }
+
+        return 0;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

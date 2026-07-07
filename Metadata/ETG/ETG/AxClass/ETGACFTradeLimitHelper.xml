@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGACFTradeLimitHelper</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGACFTradeLimitHelper
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>processTradeLimitPurch</Name>
+				<Source><![CDATA[
+    public static void processTradeLimitPurch(PurchAgreementHeader purchAgreementHeader)
+    {
+        AgreementLineQuantityCommitment agreementLineQuantityCommitment;
+        AgreementLineVolumeCommitment   agreementLineVolumeCommitment;
+        AgreementLine                   agreementLine;
+        LineAmount                      lineAmount,totalamount;
+        VendTable                       vendTable,vendTableloc;
+        
+        if(purchAgreementHeader.vendTable().ETGApplicableTradeLimit == NoYes::No)
+        {
+            return;
+        }
+        
+        while select agreementLine
+                    where agreementLine.Agreement == purchAgreementHeader.RecId
+        {
+            if (agreementLine.isQuantityBased())
+            {
+                agreementLineQuantityCommitment = agreementLine as AgreementLineQuantityCommitment;
+                lineAmount = agreementLineQuantityCommitment.lineAmount();
+            }
+            else
+            {
+                agreementLineVolumeCommitment = agreementLine as AgreementLineVolumeCommitment;
+                lineAmount = agreementLineVolumeCommitment.CommitedAmount;
+            }
+
+            totalamount += lineAmount;
+        }
+
+        select  vendTable
+                    where vendTable.AccountNum == purchAgreementHeader.VendAccount
+                    && vendTable.DataAreaId == purchAgreementHeader.VendorDataAreaId;
+
+        vendTableloc = vendTable.orig();
+
+        //CS, DLT, 03/03/2025 Shreelekha Samudralwar
+        CurrencyCode companyCurrency = Ledger::accountingCurrency();
+        CurrencyExchangeHelper currencyExchangeHelper = CurrencyExchangeHelper::newExchangeDate(
+                Ledger::current(), DateTimeUtil::getSystemDate(DateTimeutil::getUserPreferredTimeZone()));
+           
+        AmountMst convertedTotalAmount = currencyExchangeHelper.calculateCurrencyToCurrency(
+            purchAgreementHeader.Currency, companyCurrency, totalamount, true);
+
+        //CE, DLT, 03/03/2025 Shreelekha Samudralwar
+
+        if(vendTableloc.ETGRemainingTradeLimitPurchReal == 0 && vendTable.ETGTradeLimitPurchReal != 0)
+        {
+            if(vendTable.ETGTradeLimitPurchReal >= convertedTotalAmount)
+            {
+                vendTable.selectForUpdate(true);
+                ttsbegin;
+                vendTable.ETGRemainingTradeLimitPurchReal = vendTable.ETGTradeLimitPurchReal - convertedTotalAmount;
+                vendTable.ETGTradeLimitPurchReal = NoYes::Yes;
+                vendTable.update();
+                ttscommit;
+            }
+            else
+            {
+                throw error(strFmt("@ETG_New:TradeLimitErrorMsg", convertedTotalAmount, companyCurrency, vendTable.ETGRemainingTradeLimitPurchReal));
+            }
+        }
+        else
+        {
+            if(vendTable.ETGRemainingTradeLimitPurchReal >= convertedTotalAmount)
+            {
+                vendTable.selectForUpdate(true);
+                ttsbegin;
+                vendTable.ETGRemainingTradeLimitPurchreal = vendTable.ETGRemainingTradeLimitPurchReal - convertedTotalAmount;
+                vendTable.update();
+                ttscommit;
+            }
+            else
+            {
+                throw error(strFmt("@ETG_New:TradeLimitErrorMsg", convertedTotalAmount, companyCurrency, vendTable.ETGRemainingTradeLimitPurchReal));
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processTradeLimitSales</Name>
+				<Source><![CDATA[
+    public static void processTradeLimitSales(SalesAgreementHeader salesAgreementHeader)
+    {
+        AgreementLineQuantityCommitment agreementLineQuantityCommitment;
+        AgreementLineVolumeCommitment   agreementLineVolumeCommitment;
+        AgreementLine                   agreementLine;
+        LineAmount                      lineAmount,totalamount;
+        CustTable                       custTable, custTableLoc;
+
+
+        if(salesAgreementHeader.custTable().ETGApplicableTradeLimit == NoYes::No)
+        {
+            return;
+        }
+
+        while select agreementLine where agreementLine.Agreement == salesAgreementHeader.RecId
+        {
+            if (agreementLine.isQuantityBased())
+            {
+                agreementLineQuantityCommitment = agreementLine as AgreementLineQuantityCommitment;
+                lineAmount = agreementLineQuantityCommitment.lineAmount();
+            }
+            else
+            {
+                agreementLineVolumeCommitment = agreementLine as AgreementLineVolumeCommitment;
+                lineAmount = agreementLineVolumeCommitment.CommitedAmount;
+            }
+
+            totalamount += lineAmount;
+        }
+
+        select  custTable
+                    where custTable.AccountNum == salesAgreementHeader.CustAccount
+                    && custTable.DataAreaId == salesAgreementHeader.CustomerDataAreaId;
+
+        custTableLoc = custTable.orig();
+
+        //NS, DLT, 03/03/2025 Shreelekha Samudralwar
+        CurrencyCode companyCurrency = Ledger::accountingCurrency();
+        CurrencyExchangeHelper currencyExchangeHelper = CurrencyExchangeHelper::newExchangeDate(
+            Ledger::current(), systemDateGet());
+           
+        AmountMst convertedTotalAmount = currencyExchangeHelper.calculateCurrencyToCurrency(
+            salesAgreementHeader.Currency, companyCurrency, totalamount, true);
+
+        if(custTableLoc.ETGRemainingTradeLimitSalesReal == 0 && custTable.ETGTradeLimitSalesReal != 0)
+        {
+            if(custTable.ETGTradeLimitSalesReal >= convertedTotalAmount)
+            {
+                custTable.selectForUpdate(true);
+                ttsbegin;
+                custTable.ETGRemainingTradeLimitSalesReal = custTable.ETGTradeLimitSalesReal - convertedTotalAmount;
+                custTable.ETGTradeLimitSalesReal = NoYes::Yes;
+                custTable.update();
+                ttscommit;
+            }
+            else
+            {
+                throw error(strFmt("@ETG_New:TradeLimitErrorMsg",convertedTotalAmount, companyCurrency, custTable.ETGRemainingTradeLimitSalesReal));
+            }
+        }
+        else
+        {
+            if(custTable.ETGRemainingTradeLimitSalesReal >= convertedTotalAmount)
+            {
+                custTable.selectForUpdate(true);
+                ttsbegin;
+                custTable.ETGRemainingTradeLimitSalesReal = custTable.ETGRemainingTradeLimitSalesReal - convertedTotalAmount;
+                custTable.update();
+                ttscommit;
+            }
+            else
+            {
+                throw error(strFmt("@ETG_New:TradeLimitErrorMsg",convertedTotalAmount, companyCurrency, custTable.ETGRemainingTradeLimitSalesReal));
+            }
+            //NE, DLT, 03/03/2025 Shreelekha Samudralwar
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

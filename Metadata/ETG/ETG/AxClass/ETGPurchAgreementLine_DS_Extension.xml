@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchAgreementLine_DS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formdatasourcestr(PurchAgreement, ALine))]
+final class ETGPurchAgreementLine_DS_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>validateWrite</Name>
+				<Source><![CDATA[
+    public boolean validateWrite()
+    {
+        boolean ret = next validateWrite();
+        ETGACFParameters acfParameters = ETGACFParameters::find();
+      
+        if (ret && acfParameters.EnableMandatoryFields == NoYes::Yes)
+        {
+            str dimensionName, label;
+            str dimensionValue;
+            VendTable   vendtable;
+            VendGroup   vendGroup;
+
+            AgreementLine aLine = this.cursor();
+            PurchAgreementHeader  purchAgreementHeader;
+
+            FormDataSource      agrLine         = any2Object(this) as FormDataSource;
+            formRun             formRun                         = agrLine.formRun();
+
+            ret = ETGPurchAgreementMandatoryValidation::validateFormLines(this.formRun());
+
+            container mandatoryDims = [
+            [acfParameters.BusinessUnit, "BusinessUnit"],
+            [acfParameters.Department, "Department"],
+            [acfParameters.InterCompany, "InterCompany"],
+            [acfParameters.ItemId, "Items"],
+            [acfParameters.LineofBusinesss, "Line_of_Business"],
+            [acfParameters.MainCommodity, "MainCommodity"],
+            [acfParameters.PlantWarehouseOffice, "Plant_Warehouse_Office"],
+            [acfParameters.SubCommodity, "SubCommodity"],
+            [acfParameters.TraderEmployee, "Trader_Employee"],
+            [acfParameters.Vertical, "Vertical"]
+            ];
+
+            purchAgreementHeader = aLine.agreementHeader();
+           
+            select firstonly vendtable where
+                            vendtable.AccountNum == purchAgreementHeader.VendAccount
+                        &&  vendtable.DataAreaId == purchAgreementHeader.VendorDataAreaId;
+
+            select firstonly vendGroup from  vendGroup where  vendGroup.VendGroup == vendtable.VendGroup;
+
+            for (int i = 1; i <= conLen(mandatoryDims); i++)
+            {
+                container dimEntry = conPeek(mandatoryDims, i);
+                dimensionName = conPeek(dimEntry, 1);
+                label = conPeek(dimEntry, 2);
+
+                dimensionValue = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(aLine.DefaultDimension, dimensionName);
+
+                if (!dimensionValue)
+                {
+                    if(dimensionName == "InterCompany" && vendGroup.VendGroup != '40')
+                    {
+                        // Dimension is NOT mandatory here - do nothing
+                    }
+                    else
+                    {
+                        checkFailed(strFmt("Financial dimension %1 is mandatory.", label));
+                        ret = false;
+                    }
+                }
+            }
+        }
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {
+        int ret = next active();
+
+        FormDataSource purchAgreementLine_ds = any2Object(this) as FormDataSource;
+        AgreementLine agreementLine = purchAgreementLine_ds.cursor();
+
+        if (ETGACFParameters::find().EnableContractFDAutomation == NoYes::Yes)
+        {
+            purchAgreementLine_ds.object(fieldNum(AgreementLine, DefaultDimension)).allowEdit(agreementLine.ETG_IsThirdParty == NoYes::No);
+        }
+
+        if (ETGACFParameters::find().EnableMandatoryFields == NoYes::Yes)
+        {
+            purchAgreementLine_ds.object(fieldNum(AgreementLine, ItemId)).mandatory(true);
+            purchAgreementLine_ds.object(fieldNum(AgreementLine, ETGFinalPlaceOfDelivery)).mandatory(true);
+        }
+
+        //CS - BIN Qty Status activation - Abhinav
+        FormPartControl formpartcontrol = this.formrun().design().controlName("ETGBinQtyAvailable");
+        formpartcontrol.visible(ETGCanadaParameters::find().EnableBinQtyStatus);
+
+        if(ETGCanadaParameters::find().EnableBinQtyStatus)
+        {
+            InventDim inventdim = agreementLine.inventDim();
+            ETGBinQtyVisualChartHelperClass::populateBinQtyChartData(inventdim,formpartcontrol);
+        }
+        //CE
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

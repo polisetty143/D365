@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerVoucherTransObject_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This class is an extension of class <c>LedgerVoucherTransObject</c>
+/// </summary>
+[ExtensionOf(classStr(LedgerVoucherTransObject))]
+internal final class ETGLedgerVoucherTransObject_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initFromLedgerPostingTransaction</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// flowing the value of capexApprovalId from LedgerJournalFixedAsset to AssetTable
+    /// </summary>
+    /// <param name = "_ledgerPostingTransaction">LedgerPostingTransactionTmp</param>
+    /// <param name = "_projectPostingTransaction">LedgerPostingTransactionProjectTmp</param>
+    public void initFromLedgerPostingTransaction(
+        LedgerPostingTransactionTmp _ledgerPostingTransaction,
+        LedgerPostingTransactionProjectTmp _projectPostingTransaction)
+    {
+        next initFromLedgerPostingTransaction(_ledgerPostingTransaction,_projectPostingTransaction);
+
+        if(_ledgerPostingTransaction.SourceRecId
+            && _ledgerPostingTransaction.SourceTableId           == tableNum(LedgerJournalTrans)
+            && _ledgerPostingTransaction.PostingType             == LedgerPostingType::FixedAssetsDebit
+            && AssetParameters::find().ETGCapexApprovalIdFeature == NoYes::Yes)
+        {
+            LedgerJournalTrans ledgerJournalFixedAsset    = LedgerJournalTrans::findRecId(_ledgerPostingTransaction.SourceRecId, false);
+            AssetTable         assetTable                 = AssetTable::find(LedgerDimensionFacade::getDisplayValueForLedgerDimension(ledgerJournalFixedAsset.LedgerDimension), true);
+            generalJournalAccountEntry.ETGCapexApprovalId = ledgerJournalFixedAsset.ETGCapexApprovalId;
+
+            if(assetTable.ETGCapexApprovalId != ledgerJournalFixedAsset.ETGCapexApprovalId)
+            {
+                ttsbegin;
+                assetTable.ETGCapexApprovalId = ledgerJournalFixedAsset.ETGCapexApprovalId;
+                assetTable.doupdate();
+                ttscommit;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>checkAccountStructure</Name>
+				<Source><![CDATA[
+    //NS, DLT ,13/03/2025 System should not allow to book "Future Date" transactions & also should pick from "As on Date" inventory.
+    /// <summary>
+    /// System should not allow to book "Future Date" transactions & also should pick from "As on Date" inventory.
+    /// </summary>
+    /// <param name = "_journal">LedgerVoucher _journal</param>
+    /// <param name = "_reference">LedgerVoucherObject _reference</param>
+    /// <param name = "_mainAccount">MainAccount _mainAccount</param>
+    /// <returns>boolean</returns>
+    protected boolean checkAccountStructure(LedgerVoucher _journal, LedgerVoucherObject _reference, MainAccount _mainAccount)
+    {
+        boolean ok = next checkAccountStructure(_journal, _reference, _mainAccount);
+
+        if(ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+        {
+            TransDate currentdate = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+
+            if(_reference.parmAccountingDate() > currentdate)
+            {
+                throw error(strFmt("Posting date %1 can not be greater than today's date", _reference.parmAccountingDate()));
+            }
+        }
+
+        return ok;
+    }
+    //NE, DLT ,13/03/2025 System should not allow to book "Future Date" transactions & also should pick from "As on Date" inventory.
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

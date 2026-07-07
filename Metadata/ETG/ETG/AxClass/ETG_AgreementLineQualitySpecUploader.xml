@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_AgreementLineQualitySpecUploader</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+using System.IO;
+using OfficeOpenXml;
+using OfficeOpenXml.ExcelPackage;
+using OfficeOpenXml.ExcelRange;
+
+class ETG_AgreementLineQualitySpecUploader
+{
+    
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Runs the class with the specified arguments.
+    /// </summary>
+    /// <param name = "_args">The specified arguments.</param>
+    public static void main(Args _args)
+    {
+        System.IO.Stream		    stream;
+        ExcelSpreadsheetName	    sheeet;
+        FileUploadBuild			    fileUpload;
+        DialogGroup				    dlgUploadGroup;
+        FileUploadBuild			    fileUploadBuild;
+        FormBuildControl		    formBuildControl;
+
+        int                          counter,minrange,maxrange;
+        InventTable				     inventTable;       
+        PurchAgreementHeader         purchAgreementHeader, purchAgreementHeaderUpd;
+        SalesAgreementHeader	     salesAgreementHeader,salesAgreementHeaderUpd;
+        AgreementLine		         agreementLine,agreementLineUpd;
+        ItemId					     itemID;
+        SalesAgreementId             salesAgreementId;
+        PurchAgreementId             purchAgreementId;
+        AgreementHeaderRecId         agreementHeaderRecid;
+        ETG_AgreementLineQualityGrp  agreementlinequalitygrp;
+        ETGAgrrementQualitySpecsLine agreementqualityspecline;
+        ETGQUALITYSPECIFICATIONGROUP qualityspecgrp;
+        Name                         groupid,maxrangeUpd,minrangeUpd;
+        CalculationType              calculationType;
+        AgreementLineNum_PSN         lineNum;
+        
+        
+              
+        Dialog dialog = new Dialog("Import Agreement Line Quality Specifications");
+
+        dlgUploadGroup		= dialog.addGroup("Select Excel File to Upload.");
+        formBuildControl	= dialog.formBuildDesign().control(dlgUploadGroup.name());
+        fileUploadBuild		= formBuildControl.addControlEx(classstr(FileUpload), 'Upload');
+
+        fileUploadBuild.style(FileUploadStyle::MinimalWithFilename);
+        fileUploadBuild.fileTypesAccepted('.xlsx');
+
+    
+        if (dialog.run() && dialog.closedOk())
+        {
+            FileUpload fileUploadControl					  = dialog.formRun().control(dialog.formRun().controlId('Upload'));
+            FileUploadTemporaryStorageResult fileUploadResult = fileUploadControl.getFileUploadResult();
+
+            if (fileUploadResult != null && fileUploadResult.getUploadStatus())
+            {
+                stream = fileUploadResult.openResult();
+                using (ExcelPackage Package = new ExcelPackage(stream))
+                {
+                    int rowCount, i;
+
+                    Package.Load(stream);
+                    ExcelWorksheet worksheet		= package.get_Workbook().get_Worksheets().get_Item(1);
+                    OfficeOpenXml.ExcelRange range	= worksheet.Cells;
+                    rowCount = worksheet.Dimension.End.Row - worksheet.Dimension.Start.Row + 1;
+
+                    for (i = 2; i<= rowCount; i++)
+                    {
+                        
+                        purchAgreementId         = range.get_Item(i, 1).Value;
+                        salesAgreementId         = range.get_Item(i, 2).Value;
+                        groupid                  = range.get_Item(i, 3).Value;
+                        minrange                 = str2Int(range.get_Item(i,7).Value);
+                        maxrange                 = str2Int(range.get_Item(i,8).Value);
+                        lineNum                  = str2Num(range.get_Item(i, 9).Value);
+                        qualityspecgrp  = ETGQUALITYSPECIFICATIONGROUP::find(groupid);
+
+                        select firstonly purchAgreementHeader
+                            where purchAgreementHeader.PurchNumberSequence == purchAgreementId;
+                        select firstonly salesAgreementHeader
+                            where salesAgreementHeader.SalesNumberSequence == salesAgreementId;
+
+                        select firstonly agreementLine
+                            where agreementLine.Agreement == purchAgreementHeader.RecId
+                            && agreementLine.LineNumber == lineNum;
+                        select firstonly agreementLineUpd
+                            where agreementLineUpd.Agreement == salesAgreementHeader.RecId
+                            && agreementLineUpd.Agreement == lineNum;
+
+                        
+                        if(!purchAgreementHeader && !salesAgreementHeader)
+                        {
+                            error(strFmt('Agreement number %1 %2 does not Exist',purchAgreementId, salesAgreementId));
+                        }
+                        if(!agreementLine && !agreementLineUpd)
+                        {
+                            error(strFmt('Agreement line does not Exist for Agreement number %1, %2', purchAgreementId, salesAgreementId ));
+                        }
+                        
+                        if(minrange > maxrange)
+                        {
+                            error(strFmt('Max range should be greater than min range for Groupid in Agreement number %1 %2 %3', groupid, purchAgreementId, salesAgreementId));
+                        }
+                        
+                        if(maxrange > minrange)
+                        {
+                            maxrangeUpd = 'Maximum value';
+                        }
+
+                        if(minrange > maxrange)
+                        {
+                            minrangeUpd = 'Minumun value';
+                        }
+
+                        if((purchAgreementHeader && !salesAgreementHeader && qualityspecgrp && maxrangeUpd && agreementLine && !agreementLineUpd) || (!purchAgreementHeader && salesAgreementHeader && qualityspecgrp && maxrangeUpd && !agreementLine && agreementLineUpd))
+                        {
+                            agreementlinequalitygrp.clear();
+                            agreementqualityspecline.clear();
+                          
+                            try
+                            { 
+                                if(purchAgreementHeader)
+                                {
+                                    agreementlinequalitygrp.AgreementLine           = agreementLine.RecId;
+                                    agreementqualityspecline.AgreementLineRefrecid  = agreementLine.RecId;
+                                }
+                                if(salesAgreementHeader)
+                                {
+                                    agreementlinequalitygrp.AgreementLine           = agreementLineUpd.RecId;
+                                    agreementqualityspecline.AgreementLineRefrecid  = agreementLineUpd.RecId;
+                                }
+                                
+                                agreementlinequalitygrp.GroupId                 = range.get_Item(i, 3).Value;
+                                agreementqualityspecline.GroupID                = range.get_Item(i, 3).Value;
+                                agreementqualityspecline.GroupDescription       = qualityspecgrp.GroupDescription;
+                                agreementqualityspecline.SubGrpId               = range.get_Item(i,3).Value;
+                                agreementqualityspecline.SubGroupDescription    = qualityspecgrp.GroupDescription;
+                                agreementqualityspecline.MeasurementType        = str2Enum(calculationType,range.get_Item(i,4).Value);
+                                agreementqualityspecline.Increment              = str2Int(range.get_Item(i,5).Value);
+                                agreementqualityspecline.FixedValue             = str2Int(range.get_Item(i,6).Value);
+                                agreementqualityspecline.MinRange               = str2Int(range.get_Item(i,7).Value);
+                                agreementqualityspecline.MaxRange               = str2Int(range.get_Item(i,8).Value);
+
+                                
+                                maxrangeUpd = '';
+                                minrangeUpd = '';
+
+                                ttsbegin;
+                                if(agreementlinequalitygrp.validateWrite())
+                                {
+                                    agreementlinequalitygrp.insert();
+                                    agreementqualityspecline.insert();
+                                }
+                                
+                                ttscommit;
+                                counter++;
+
+                            }
+                            catch(Exception::Error)
+                            {
+                                ttsabort;
+                            }
+                        }
+                        
+                    }
+                    info(strFmt('Agreement Lines Quality Specifications Uploaded Sucessfully. Total Lines %1 : ',counter));
+                }
+            }
+            else
+            {
+                error("Error During Upload. Please Contact System Admin. Item ID %1",itemID);
+            }
+
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

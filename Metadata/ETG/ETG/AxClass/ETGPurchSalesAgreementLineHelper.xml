@@ -1,0 +1,232 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchSalesAgreementLineHelper</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+//SB, DLT, 10/04/2026
+/// <summary>
+/// Class Identifies linked parent s/p agreement lines and links it with child s/p agreement lines
+/// </summary>
+internal final class ETGPurchSalesAgreementLineHelper
+{
+    private AgreementLineQuantityCommitment agreementLinesCurrent;
+    private str errorMsg;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static ETGPurchSalesAgreementLineHelper construct(AgreementLineQuantityCommitment _agreementLinesCurrent)
+    {
+        return new ETGPurchSalesAgreementLineHelper(_agreementLinesCurrent);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>new</Name>
+				<Source><![CDATA[
+    void new(AgreementLineQuantityCommitment _agreementLinesCurrent)
+    {
+        agreementLinesCurrent = _agreementLinesCurrent;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    public void run()
+    {
+        SalesAgreementHeader        salesAgreementHeaderCurrent, salesAgreementHeaderLinked;
+        PurchAgreementHeader        purchAgreementHeaderCurrent, purchAgreementHeaderLinked;
+        AgreementLineQuantityCommitment     agreementLinesLinked;
+
+        salesAgreementHeaderCurrent = SalesAgreementHeader::find(agreementLinesCurrent.Agreement);
+        purchAgreementHeaderCurrent = PurchAgreementHeader::find(agreementLinesCurrent.Agreement);
+
+        if(purchAgreementHeaderCurrent.ETGDMSParentDealNumbers)
+        {
+            salesAgreementHeaderLinked = SalesAgreementHeader::ETG_findByParentDealNumber(purchAgreementHeaderCurrent.ETGDMSParentDealNumbers);
+           
+            if(salesAgreementHeaderLinked.CustomerDataAreaId == curExt())
+            {
+                agreementLinesLinked.clear();
+                select firstonly agreementLinesLinked
+                    where agreementLinesLinked.Agreement == salesAgreementHeaderLinked.RecId
+                    && agreementLinesLinked.LineNumber == agreementLinesCurrent.LineNumber;
+
+                this.PurchB2BAgreementLinesSync(agreementLinesCurrent, agreementLinesLinked);
+            }
+            else
+            {
+                agreementLinesLinked.clear();
+                select firstonly crosscompany agreementLinesLinked
+                    where agreementLinesLinked.Agreement == salesAgreementHeaderLinked.RecId
+                    && agreementLinesLinked.LineNumber == agreementLinesCurrent.LineNumber
+                    && agreementLinesLinked.ItemDataAreaId == salesAgreementHeaderLinked.CustomerDataAreaId;
+
+                this.PurchIntercompanyAgreementLinesSync(agreementLinesCurrent, agreementLinesLinked);
+            }
+        }
+        else if(salesAgreementHeaderCurrent.ETGDMSParentDealNumber)
+        {
+            purchAgreementHeaderLinked = PurchAgreementHeader::ETG_findByParentDealNumber(salesAgreementHeaderCurrent.ETGDMSParentDealNumber);
+           
+            if(purchAgreementHeaderLinked.VendorDataAreaId == curExt())
+            {
+                agreementLinesLinked.clear();
+                select firstonly agreementLinesLinked
+                    where agreementLinesLinked.Agreement == purchAgreementHeaderLinked.RecId
+                    && agreementLinesLinked.LineNumber == agreementLinesCurrent.LineNumber;
+
+                this.SalesB2BAgreementLinesSync(agreementLinesCurrent, agreementLinesLinked);
+            }
+            else
+            {
+                agreementLinesLinked.clear();
+                select firstonly crosscompany agreementLinesLinked
+                    where agreementLinesLinked.Agreement == purchAgreementHeaderLinked.RecId
+                    && agreementLinesLinked.LineNumber == agreementLinesCurrent.LineNumber
+                    && agreementLinesLinked.ItemDataAreaId == purchAgreementHeaderLinked.VendorDataAreaId;
+
+                this.SalesIntercompanyAgreementLinesSync(agreementLinesCurrent, agreementLinesLinked);
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>PurchB2BAgreementLinesSync</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method syncs Purch agreement lines to Sales agreement lines for Third Party (B2B)
+    /// </summary>
+    private void PurchB2BAgreementLinesSync(AgreementLineQuantityCommitment _PurchAgreementLines,AgreementLineQuantityCommitment _salesAgreementLines)
+    {
+        ETG_IsCreatedAgreement      isCreatedAgreement;
+
+        ttsbegin;
+        _salesAgreementLines.selectForUpdate(true);
+        _salesAgreementLines.ETG_DerivedTP               = _PurchAgreementLines.RecId;
+        _salesAgreementLines.ETG_IsThirdParty            = NoYes::Yes;
+        _salesAgreementLines.doUpdate();
+
+        _PurchAgreementLines.selectForUpdate(true);
+        _PurchAgreementLines.IntercompanySkipUpdate      = InterCompanySkipUpdate::Both;
+        _PurchAgreementLines.ETG_IsThirdParty            = NoYes::Yes;
+        _PurchAgreementLines.ETG_DerivedTP               = _salesAgreementLines.RecId;
+        _PurchAgreementLines.doUpdate();
+
+        select firstonly isCreatedAgreement
+                    where isCreatedAgreement.AgreementLine == _PurchAgreementLines.RecId;
+       
+        if(!isCreatedAgreement)
+        {
+            isCreatedAgreement.clear();
+            isCreatedAgreement.AgreementLine = _PurchAgreementLines.RecId;
+            isCreatedAgreement.insert();
+        }
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>PurchIntercompanyAgreementLinesSync</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method syncs Purch agreement lines to Sales agreement lines for Intercompany
+    /// </summary>
+    private void PurchIntercompanyAgreementLinesSync(AgreementLineQuantityCommitment _PurchAgreementLines,AgreementLineQuantityCommitment _salesAgreementLines)
+    {
+        ETG_IsCreatedAgreement      isCreatedAgreement;
+
+        ttsbegin;
+        AgreementLineReference::createRelationShip(_salesAgreementLines.RecId, _PurchAgreementLines.RecId);//check example data in dev15 then link one line to another
+        TradeInterCompany::synchronizeDocuRef(_salesAgreementLines);
+        ttscommit;
+
+        select firstonly isCreatedAgreement
+                    where isCreatedAgreement.AgreementLine == _PurchAgreementLines.RecId;
+       
+        if(!isCreatedAgreement)
+        {
+            isCreatedAgreement.clear();
+            isCreatedAgreement.AgreementLine = _PurchAgreementLines.RecId;
+            isCreatedAgreement.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>SalesB2BAgreementLinesSync</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method syncs sales agreement lines to purchase agreement lines for Third Party (B2B)
+    /// </summary>
+    private void SalesB2BAgreementLinesSync(AgreementLineQuantityCommitment _PurchAgreementLines,AgreementLineQuantityCommitment _salesAgreementLines)
+    {
+        ETG_IsCreatedAgreement      isCreatedAgreement;
+
+        ttsbegin;
+        _salesAgreementLines.selectForUpdate(true);
+        _salesAgreementLines.IntercompanySkipUpdate      = InterCompanySkipUpdate::Both;
+        _salesAgreementLines.ETG_DerivedTP               = _PurchAgreementLines.RecId;
+        _salesAgreementLines.ETG_IsThirdParty            = NoYes::Yes;
+        _salesAgreementLines.doUpdate();
+
+        _PurchAgreementLines.selectForUpdate(true);
+        _PurchAgreementLines.ETG_IsThirdParty            = NoYes::Yes;
+        _PurchAgreementLines.ETG_DerivedTP               = _salesAgreementLines.RecId;
+        _PurchAgreementLines.doUpdate();
+
+        select firstonly isCreatedAgreement
+                    where isCreatedAgreement.AgreementLine == _salesAgreementLines.RecId;
+       
+        if(!isCreatedAgreement)
+        {
+            isCreatedAgreement.clear();
+            isCreatedAgreement.AgreementLine = _salesAgreementLines.RecId;
+            isCreatedAgreement.insert();
+        }
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>SalesIntercompanyAgreementLinesSync</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method syncs sales agreement lines to Purchase agreement lines for Intercompany
+    /// </summary>
+    private void SalesIntercompanyAgreementLinesSync(AgreementLineQuantityCommitment _salesAgreementLines,AgreementLineQuantityCommitment _PurchAgreementLines)
+    {
+        ETG_IsCreatedAgreement      isCreatedAgreement;
+
+        ttsbegin;
+        AgreementLineReference::createRelationShip(_PurchAgreementLines.RecId, _salesAgreementLines.RecId);
+        TradeInterCompany::synchronizeDocuRef(_PurchAgreementLines);
+        ttscommit;
+
+        select firstonly isCreatedAgreement
+                    where isCreatedAgreement.AgreementLine == _salesAgreementLines.RecId;
+       
+        if(!isCreatedAgreement)
+        {
+            isCreatedAgreement.clear();
+            isCreatedAgreement.AgreementLine = _salesAgreementLines.RecId;
+            isCreatedAgreement.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

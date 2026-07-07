@@ -1,0 +1,1535 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_CustProvisionalBalanceDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The <c>CustProvisionalBalanceDP</c> class fetches records for the
+/// <c>CustProvisionalBalance</c>Microsoft SQL Server Reporting Services report.
+/// </summary>
+[
+    SRSReportQueryAttribute(queryStr(ETG_CustProvisionalBalance)),
+    SRSReportParameterAttribute(classStr(ETG_CustProvisionalBalanceContract))
+]
+public class ETG_CustProvisionalBalanceDP extends SrsReportDataProviderPreProcessTempDB
+{
+    ToDate toDate;
+    NoneBeginTransEnd noneBeginTransEnd;
+
+    ETG_CustProvisionalBalanceTmp custProvisionalBalanceTmp;
+    ETG_CustProvisionalBalanceTmpBCCriteria custProvisionalBalanceTmpBCCriteria;
+    ETG_CustProvisionalBalanceTmpProcessing custProvisionalBalanceTmpProcessing;
+    LedgerCurrencySelection ledgerCurrencySelection;
+    private boolean isLedgerCurrencyAccounting;
+
+    #ISOCountryRegionCodes
+
+    boolean isPublicSectorScenario;
+    NoYes includeTransactionWithoutBillingClass;
+    List billingClassificationList;
+
+    #LOCALMACRO.PublicSectorFilter
+            join custProvisionalBalanceTmpBCCriteria
+                where custProvisionalBalanceTmpBCCriteria.CustBillingClassification == custTrans.CustBillingClassification
+    ENDMACRO
+    #LOCALMACRO.RUFilter
+            notexists join custTrans_W
+                where custTrans_W.CustTrans == custTrans.RecId
+                    && custTrans_W.InvoicePostingType_RU == SalesInvoicePostingType_RU::GoodsInRoute
+    ENDMACRO
+
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>buildCustomerFilterSet</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates a set of customers to be processed in the report.
+    /// </summary>
+    /// <returns>The temporary table with a set of customers.</returns>
+    private ETG_CustProvisionalBalanceTmpValue buildCustomerFilterSet()
+    {
+        ETG_CustProvisionalBalanceTmpValue selectedCustomerTmp;
+        CustTable custTable;
+
+        selectedCustomerTmp.setConnection(this.parmUserConnection());
+
+        QueryRun queryRun = new QueryRun(this.parmQuery());
+        Query query = queryRun.query();
+        QueryBuildDataSource qbdsCustTable = SysQuery::findOrCreateDataSource(query, tableNum(CustTable));
+        QueryBuildDataSource qbdsMainAccount = SysQuery::findOrCreateDataSource(query, tableNum(MainAccount));
+
+        if (this.hasFilteredTable(query, tableNum(CustTable)))
+        {
+            qbdsCustTable.enabled(true);
+            qbdsMainAccount.enabled(false);
+
+            RecordInsertList customersInsertList = new RecordInsertList(tableNum(ETG_CustProvisionalBalanceTmpValue), false, false, false, false, true, selectedCustomerTmp);
+
+            while (queryRun.next())
+            {
+                custTable = queryRun.get(tableNum(CustTable));
+                selectedCustomerTmp.clear();
+                selectedCustomerTmp.AccountNum = custTable.AccountNum;
+                customersInsertList.add(selectedCustomerTmp);
+            }
+
+            customersInsertList.insertDatabase();
+        }
+
+        return selectedCustomerTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buildMainAccountFilterSet</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates a set of main accounts to be processed in the report.
+    /// </summary>
+    /// <returns>The temporary table with a set of main accounts.</returns>
+    private ETG_CustProvisionalBalanceTmpValue buildMainAccountFilterSet()
+    {
+        ETG_CustProvisionalBalanceTmpValue selectedMainAccountTmp;
+        MainAccount mainAccount;
+
+        selectedMainAccountTmp.setConnection(this.parmUserConnection());
+
+        QueryRun queryRun = new QueryRun(this.parmQuery());
+        Query query = queryRun.query();
+        QueryBuildDataSource qbdsCustTable = SysQuery::findOrCreateDataSource(query, tableNum(CustTable));
+        QueryBuildDataSource qbdsMainAccount = SysQuery::findOrCreateDataSource(query, tableNum(MainAccount));
+
+        if (this.hasFilteredTable(query, tableNum(MainAccount)))
+        {
+            qbdsCustTable.enabled(false);
+            qbdsMainAccount.enabled(true);
+
+            RecordInsertList mainAccountRecordInsertList = new RecordInsertList(tableNum(ETG_CustProvisionalBalanceTmpValue), false, false, false, false, true, selectedMainAccountTmp);
+
+            while (queryRun.next())
+            {
+                mainAccount = queryRun.get(tableNum(MainAccount));
+                selectedMainAccountTmp.clear();
+                selectedMainAccountTmp.MainAccountId = mainAccount.MainAccountId;
+                mainAccountRecordInsertList.add(selectedMainAccountTmp);
+            }
+
+            mainAccountRecordInsertList.insertDatabase();
+        }
+
+        return selectedMainAccountTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateAmounts</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///     Calculates the opening balance, debit balance, debit report balance,
+    ///     opening balance, credit balance, and credit report balance per posting profile for the specified dates.
+    /// </summary>
+    /// <param name = "_fromDate">
+    ///     The date for which balances are calculated.
+    /// </param>
+    /// <param name = "_reportPeriodStartDate">
+    ///     The start date for which balances are calculated.
+    /// </param>
+    /// <param name = "_calculatePerPostingProfile">
+    ///     A boolean value which indicates whether to calculate the opening, debit, credit and reporting balances by posting profile; optional.
+    /// </param>
+    protected void calculateAmounts(TransDate _fromDate, TransDate _reportPeriodStartDate, boolean _calculatePerPostingProfile = true)
+    {
+        if (_calculatePerPostingProfile)
+        {
+            this.calculateOpeningBalancePerPostingProfile(_fromDate);
+            this.calculateDebitBalancePerPostingProfile(_fromDate);
+            this.calculateDebitReportBalPerPostingProfile(_reportPeriodStartDate);
+            this.calculateCreditBalancePerPostingProfile(_fromDate);
+            this.calculateCreditReportBalPerPostProfile(_reportPeriodStartDate);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateCreditBalancePerPostingProfile</Name>
+				<Source><![CDATA[
+    private void calculateCreditBalancePerPostingProfile(TransDate _fromDate)
+    {
+        ETG_CustProvisionalBalanceTmpValue tmpValue;
+
+        this.getBalanceByType(tmpValue, _fromDate, DebitCredit::Credit);
+
+        update_recordset custProvisionalBalanceTmpProcessing
+            setting AmountCredit = tmpValue.Amount, AmountCreditReporting = tmpValue.ReportingCurrencyAmount
+            join tmpValue
+                where tmpValue.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                    && tmpValue.Location == custProvisionalBalanceTmpProcessing.Location
+                    && tmpValue.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateCreditReportBalPerPostProfile</Name>
+				<Source><![CDATA[
+    private void calculateCreditReportBalPerPostProfile(TransDate _fromDate)
+    {
+        ETG_CustProvisionalBalanceTmpValue tmpValue;
+
+        this.getBalanceByType(tmpValue, _fromDate, DebitCredit::Credit);
+
+        update_recordset custProvisionalBalanceTmpProcessing
+            setting AmountCreditReportPeriod = tmpValue.Amount, AmountCreditReportingReportPeriod = tmpValue.ReportingCurrencyAmount
+            join tmpValue
+                where tmpValue.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                    && tmpValue.Location == custProvisionalBalanceTmpProcessing.Location
+                    && tmpValue.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateDebitBalancePerPostingProfile</Name>
+				<Source><![CDATA[
+    private void calculateDebitBalancePerPostingProfile(TransDate _fromDate)
+    {
+        ETG_CustProvisionalBalanceTmpValue tmpValue;
+
+        this.getBalanceByType(tmpValue, _fromDate, DebitCredit::Debit);
+
+        update_recordset custProvisionalBalanceTmpProcessing
+            setting AmountDebit = tmpValue.Amount, AmountDebitReporting = tmpValue.ReportingCurrencyAmount
+            join  tmpValue
+                where tmpValue.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                    && tmpValue.Location == custProvisionalBalanceTmpProcessing.Location
+                    && tmpValue.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateDebitReportBalPerPostingProfile</Name>
+				<Source><![CDATA[
+    private void calculateDebitReportBalPerPostingProfile(TransDate _fromDate)
+    {
+        ETG_CustProvisionalBalanceTmpValue tmpValue;
+
+        this.getBalanceByType(tmpValue, _fromDate, DebitCredit::Debit);
+
+        update_recordset custProvisionalBalanceTmpProcessing
+            setting AmountDebitReportPeriod = tmpValue.Amount, AmountDebitReportingReportPeriod = tmpValue.ReportingCurrencyAmount
+            join tmpValue
+                where tmpValue.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                    && tmpValue.Location == custProvisionalBalanceTmpProcessing.Location
+                    && tmpValue.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateOpeningBalancePerPostingProfile</Name>
+				<Source><![CDATA[
+    private void calculateOpeningBalancePerPostingProfile(TransDate _fromDate)
+    {
+        CustTrans custTrans;
+        CustTrans_W custTrans_W;
+        DimensionAttributeValueSetItem  dimensionAttributeValueSetItem;
+        DimensionAttributeValue         dimensionAttributeValue;
+        DimensionAttribute              dimensionAttribute;
+        boolean                         noLocation;
+
+
+        ETG_CustProvisionalBalanceTmpValue tmpValue;
+        tmpValue.setConnection(this.parmUserConnection());
+
+        #LOCALMACRO.MainInsert
+            insert_recordset tmpValue
+                (AccountNum, PostingProfile, Amount, ReportingCurrencyAmount, Location)
+                select AccountNum
+                from custProvisionalBalanceTmpProcessing
+                    group by AccountNum
+                join PostingProfile, sum(AmountMST), sum(ReportingCurrencyAmount) from custTrans
+                    group by PostingProfile, DefaultDimension
+                    where custTrans.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                        && custTrans.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile
+                        && custTrans.TransDate < _fromDate
+                join DisplayValue from dimensionAttributeValueSetItem
+                join dimensionAttributeValue
+                join dimensionAttribute
+                where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                                == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == custTrans.DefaultDimension
+                 && dimensionAttributeValueSetItem.DisplayValue == custProvisionalBalanceTmpProcessing.Location
+        ENDMACRO
+
+        if (isPublicSectorScenario)
+        {
+            #MainInsert
+            #PublicSectorFilter
+            #RUFilter
+            ;
+        }
+        else
+        {
+            //#MainInsert
+            //#RUFilter
+
+           /* insert_recordset tmpValue
+                (AccountNum, Location, PostingProfile, Amount, ReportingCurrencyAmount)
+                select AccountNum, Location
+                from custProvisionalBalanceTmpProcessing
+                    group by AccountNum, Location
+                join PostingProfile, sum(AmountMST), sum(ReportingCurrencyAmount) from custTrans
+                    group by PostingProfile, DefaultDimension
+                    where custTrans.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                        && custTrans.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile
+                        && custTrans.TransDate < _fromDate
+                join dimensionAttributeValueSetItem
+                join dimensionAttributeValue
+                join dimensionAttribute
+                where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                                == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == custTrans.DefaultDimension
+                 && dimensionAttributeValueSetItem.DisplayValue == custProvisionalBalanceTmpProcessing.Location;  */
+
+                 while select AccountNum,Location,PostingProfile
+                from custProvisionalBalanceTmpProcessing
+               where   custProvisionalBalanceTmpProcessing.Location != ""
+                    //group by AccountNum,Location
+                    join PostingProfile, DefaultDimension,TransDate, AmountMST, ReportingCurrencyAmount from custTrans
+                    //group by PostingProfile, DefaultDimension
+                    where custTrans.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                        && custTrans.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile
+                        && custTrans.TransDate < _fromDate
+                
+            {
+                select  dimensionAttributeValueSetItem
+                join dimensionAttributeValue
+                join dimensionAttribute
+                where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                                == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == custTrans.DefaultDimension
+                 && dimensionAttributeValueSetItem.DisplayValue == custProvisionalBalanceTmpProcessing.Location;
+                if(dimensionAttributeValueSetItem && dimensionAttributeValueSetItem.DisplayValue == custProvisionalBalanceTmpProcessing.Location)
+                {
+                ttsbegin;
+                select forupdate tmpValue 
+                   where tmpValue.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                    && tmpValue.Location == custProvisionalBalanceTmpProcessing.Location
+                    && tmpValue.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile;
+
+                if(tmpValue)
+                {
+                    tmpValue.Amount       +=  custTrans.AmountMST;
+                    tmpValue.ReportingCurrencyAmount         += custTrans.ReportingCurrencyAmount;
+                    tmpValue.update();
+                }
+                else
+                {
+                tmpValue.clear();
+                tmpValue.AccountNum    = custProvisionalBalanceTmpProcessing.AccountNum;
+                tmpValue.Location     = custProvisionalBalanceTmpProcessing.Location;
+                tmpValue.PostingProfile   = custTrans.PostingProfile;
+                tmpValue.Amount       =  custTrans.AmountMST;
+                tmpValue.ReportingCurrencyAmount         = custTrans.ReportingCurrencyAmount;
+
+                tmpValue.insert();
+                }
+                ttscommit;
+                }
+            }
+            while select AccountNum,Location,PostingProfile
+                from custProvisionalBalanceTmpProcessing
+               where   custProvisionalBalanceTmpProcessing.Location == ""
+                    //group by AccountNum,Location
+            join PostingProfile, DefaultDimension,TransDate, AmountMST, ReportingCurrencyAmount from custTrans
+                    //group by PostingProfile, DefaultDimension
+            where custTrans.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                        && custTrans.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile
+                        && custTrans.TransDate < _fromDate
+                
+            {
+                noLocation = true;
+                while select  dimensionAttributeValueSetItem
+                join dimensionAttributeValue
+                where  dimensionAttributeValueSetItem.DimensionAttributeValueSet == custTrans.DefaultDimension
+                 &&   dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                {
+                    select  dimensionAttribute
+                         Where dimensionAttribute.RecId == dimensionAttributeValue.DimensionAttribute
+                 && dimensionAttribute.Name                                                == 'Locations';
+                    if(dimensionAttribute)
+                        noLocation = false;
+                }
+                if(noLocation)
+                {
+
+                    {
+                    ttsbegin;
+                    select forupdate tmpValue
+                   where tmpValue.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                    && tmpValue.Location == custProvisionalBalanceTmpProcessing.Location
+                    && tmpValue.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile;
+
+                    if(tmpValue)
+                    {
+                        tmpValue.Amount       +=  custTrans.AmountMST;
+                        tmpValue.ReportingCurrencyAmount         += custTrans.ReportingCurrencyAmount;
+                        tmpValue.update();
+                    }
+                    else
+                    {
+                        tmpValue.clear();
+                        tmpValue.AccountNum    = custProvisionalBalanceTmpProcessing.AccountNum;
+                        tmpValue.Location     = custProvisionalBalanceTmpProcessing.Location;
+                        tmpValue.PostingProfile   = custTrans.PostingProfile;
+                        tmpValue.Amount       =  custTrans.AmountMST;
+                        tmpValue.ReportingCurrencyAmount         = custTrans.ReportingCurrencyAmount;
+
+                        tmpValue.insert();
+                    }
+                    ttscommit;
+                    }
+                }
+                
+            }
+        }
+        while select tmpValue
+        {
+            Info(strFmt("Location - %1, amount - %2",tmpValue.Location, tmpValue.Amount))  ;
+        }
+        update_recordset custProvisionalBalanceTmpProcessing
+            setting OpeningBalance = tmpValue.Amount, OpeningBalanceReporting = tmpValue.ReportingCurrencyAmount
+            join  tmpValue
+                where tmpValue.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                    && tmpValue.Location == custProvisionalBalanceTmpProcessing.Location
+                    && tmpValue.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getBalanceByType</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Inserts transactional data into the <c>ETG_CustProvisionalBalanceTmpValue</c> table.
+    /// </summary>
+    /// <param name="_tmpValue">
+    /// A <c>ETG_CustProvisionalBalanceTmpValue</c> table into which the records are inserted.
+    /// </param>
+    /// <param name="_fromDate">
+    /// The date from which transactions are inserted.
+    /// </param>
+    /// <param name="_creditOrDebit">
+    /// A <c>DebitCredit</c> enum value which indicates whether to insert debit or credit transactions.
+    /// </param>
+    protected void getBalanceByType(ETG_CustProvisionalBalanceTmpValue _tmpValue,
+                            TransDate _fromDate,
+                            DebitCredit _creditOrDebit)
+    {
+        _tmpValue.setConnection(this.parmUserConnection());
+
+        int creditOrDebitSign = 1;
+        if (_creditOrDebit == DebitCredit::Credit)
+        {
+            creditOrDebitSign = -1;
+        }
+
+        if (ledgerCurrencySelection == LedgerCurrencySelection::Reporting)
+        {
+            this.getReportingCurrencyBalance(_tmpValue, _fromDate, creditOrDebitSign);
+        }
+        else
+        {
+            this.getAccountingCurrencyBalance(_tmpValue, _fromDate, creditOrDebitSign);
+        }
+
+        if (_creditOrDebit == DebitCredit::Credit)
+        {
+            update_recordset _tmpValue 
+                setting Amount = _tmpValue.Amount * -1, ReportingCurrencyAmount = _tmpValue.ReportingCurrencyAmount * -1;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getReportingCurrencyBalance</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Gets the sum of <c>ReportingCurrencyAmount</c> for each customer transaction in the given <c>ETG_CustProvisionalBalanceTmpValue</c>
+    /// </summary>
+    private void getReportingCurrencyBalance(ETG_CustProvisionalBalanceTmpValue _tmpValue, TransDate _fromDate, int _creditOrDebitSign)
+    {
+        CustTrans custTrans;
+        CustTrans_W custTrans_W;
+        DimensionAttributeValueSetItem  dimensionAttributeValueSetItem;
+        DimensionAttributeValue              dimensionAttributeValue;
+        DimensionAttribute                       dimensionAttribute;
+
+
+        if(isPublicSectorScenario)
+        {
+            /*
+            insert_recordset _tmpValue
+                (AccountNum, Location, PostingProfile, ReportingCurrencyAmount)
+                select AccountNum, Location
+                from custProvisionalBalanceTmpProcessing
+                    group by AccountNum, Location
+                join PostingProfile, sum(ReportingCurrencyAmount) from custTrans
+                    group by PostingProfile,DefaultDimension
+                    where custTrans.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                        && custTrans.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile
+                        && custTrans.TransDate >= _fromDate
+                        && custTrans.TransDate <= toDate
+                        && (((_creditOrDebitSign * custTrans.ReportingCurrencyAmount) > 0 && !custTrans.Correct) || ((_creditOrDebitSign * custTrans.ReportingCurrencyAmount) < 0 && custTrans.Correct))
+                join dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                                == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == custTrans.DefaultDimension
+                 && dimensionAttributeValueSetItem.DisplayValue == custProvisionalBalanceTmpProcessing.Location
+                join custProvisionalBalanceTmpBCCriteria
+                    where custProvisionalBalanceTmpBCCriteria.CustBillingClassification == custTrans.CustBillingClassification
+                notexists join custTrans_W
+                    where custTrans_W.CustTrans == custTrans.RecId
+                && custTrans_W.InvoicePostingType_RU == SalesInvoicePostingType_RU::GoodsInRoute ;
+             */
+             while                 select AccountNum, Location  , PostingProfile
+                from custProvisionalBalanceTmpProcessing
+                    //group by AccountNum, Location
+                    join PostingProfile,DefaultDimension,TransDate, ReportingCurrencyAmount from custTrans
+                    //group by PostingProfile,DefaultDimension
+                    where custTrans.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                        && custTrans.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile
+                        && custTrans.TransDate >= _fromDate
+                        && custTrans.TransDate <= toDate
+                        && (((_creditOrDebitSign * custTrans.ReportingCurrencyAmount) > 0 && !custTrans.Correct) || ((_creditOrDebitSign * custTrans.ReportingCurrencyAmount) < 0 && custTrans.Correct))
+                join dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                                == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == custTrans.DefaultDimension
+                 && dimensionAttributeValueSetItem.DisplayValue == custProvisionalBalanceTmpProcessing.Location
+                join custProvisionalBalanceTmpBCCriteria
+                    where custProvisionalBalanceTmpBCCriteria.CustBillingClassification == custTrans.CustBillingClassification
+                notexists join custTrans_W
+                    where custTrans_W.CustTrans == custTrans.RecId
+                && custTrans_W.InvoicePostingType_RU == SalesInvoicePostingType_RU::GoodsInRoute
+            {
+                ttsbegin;
+                select forupdate _tmpValue
+                   where _tmpValue.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                    && _tmpValue.Location == custProvisionalBalanceTmpProcessing.Location
+                    && _tmpValue.PostingProfile == custTrans.PostingProfile;
+
+                if(_tmpValue)
+                {
+                    //_tmpValue.Amount       +=  custTrans.AmountMST;
+                    _tmpValue.ReportingCurrencyAmount         += custTrans.ReportingCurrencyAmount;
+                    _tmpValue.update();
+                }
+                else
+                {
+
+                _tmpValue.clear();
+                _tmpValue.AccountNum = custProvisionalBalanceTmpProcessing.AccountNum;
+                _tmpValue.Location = custProvisionalBalanceTmpProcessing.Location;
+                _tmpValue.PostingProfile = custTrans.PostingProfile;
+                _tmpValue.ReportingCurrencyAmount  = custTrans.ReportingCurrencyAmount;
+                _tmpValue.insert();
+                }
+                ttscommit;
+            }
+        }
+        else
+        {
+            /*insert_recordset _tmpValue
+                (AccountNum, Location, PostingProfile, ReportingCurrencyAmount)
+                select AccountNum, Location
+                from custProvisionalBalanceTmpProcessing
+                    group by AccountNum, Location
+                join PostingProfile, sum(ReportingCurrencyAmount) from custTrans
+                    group by PostingProfile,DefaultDimension
+                    where custTrans.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                        && custTrans.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile
+                        && custTrans.TransDate >= _fromDate
+                        && custTrans.TransDate <= toDate
+                        && (((_creditOrDebitSign * custTrans.ReportingCurrencyAmount) > 0 && !custTrans.Correct) || ((_creditOrDebitSign * custTrans.ReportingCurrencyAmount) < 0 && custTrans.Correct))
+                join dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                                == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == custTrans.DefaultDimension
+                 && dimensionAttributeValueSetItem.DisplayValue == custProvisionalBalanceTmpProcessing.Location
+                notexists join custTrans_W
+                    where custTrans_W.CustTrans == custTrans.RecId
+                        && custTrans_W.InvoicePostingType_RU == SalesInvoicePostingType_RU::GoodsInRoute;     */
+
+
+                        while                 select AccountNum, Location, PostingProfile
+                from custProvisionalBalanceTmpProcessing
+                    //group by AccountNum, Location
+                    join PostingProfile,DefaultDimension, TransDate, ReportingCurrencyAmount from custTrans
+                    //group by PostingProfile,DefaultDimension
+                    where custTrans.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                        && custTrans.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile
+                        && custTrans.TransDate >= _fromDate
+                        && custTrans.TransDate <= toDate
+                        && (((_creditOrDebitSign * custTrans.ReportingCurrencyAmount) > 0 && !custTrans.Correct) || ((_creditOrDebitSign * custTrans.ReportingCurrencyAmount) < 0 && custTrans.Correct))
+                join dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                                == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == custTrans.DefaultDimension
+                 && dimensionAttributeValueSetItem.DisplayValue == custProvisionalBalanceTmpProcessing.Location 
+                notexists join custTrans_W
+                    where custTrans_W.CustTrans == custTrans.RecId
+                        && custTrans_W.InvoicePostingType_RU == SalesInvoicePostingType_RU::GoodsInRoute
+            {
+                ttsbegin;
+                select forupdate _tmpValue
+                   where _tmpValue.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                    && _tmpValue.Location == custProvisionalBalanceTmpProcessing.Location
+                    && _tmpValue.PostingProfile == custTrans.PostingProfile;
+
+                if(_tmpValue)
+                {
+                    //_tmpValue.Amount       +=  custTrans.AmountMST;
+                    _tmpValue.ReportingCurrencyAmount         += custTrans.ReportingCurrencyAmount;
+                    _tmpValue.update();
+                }
+                else
+                {
+                _tmpValue.clear();
+                _tmpValue.AccountNum = custProvisionalBalanceTmpProcessing.AccountNum;
+                _tmpValue.Location = custProvisionalBalanceTmpProcessing.Location;
+                _tmpValue.PostingProfile = custTrans.PostingProfile;
+                _tmpValue.ReportingCurrencyAmount  = custTrans.ReportingCurrencyAmount;
+                _tmpValue.insert();
+                }
+                ttscommit;
+            }
+         }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getAccountingCurrencyBalance</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Gets the sum of <c>AmountMST</c> for each customer transaction in the given <c>ETG_CustProvisionalBalanceTmpValue</c>
+    /// </summary>
+    private void getAccountingCurrencyBalance(ETG_CustProvisionalBalanceTmpValue _tmpValue, TransDate _fromDate, int _creditOrDebitSign)
+    {
+        CustTrans custTrans;
+        CustTrans_W custTrans_W;
+        DimensionAttributeValueSetItem  dimensionAttributeValueSetItem;
+        DimensionAttributeValue              dimensionAttributeValue;
+        DimensionAttribute                       dimensionAttribute;
+
+        if(isPublicSectorScenario)
+        {
+            /*
+            insert_recordset _tmpValue
+                (AccountNum, Location, PostingProfile, Amount)
+                select AccountNum, Location
+                from custProvisionalBalanceTmpProcessing
+                    group by AccountNum, Location
+                join PostingProfile, sum(AmountMST) from custTrans
+                    group by PostingProfile,DefaultDimension
+                    where custTrans.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                        && custTrans.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile
+                        && custTrans.TransDate >= _fromDate
+                        && custTrans.TransDate <= toDate
+                        && (((_creditOrDebitSign * custTrans.AmountMST) > 0 && !custTrans.Correct) || ((_creditOrDebitSign * custTrans.AmountMST) < 0 && custTrans.Correct))
+                join dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                                == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == custTrans.DefaultDimension
+                 && dimensionAttributeValueSetItem.DisplayValue == custProvisionalBalanceTmpProcessing.Location
+                join custProvisionalBalanceTmpBCCriteria
+                    where custProvisionalBalanceTmpBCCriteria.CustBillingClassification == custTrans.CustBillingClassification
+                notexists join custTrans_W
+                    where custTrans_W.CustTrans == custTrans.RecId
+                        && custTrans_W.InvoicePostingType_RU == SalesInvoicePostingType_RU::GoodsInRoute;
+            */
+
+            while             select AccountNum,Location, PostingProfile
+            from custProvisionalBalanceTmpProcessing
+                //group by AccountNum,Location
+                Where  custProvisionalBalanceTmpProcessing.Location != ""
+            join PostingProfile, DefaultDimension, TransDate, AmountMST from custTrans
+                //group by PostingProfile, DefaultDimension
+                where custTrans.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                    && custTrans.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile
+                    && custTrans.TransDate >= _fromDate
+                    && custTrans.TransDate <= toDate
+                    && (((_creditOrDebitSign * custTrans.AmountMST) > 0 && !custTrans.Correct) || ((_creditOrDebitSign * custTrans.AmountMST) < 0 && custTrans.Correct))
+            notexists join custTrans_W
+                where custTrans_W.CustTrans == custTrans.RecId
+                    && custTrans_W.InvoicePostingType_RU == SalesInvoicePostingType_RU::GoodsInRoute
+            {
+                select * from  dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                                == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == custTrans.DefaultDimension
+                    && dimensionAttributeValueSetItem.DisplayValue == custProvisionalBalanceTmpProcessing.Location;
+
+                if(dimensionAttributeValueSetItem)
+                {
+                    ttsbegin;
+                    select forupdate _tmpValue
+                   where _tmpValue.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                    && _tmpValue.Location == custProvisionalBalanceTmpProcessing.Location
+                    && _tmpValue.PostingProfile == custTrans.PostingProfile;
+
+                    if(_tmpValue)
+                    {
+                        _tmpValue.Amount       +=  custTrans.AmountMST;
+                        //_tmpValue.ReportingCurrencyAmount         += custTrans.ReportingCurrencyAmount;
+                        _tmpValue.update();
+                    }
+                    else
+                    {
+                    _tmpValue.clear();
+                    _tmpValue.AccountNum = custProvisionalBalanceTmpProcessing.AccountNum;
+                    _tmpValue.Location = custProvisionalBalanceTmpProcessing.Location;
+                    _tmpValue.PostingProfile  = custTrans.PostingProfile;
+                    _tmpValue.Amount   =  custTrans.AmountMST;
+                    _tmpValue.insert();
+                    }
+                    ttscommit;
+                }
+            }
+
+            while             select AccountNum,Location, PostingProfile
+            from custProvisionalBalanceTmpProcessing
+                //group by AccountNum,Location
+                Where  custProvisionalBalanceTmpProcessing.Location == ""
+            join PostingProfile, DefaultDimension, TransDate, AmountMST from custTrans
+                //group by PostingProfile, DefaultDimension
+                where custTrans.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                    && custTrans.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile
+                    && custTrans.TransDate >= _fromDate
+                    && custTrans.TransDate <= toDate
+                    && (((_creditOrDebitSign * custTrans.AmountMST) > 0 && !custTrans.Correct) || ((_creditOrDebitSign * custTrans.AmountMST) < 0 && custTrans.Correct))
+            notexists join custTrans_W
+                where custTrans_W.CustTrans == custTrans.RecId
+                    && custTrans_W.InvoicePostingType_RU == SalesInvoicePostingType_RU::GoodsInRoute
+            {
+
+                select * from  dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                                == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == custTrans.DefaultDimension;
+                //&& dimensionAttributeValueSetItem.DisplayValue == custProvisionalBalanceTmpProcessing.Location
+                if(dimensionAttributeValueSetItem.RecId == 0)
+                {
+                    ttsbegin;
+                    select forupdate _tmpValue
+                   where _tmpValue.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                    && _tmpValue.Location == custProvisionalBalanceTmpProcessing.Location
+                    && _tmpValue.PostingProfile == custTrans.PostingProfile;
+
+                    if(_tmpValue)
+                    {
+                        _tmpValue.Amount       +=  custTrans.AmountMST;
+                        //_tmpValue.ReportingCurrencyAmount         += custTrans.ReportingCurrencyAmount;
+                        _tmpValue.update();
+                    }
+                    else
+                    {
+                    _tmpValue.clear();
+                    _tmpValue.AccountNum = custProvisionalBalanceTmpProcessing.AccountNum;
+                    _tmpValue.Location = "";
+                    _tmpValue.PostingProfile  = custTrans.PostingProfile;
+                    _tmpValue.Amount   =  custTrans.AmountMST;
+                    _tmpValue.insert();
+                    }
+                    ttscommit;
+                }
+            }
+        }
+        else
+        {
+            /*insert_recordset _tmpValue
+            (AccountNum,Location, PostingProfile, Amount)
+            select AccountNum,Location
+            from custProvisionalBalanceTmpProcessing
+                group by AccountNum,Location
+            join PostingProfile, sum(AmountMST) from custTrans
+                group by PostingProfile,DefaultDimension
+                where custTrans.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                    && custTrans.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile
+                    && custTrans.TransDate >= _fromDate
+                    && custTrans.TransDate <= toDate
+                    && (((_creditOrDebitSign * custTrans.AmountMST) > 0 && !custTrans.Correct) || ((_creditOrDebitSign * custTrans.AmountMST) < 0 && custTrans.Correct))
+                join dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                                == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == custTrans.DefaultDimension
+                 && dimensionAttributeValueSetItem.DisplayValue == custProvisionalBalanceTmpProcessing.Location
+            notexists join custTrans_W
+                where custTrans_W.CustTrans == custTrans.RecId
+                    && custTrans_W.InvoicePostingType_RU == SalesInvoicePostingType_RU::GoodsInRoute; */
+
+                    while             select AccountNum,Location , PostingProfile
+            from custProvisionalBalanceTmpProcessing
+                //group by AccountNum,Location
+                Where  custProvisionalBalanceTmpProcessing.Location != ""
+            join PostingProfile, DefaultDimension, TransDate, AmountMST from custTrans
+                //group by PostingProfile, DefaultDimension
+                where custTrans.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                    && custTrans.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile
+                    && custTrans.TransDate >= _fromDate
+                    && custTrans.TransDate <= toDate
+                    && (((_creditOrDebitSign * custTrans.AmountMST) > 0 && !custTrans.Correct) || ((_creditOrDebitSign * custTrans.AmountMST) < 0 && custTrans.Correct))
+            notexists join custTrans_W
+                where custTrans_W.CustTrans == custTrans.RecId
+                    && custTrans_W.InvoicePostingType_RU == SalesInvoicePostingType_RU::GoodsInRoute
+            {
+                select * from  dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                                == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == custTrans.DefaultDimension
+                    && dimensionAttributeValueSetItem.DisplayValue == custProvisionalBalanceTmpProcessing.Location;
+
+                if(dimensionAttributeValueSetItem)
+                {
+                    ttsbegin;
+                    select forupdate _tmpValue
+                   where _tmpValue.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                    && _tmpValue.Location == custProvisionalBalanceTmpProcessing.Location
+                    && _tmpValue.PostingProfile == custTrans.PostingProfile;
+
+                    if(_tmpValue)
+                    {
+                        _tmpValue.Amount       +=  custTrans.AmountMST;
+                       _tmpValue.ReportingCurrencyAmount         += custTrans.ReportingCurrencyAmount;
+                        _tmpValue.update();
+                    }
+                    else
+                    {
+                _tmpValue.clear();
+                _tmpValue.AccountNum = custProvisionalBalanceTmpProcessing.AccountNum;
+                _tmpValue.Location = custProvisionalBalanceTmpProcessing.Location;
+                _tmpValue.PostingProfile  = custTrans.PostingProfile;
+                _tmpValue.Amount   =  custTrans.AmountMST;
+                _tmpValue.insert();
+                    }
+                    ttscommit;
+                }
+            }
+
+            while             select AccountNum, Location, PostingProfile
+            from custProvisionalBalanceTmpProcessing
+                //group by AccountNum, Location
+                Where  custProvisionalBalanceTmpProcessing.Location == ""
+                join PostingProfile, DefaultDimension, TransDate, AmountMST from custTrans
+                //group by PostingProfile, DefaultDimension
+                where custTrans.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                    && custTrans.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile
+                    && custTrans.TransDate >= _fromDate
+                    && custTrans.TransDate <= toDate
+                    && (((_creditOrDebitSign * custTrans.AmountMST) > 0 && !custTrans.Correct) || ((_creditOrDebitSign * custTrans.AmountMST) < 0 && custTrans.Correct))
+            notexists join custTrans_W
+                where custTrans_W.CustTrans == custTrans.RecId
+                    && custTrans_W.InvoicePostingType_RU == SalesInvoicePostingType_RU::GoodsInRoute
+            {
+
+                select * from  dimensionAttributeValueSetItem
+            join dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValueSetItem.DimensionAttributeValue    == dimensionAttributeValue.RecId
+                 && dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                                == 'Locations'
+                 && dimensionAttributeValueSetItem.DimensionAttributeValueSet == custTrans.DefaultDimension;
+                 //&& dimensionAttributeValueSetItem.DisplayValue == custProvisionalBalanceTmpProcessing.Location
+                 if(dimensionAttributeValueSetItem.RecId == 0)
+                 {
+                     ttsbegin;
+                     select forupdate _tmpValue
+                   where _tmpValue.AccountNum == custProvisionalBalanceTmpProcessing.AccountNum
+                    && _tmpValue.Location == custProvisionalBalanceTmpProcessing.Location
+                    && _tmpValue.PostingProfile == custTrans.PostingProfile;
+
+                     if(_tmpValue)
+                     {
+                         _tmpValue.Amount       +=  custTrans.AmountMST;
+                         //_tmpValue.ReportingCurrencyAmount         += custTrans.ReportingCurrencyAmount;
+                         _tmpValue.update();
+                     }
+                     else
+                     {
+                _tmpValue.clear();
+                _tmpValue.AccountNum = custProvisionalBalanceTmpProcessing.AccountNum;
+                _tmpValue.Location = "";
+                _tmpValue.PostingProfile  = custTrans.PostingProfile;
+                _tmpValue.Amount   =  custTrans.AmountMST;
+                _tmpValue.insert();
+                     }
+                     ttscommit;
+                 }
+            }
+
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getCustProvisionalBalanceTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the data for the report from the temporary table.
+    /// </summary>
+    /// <returns>
+    /// The data from the <c>CustProvisionalBalanceTmp</c> temporary table.
+    /// </returns>
+    [
+        SRSReportDataSetAttribute('CustProvisionalBalanceTmp')
+    ]
+    public ETG_CustProvisionalBalanceTmp getCustProvisionalBalanceTmp()
+    {
+        select custProvisionalBalanceTmp;
+        return custProvisionalBalanceTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>hasFilteredTable</Name>
+				<Source><![CDATA[
+    private boolean hasFilteredTable(Query _sourceQuery, TableId _tableId)
+    {
+        QueryBuildDataSource source_qbds;
+
+        QueryBuildRange sourceRange;
+        QueryFilter dynamicQueryFilter;
+
+        int rangeCount;
+        int queryFilterCount;
+        int i;
+
+        if (_sourceQuery != null)
+        {
+            source_qbds = _sourceQuery.dataSourceTable(_tableId);
+
+            if (source_qbds == null)
+            {
+                return false;
+            }
+
+            rangeCount = source_qbds.rangeCount();
+            for (i = 1; i <= rangeCount; i++)
+            {
+                sourceRange = source_qbds.range(i);
+
+                if (sourceRange != null
+                    && sourceRange.value() != '')
+                {
+                    return true;
+                }
+            }
+
+            queryFilterCount = _sourceQuery.queryFilterCount();
+            for (i = 1; i <= queryFilterCount; i++)
+            {
+                dynamicQueryFilter = _sourceQuery.queryFilter(i);
+
+                if (dynamicQueryFilter != null
+                    && dynamicQueryFilter.value() != ''
+                    && dynamicQueryFilter.dataSource().table() == _tableId)
+                {
+                    return true;
+                }
+            }
+
+            var dimensionRanges = new DimensionProvider().getDimensionFiltersFromQuery(_sourceQuery);
+
+            if (!dimensionRanges.empty())
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>canSkipInsertCustProvisionalBalanceTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Determines if insert will be skipped in the insertCustProvisionalBalanceTmp method.
+    /// </summary>
+    /// <returns>true to skip insert; otherwise, false.</returns>
+    public boolean canSkipInsertCustProvisionalBalanceTmp()
+    {
+        return false;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertCustProvisionalBalanceTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///     Inserts records into the <c>CustProvisionalBalanceTmp</c> temporary table.
+    /// </summary>
+    protected void insertCustProvisionalBalanceTmp()
+    {
+        #LOCALMACRO.MainInsertAccounting
+            insert_recordset custProvisionalBalanceTmp
+                (AccountNum, MainAccountId, Location, MainAccountName, CustAccountName, OpeningBalance, AmountDebit, AmountDebitReportPeriod,
+                        AmountCredit, AmountCreditReportPeriod)
+                select AccountNum, MainAccountId, Location,MainAccountName, CustAccountName, OpeningBalance, AmountDebit, AmountDebitReportPeriod,
+                        AmountCredit, AmountCreditReportPeriod
+                from custProvisionalBalanceTmpProcessing
+        ENDMACRO
+
+        #LOCALMACRO.MainInsertReporting
+            insert_recordset custProvisionalBalanceTmp
+                (AccountNum, MainAccountId, Location, MainAccountName, CustAccountName, OpeningBalanceReporting, AmountDebitReporting, AmountDebitReportingReportPeriod,
+                        AmountCreditReporting, AmountCreditReportingReportPeriod)
+                select AccountNum, MainAccountId, Location, MainAccountName, CustAccountName, OpeningBalanceReporting, AmountDebitReporting, AmountDebitReportingReportPeriod,
+                        AmountCreditReporting, AmountCreditReportingReportPeriod
+                from custProvisionalBalanceTmpProcessing
+        ENDMACRO
+
+        if(!this.canSkipInsertCustProvisionalBalanceTmp())
+        {
+            switch (noneBeginTransEnd)
+            {
+                case NoneBeginTransEnd::None:
+                    if(isLedgerCurrencyAccounting)
+                    {
+                        #MainInsertAccounting
+                        where (custProvisionalBalanceTmpProcessing.OpeningBalance != 0
+                            || custProvisionalBalanceTmpProcessing.AmountCredit != 0
+                            || custProvisionalBalanceTmpProcessing.AmountDebit != 0
+                            || custProvisionalBalanceTmpProcessing.AmountDebitReportPeriod != 0
+                            || custProvisionalBalanceTmpProcessing.AmountCreditReportPeriod != 0);
+                    }
+                    else
+                    {
+                        #MainInsertReporting
+                        where (custProvisionalBalanceTmpProcessing.OpeningBalanceReporting != 0
+                            || custProvisionalBalanceTmpProcessing.AmountCreditReporting != 0
+                            || custProvisionalBalanceTmpProcessing.AmountDebitReporting != 0
+                            || custProvisionalBalanceTmpProcessing.AmountDebitReportingReportPeriod != 0
+                            || custProvisionalBalanceTmpProcessing.AmountCreditReportingReportPeriod != 0);
+                    }
+                    break;
+
+                case NoneBeginTransEnd::BeginBalance:
+                    if(isLedgerCurrencyAccounting)
+                    {
+                        #MainInsertAccounting
+                        where (custProvisionalBalanceTmpProcessing.OpeningBalance != 0);
+                    }
+                    else
+                    {
+                        #MainInsertReporting
+                        where (custProvisionalBalanceTmpProcessing.OpeningBalanceReporting != 0);
+                    }
+                    break;
+
+                case NoneBeginTransEnd::Transactions:
+                    if(isLedgerCurrencyAccounting)
+                    {
+                        #MainInsertAccounting
+                        where (custProvisionalBalanceTmpProcessing.AmountCredit != 0
+                            || custProvisionalBalanceTmpProcessing.AmountDebit != 0);
+                    }
+                    else
+                    {
+                        #MainInsertReporting
+                        where ( custProvisionalBalanceTmpProcessing.AmountCreditReporting != 0
+                            || custProvisionalBalanceTmpProcessing.AmountDebitReporting != 0);
+                    }
+                    break;
+
+                case NoneBeginTransEnd::EndBalance:
+                    if(isLedgerCurrencyAccounting)
+                    {
+                        #MainInsertAccounting
+                        where ((custProvisionalBalanceTmpProcessing.OpeningBalance + custProvisionalBalanceTmpProcessing.AmountDebit -
+                            custProvisionalBalanceTmpProcessing.AmountCredit) != 0);
+                    }
+                    else
+                    {
+                        #MainInsertReporting
+                        where ((custProvisionalBalanceTmpProcessing.OpeningBalanceReporting + custProvisionalBalanceTmpProcessing.AmountDebitReporting -
+                            custProvisionalBalanceTmpProcessing.AmountCreditReporting) != 0);
+                    }
+                    break;
+            }
+        }
+        select count(RecId) from custProvisionalBalanceTmp;
+        this.setClosingBalanceAndSumOnCustProvisionalBalanceTmp();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setClosingBalanceAndSumOnCustProvisionalBalanceTmp</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Calculates and sets the closing balance and sum amount fields on the <c>CustProvisionalBalanceTmp</c>, based on other fields on the record.
+    /// </summary>
+    private void setClosingBalanceAndSumOnCustProvisionalBalanceTmp()
+    {
+        update_recordSet custProvisionalBalanceTmp
+            setting ClosingBalance = (custProvisionalBalanceTmp.OpeningBalance + custProvisionalBalanceTmp.AmountDebit - custProvisionalBalanceTmp.AmountCredit),
+                    SumAmount = (custProvisionalBalanceTmp.AmountDebit - custProvisionalBalanceTmp.AmountCredit),
+                    ClosingBalanceReporting = (custProvisionalBalanceTmp.OpeningBalanceReporting + custProvisionalBalanceTmp.AmountDebitReporting - custProvisionalBalanceTmp.AmountCreditReporting),
+                    SumAmountReporting = (custProvisionalBalanceTmp.AmountDebitReporting - custProvisionalBalanceTmp.AmountCreditReporting);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>populateBCCriteriaTable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Populates the <c>CustProvisionalBalanceTmpBCCriteria</c> table with a list of billing classifications
+    /// to include in the report.
+    /// </summary>
+    protected void populateBCCriteriaTable()
+    {
+        ListEnumerator listEnumerator;
+
+        if (billingClassificationList)
+        {
+            listEnumerator = billingClassificationList.getEnumerator();
+
+            while (listEnumerator.moveNext())
+            {
+                custProvisionalBalanceTmpBCCriteria.clear();
+                custProvisionalBalanceTmpBCCriteria.CustBillingClassification =
+                    CustBillingClassification::findByBillingClassification(listEnumerator.current()).RecId;
+                custProvisionalBalanceTmpBCCriteria.insert();
+            }
+        }
+
+        if (includeTransactionWithoutBillingClass)
+        {
+            custProvisionalBalanceTmpBCCriteria.clear();
+            custProvisionalBalanceTmpBCCriteria.CustBillingClassification = 0;
+            custProvisionalBalanceTmpBCCriteria.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>translateMainAccountNamesOnCustProvisionalBalanceTmpProcessing</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///     Updates the <c>CustProvisionalBalanceTmpProcessing</c> table with translated names for used account numbers.
+    /// </summary>
+    /// <param name = "_skipTranslation">
+    ///     A boolean value which indicates whether to skip translation; optional.
+    /// </param>
+    protected void translateMainAccountNamesOnCustProvisionalBalanceTmpProcessing(boolean _skipTranslation = false)
+    {
+        MainAccountTranslation mainAccountTranslation;
+        LanguageId languageId = DimensionCache::currentDimensionValueLanguageId();
+        MainAccount mainAccount;
+
+        if (languageId && !_skipTranslation)
+        {
+            update_recordSet custProvisionalBalanceTmpProcessing
+                setting MainAccountName = mainAccountTranslation.Name
+                join mainAccount
+                    where mainAccount.MainAccountId == custProvisionalBalanceTmpProcessing.MainAccountId
+                join mainAccountTranslation
+                    where mainAccountTranslation.MainAccount == mainAccount.RecId
+                        && mainAccountTranslation.LanguageId == languageId;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>populateCustProvisionalBalanceTmpProcessing</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Fills the <c>CustProvisionalBalanceTmpProcessing</c> table for use by the report population logic.
+    /// </summary>
+    protected void populateCustProvisionalBalanceTmpProcessing()
+    {
+        CustTable custTable;
+        CustTrans custTrans;
+        CustTrans_W custTrans_W;
+        DirPartyTable dirPartyTable;
+        ETG_CustProvisionalBalanceTmpProcessing     custProvisionalBalanceTmpProcessingLocal;
+        DimensionAttributeValueCombination  dimensionAttributeValueCombination;
+        DimensionAttributeValue              dimensionAttributeValue;
+        DimensionAttribute                       dimensionAttribute;
+        RecordInsertList insertList = null;
+        insertList = new RecordInsertList(tablenum(ETG_CustProvisionalBalanceTmpProcessing));
+        #LOCALMACRO.InsertAllCustomers
+            insert_recordset custProvisionalBalanceTmpProcessing
+            (AccountNum, PostingProfile, CustAccountName)
+                select AccountNum from custTable
+                group by custTable.AccountNum, custTrans.PostingProfile
+                join PostingProfile from custTrans
+                    where custTrans.AccountNum == custTable.AccountNum
+                join maxOf(Name) from dirPartyTable
+                    where dirPartyTable.RecId == custTable.Party
+        ENDMACRO
+
+        #LOCALMACRO.InsertSelectedCustomers
+            #InsertAllCustomers
+                join selectedCustomerTmp
+                    where custTable.AccountNum == selectedCustomerTmp.AccountNum
+        ENDMACRO
+
+        ETG_CustProvisionalBalanceTmpValue selectedCustomerTmp = this.buildCustomerFilterSet();
+
+        select count(RecId) from selectedCustomerTmp;
+
+        int64 selectedCustomerCount = selectedCustomerTmp.RecId;
+
+        if (this.canPopulateCustProvisionalBalanceTmpProcessing())
+        {
+            this.populateBCCriteriaTable();
+
+            if (selectedCustomerCount == 0)
+            {
+                #InsertAllCustomers
+                #PublicSectorFilter
+                #RUFilter
+                ;
+            }
+            else
+            {
+                #InsertSelectedCustomers
+                #PublicSectorFilter
+                #RUFilter
+                ;
+            }
+        }
+        else
+        {
+            if (selectedCustomerCount == 0)
+            {
+                //#InsertAllCustomers
+                //#RUFilter
+                //;
+
+                while select AccountNum from custTable
+                group by custTable.AccountNum, custTrans.PostingProfile
+                join PostingProfile from custTrans
+                    where custTrans.AccountNum == custTable.AccountNum
+                join maxOf(Name) from dirPartyTable
+                    where dirPartyTable.RecId == custTable.Party
+                {
+                    custProvisionalBalanceTmpProcessing.clear();
+                    custProvisionalBalanceTmpProcessing.AccountNum              =    custTable.AccountNum;
+                    custProvisionalBalanceTmpProcessing.PostingProfile          =  custTrans.PostingProfile;
+                    custProvisionalBalanceTmpProcessing.CustAccountName        =  dirPartyTable.Name;
+                    custProvisionalBalanceTmpProcessing.Location                =   "";
+                    custProvisionalBalanceTmpProcessing.insert();
+                    while select DisplayValue from dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                 == 'Locations'
+                    {
+                        custProvisionalBalanceTmpProcessing.clear();
+                        custProvisionalBalanceTmpProcessing.AccountNum              =    custTable.AccountNum;
+                        custProvisionalBalanceTmpProcessing.PostingProfile          =  custTrans.PostingProfile;
+                        custProvisionalBalanceTmpProcessing.CustAccountName        =  dirPartyTable.Name;
+                        custProvisionalBalanceTmpProcessing.Location                =   dimensionAttributeValue.DisplayValue;
+                        custProvisionalBalanceTmpProcessing.insert();
+                    }
+                }
+            }
+            else
+            {
+                //#InsertSelectedCustomers
+                //#RUFilter
+                //;
+
+                while select AccountNum from custTable
+                group by custTable.AccountNum, custTrans.PostingProfile
+                    
+                join PostingProfile from custTrans
+                    where custTrans.AccountNum == custTable.AccountNum
+                //join maxOf(Name) from dirPartyTable
+                //    where dirPartyTable.RecId == custTable.Party
+                
+                {
+
+                    select AccountNum from selectedCustomerTmp
+                    where custTable.AccountNum == selectedCustomerTmp.AccountNum;
+                    if(selectedCustomerTmp.AccountNum)
+                    {
+                        custProvisionalBalanceTmpProcessing.clear();
+                        custProvisionalBalanceTmpProcessing.AccountNum              =    custTable.AccountNum;
+                        custProvisionalBalanceTmpProcessing.PostingProfile          =  custTrans.PostingProfile;
+                        custProvisionalBalanceTmpProcessing.CustAccountName        =  custTable.name();
+                        custProvisionalBalanceTmpProcessing.Location                =   "";
+                        custProvisionalBalanceTmpProcessing.insert();
+                        while select DisplayValue from dimensionAttributeValue
+                            join dimensionAttribute
+                                where dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                                        && dimensionAttribute.Name                                 == 'Locations'
+                        {
+                            custProvisionalBalanceTmpProcessing.clear();
+                            custProvisionalBalanceTmpProcessing.AccountNum              =    custTable.AccountNum;
+                            custProvisionalBalanceTmpProcessing.PostingProfile          =  custTrans.PostingProfile;
+                            custProvisionalBalanceTmpProcessing.CustAccountName        =  dirPartyTable.Name;
+                            custProvisionalBalanceTmpProcessing.Location                =   dimensionAttributeValue.DisplayValue;
+                            custProvisionalBalanceTmpProcessing.insert();
+                        }
+                    }
+                }
+            }
+        }
+        /*
+        while select AccountNum from custTable
+                group by custTable.AccountNum, custTrans.PostingProfile
+                join PostingProfile from custTrans
+                    where custTrans.AccountNum == custTable.AccountNum
+                join maxOf(Name) from dirPartyTable
+                    where dirPartyTable.RecId == custTable.Party
+        {
+            custProvisionalBalanceTmpProcessing.clear();
+            custProvisionalBalanceTmpProcessing.AccountNum              =    custTable.AccountNum;
+            custProvisionalBalanceTmpProcessing.PostingProfile          =  custTrans.PostingProfile;
+            custProvisionalBalanceTmpProcessing.CustAccountName        =  dirPartyTable.Name;
+            custProvisionalBalanceTmpProcessing.Location                =   "";
+            custProvisionalBalanceTmpProcessing.insert();
+            while select DisplayValue from dimensionAttributeValue
+            join dimensionAttribute
+            where dimensionAttributeValue.DimensionAttribute                == dimensionAttribute.RecId
+                 && dimensionAttribute.Name                                 == 'Locations'
+            {
+                custProvisionalBalanceTmpProcessing.clear();
+                custProvisionalBalanceTmpProcessing.AccountNum              =    custTable.AccountNum;
+                custProvisionalBalanceTmpProcessing.PostingProfile          =  custTrans.PostingProfile;
+                custProvisionalBalanceTmpProcessing.CustAccountName        =  dirPartyTable.Name;
+                custProvisionalBalanceTmpProcessing.Location                =   dimensionAttributeValue.DisplayValue;
+                custProvisionalBalanceTmpProcessing.insert();
+            }
+        }
+        */
+        //ttsbegin;
+        //insertList.insertDatabase();
+        //ttscommit;
+
+        //select  count(RecId) from custProvisionalBalanceTmpProcessing;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>canPopulateCustProvisionalBalanceTmpProcessing</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///     Checks whether records can be inserted to the <c>CustProvisionalBalanceTmpProcessing</c> table.
+    /// </summary>
+    /// <returns>
+    ///     true if public sector scenarion exists; otherwise, false.
+    /// </returns>
+    protected boolean canPopulateCustProvisionalBalanceTmpProcessing()
+    {
+        return isPublicSectorScenario;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets records based on the parameters entered.
+    /// </summary>
+    public void processReport()
+    {
+        ETG_CustProvisionalBalanceContract contract = this.parmDataContract() as ETG_CustProvisionalBalanceContract;
+
+        toDate = contract.parmToDate();
+        noneBeginTransEnd = contract.parmNoneBeginTransEnd();
+        ledgerCurrencySelection = contract.parmCurrencySelection();
+        isLedgerCurrencyAccounting = (ledgerCurrencySelection == LedgerCurrencySelection::Accounting ? true : false);
+
+        isPublicSectorScenario = CustBillingClassificationReportManager::isPublicSectorScenario(contract.parmBillingClassification());
+
+        if (isPublicSectorScenario)
+        {
+            billingClassificationList = contract.parmBillingClassification();
+            includeTransactionWithoutBillingClass = contract.parmInclTransWithNoBillingClass();
+        }
+
+        this.setTableConnections();
+
+        this.populateCustProvisionalBalanceTmpProcessing();
+
+        this.updateMainAccountFromSummaryLedgerDimension();
+
+        this.translateMainAccountNamesOnCustProvisionalBalanceTmpProcessing();
+
+        this.calculateAmounts(contract.parmFromDate(), contract.parmReportPeriodStartDate());
+
+        this.insertCustProvisionalBalanceTmp();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setTableConnections</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Sets the user connection to use on table.
+    /// </summary>
+    protected void setTableConnections()
+    {
+        custProvisionalBalanceTmpProcessing.setConnection(this.parmUserConnection());
+        custProvisionalBalanceTmp.setConnection(this.parmUserConnection());
+
+        if (isPublicSectorScenario)
+        {
+            custProvisionalBalanceTmpBCCriteria.setConnection(this.parmUserConnection());
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateMainAccountFromSummaryLedgerDimension</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Finds the summary main accounts for the processing set.
+    /// </summary>
+    /// <remarks>
+    /// This method assumes that the appropriate set of customers and customer transaction posting profiles 
+    /// has been created and filtered prior to execution.
+    /// </remarks>
+    protected void updateMainAccountFromSummaryLedgerDimension()
+    {
+        CustLedgerAccounts custLedgerAccounts;
+        DimensionAttributeValueCombination dimensionAttributeValueCombination;
+        MainAccount mainAccount;
+        CustTable custTable;
+
+        // Performance: Update the posting profile summary ledger dimension in reverse priority order.
+        // Higher priority posting profile settings will overwrite lower priority.
+        // This avoids the need to individually inspect posting profiles to determine the correct summary ledger dimension.
+
+        // Posting profile summary ledger dimension by posting profile default
+        update_recordSet custProvisionalBalanceTmpProcessing
+            setting MainAccountId = mainAccount.MainAccountId,
+                MainAccountName = MainAccount.Name
+        join custLedgerAccounts
+            where custLedgerAccounts.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile
+                && custLedgerAccounts.AccountCode == TableGroupAll::All
+        join dimensionAttributeValueCombination
+            where dimensionAttributeValueCombination.RecId == custLedgerAccounts.SummaryLedgerDimension
+        join MainAccountId, Name from mainAccount
+            where mainAccount.RecId == dimensionAttributeValueCombination.MainAccount;
+
+        // Posting profile summary ledger dimension by customer group
+        update_recordSet custProvisionalBalanceTmpProcessing
+            setting MainAccountId = mainAccount.MainAccountId,
+                MainAccountName = MainAccount.Name
+        join custTable
+            where custProvisionalBalanceTmpProcessing.AccountNum == custTable.AccountNum
+        join custLedgerAccounts
+            where custLedgerAccounts.Num == custTable.CustGroup
+                && custLedgerAccounts.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile
+                && custLedgerAccounts.AccountCode == TableGroupAll::GroupId
+        join dimensionAttributeValueCombination
+            where dimensionAttributeValueCombination.RecId == custLedgerAccounts.SummaryLedgerDimension
+        join MainAccountId, Name from mainAccount
+            where mainAccount.RecId == dimensionAttributeValueCombination.MainAccount;
+
+        // Posting profile summary ledger dimension by specified customer
+        update_recordSet custProvisionalBalanceTmpProcessing
+            setting MainAccountId = mainAccount.MainAccountId,
+                MainAccountName = MainAccount.Name
+        join custLedgerAccounts
+            where custLedgerAccounts.Num == custProvisionalBalanceTmpProcessing.AccountNum
+                && custLedgerAccounts.PostingProfile == custProvisionalBalanceTmpProcessing.PostingProfile
+                && custLedgerAccounts.AccountCode == TableGroupAll::Table
+        join dimensionAttributeValueCombination
+            where dimensionAttributeValueCombination.RecId == custLedgerAccounts.SummaryLedgerDimension
+        join MainAccountId, Name from mainAccount
+            where mainAccount.RecId == dimensionAttributeValueCombination.MainAccount;
+
+        ETG_CustProvisionalBalanceTmpValue selectedMainAccountTmp = this.buildMainAccountFilterSet();
+
+        select count(RecId) from selectedMainAccountTmp;
+
+        this.deleteFromCustProvisionalBalanceTmpProcessingByMainAccount(selectedMainAccountTmp, selectedMainAccountTmp.RecId == 0);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>deleteFromCustProvisionalBalanceTmpProcessingByMainAccount</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///     Deletes the <c>CustProvisionalBalanceTmpProcessing</c> record if record 
+    ///     exists in <c>ETG_CustProvisionalBalanceTmpValue</c>.
+    /// </summary>
+    /// <param name = "_ETG_CustProvisionalBalanceTmpValue">
+    ///     A <c>ETG_CustProvisionalBalanceTmpValue</c> table buffer.
+    /// </param>
+    /// <param name = "_skipDelete">
+    ///     A boolean flag to skip deletion; optional.
+    /// </param>
+    protected void deleteFromCustProvisionalBalanceTmpProcessingByMainAccount(ETG_CustProvisionalBalanceTmpValue _ETG_CustProvisionalBalanceTmpValue, boolean _skipDelete = false)
+    {
+        if (!_skipDelete)
+        {
+            // Exclude any customer tuples not specified for main account
+            delete_from custProvisionalBalanceTmpProcessing
+                notexists join _ETG_CustProvisionalBalanceTmpValue
+                    where custProvisionalBalanceTmpProcessing.MainAccountId == _ETG_CustProvisionalBalanceTmpValue.MainAccountId;
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>SalesCopying_ETGSPAIN_Form_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the <c>SalesCopying</c> form for the ETGSPAIN model.
+/// </summary>
+[ExtensionOf(formStr(SalesCopying))]
+final class SalesCopying_ETGSPAIN_Form_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>canClose</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>canClose</c> method.
+    /// </summary>
+    /// <returns>
+    /// Returns a boolean value indicating whether the form can close.
+    /// </returns>
+    boolean canClose()
+    {
+        boolean         ret;
+        boolean         ETGSPAINHasUpdateUnsoldQty;
+        RefRecId        unsoldInventTrans;
+        TmpFrmVirtual   tmpFrmVirtualLinesLocal     = this.tmpFrmVirtualLines;
+        TmpFrmVirtual   tmpFrmVirtualHeaderLocal    = this.tmpFrmVirtualHeader;
+          
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            while select tmpFrmVirtualLinesLocal order by Id, TransDate
+            {
+                if (!ETGSPAINHasUpdateUnsoldQty)
+                {
+                    switch (tmpFrmVirtualLinesLocal.TableNum)
+                    {
+                        case tableNum(CustInvoiceTrans):
+                            CustInvoiceTrans localCustInvoiceTrans = CustInvoiceTrans::findRecId(tmpFrmVirtualLinesLocal.RecordNo);
+                            if (localCustInvoiceTrans)
+                            {
+                                unsoldInventTrans           = ETGSPAINUnsoldInventTrans::findByInventTransId(localCustInvoiceTrans.inventTransId, true).RecId;
+                                ETGSPAINHasUpdateUnsoldQty  = ETGSPAINHasUpdateUnsoldQty    ?
+                                                            ETGSPAINHasUpdateUnsoldQty  :
+                                                            (unsoldInventTrans && ETGSPAINUnsoldInventTransModifyController::updateUnsoldQtyDialog());
+
+                                if (ETGSPAINHasUpdateUnsoldQty)
+                                {
+                                    while select forupdate tmpFrmVirtualLinesLocal order by Id, TransDate
+                                    {
+                                        ttsbegin;
+                                        tmpFrmVirtualLinesLocal.ETGSPAINHasUpdateUnsoldQty          = true;
+                                        tmpFrmVirtualLinesLocal.ETGSPAINUnsoldInventTransRefRecId   = InventTrans::findTransId(localCustInvoiceTrans.inventTransId).RecId;
+                                        tmpFrmVirtualLinesLocal.update();
+                                        ttscommit;
+                                    }
+
+                                    this.tmpFrmVirtualLines = tmpFrmVirtualLinesLocal;
+                                }
+                            }
+                            break;
+                    }
+                }
+            }
+        }
+        ret = next canClose();
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

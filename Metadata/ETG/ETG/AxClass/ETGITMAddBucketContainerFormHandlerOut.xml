@@ -1,0 +1,435 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGITMAddBucketContainerFormHandlerOut</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// this class will handle logic for add to bucket for new container or existing containers
+/// </summary>
+public final class ETGITMAddBucketContainerFormHandlerOut
+{
+    private FormRun thisFormRun;
+    private FormDataSource tmpCreatorTable_ds, tmpCreatorLine_ds, containers_ds;
+
+    private ITMTable itmTable;
+    private ITMTmpCreatorLine tmpCreatorLine;
+    private ITMContainers itmContainers;
+    private boolean addToExistingContainers;
+    private boolean operationCompleted;
+    private boolean batchFeatureEnabled;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>newFromForm</Name>
+				<Source><![CDATA[
+    public static ETGITMAddBucketContainerFormHandlerOut newFromForm(FormRun _element)
+    {
+        ETGITMAddBucketContainerFormHandlerOut form = new ETGITMAddBucketContainerFormHandlerOut();
+
+        form.InitFromFormRun(_element);
+        
+        return form;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initFromFormRun</Name>
+				<Source><![CDATA[
+    private void initFromFormRun(FormRun _formRun)
+    {
+        thisFormRun = _formRun;
+
+        tmpCreatorLine_ds = thisFormRun.dataHelper().FindDataSource(formDataSourceStr(ETGITMAddBucketContainerOut, ITMTmpCreatorLine));
+        containers_ds = thisFormRun.dataHelper().FindDataSource(formDataSourceStr(ETGITMAddBucketContainerOut, ITMContainers));
+        batchFeatureEnabled = FeatureStateProvider::isFeatureEnabled(ITMAddToContainerBatchJobFeature::instance());
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmITMTable</Name>
+				<Source><![CDATA[
+    public ITMTable parmITMTable(ITMTable _itmTable = itmTable)
+    {
+        itmTable = _itmTable;
+
+        return itmTable;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmITMContainers</Name>
+				<Source><![CDATA[
+    public ITMContainers parmITMContainers(ITMContainers _itmContainers = itmContainers)
+    {
+        itmContainers = _itmContainers;
+
+        return itmContainers;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmTmpCreatorLine</Name>
+				<Source><![CDATA[
+    public ITMTmpCreatorLine parmTmpCreatorLine(ITMTmpCreatorLine _tmpCreatorLine = tmpCreatorLine)
+    {
+        tmpCreatorLine = _tmpCreatorLine;
+
+        return tmpCreatorLine;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmAddToExistingContainers</Name>
+				<Source><![CDATA[
+    public boolean parmAddToExistingContainers(boolean _addToExistingContainers = addToExistingContainers)
+    {
+        addToExistingContainers = _addToExistingContainers;
+
+        return addToExistingContainers;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmOperationCompleted</Name>
+				<Source><![CDATA[
+    public boolean parmOperationCompleted(boolean _operationCompleted = operationCompleted)
+    {
+        operationCompleted = _operationCompleted;
+
+        return operationCompleted;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createContainersFormName</Name>
+				<Source><![CDATA[
+    private str createContainersFormName()
+    {
+        return formStr(ETGITMContainersCreateFromBucketOut);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>removeBucket</Name>
+				<Source><![CDATA[
+    public void removeBucket(ITMTmpCreatorTable _tmpCreatorTable)
+    {
+        ETGITMCreatorTableGeneration::removeFromBucketFromForm(_tmpCreatorTable, tmpCreatorLine);
+     
+        this.refreshCallingDatasource();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmBatchFeatureEnabled</Name>
+				<Source><![CDATA[
+    public boolean parmBatchFeatureEnabled()
+    {
+        return batchFeatureEnabled;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createContainersForm</Name>
+				<Source><![CDATA[
+    public void createContainersForm()
+    {
+        if (batchFeatureEnabled)
+        {
+            this.parmOperationCompleted(false);
+            Args args = new Args();
+            args.caller(this);
+            new MenuFunction(menuItemActionStr(ETGITMCreatorCreateShipmentOut), MenuItemType::Action).run(args);
+
+            if (this.parmOperationCompleted())
+            {
+                this.addQtyIfSplitQty();
+
+                this.removeTmpCreatorLine();
+
+                this.updateInventTransIdInBucket();
+
+                this.refreshCallingDatasource();
+            }
+        }
+        else
+        {
+            Args        args = new Args();
+            args.name(this.createContainersFormName());
+            args.caller(this);
+            FormRun     createContainers;
+            createContainers = classfactory.formRunClass(args);
+            createContainers.init();
+            createContainers.run();
+            createContainers.wait();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>folioForm</Name>
+				<Source><![CDATA[
+    public void folioForm()
+    {
+        Args args = new Args();
+        
+        args.record(this.parmITMTable());
+
+        new MenuFunction(menuItemDisplayStr(ITMFolioTableListPage), MenuItemType::Display).run(args);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addContainers</Name>
+				<Source><![CDATA[
+    public void addContainers(boolean _addToExistContainer = false)
+    {
+        ETGITMCreatorCreateShipmentOut::createShipmentFromShipEditor(
+            tmpCreatorLine, 
+            ITMTable, 
+            ITMContainers, 
+            _addToExistContainer);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>refreshCallingDatasource</Name>
+				<Source><![CDATA[
+    public void refreshCallingDatasource()
+    {
+        tmpCreatorLine_ds.research();
+
+        containers_ds.research(); 
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>removeTmpCreatorLine</Name>
+				<Source><![CDATA[
+    public void removeTmpCreatorLine()
+    {
+        delete_from tmpCreatorLine
+            where tmpCreatorLine.AddedToBucket && tmpCreatorLine.Selected;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateInventTransIdInBucket</Name>
+				<Source><![CDATA[
+    public void updateInventTransIdInBucket()
+    {
+        ITMTmpCreatorLine ITMTmpCreatorLineUpdate;
+        InventTransOrigin InventTransOrigin;
+
+        ITMTmpCreatorLineUpdate.setTmpData(tmpCreatorLine);
+
+        ttsbegin;
+        while select forupdate ITMTmpCreatorLineUpdate
+            where ITMTmpCreatorLineUpdate.AddedToBucket == NoYes::Yes 
+                && ITMTmpCreatorLineUpdate.Selected == NoYes::No
+                notexists join InventTransOrigin
+                    where InventTransOrigin.InventTransId == ITMTmpCreatorLineUpdate.InventTransId
+        {
+            InventTransId InventTransIdNonITM = this.getInventTransIdNonITM(ITMTmpCreatorLineUpdate.InventTransType, ITMTmpCreatorLineUpdate.InventTransId);
+
+            if(InventTransIdNonITM)
+            {
+                ITMTmpCreatorLineUpdate.InventTransId = InventTransIdNonITM;
+                ITMTmpCreatorLineUpdate.update();
+            }
+        }
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addQtyIfSplitQty</Name>
+				<Source><![CDATA[
+    public void addQtyIfSplitQty() 
+    {
+        ITMTmpCreatorLine ITMTmpCreatorLineGroup, ITMTmpCreatorLineLocal;
+
+        ITMTmpCreatorLineGroup.setTmpData(tmpCreatorLine);
+
+        ITMTmpCreatorLineLocal.setTmpData(tmpCreatorLine);
+
+        while select sum(TransferQty), sum(InventQty), sum(PurchQty), InventTransId, Close, ShipDataArea, InventTransType from ITMTmpCreatorLineGroup
+            group by InventTransId, Close, ShipDataArea, InventTransType
+            where ITMTmpCreatorLineGroup.Selected == NoYes::Yes
+                && ITMTmpCreatorLineGroup.AddedToBucket == NoYes::Yes
+                && ITMTmpCreatorLineGroup.TransferQty > 0
+                && ITMTmpCreatorLineGroup.TransferQty < ITMTmpCreatorLineGroup.InventQty
+        {
+            select tmpCreatorLine where tmpCreatorLine.InventTransId == ITMTmpCreatorLineGroup.InventTransId;
+
+            InventTransId InventTransIdNonITM = this.getInventTransIdNonITM(ITMTmpCreatorLineGroup.InventTransType, ITMTmpCreatorLineGroup.InventTransId);
+
+            if(InventTransIdNonITM)
+            {
+                buf2Buf(tmpCreatorLine, ITMTmpCreatorLineLocal);
+                ITMTmpCreatorLineLocal.PurchQty = ITMTmpCreatorLineGroup.PurchQty - ITMTmpCreatorLineGroup.TransferQty;
+
+                InventMovement movement = InventTransOrigin::findByInventTransId(InventTransIdNonITM).inventMovement();
+                InventUnitId   inventUnitId = movement.inventTableInvent().UnitId;
+                if (inventUnitId
+                    && ITMTmpCreatorLineLocal.PurchUnit 
+                    && InventUnitId != ITMTmpCreatorLineLocal.PurchUnit)
+              //todo test
+                if(ETGOTMAddToBucketUnitConversionFlight::instance().isEnabled())
+                {
+                    ITMTmpCreatorLineLocal.InventQty = ITMTmpCreatorLineGroup.InventQty - EcoResProductUnitConverter::convertGivenUnitSymbolsForReleasedProduct(
+                                                                                                        movement.itemId(),
+                                                                                                        movement.inventDimId(),
+                                                                                                        ITMTmpCreatorLineGroup.TransferQty,
+                                                                                                        ITMTmpCreatorLineLocal.PurchUnit,
+                                                                                                        InventUnitId,
+                                                                                                        NoYes::Yes);
+                }
+                else
+                {
+                    ITMTmpCreatorLineLocal.InventQty = ITMTmpCreatorLineGroup.InventQty - ITMTmpCreatorLineGroup.TransferQty ;
+                }
+
+                ITMTmpCreatorLineLocal.TransferQty = ITMTmpCreatorLineLocal.PurchQty;
+                ITMTmpCreatorLineLocal.InventTransId = InventTransIdNonITM;
+                ITMTmpCreatorLineLocal.Selected = NoYes::No;
+                ITMTmpCreatorLineLocal.doInsert();
+            }
+
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getInventTransIdSales</Name>
+				<Source><![CDATA[
+    public InventTransId getInventTransIdSales(InventTransId _orderlineInventTransId)
+    {
+        SalesDeliverySchedule salesDeliverySchedule, salesDeliveryScheduleOrderLine;
+        ITMLine ITMLine;
+
+        select DeliveryLine from salesDeliverySchedule
+            where salesDeliverySchedule.OrderLine == _orderlineInventTransId
+            notexists join ITMLine where ITMLine.InventTransId == salesDeliverySchedule.Deliveryline;
+
+        if(!salesDeliverySchedule.Deliveryline)
+        {
+            select OrderLine from salesDeliveryScheduleOrderLine
+                where salesDeliveryScheduleOrderLine.DeliveryLine == _orderlineInventTransId
+                join DeliveryLine from salesDeliverySchedule
+                    where salesDeliverySchedule.OrderLine == salesDeliveryScheduleOrderLine.OrderLine
+                    notexists join ITMLine 
+                        where ITMLine.InventTransId == salesDeliverySchedule.Deliveryline;
+        }
+
+        return salesDeliverySchedule.Deliveryline;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getInventTransIdNonITM</Name>
+				<Source><![CDATA[
+    public InventTransId getInventTransIdNonITM(InventTransType _inventTransType, InventTransId _inventTransId)
+    {
+        switch(_inventTransType)
+        {
+            case InventTransType::Sales :
+                return this.getInventTransIdSales(_inventTransId);
+            case InventTransType::TransferOrderShip :
+                return _inventTransId;
+            default : 
+                return '';				
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateTmpCreatorLine</Name>
+				<Source><![CDATA[
+    public void validateTmpCreatorLine()
+    {
+        ITMLine ITMLine;
+
+        ttsbegin;
+
+        while select forupdate tmpCreatorLine
+            where tmpCreatorLine.AddedToBucket && tmpCreatorLine.Selected
+            exists join ITMLine
+                where ITMLine.InventTransId == tmpCreatorLine.InventTransId
+                && ITMLine.ShipDataArea == tmpCreatorLine.ShipDataArea
+        {
+            warning(strFmt("@InboundTransportationManagement:ItemAlreadyAddedToShipment", tmpCreatorLine.ItemId));
+
+            tmpCreatorLine.delete();
+        }
+
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initCreateContainerForm</Name>
+				<Source><![CDATA[
+    public void initCreateContainerForm()
+    {
+        this.validateTmpCreatorLine();
+
+        this.refreshCallingDatasource();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addToNewContainerProcess</Name>
+				<Source><![CDATA[
+    public void addToNewContainerProcess(ITMContainers _itmContainers, boolean _addToExistContainer = false)
+    {
+        try
+        {
+            this.parmITMContainers(_itmContainers);
+
+            this.validateTmpCreatorLine();
+
+            this.addContainers(_addToExistContainer);
+
+            this.addQtyifSplitQty();
+
+            this.removeTmpCreatorLine();
+
+            this.updateInventTransIdInBucket();
+
+            this.refreshCallingDatasource();
+        }
+        catch(Exception::Error)
+        {
+            this.refreshCallingDatasource();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCustTrans_Table_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tableStr(CustTrans))]
+final class ETGCustTrans_Table_Extension
+{
+
+ 
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>insert</Name>
+				<Source><![CDATA[
+    public void insert()
+    {
+        this.updateTermoNumber();
+
+        next insert();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateTermoNumber</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// update termo number ref after payment journal post or sales invoice post
+    /// </summary>
+    public void updateTermoNumber()
+    {
+        if(this.Voucher && VendParameters::find().ETGEnableTermoNumberFeature == NoYes::Yes)
+        {
+            CustInvoiceJour    custInvJour;
+            LedgerJournalTrans ledgerJournalTrans;
+            ETGTERMONumber     termoNumber;
+
+            if(this.Prepayment)
+            {
+                select firstonly ETGTERMONumber from ledgerJournalTrans
+                where ledgerJournalTrans.Voucher == this.Voucher
+                    && ledgerJournalTrans.TransDate == this.TransDate;
+
+                termoNumber = ledgerJournalTrans.ETGTERMONumber;
+            }
+            else
+            {
+                select firstonly ETGTERMONumber from custInvJour
+                where custInvJour.LedgerVoucher == this.Voucher
+                    && custInvJour.InvoiceAccount == this.AccountNum
+                    && custInvJour.InvoiceDate == this.TransDate;
+
+                termoNumber = custInvJour.ETGTERMONumber;
+            }
+
+            this.ETGTERMONumber          = termoNumber;
+            this.ETGMotherTERMOReference = ETGTERMONumberTable::findFromTermoNumber(termoNumber).MotherTERMOReference;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>update</Name>
+				<Source><![CDATA[
+    public void update()
+    {
+        next update();
+
+        this.updateChildTermoPostSettlement();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateChildTermoPostSettlement</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// close child termo after posting customer transactions settlemt
+    /// </summary>
+    public void updateChildTermoPostSettlement()
+    {
+        if(VendParameters::find().ETGEnableTermoNumberFeature)
+        {
+            if(this.LastSettleVoucher && this.Invoice && this.ETGTERMONumber)
+            {
+                ETGTERMONumberTable termoNumberTable, termoNumberTableChild, termoNumberTableMother;
+                termoNumberTable = ETGTERMONumberTable::findFromTermoNumber(this.ETGTERMONumber, true);
+                if(termoNumberTable.TypeOfTERMO == ETGTypeOfTERMO::Child)
+                {
+                    ttsbegin;
+                    termoNumberTable.TERMONumberStatus = ETGTERMONumberStatus::Close;
+                    termoNumberTable.ClosedDate        = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+                    termoNumberTable.doUpdate();
+
+                    //close mother termo if all child is closed
+                    select firstonly RecId from termoNumberTableChild
+                        where termoNumberTableChild.MotherTERMOReference == termoNumberTable.MotherTERMOReference
+                        && termoNumberTableChild.TERMONumberStatus != ETGTERMONumberStatus::Close
+                        && termoNumberTableChild.TERMONumber != termoNumberTable.TERMONumber;
+
+                    if(termoNumberTableChild.RecId == 0)
+                    {
+                        termoNumberTableMother = ETGTERMONumberTable::findFromTermoNumber(termoNumberTable.MotherTERMOReference, true);
+                        if(termoNumberTableMother 
+                            && termoNumberTableMother.RemainingClosedTERMOValueReal == 0 
+                            && termoNumberTableMother.RemainingTermoValueReal == 0)
+                        {
+                            termoNumberTableMother.TERMONumberStatus = ETGTERMONumberStatus::Close;
+                            termoNumberTableMother.ClosedDate        = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+                            termoNumberTableMother.update();
+                        }
+                    }
+                    ttscommit;
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>text</Name>
+				<Source><![CDATA[
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display str text(CustTrans _this)
+    {
+        str textVal;
+
+        if(_this.Txt)
+        {
+            textVal = _this.Txt;
+        }
+        else if(_this.Txt == "")
+        {
+            textVal = _this.Invoice;
+        }
+        return textVal;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>displayMainAccountId</Name>
+				<Source><![CDATA[
+    // Display method to get MainAccountId
+    [SysClientCacheDataMethod(true)]
+    public static display MainAccountNum displayMainAccountId(CustTrans _this)
+    {
+        GeneralJournalEntry         gje;
+        GeneralJournalAccountEntry  gjae;
+        MainAccount                 mainAccount;
+
+        select firstonly MainAccountId from mainAccount
+            exists join gjae
+            where gjae.MainAccount == mainAccount.RecId
+            join gje
+            where gje.RecId == gjae.GeneralJournalEntry
+               && gje.SubledgerVoucher == _this.Voucher
+               && gje.SubledgerVoucherDataAreaId == _this.dataAreaId
+               && gje.AccountingDate == _this.TransDate;
+               
+        return mainAccount.MainAccountId;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

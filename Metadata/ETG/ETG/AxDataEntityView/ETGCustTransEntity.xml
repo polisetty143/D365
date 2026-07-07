@@ -1,0 +1,392 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxDataEntityView xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGCustTransEntity</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGCustTransEntity extends common
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>postLoad</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    public void postLoad()
+    {
+        super();
+        DataArea                     dataArea;
+        ETGACFParameters             acfparameters = ETGACFParameters::find();
+        DefaultDimensionView         DefaultDimensionView;
+        DimAttributeOMBusinessUnit   dimAttributeOMBusinessUnit;
+        GeneralJournalAccountEntry   generalJournalAccountEntry;
+        GeneralJournalEntry          generalJournalEntry;
+        AmountMST                    AmtUSD;
+
+        this.Name = CustTable::find(this.AccountNum).name();
+        this.CountryName = CustTable::find(this.AccountNum).countryName();
+        this.Commidity = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(this.DefaultDimension, acfparameters.MainCommodity);
+        this.SubCommidity = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(this.DefaultDimension, acfparameters.SubCommodity);
+        this.Vertical = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValue(this.DefaultDimension, acfparameters.Vertical);
+
+        
+        select * from DefaultDimensionView where DefaultDimensionView.DEFAULTDIMENSION == this.DefaultDimension
+             && DefaultDimensionView.Name == acfparameters.SubVertical;
+
+        
+
+        select * from dimAttributeOMBusinessUnit
+            where dimAttributeOMBusinessUnit.value == DefaultDimensionView.DisplayValue;
+
+        if (dimAttributeOMBusinessUnit)
+        {
+            this.SubVertical            = dimAttributeOMBusinessUnit.Name;
+        }
+        
+       
+        CustTrans custTransLocal = CustTrans::find(this.RecId);
+
+        this.AmountoutstandinginLC = CustTrans::balanceMST(custTransLocal.AccountNum);//CustTrans::balanceReportingCurrency(custTransLocal.AccountNum);
+
+        this.AmountUSD             = CustTrans::balanceUSD(custTransLocal);
+        this.CurrencyLC            = Ledger::accountingCurrency();
+
+        select firstonly Name from dataArea
+        where dataArea.id       == this.DataAreaId;
+ 
+        this.EntityName           = dataArea.name;
+
+        CustTable custTable = CustTable::find(this.AccountNum);
+        this.AmountoutstandinginTC = custTable.balancePerDate(this.TransDate);
+
+        ExchangeRateUnionView ExchangeRateUnionView, ExchangeRateUnionViewLoc;
+
+        select firstonly ExchangeRateUnionView order by ExchangeRateUnionView.ValidFrom desc
+        where ExchangeRateUnionView.FromCurrencyCode == this.CurrencyCode && ExchangeRateUnionView.ToCurrencyCode == 'USD'
+                && ExchangeRateUnionView.ValidFrom <= this.TransDate &&  ExchangeRateUnionView.ValidTo >= this.TransDate;
+
+        if (this.CurrencyCode == 'USD')
+        {
+            this.ExchInUSD = 1;
+        }
+        else
+        {
+            this.ExchInUSD  = ( ExchangeRateUnionView.ExchangeRate) /100.00;
+        }
+ 
+        select firstonly  ExchangeRateUnionViewLoc order by ExchangeRateUnionViewLoc.ValidFrom desc
+        where ExchangeRateUnionViewLoc.FromCurrencyCode == this.CurrencyCode && ExchangeRateUnionViewLoc.ToCurrencyCode == Ledger::accountingCurrency(CompanyInfo::current())
+        && ExchangeRateUnionViewLoc.ValidFrom <= this.TransDate &&  ExchangeRateUnionViewLoc.ValidTo >=this.TransDate;
+ 
+        if (this.CurrencyCode == Ledger::accountingCurrency(CompanyInfo::current() ))
+        {
+        this.ExchInLC   = 1;
+        }
+        else
+        {
+            this.ExchInLC = (ExchangeRateUnionViewLoc.ExchangeRate)/100.00;
+        }
+
+       
+        select firstonly SubledgerVoucher, RecId from generalJournalEntry
+            where generalJournalEntry.SubledgerVoucher == this.Voucher;
+
+        select firstonly MainAccount from generalJournalAccountEntry
+            where generalJournalAccountEntry.GeneralJournalEntry == generalJournalEntry.RecId
+            && generalJournalAccountEntry.PostingType == LedgerPostingType::CustBalance;
+
+        MainAccount mainAccount =  MainAccount::find(generalJournalAccountEntry.mainAccount);
+
+        this.GLCode         = mainAccount.MainAccountId;
+        this.GLDescription  = mainAccount.Name;
+
+        this.GLCodeProstingProfile = DimensionAttributeValueCombination::find( CustLedgerAccounts::summaryLedgerDimension(this.AccountNum, this.PostingProfile)).DisplayValue;
+        this.GLDescriptionPostingProfile = MainAccount::findByMainAccountId(this.GLCodeProstingProfile).Name;
+        this.CustBalance =custTransLocal.remainAmountCur();
+        
+
+        
+       
+
+        
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+	<Label>ETG custtrans entity</Label>
+	<DataManagementEnabled>Yes</DataManagementEnabled>
+	<DataManagementStagingTable>ETGCustTransStaging</DataManagementStagingTable>
+	<EntityCategory>Transaction</EntityCategory>
+	<IsPublic>Yes</IsPublic>
+	<IsReadOnly>Yes</IsReadOnly>
+	<Modules>Accounts Receivable</Modules>
+	<PrimaryCompanyContext>DataAreaId</PrimaryCompanyContext>
+	<PrimaryKey>EntityKey</PrimaryKey>
+	<PublicCollectionName>ETGCustTransEntities</PublicCollectionName>
+	<PublicEntityName>ETGCustTransEntity</PublicEntityName>
+	<DeleteActions />
+	<FieldGroups>
+		<AxTableFieldGroup>
+			<Name>AutoReport</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoLookup</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoIdentification</Name>
+			<AutoPopulate>Yes</AutoPopulate>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoSummary</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoBrowse</Name>
+			<Fields />
+		</AxTableFieldGroup>
+	</FieldGroups>
+	<Fields>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>TransDate</Name>
+			<DataField>TransDate</DataField>
+			<DataSource>CustTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>AccountNum</Name>
+			<DataField>AccountNum</DataField>
+			<DataSource>CustTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>AmountCur</Name>
+			<DataField>AmountCur</DataField>
+			<DataSource>CustTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>AmountMST</Name>
+			<DataField>AmountMST</DataField>
+			<DataSource>CustTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>CustTransRecId</Name>
+			<DataField>RecId</DataField>
+			<DataSource>CustTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>Name</Name>
+			<Label>Name</Label>
+			<ExtendedDataType>Name</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>AccountingEvent</Name>
+			<DataField>AccountingEvent</DataField>
+			<DataSource>CustTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>TransType</Name>
+			<DataField>TransType</DataField>
+			<DataSource>CustTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Txt</Name>
+			<DataField>Txt</DataField>
+			<DataSource>CustTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>Voucher</Name>
+			<DataField>Voucher</DataField>
+			<DataSource>CustTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>CountryName</Name>
+			<Label>Country</Label>
+			<IsComputedField>No</IsComputedField>
+			<StringSize>-1</StringSize>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>Vertical</Name>
+			<ExtendedDataType>String255</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>SubVertical</Name>
+			<ExtendedDataType>String255</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>Commidity</Name>
+			<ExtendedDataType>String255</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>SubCommidity</Name>
+			<ExtendedDataType>String255</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>GLCode</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>GLDescription</Name>
+			<ExtendedDataType>UserIdStr</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>DefaultDimension</Name>
+			<AccessModifier>Private</AccessModifier>
+			<DataField>DefaultDimension</DataField>
+			<DataSource>CustTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>AmountoutstandinginLC</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>AmountoutstandinginTC</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>TCCurrencyName</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>TCCureency</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>CurrencyCode</Name>
+			<DataField>CurrencyCode</DataField>
+			<DataSource>CustTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>AmountUSD</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>CurrencyLC</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>EntityName</Name>
+			<ExtendedDataType>UserIdStr</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>SettleAmountMST</Name>
+			<DataField>SettleAmountMST</DataField>
+			<DataSource>CustTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>ExchInLC</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>ExchInUSD</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewMappedField">
+			<Name>PostingProfile</Name>
+			<DataField>PostingProfile</DataField>
+			<DataSource>CustTrans</DataSource>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>GLCodeProstingProfile</Name>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldString">
+			<Name>GLDescriptionPostingProfile</Name>
+			<ExtendedDataType>UserIdStr</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+		<AxDataEntityViewField xmlns=""
+			i:type="AxDataEntityViewUnmappedFieldReal">
+			<Name>CustBalance</Name>
+			<ExtendedDataType>AmountMST</ExtendedDataType>
+			<IsComputedField>No</IsComputedField>
+		</AxDataEntityViewField>
+	</Fields>
+	<Keys>
+		<AxDataEntityViewKey>
+			<Name>EntityKey</Name>
+			<Fields>
+				<AxDataEntityViewKeyField>
+					<DataField>CustTransRecId</DataField>
+				</AxDataEntityViewKeyField>
+			</Fields>
+		</AxDataEntityViewKey>
+	</Keys>
+	<Mappings />
+	<Ranges />
+	<Relations />
+	<StateMachines />
+	<ViewMetadata>
+		<Name>Metadata</Name>
+		<SourceCode>
+			<Methods>
+				<Method>
+					<Name>classDeclaration</Name>
+					<Source><![CDATA[
+[Query]
+public class Metadata extends QueryRun
+{
+}
+]]></Source>
+				</Method>
+			</Methods>
+		</SourceCode>
+		<DataSources>
+			<AxQuerySimpleRootDataSource>
+				<Name>CustTrans</Name>
+				<DynamicFields>Yes</DynamicFields>
+				<Table>CustTrans</Table>
+				<DataSources />
+				<DerivedDataSources />
+				<Fields />
+				<Ranges />
+				<GroupBy />
+				<Having />
+				<OrderBy />
+			</AxQuerySimpleRootDataSource>
+		</DataSources>
+	</ViewMetadata>
+</AxDataEntityView>

@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>PurchInvoiceBusinessEventContract</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[DataContract]
+public final class PurchInvoiceBusinessEventContract extends BusinessEventsContract
+{
+    private VendInvoiceId       invoiceId;
+    private TransDate           transactionDate;
+    private PurchId             purchId;
+    private str                 purchAgreementNumber;
+    private str                 dealNumber;
+    private str                 source;
+    private VendAccount         vendorNo;
+    private AmountCur           invoiceAmount;
+    private CurrencyCode        currency;
+    private RefRecId            recordId;
+    private str                 transactionType;
+    
+    // Lines collection
+    private List                lines;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initialize</Name>
+				<Source><![CDATA[
+    protected void initialize(VendInvoiceJour _journal)
+    {
+        PurchTable              purchTable;
+        PurchAgreementHeader    purchAgreementHeader;
+        AgreementHeaderDefault  agreementHeaderDefault;
+
+        // Hardcoded values
+        transactionType = 'PurchaseInvoice';
+        source          = 'D365';
+        
+        // Populate standard header fields from journal
+        invoiceId       = _journal.InvoiceId;
+        transactionDate = _journal.InvoiceDate;
+        purchId         = _journal.PurchId;
+        vendorNo        = _journal.OrderAccount; // or InvoiceAccount, depending on your requirement
+        currency        = _journal.CurrencyCode;
+        recordId        = _journal.RecId;
+
+        // Lookup Purchase Agreement and Deal Number
+        purchTable = PurchTable::find(_journal.PurchId);
+        
+        select firstonly purchAgreementHeader
+            where purchAgreementHeader.RecId == purchTable.MatchingAgreement;
+
+        if (purchAgreementHeader.RecId)
+        {
+            purchAgreementNumber = purchAgreementHeader.PurchNumberSequence;
+
+            select firstonly agreementHeaderDefault
+                where agreementHeaderDefault.AgreementHeader == purchAgreementHeader.RecId;
+
+            if (agreementHeaderDefault.RecId)
+            {
+                dealNumber = agreementHeaderDefault.ETGDealNumber;
+            }
+        }
+        
+        // Initialize lines list
+        lines = new List(Types::Class);
+
+        // Populate lines and calculate total invoice amount
+        this.populateLines(_journal);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>populateLines</Name>
+				<Source><![CDATA[
+    private void populateLines(VendInvoiceJour _journal)
+    {
+        VendInvoiceTrans invoiceTrans;
+
+        invoiceAmount = 0;
+
+        // Loop through lines for this specific invoice
+        while select invoiceTrans
+            where invoiceTrans.InvoiceId == _journal.InvoiceId
+               && invoiceTrans.InvoiceDate == _journal.InvoiceDate
+               && invoiceTrans.PurchId == _journal.PurchId
+        {
+            // Accumulate total header amount
+            invoiceAmount += invoiceTrans.LineAmount;
+            
+            // Instantiate the line contract and pass down line values
+            PurchInvoiceLineBusinessEventContract lineContract = PurchInvoiceLineBusinessEventContract::construct(
+                _journal.InvoiceId,
+                invoiceTrans.Qty,
+                invoiceTrans.LineAmount,
+                invoiceTrans.ItemId,
+                _journal.CurrencyCode,
+                invoiceTrans.TaxGroup, // Alternatively invoiceTrans.TaxItemGroup
+                invoiceTrans.TaxAmount);
+
+            lines.addEnd(lineContract);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>newFromVendInvoiceJour</Name>
+				<Source><![CDATA[
+    public static PurchInvoiceBusinessEventContract newFromVendInvoiceJour(VendInvoiceJour _journal)
+    {
+        var contract = new PurchInvoiceBusinessEventContract();
+        contract.initialize(_journal);
+        return contract;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmLines</Name>
+				<Source><![CDATA[
+    // --- Data Members for Collections ---
+
+    [DataMember('Lines'),
+     DataCollectionAttribute(Types::Class, classStr(PurchInvoiceLineBusinessEventContract)),
+     BusinessEventsDataMember('Invoice Lines')]
+    public List parmLines(List _lines = lines)
+    {
+        lines = _lines;
+        return lines;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmInvoiceNo</Name>
+				<Source><![CDATA[
+    // --- Data Members for Header Fields (Exact Match to your layout style) ---
+
+    [DataMember('Invoice No'), BusinessEventsDataMember('Invoice No')]
+    public VendInvoiceId parmInvoiceNo(VendInvoiceId _invoiceId = invoiceId)
+    {
+        invoiceId = _invoiceId;
+        return invoiceId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmTransactionDate</Name>
+				<Source><![CDATA[
+    [DataMember('Transaction Date'), BusinessEventsDataMember('Transaction Date')]
+    public TransDate parmTransactionDate(TransDate _transactionDate = transactionDate)
+    {
+        transactionDate = _transactionDate;
+        return transactionDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmPurchaseOrderNumber</Name>
+				<Source><![CDATA[
+    [DataMember('Purchase order number'), BusinessEventsDataMember('Purchase order number')]
+    public PurchId parmPurchaseOrderNumber(PurchId _purchId = purchId)
+    {
+        purchId = _purchId;
+        return purchId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmPurchaseAgreementNumber</Name>
+				<Source><![CDATA[
+    [DataMember('Purchase agreement number'), BusinessEventsDataMember('Purchase agreement number')]
+    public str parmPurchaseAgreementNumber(str _purchAgreementNumber = purchAgreementNumber)
+    {
+        purchAgreementNumber = _purchAgreementNumber;
+        return purchAgreementNumber;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmDealNumber</Name>
+				<Source><![CDATA[
+    [DataMember('Deal Number'), BusinessEventsDataMember('Deal Number')]
+    public str parmDealNumber(str _dealNumber = dealNumber)
+    {
+        dealNumber = _dealNumber;
+        return dealNumber;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmSource</Name>
+				<Source><![CDATA[
+    [DataMember('Source'), BusinessEventsDataMember('Source')]
+    public str parmSource(str _source = source)
+    {
+        source = _source;
+        return source;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmVendorNo</Name>
+				<Source><![CDATA[
+    [DataMember('Vendor No'), BusinessEventsDataMember('Vendor No')]
+    public VendAccount parmVendorNo(VendAccount _vendorNo = vendorNo)
+    {
+        vendorNo = _vendorNo;
+        return vendorNo;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmInvoiceAmount</Name>
+				<Source><![CDATA[
+    [DataMember('Invoice Amount'), BusinessEventsDataMember('Invoice Amount')]
+    public AmountCur parmInvoiceAmount(AmountCur _invoiceAmount = invoiceAmount)
+    {
+        invoiceAmount = _invoiceAmount;
+        return invoiceAmount;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmCurrency</Name>
+				<Source><![CDATA[
+    [DataMember('Currency'), BusinessEventsDataMember('Currency')]
+    public CurrencyCode parmCurrency(CurrencyCode _currency = currency)
+    {
+        currency = _currency;
+        return currency;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmRecId</Name>
+				<Source><![CDATA[
+    [DataMember('Rec ID'), BusinessEventsDataMember('Rec ID')]
+    public RefRecId parmRecId(RefRecId _recordId = recordId)
+    {
+        recordId = _recordId;
+        return recordId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmTransactionType</Name>
+				<Source><![CDATA[
+    [DataMember('Transaction Type'), BusinessEventsDataMember('Transaction Type')]
+    public str parmTransactionType(str _transactionType = transactionType)
+    {
+        transactionType = _transactionType;
+        return transactionType;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

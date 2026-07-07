@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchTableCancelButton_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formControlStr(SalesTable, CancelOrderButton))]
+final class ETGPurchTableCancelButton_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>clicked</Name>
+				<Source><![CDATA[
+    public void clicked()
+    {
+        FormControl    control = this;
+        FormRun        formRun;
+        FormDataSource purchTableDS;
+        PurchTable     purchTable;
+        AgreementHeaderHistory       agreementHeaderHistory;
+
+        next clicked();
+
+        formRun = control.formRun();
+        purchTableDS = formRun.dataSource(formDataSourceStr(PurchTable, PurchTable));
+        purchTable = purchTableDS.cursor();
+
+        if (purchTable && purchTable.PurchStatus == PurchStatus::Canceled)//&& salesTable.MatchingAgreement)
+        {
+            if (ETGACFParameters::find().EnableDMSIntegration
+            && BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGDMSReverePurchAgreementIntegrationEventClass)))
+            {
+                PurchAgreementHeader purchAgreementHeader = PurchAgreementHeader::find(purchTable.MatchingAgreement);
+                select firstonly agreementHeaderHistory
+                        order by RecId desc
+                          where agreementHeaderHistory.AgreementHeader == purchAgreementHeader.RecId;
+
+                str confirmationnumber  = strFmt("%1-%2", purchAgreementHeader.PurchNumberSequence, agreementHeaderHistory.ConfirmationNumber);
+                str formattedDateTime = DateTimeUtil::toStr(agreementHeaderHistory.CreatedDateTime);
+
+                ETGDMSReverePurchAgreementIntegrationContract contract = new ETGDMSReverePurchAgreementIntegrationContract();
+
+                contract.parmDealNumber(purchAgreementHeader.ETGDMSDealNumbers);
+                contract.parmDataAreaId(curExt());
+                contract.parmOperationType("Purchase Order Cancelled");
+                contract.parmActivityName("Purchase Order Cancellation");
+                contract.parmDocumentNumber(confirmationnumber);
+                contract.parmDocumentDate(formattedDateTime);
+                contract.parmActivityOwner(purchAgreementHeader.CreatedBy);
+                contract.parmActivityRemarks(strFmt("The Purchase order %1 is cancelled",purchTable.PurchId));
+
+                ETGDMSReverePurchAgreementIntegrationEventClass eventClass = ETGDMSReverePurchAgreementIntegrationEventClass::newFromContract(contract);
+                eventClass.send();
+            }
+
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

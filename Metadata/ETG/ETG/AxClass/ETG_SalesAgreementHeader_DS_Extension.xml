@@ -1,0 +1,596 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesAgreementHeader_DS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///    Extension class of form <c>SalesAgreement</c> datasource <c>SalesAgreementHeader</c>
+/// </summary>
+[ExtensionOf(formdatasourcestr(SalesAgreement, SalesAgreementHeader))]
+final class ETG_SalesAgreementHeader_DS_Extension
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {
+        int                 ret;
+        AgreementReference  agreementReference;
+        boolean             isTPAgreement = false;
+        boolean             isReleased    = true;
+        FormDataSource      salesAgreementHeader_ds         = any2Object(this) as FormDataSource;
+        formRun             formRun                         = salesAgreementHeader_ds.formRun();
+        FormDataSource      salesAgreementHeaderDefault_ds  = formRun.dataSource(formDataSourceStr(SalesAgreement, SalesAgreementHeaderDefault)) as FormDataSource;
+        FormDataSource      aline_ds                        = formRun.dataSource(formDataSourceStr(SalesAgreement, Aline)) as FormDataSource;
+        FormDataSource      SalesAgreementTrade_ds          = formRun.dataSource(formDataSourceStr(SalesAgreement, ETG_SalesAgreementHeader)) as FormDataSource;
+        FormDataSource      agreementHeaderDefault_ds       = formRun.dataSource(formDataSourceStr(SalesAgreement, AgreementHeaderDefault)) as FormDataSource;
+        FormDataSource      qualityGrp_ds                   = formRun.dataSource(formDataSourceStr(SalesAgreement, ETG_AgreementLineQualityGrp)) as FormDataSource;
+        FormDataSource      tmsSalesAgreement_ds            = formRun.dataSource(formDataSourceStr(SalesAgreement, TMSSalesAgreementHeader)) as FormDataSource;
+        FormControl         buttoncontrol                   = this.formRun().design().controlName(formControlStr(SalesAgreement,ButtonReleaseOrderCreate));
+
+        FormDataSource          aLineQtyCommitmentSales_ds   = formRun.dataSource(formDataSourceStr(SalesAgreement,ALine_AgreementLineQuantityCommitment )) as FormDataSource;
+        FormDataSource          aLineVolCommitmentSales_ds   = formRun.dataSource(formDataSourceStr(SalesAgreement,ALine_AgreementLineVolumeCommitment  )) as FormDataSource;
+        FormDataSource          agreementLineDefaultSales_ds = formRun.dataSource(formDataSourceStr(SalesAgreement, AgreementLineDefault)) as FormDataSource;
+        FormDataSource          inventDimSales_ds            = formRun.dataSource(formDataSourceStr(SalesAgreement, InventDim)) as FormDataSource;
+
+        SalesAgreementHeader    salesAgreementHeader = SalesAgreementHeader_ds.cursor();        
+       
+        ETG_Parameters          parameter            = ETG_Parameters::find();
+        ETGCanadaParameters     canadaParamaters     = ETGCanadaParameters::find();
+
+        ret = next active();
+
+        if(ETGACFParameters::find().EnableAbruptTerminationAgreement == NoYes::Yes)
+        {
+            FormControl  buttoncontrolconfirmation = formRun.design().controlName(formControlStr(SalesAgreement, ButtonConfirmation));
+
+            // NS DLT 28/05/2023 Shreelekha Check if workflow for this document is not active
+            boolean isWorkflowActive = WorkflowTable::findActiveTemplate(workflowTypeStr(ETGSalesAgreementWFType)).RecId != 0;
+
+            if (!isWorkflowActive)
+            {
+                // Set workflow status to Approved
+                salesAgreementHeader.ETGWorkflowStatus = VersioningDocumentState::Approved;
+
+                // Enable confirmation button
+                buttoncontrolconfirmation.enabled(true);
+            }
+            // NE DLT 28/05/2023 Shreelekha Check if workflow for this document is not active
+
+            if(salesAgreementHeader.AgreementState == AgreementState::ETGTerminated || salesAgreementHeader.AgreementState == AgreementState::ETGForceClosed)
+            {
+                buttoncontrol.enabled(false);
+                buttoncontrolconfirmation.enabled(false);
+            }
+        }
+
+        // NS DLT 28/05/2023 Shreelekha Check if workflow for this document is not active
+        if(ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+        {
+            FormControl  buttoncontrolconfirmation = formRun.design().controlName(formControlStr(SalesAgreement, ButtonConfirmation));
+            boolean      isWorkflowActive          = WorkflowTable::findActiveTemplate(workflowTypeStr(ETGSalesAgreementWFType)).RecId != 0;
+
+            if (!isWorkflowActive)
+            {
+                // Set workflow status to Approved
+                salesAgreementHeader.ETGWorkflowStatus = VersioningDocumentState::Approved;
+
+                // Enable confirmation button
+                buttoncontrolconfirmation.enabled(true);
+            }
+        }
+        // NE DLT 28/05/2023 Shreelekha Check if workflow for this document is not active
+       
+       
+        select firstonly agreementReference
+            where agreementReference.DerivedAgreement == SalesAgreementHeader.RecId;
+       
+        if(SalesAgreementHeader.ETG_TradingStatusSales != ETG_TradingStatus::None)
+        {
+            isReleased = false;
+        }
+
+        if(parameter.ETG_FrozenValidations
+            && parameter.ETG_FrozenValidationPurchaseAgreement
+            && (SalesAgreementHeader.ETG_IsThirdParty || agreementReference))
+        {
+            isTPAgreement = true;
+        }
+
+        formRun.design().controlName(formcontrolstr(SalesAgreement,TabHeaderFinancialDimensions)).allowEdit(isReleased);
+        formRun.design().controlName(formcontrolstr(SalesAgreement,ButtonConfirmationETG)).allowEdit(isReleased);
+        tmsSalesAgreement_ds.allowEdit(isReleased);
+      
+        if(!isReleased)
+        {
+            SalesAgreementHeader_ds.allowEdit(true);//Abhinav - 12-02-2025
+            salesAgreementHeaderDefault_ds.allowEdit(false);
+            agreementHeaderDefault_ds.allowEdit(false);
+            SalesAgreementTrade_ds.allowEdit(false);
+                      
+            qualityGrp_ds.allowCreate(false);
+            qualityGrp_ds.allowDelete(false);
+            formRun.design().controlName(formcontrolstr(SalesAgreement,TabHeaderGeneral)).allowEdit(false);
+            //CS, Abhinav
+            formRun.design().controlName(formcontrolstr(SalesAgreement,LineViewHeader_AgreementState)).allowEdit(true);
+            formRun.design().controlName(formcontrolstr(SalesAgreement,ETGReasonCode)).allowEdit(true);
+            //CE
+            
+        }
+        else if(isTPAgreement)
+        {
+            allowEditFieldGroup(SalesAgreementHeader_ds, tableFieldGroupStr(SalesAgreementHeader_ds, AgreementFieldsEditable));
+            allowEditFieldGroup(SalesAgreementTrade_ds, tableFieldGroupStr(SalesAgreementTrade_ds, AgreementFieldsEditable));
+            allowEditFieldGroup(agreementHeaderDefault_ds, tableFieldGroupStr(agreementHeaderDefault_ds, AgreementFieldsEditable));
+            allowEditFieldGroup(salesAgreementHeaderDefault_ds, tableFieldGroupStr(salesAgreementHeaderDefault_ds, AgreementFieldsEditable));
+            formRun.design().controlName(formcontrolstr(SalesAgreement,TabHeaderGeneral)).allowEdit(false);
+            formRun.design().controlName(formcontrolstr(SalesAgreement,LineViewHeader)).allowEdit(false);
+        }
+        else
+        {
+            SalesAgreementHeader_ds.allowEdit(true);
+            salesAgreementHeaderDefault_ds.allowEdit(true);
+            agreementHeaderDefault_ds.allowEdit(true);
+            SalesAgreementTrade_ds.allowEdit(true);
+           
+            qualityGrp_ds.allowCreate(true);
+            qualityGrp_ds.allowDelete(true);
+            formRun.design().controlName(formcontrolstr(SalesAgreement,LineViewHeader)).allowEdit(true);
+            formRun.design().controlName(formcontrolstr(SalesAgreement,TabHeaderGeneral)).allowEdit(true);
+        }
+        //NS, DLT  5/15/2025 Disable ButtonConfirmation if workflow is Draft or InReview        
+        if (ETGACFParameters::find().EnableSalesAgreementWorkflow == NoYes::Yes)
+        {
+            FormControl buttonConfirmation = formRun.design().controlName(formControlStr(SalesAgreement, ButtonConfirmationETG));
+
+            if (salesAgreementHeader.ETGWorkflowStatus == VersioningDocumentState::Draft ||
+                salesAgreementHeader.ETGWorkflowStatus == VersioningDocumentState::InReview)
+            {
+                buttonConfirmation.enabled(false);
+            }
+            else if (salesAgreementHeader.ETGWorkflowStatus == VersioningDocumentState::Rejected)
+            {
+                buttonConfirmation.enabled(false);
+                buttoncontrol.enabled(false);
+            }
+            else
+            {
+                buttonConfirmation.enabled(true);
+            }
+        }
+        //NS, DLT  5/15/2025 Disable ButtonConfirmation if workflow is Draft or InReview
+
+
+        if(ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+        {
+            if(salesAgreementHeader.AgreementState == AgreementState::OnHold)
+            {
+                element.design(ViewEditMode::Edit);
+                SalesAgreementHeader_ds.allowEdit(true);
+                salesAgreementHeaderDefault_ds.allowEdit(true);
+                agreementHeaderDefault_ds.allowEdit(true);
+                qualityGrp_ds.allowEdit(true);
+                tmsSalesAgreement_ds.allowEdit(true);
+
+                aline_ds.allowCreate(true);
+                aline_ds.allowDelete(true);
+                aline_ds.allowEdit(true);
+                inventDimSales_ds.allowEdit(true);
+                aLineQtyCommitmentSales_ds.allowEdit(true);
+                aLineQtyCommitmentSales_ds.allowCreate(true);
+                aLineQtyCommitmentSales_ds.allowDelete(true);
+                agreementLineDefaultSales_ds.allowCreate(true);
+                agreementLineDefaultSales_ds.allowEdit(true);
+                agreementLineDefaultSales_ds.allowDelete(true);
+
+                FormControl         LineViewLineDetailsctrl    = element.design().controlName('LineViewLineDetails');
+                LineViewLineDetailsctrl.allowEdit(true);
+                LineViewLineDetailsctrl.enabled(true);
+
+                FormControl         OverDeliveryPctCtrl    = element.design().controlName('OverDeliveryPct');
+                OverDeliveryPctCtrl.allowEdit(true);
+                OverDeliveryPctCtrl.enabled(true);
+                FormControl         UnderDeliveryPctCtrl    = element.design().controlName('UnderDeliveryPct');
+                UnderDeliveryPctCtrl.allowEdit(true);
+                UnderDeliveryPctCtrl.enabled(true);
+            }
+            else
+            {
+                element.design(ViewEditMode::View);
+                SalesAgreementHeader_ds.allowEdit(false);
+                salesAgreementHeaderDefault_ds.allowEdit(false);
+                agreementHeaderDefault_ds.allowEdit(false);
+                qualityGrp_ds.allowEdit(false);
+                tmsSalesAgreement_ds.allowEdit(false);
+
+                aline_ds.allowCreate(false);
+                aline_ds.allowDelete(false);
+                aline_ds.allowEdit(false);
+                inventDimSales_ds.allowEdit(false);
+                aLineQtyCommitmentSales_ds.allowEdit(false);
+                aLineQtyCommitmentSales_ds.allowCreate(false);
+                aLineQtyCommitmentSales_ds.allowDelete(false);
+                agreementLineDefaultSales_ds.allowCreate(false);
+                agreementLineDefaultSales_ds.allowEdit(false);
+                agreementLineDefaultSales_ds.allowDelete(false);
+
+                FormControl         LineViewLineDetailsctrl    = element.design().controlName('LineViewLineDetails');
+                LineViewLineDetailsctrl.allowEdit(false);
+                LineViewLineDetailsctrl.enabled(false);
+
+                FormControl         OverDeliveryPctCtrl    = element.design().controlName('OverDeliveryPct');
+                OverDeliveryPctCtrl.allowEdit(false);
+                OverDeliveryPctCtrl.enabled(false);
+                FormControl         UnderDeliveryPctCtrl    = element.design().controlName('UnderDeliveryPct');
+                UnderDeliveryPctCtrl.allowEdit(false);
+                UnderDeliveryPctCtrl.enabled(false);
+            }
+        }
+        //NE, DLT ,27/05/2025 Shreelekha Line items should be enable when change request button is clicked
+
+        //DMS Integration
+        SalesAgreementHeader_ds.object(fieldNum(SalesAgreementHeader, ETGDMSDealNumber)).allowEdit(false);
+        //DMS Integration
+
+        //fields to be non-editable integrated from deal 
+        if(canadaParamaters.DMSFieldFreezeDeal && salesAgreementHeader.ETGDMSDealNumber)
+        {
+            formRun.design().controlName(formControlStr(SalesAgreement, LineViewHeader_Currency)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, LineViewHeader_ExpirationDate)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, LineViewHeader_EffectiveDate)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, AgreementLine_AgreementLineQuantityCommitment_CommitedQuantity)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, AgreementLine_AgreementLineQuantityCommitment_ProductUnitOfMeasure)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, AgreementLine_AgreementLineQuantityCommitment_PricePerUnit)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, AgreementLine_ExpirationDate)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, ValidityPeriodLine_ExpirationDate)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, ValidityPeriodLine_EffectiveDate)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, DeliveryLine_SalesModeOfDelivery)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, PriceDisc_PricePerUnit)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, ALine_AgreementLineQuantityCommitment_CommitedQuantity)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, ALine_AgreementLineQuantityCommitment_ProductUnitOfMeasure)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, TabFinancialDimensions)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, TabLineDimension)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, TradingDetails)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, SalesAgreementHeader_CustAccount1)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, SalesAgreementHeader_Currency1)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, DefaultAgreementLineExpirationDate)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, DefaultAgreementLineEffectiveDate)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, Through)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, BrokerageCommissionType)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, BrokerageCommissionValue)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, ReferenceGroup)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, TabHeaderTerm)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, TabHeaderFinancialDimensions)).allowEdit(false);
+            formRun.design().controlName(formControlStr(SalesAgreement, ETGCanadaDetails)).allowEdit(false);
+
+        }
+        else
+        {
+            formRun.design().controlName(formControlStr(SalesAgreement, LineViewHeader_Currency)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, LineViewHeader_ExpirationDate)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, LineViewHeader_EffectiveDate)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, AgreementLine_AgreementLineQuantityCommitment_CommitedQuantity)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, AgreementLine_AgreementLineQuantityCommitment_ProductUnitOfMeasure)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, AgreementLine_AgreementLineQuantityCommitment_PricePerUnit)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, AgreementLine_ExpirationDate)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, ValidityPeriodLine_ExpirationDate)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, ValidityPeriodLine_EffectiveDate)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, DeliveryLine_SalesModeOfDelivery)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, PriceDisc_PricePerUnit)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, ALine_AgreementLineQuantityCommitment_CommitedQuantity)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, ALine_AgreementLineQuantityCommitment_ProductUnitOfMeasure)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, TabFinancialDimensions)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, TabLineDimension)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, TradingDetails)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, SalesAgreementHeader_CustAccount1)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, SalesAgreementHeader_Currency1)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, DefaultAgreementLineExpirationDate)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, DefaultAgreementLineEffectiveDate)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, Through)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, BrokerageCommissionType)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, BrokerageCommissionValue)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, ReferenceGroup)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, TabHeaderTerm)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, TabHeaderFinancialDimensions)).allowEdit(true);
+            formRun.design().controlName(formControlStr(SalesAgreement, ETGCanadaDetails)).allowEdit(true);
+        }
+
+
+        //Canada entity details new 9 fields code for diabling enabling - DMS Integration
+
+       /* if(ETGACFParameters::find().EnableDMSIntegration == NoYes::Yes && LedgerParameters::find().EnableCanadaDetails == NoYes::Yes)
+            {
+
+            SalesAgreementHeader_ds.object(fieldNum(SalesAgreementHeader, ETGDMSSalesCropYear)).visible(true);
+            SalesAgreementHeader_ds.object(fieldNum(SalesAgreementHeader, ETGDMSSalesExchangeRate)).visible(true);
+            SalesAgreementHeader_ds.object(fieldNum(SalesAgreementHeader, ETGDMSSalesHedgingRate)).visible(true);
+            SalesAgreementHeader_ds.object(fieldNum(SalesAgreementHeader, ETGDMSSalesOfferDate)).visible(true);
+            SalesAgreementHeader_ds.object(fieldNum(SalesAgreementHeader, ETGDMSSalesPackageType)).visible(true);
+            SalesAgreementHeader_ds.object(fieldNum(SalesAgreementHeader, ETGDMSSalesShippingEndDate)).visible(true);
+            SalesAgreementHeader_ds.object(fieldNum(SalesAgreementHeader, ETGDMSSalesShippingStartDate)).visible(true);
+            SalesAgreementHeader_ds.object(fieldNum(SalesAgreementHeader, ETGDMSSalesSource)).visible(true);
+            SalesAgreementHeader_ds.object(fieldNum(SalesAgreementHeader, ETGDMSSalesType)).visible(true);
+            }
+            else
+            {
+            SalesAgreementHeader_ds.object(fieldNum(SalesAgreementHeader, ETGDMSSalesCropYear)).visible(false);
+            SalesAgreementHeader_ds.object(fieldNum(SalesAgreementHeader, ETGDMSSalesExchangeRate)).visible(false);
+            SalesAgreementHeader_ds.object(fieldNum(SalesAgreementHeader, ETGDMSSalesHedgingRate)).visible(false);
+            SalesAgreementHeader_ds.object(fieldNum(SalesAgreementHeader, ETGDMSSalesOfferDate)).visible(false);
+            SalesAgreementHeader_ds.object(fieldNum(SalesAgreementHeader, ETGDMSSalesPackageType)).visible(false);
+            SalesAgreementHeader_ds.object(fieldNum(SalesAgreementHeader, ETGDMSSalesShippingEndDate)).visible(false);
+            SalesAgreementHeader_ds.object(fieldNum(SalesAgreementHeader, ETGDMSSalesShippingStartDate)).visible(false);
+            SalesAgreementHeader_ds.object(fieldNum(SalesAgreementHeader, ETGDMSSalesSource)).visible(false);
+            SalesAgreementHeader_ds.object(fieldNum(SalesAgreementHeader, ETGDMSSalesType)).visible(false);
+            }*/
+        //Canada entity details new 9 fields code for diabling enabling - DMS Integration
+
+        //CS - Abhinav - Enable ETGProFormaInvoiceCanada control based on parameter boolean
+        FormControl         ETGProFormaInvoiceCanada    = element.design().controlName('ETGProFormaInvoiceCanada');
+        ETGProFormaInvoiceCanada.visible(ETGCanadaParameters::find().EnableProformInvoiceGenerate);
+        //CE
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>LineViewHeader_AgreementState_OnModified</Name>
+				<Source><![CDATA[
+    [FormControlEventHandler(formControlStr(SalesAgreement, LineViewHeader_AgreementState), FormControlEventType::Modified)]
+    public static void LineViewHeader_AgreementState_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+
+        if(ETGACFParameters::find().EnableAbruptTerminationAgreement == NoYes::Yes)
+        {
+            FormControl          buttoncontrol        = sender.formRun().design().controlName(formControlStr(SalesAgreement, ButtonReleaseOrderCreate));
+            SalesAgreementHeader salesAgreementHeader = sender.formRun().dataSource().cursor();
+            
+            if(salesAgreementHeader.AgreementState == AgreementState::ETGTerminated || salesAgreementHeader.AgreementState == AgreementState::ETGForceClosed)
+            {
+                //CS, DLT, Abhinav - 18-02-2025
+                AgreementLine                           agreementLine, agreementLineCheck, agreementLineLoop;
+                FormDataSource  agreementLine_ds   = sender.formRun().dataSource(formDataSourceStr(SalesAgreement,Aline))  as FormDataSource;
+                agreementLine      = agreementLine_ds.cursor();
+                AgreementLineQuantityCommitment qtyCommitmentLoc;
+                MultiSelectionHelper helper = MultiSelectionHelper::construct();
+                helper.parmDatasource(agreementLine_ds);
+                agreementLineLoop = helper.getFirst();
+
+                if(salesAgreementHeader.AgreementState == AgreementState::ETGTerminated)
+                {
+                    while (agreementLineLoop.RecId != 0)
+                    {
+                        while select qtyCommitmentLoc
+                        where qtyCommitmentLoc.RecId == agreementLineLoop.RecId
+                        {
+                            if(qtyCommitmentLoc.isReleased())
+                            {
+                                throw error("Termination is not allowed. Contract is already released");
+                            }
+                        }
+                    
+                        agreementLineLoop = helper.getNext();
+                    }
+                }
+                //CE - 18-02-2025
+
+                // DMS Reverse intergreation
+
+                if (ETGACFParameters::find().EnableDMSIntegration 
+                    && BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGDMSRevereSalesAgreementIntegrationEventClass)))
+                {
+                    if(salesAgreementHeader.AgreementState == AgreementState::ETGTerminated)
+                    {
+                        AgreementHeaderHistory       agreementHeaderHistory;
+                        select firstonly agreementHeaderHistory
+                              order by RecId desc
+                                where agreementHeaderHistory.AgreementHeader == salesAgreementHeader.RecId;
+
+                        str confirmationnumber  = strFmt("%1-%2", salesAgreementHeader.SalesNumberSequence, agreementHeaderHistory.ConfirmationNumber);
+                        str formattedDateTime = DateTimeUtil::toStr(agreementHeaderHistory.CreatedDateTime);
+
+                        ETGDMSRevereSalesAgreementIntegrationContract contract = new ETGDMSRevereSalesAgreementIntegrationContract();
+
+                        contract.parmDealNumber(salesAgreementHeader.ETGDMSDealNumber);
+                        contract.parmDataAreaId(curExt());
+                        contract.parmOperationType("Termination");
+                        contract.parmActivityName("Sales Agreement Termination");
+                        contract.parmDocumentNumber(confirmationnumber);
+                        contract.parmDocumentDate(formattedDateTime);
+                        contract.parmActivityOwner(SalesAgreementHeader.CreatedBy);
+                        contract.parmActivityRemarks(strFmt("The Sales agreement %1 is Terminated",salesAgreementHeader.SalesNumberSequence));
+                       
+
+                        ETGDMSRevereSalesAgreementIntegrationEventClass eventClass = ETGDMSRevereSalesAgreementIntegrationEventClass::newFromContract(contract);
+                        eventClass.send();
+                    }
+                    else if(salesAgreementHeader.AgreementState == AgreementState::ETGForceClosed)
+                    {
+                        AgreementHeaderHistory       agreementHeaderHistory;
+
+                        select firstonly agreementHeaderHistory
+                                order by RecId desc
+                                where agreementHeaderHistory.AgreementHeader == salesAgreementHeader.RecId;
+
+                        str confirmationnumber  = strFmt("%1-%2", salesAgreementHeader.SalesNumberSequence, agreementHeaderHistory.ConfirmationNumber);
+                        str formattedDateTime = DateTimeUtil::toStr(agreementHeaderHistory.CreatedDateTime);
+
+
+                        ETGDMSRevereSalesAgreementIntegrationContract contract = new ETGDMSRevereSalesAgreementIntegrationContract();
+
+                        contract.parmDealNumber(salesAgreementHeader.ETGDMSDealNumber);
+                        contract.parmDataAreaId(curExt());
+                        contract.parmOperationType("Force Closure");
+                        contract.parmActivityName("Sales Agreement Force Closure");
+                        contract.parmDocumentNumber(confirmationnumber);
+                        contract.parmDocumentDate(formattedDateTime);
+                        contract.parmActivityOwner(SalesAgreementHeader.CreatedBy);
+                        contract.parmActivityRemarks(strFmt("The Sales agreement  %1 is Force Closed.",salesAgreementHeader.SalesNumberSequence));
+
+                        ETGDMSRevereSalesAgreementIntegrationEventClass eventClass = ETGDMSRevereSalesAgreementIntegrationEventClass::newFromContract(contract);
+                        eventClass.send();
+                    }
+                }
+                // DMS Reverse intergreation
+
+
+                salesAgreementHeader.ETGWorkflowStatus = VersioningDocumentState::Draft;
+                Workflow::activateFromWorkflowType(workflowTypeStr(ETGSalesAgreementWFType), salesAgreementHeader.RecId, "", NoYes::No);//Abhinav 15-020-2025
+               
+                buttoncontrol.enabled(false);
+            }
+            else
+            {
+                buttoncontrol.enabled(true);
+            }
+        }
+
+        if(ETGACFParameters::find().EnableSalesAgreementWorkflow == NoYes::Yes)
+        {
+            SalesAgreementHeader salesAgreementHeader = sender.formRun().dataSource().cursor();
+            if(salesAgreementHeader.ETGWorkflowStatus != VersioningDocumentState::Approved)
+            {
+                sender.formRun().design().controlName(formcontrolstr(SalesAgreement, ButtonConfirmationETG)).allowEdit(false);
+                sender.formRun().design().controlName(formcontrolstr(SalesAgreement, ButtonConfirmationETG)).enabled(false);
+            }
+        }
+
+        ///CS, DLT, Abhinav 
+        if(ETGACFParameters::find().EnableAbruptTerminationAgreement == NoYes::Yes)
+        {
+           // SalesAgreementHeader salesAgreementHeader = sender.formRun().dataSource().cursor();
+           FormDataSource salesAgreementHeader_ds = sender.formRun().dataSource(formDataSourceStr(SalesAgreement, SalesAgreementHeader)) as FormDataSource;
+            SalesAgreementHeader salesAgreementHeader = salesAgreementHeader_ds.cursor();
+
+            
+            if(salesAgreementHeader.AgreementState == AgreementState::ETGTerminated || salesAgreementHeader.AgreementState == AgreementState::ETGForceClosed)
+            {
+                AgreementLine                           agreementLine,agreementLineCheck;
+                FormDataSource  agreementLine_ds   = sender.formRun().dataSource(formDataSourceStr(SalesAgreement,Aline))  as FormDataSource;
+                agreementLine                      = agreementLine_ds.cursor();
+
+                AgreementLineQuantityCommitment qtyCommitment;
+                
+                //select sum(ETGRemainingQuantity) from qtyCommitment
+                //    where qtyCommitment.RecId == agreementLine.RecId;
+
+                real remainingQty;
+
+                while select qtyCommitment
+                    where qtyCommitment.RecId == agreementLine.RecId
+                {
+                    remainingQty += qtyCommitment.quantityRemainingRelease();
+                }
+
+                if(remainingQty == 0)
+                {
+                    if(!Box::yesNo("@ETG_New:ETGTerminateAgreementRemain",dialogButton::No))
+                    {
+                        throw Error("@ETG_New:ETGUpdateStateCancelled");
+                    }
+                }
+                
+            }
+        }
+        //CE
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>Status_AgreementState_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// DMS reverse integration changes
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(SalesAgreement, Status_AgreementState), FormControlEventType::Modified)]
+    public static void Status_AgreementState_OnModified(FormControl sender, FormControlEventArgs e)
+    {
+        if (ETGACFParameters::find().EnableDMSIntegration
+            && BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGDMSRevereSalesAgreementIntegrationEventClass)))
+        {
+            SalesAgreementHeader salesAgreementHeader = sender.formRun().dataSource().cursor();
+            if(salesAgreementHeader.AgreementState == AgreementState::ETGTerminated)
+            {
+                AgreementHeaderHistory       agreementHeaderHistory;
+                select firstonly agreementHeaderHistory
+                    order by RecId desc 
+                    where agreementHeaderHistory.AgreementHeader == salesAgreementHeader.RecId;
+
+                str confirmationnumber  = strFmt("%1-%2", salesAgreementHeader.SalesNumberSequence, agreementHeaderHistory.ConfirmationNumber);
+
+               // date    agrementdate  = DateTimeUtil::date(agreementHeaderHistory.CreatedDateTime);
+                //str formattedDate    = date2str(agrementdate,123,DateDay::Digits2,DateSeparator::None,DateMonth::Digits2,DateSeparator::None,DateYear::Digits4);
+                str formattedDateTime = DateTimeUtil::toStr(agreementHeaderHistory.CreatedDateTime);
+
+
+                ETGDMSRevereSalesAgreementIntegrationContract contract = new ETGDMSRevereSalesAgreementIntegrationContract();
+
+                contract.parmDealNumber(salesAgreementHeader.ETGDMSDealNumber);
+                contract.parmDataAreaId(curExt());
+                contract.parmOperationType("Termination");
+                contract.parmActivityName("Sales Agreement Termination");
+                contract.parmDocumentNumber(confirmationnumber);
+                contract.parmDocumentDate(formattedDateTime);
+                contract.parmActivityOwner(SalesAgreementHeader.CreatedBy);
+                contract.parmActivityRemarks(strFmt("The Sales agreement %1 is Terminated",salesAgreementHeader.SalesNumberSequence));
+
+                ETGDMSRevereSalesAgreementIntegrationEventClass eventClass = ETGDMSRevereSalesAgreementIntegrationEventClass::newFromContract(contract);
+                eventClass.send();
+            }
+            else if(salesAgreementHeader.AgreementState == AgreementState::ETGForceClosed)
+            {
+                AgreementHeaderHistory       agreementHeaderHistory;
+
+                select firstonly agreementHeaderHistory
+                    order by RecId desc
+                    where agreementHeaderHistory.AgreementHeader == salesAgreementHeader.RecId;
+
+                str confirmationnumber  = strFmt("%1-%2", salesAgreementHeader.SalesNumberSequence, agreementHeaderHistory.ConfirmationNumber);
+
+                str formattedDateTime = DateTimeUtil::toStr(agreementHeaderHistory.CreatedDateTime);
+
+                ETGDMSRevereSalesAgreementIntegrationContract contract = new ETGDMSRevereSalesAgreementIntegrationContract();
+
+                contract.parmDealNumber(salesAgreementHeader.ETGDMSDealNumber);
+                contract.parmDataAreaId(curExt());
+                contract.parmOperationType("Force Closure");
+                contract.parmActivityName("Sales Agreement Force Closure");
+                contract.parmDocumentNumber(confirmationnumber);
+                contract.parmDocumentDate(formattedDateTime);
+                contract.parmActivityOwner(SalesAgreementHeader.CreatedBy);
+                contract.parmActivityRemarks(strFmt("The Sales agreement  %1 is Force Closed.",salesAgreementHeader.SalesNumberSequence));
+
+                ETGDMSRevereSalesAgreementIntegrationEventClass eventClass = ETGDMSRevereSalesAgreementIntegrationEventClass::newFromContract(contract);
+                eventClass.send();
+            }
+        }
+        // DMS Reverse intergreation
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>write</Name>
+				<Source><![CDATA[
+    public void write()
+    {
+        FormDataSource salesAgreementDS = this;
+        salesAgreementDS.refresh();
+        next write();
+        salesAgreementDS.reread();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

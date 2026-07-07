@@ -1,0 +1,1027 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxForm xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V6">
+	<Name>ETGBinJournalLine</Name>
+	<SourceCode>
+		<Methods xmlns="">
+			<Method>
+				<Name>classDeclaration</Name>
+				<Source><![CDATA[
+[Form]
+public class ETGBinJournalLine extends FormRun
+{
+}
+]]></Source>
+			</Method>
+		</Methods>
+		<DataSources xmlns="">
+			<DataSource>
+				<Name>ETGBinJournalLine</Name>
+				<Methods>
+					<Method>
+						<Name>create</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// assign system date to transdate
+        /// </summary>
+        /// <param name = "_append">boolean</param>
+        public void create(boolean _append = true)
+        {
+            super(_append);
+
+            ETGBinJournalLine.TransDate = systemDateGet();
+            ETGBinJournalLine_ds.refresh();
+
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>active</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// enable/disable control
+        /// </summary>
+        /// <returns>integer</returns>
+        public int active()
+        {
+            int ret;
+            boolean  Configenable,Sizeenable,ColorEnable,Styleenable;
+            EcoResProductDimensionGroupProduct      erpdgp;
+            EcoResProductDimensionGroup             erpdg;
+            InventJournalTable                      inventJournalTable;
+        
+            ret = super();
+
+            erpdgp=EcoResProductDimensionGroupProduct::findByProduct(InventTable::find(ETGBinJournalLine.ItemId).Product);
+            erpdg=EcoResProductDimensionGroup::find(erpdgp.ProductDimensionGroup);
+
+            Configenable = ETGGlobal::checkdimactive(ETGBinJournalLine.ItemId,'Configid',erpdg.Name);
+            Sizeenable  =  ETGGlobal::checkdimactive(ETGBinJournalLine.ItemId,'InventSizeId',erpdg.Name);
+            ColorEnable =  ETGGlobal::checkdimactive(ETGBinJournalLine.ItemId,'Inventcolorid',erpdg.Name);
+            Styleenable =  ETGGlobal::checkdimactive(ETGBinJournalLine.ItemId,'InventStyleId',erpdg.Name);
+
+            ETGBinJournalLine_ds.object(fieldNum(ETGBinJournalLine,Configuration)).allowEdit(Configenable);
+            ETGBinJournalLine_ds.object(fieldNum(ETGBinJournalLine,Colour)).allowEdit(ColorEnable);
+            ETGBinJournalLine_ds.object(fieldNum(ETGBinJournalLine,Size)).allowEdit(Sizeenable);
+            ETGBinJournalLine_ds.object(fieldNum(ETGBinJournalLine,Style)).allowEdit(Styleenable);
+
+            ETGBinJournalLine_ds.object(fieldNum(ETGBinJournalLine,RetailVariantId)).allowEdit(Configenable||Sizeenable||ColorEnable||Styleenable);
+
+            boolean  batchenable,serailenable;
+
+            batchenable=   ecoResTrackingDimensionGroupFldSetup::findByDimensionGroupFieldId(InventTable::find(ETGBinJournalLine.ItemId).trackingDimensionGroup(), fieldNum(InventDim, InventBatchId)).IsActive;
+            ETGBinJournalLine_ds.object(fieldNum(ETGBinJournalLine,ToBatch)).allowEdit(batchenable);
+
+            serailenable=   ecoResTrackingDimensionGroupFldSetup::findByDimensionGroupFieldId(InventTable::find(ETGBinJournalLine.ItemId).trackingDimensionGroup(), fieldNum(InventDim,InventSerialId)).IsActive;
+            ETGBinJournalLine_ds.object(fieldNum(ETGBinJournalLine,InventSerialId)).allowEdit(serailenable);
+
+            TransferGRNCreate.enabled(ETGBinJournalLine.TransferJRNId == "");
+            SelectGRN.enabled(ETGBinJournalLine.TransferJRNId == "");
+            GP1.allowEdit(ETGBinJournalLine.TransferJRNId == "");
+            GP2.allowEdit(ETGBinJournalLine.TransferJRNId == "");
+            ETGBinJournalLine_ds.allowDelete(ETGBinJournalLine.TransferJRNId == "");
+
+            ETGBinJournalLine_ds.object(fieldNum(ETGBinJournalLine,Port)).allowEdit(ETGBinJournalLine.BinLineLocked == NoYes::No);
+            ETGBinJournalLine_ds.object(fieldNum(ETGBinJournalLine,ProcessingPlant)).allowEdit(ETGBinJournalLine.BinLineLocked == NoYes::No);
+            ETGBinJournalLine_ds.object(fieldNum(ETGBinJournalLine,ProcessingStartDate)).allowEdit(ETGBinJournalLine.BinLineLocked == NoYes::No);
+            ETGBinJournalLine_ds.object(fieldNum(ETGBinJournalLine,ProcessingEndDate)).allowEdit(ETGBinJournalLine.BinLineLocked == NoYes::No);
+            ETGBinJournalLine_ds.object(fieldNum(ETGBinJournalLine,Waste)).allowEdit(ETGBinJournalLine.BinLineLocked == NoYes::No);
+
+            select firstonly inventJournalTable
+                where inventJournalTable.JournalId == ETGBinJournalLine.TransferJRNId
+                && inventJournalTable.Posted == NoYes::Yes;
+
+            if (inventJournalTable.RecId)
+            {
+                this.formRun().design().controlName(formControlStr(ETGBinJournalLine, ETGBinLotLine)).enabled(true);
+                this.formRun().design().controlName(formControlStr(ETGBinJournalLine, WeightAdjustment)).enabled(true);
+            }
+
+            else
+            {
+                this.formRun().design().controlName(formControlStr(ETGBinJournalLine, ETGBinLotLine)).enabled(false);
+                this.formRun().design().controlName(formControlStr(ETGBinJournalLine, WeightAdjustment)).enabled(false);
+            }
+             
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields>
+					<Field>
+						<DataField>BinQty</DataField>
+						<Methods>
+							<Method>
+								<Name>modified</Name>
+								<Source><![CDATA[
+            /// <summary>
+            /// modifies controls upon modification of BinQty
+            /// </summary>
+            public void modified()
+            {
+                super();
+                ETGBinJournalLine.DiffereceQty = ETGBinJournalLine.BinQty - ETGBinJournalLine.FGRNQty;
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>Colour</DataField>
+						<Methods>
+							<Method>
+								<Name>lookup</Name>
+								<Source><![CDATA[
+            /// <summary>
+            /// lookup method for name.
+            /// </summary>
+            /// <param name = "_formControl">EcoResColor</param>
+            /// <param name = "_filterStr">Name</param>
+            public void lookup(FormControl _formControl, str _filterStr)
+            {
+                // super(_formControl, _filterStr);
+               
+                Query                   query = new Query();
+                QueryBuildDataSource    queryBuildDataSource;
+                SysTableLookup          sysTableLookup;
+
+              
+                sysTableLookup = SysTableLookup::newParameters(tableNum(EcoResColor), _formControl);
+                queryBuildDataSource = query.addDataSource(tableNum(EcoResColor));
+                sysTableLookup.addLookupField(fieldNum(EcoResColor, Name));
+                   
+                sysTableLookup.parmQuery(query);
+                sysTableLookup.performFormLookup();
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>Configuration</DataField>
+						<Methods>
+							<Method>
+								<Name>lookup</Name>
+								<Source><![CDATA[
+            /// <summary>
+            /// lookup method for name field
+            /// </summary>
+            /// <param name = "_formControl">EcoResConfiguration</param>
+            /// <param name = "_filterStr">Name</param>
+            public void lookup(FormControl _formControl, str _filterStr)
+            {
+                // super(_formControl, _filterStr);
+                Query                   query = new Query();
+                QueryBuildDataSource    queryBuildDataSource;
+                SysTableLookup          sysTableLookup;
+
+             
+                sysTableLookup = SysTableLookup::newParameters(tableNum(EcoResConfiguration), _formControl);
+                queryBuildDataSource = query.addDataSource(tableNum(EcoResConfiguration));
+                sysTableLookup.addLookupField(fieldNum(EcoResConfiguration, Name));
+              
+                sysTableLookup.parmQuery(query);
+                sysTableLookup.performFormLookup();
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>FGRNQty</DataField>
+						<Methods>
+							<Method>
+								<Name>modified</Name>
+								<Source><![CDATA[
+            /// <summary>
+            /// modifies controls upon modification of FGRNQty
+            /// </summary>
+            public void modified()
+            {
+                super();
+                ETGBinJournalLine.DiffereceQty = ETGBinJournalLine.BinQty - ETGBinJournalLine.FGRNQty;
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>ItemId</DataField>
+						<Methods>
+							<Method>
+								<Name>modified</Name>
+								<Source><![CDATA[
+            /// <summary>
+            /// modifies controls upon modification of ItemId
+            /// </summary>
+            public void modified()
+            {
+                boolean  Configenable,Sizeenable,ColorEnable,Styleenable;
+                EcoResProductDimensionGroupProduct erpdgp;
+                EcoResProductDimensionGroup erpdg;
+
+
+                super();
+                                     
+
+                erpdgp=EcoResProductDimensionGroupProduct::findByProduct(InventTable::find(ETGBinJournalLine.ItemId).Product);
+                erpdg=EcoResProductDimensionGroup::find(erpdgp.ProductDimensionGroup);
+
+                Configenable = ETGGlobal::checkdimactive(ETGBinJournalLine.ItemId,'Configid',erpdg.Name);
+                Sizeenable  =  ETGGlobal::checkdimactive(ETGBinJournalLine.ItemId,'InventSizeId',erpdg.Name);
+                ColorEnable =  ETGGlobal::checkdimactive(ETGBinJournalLine.ItemId,'Inventcolorid',erpdg.Name);
+                Styleenable =  ETGGlobal::checkdimactive(ETGBinJournalLine.ItemId,'InventStyleId',erpdg.Name);
+
+                ETGBinJournalLine_ds.object(fieldNum(ETGBinJournalLine,Configuration)).allowEdit(Configenable);
+                ETGBinJournalLine_ds.object(fieldNum(ETGBinJournalLine,Colour)).allowEdit(ColorEnable);
+                ETGBinJournalLine_ds.object(fieldNum(ETGBinJournalLine,Size)).allowEdit(Sizeenable);
+                ETGBinJournalLine_ds.object(fieldNum(ETGBinJournalLine,Style)).allowEdit(Styleenable);
+
+                ETGBinJournalLine_ds.object(fieldNum(ETGBinJournalLine,RetailVariantId)).allowEdit(Configenable||Sizeenable||ColorEnable||Styleenable);
+
+                boolean  batchenable;
+
+                batchenable=   ecoResTrackingDimensionGroupFldSetup::findByDimensionGroupFieldId(InventTable::find(ETGBinJournalLine.ItemId).trackingDimensionGroup(), fieldNum(InventDim, InventBatchId)).IsActive;
+                ETGBinJournalLine_ds.object(fieldNum(ETGBinJournalLine,ToBatch)).allowEdit(batchenable);
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>ProcessingEndDate</DataField>
+						<Methods>
+							<Method>
+								<Name>modified</Name>
+								<Source><![CDATA[
+            /// <summary>
+            /// modifies controls upon modification of ProcessingEndDate
+            /// </summary>
+            public void modified()
+            {
+
+                if(ETGBinJournalLine.ProcessingEndDate != dateNull())
+                {
+                    if (box::yesNo('@ETGReport:UserPromptForProcessingEndDateAftrFldFrozen', dialogButton::Yes, 'Confirmation') == dialogButton::Yes)
+                    {
+                        Info('@ETGReport:LineFreezed.');
+                        ETGBinJournalLine.BinLineLocked = NoYes::Yes;
+                        ETGBinJournalLine_ds.research(true);
+                    }
+                    else
+                    {                        
+                        ETGBinJournalLine.ProcessingEndDate = dateNull();
+                    }
+                }
+               
+                super();
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>RetailvariantId</DataField>
+						<Methods>
+							<Method>
+								<Name>modified</Name>
+								<Source><![CDATA[
+            /// <summary>
+            /// modifies controls upon modification of RetailvariantId
+            /// </summary>
+            public void modified()
+            {
+                ETG_InventDimCombinationView             ETG_InventDimCombinationView;
+                super();
+
+                select ETG_InventDimCombinationView
+                      where ETG_InventDimCombinationView.RetailVariantId ==   ETGBinJournalLine.RetailVariantId
+                    &&    ETG_InventDimCombinationView.ItemId ==    ETGBinJournalLine.ItemId;
+
+                ETGBinJournalLine.Configuration = ETG_InventDimCombinationView.configId;
+                ETGBinJournalLine.Size = ETG_InventDimCombinationView.InventSizeId;
+                ETGBinJournalLine.Colour = ETG_InventDimCombinationView.InventColorId;
+                ETGBinJournalLine.Style = ETG_InventDimCombinationView.InventStyleId;
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>Size</DataField>
+						<Methods>
+							<Method>
+								<Name>lookup</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            /// <param name = "_formControl"></param>
+            /// <param name = "_filterStr"></param>
+            public void lookup(FormControl _formControl, str _filterStr)
+            {
+                // super(_formControl, _filterStr);
+                // super(_formControl, _filterStr);
+                Query                   query = new Query();
+                QueryBuildDataSource    queryBuildDataSource;
+                SysTableLookup          sysTableLookup;
+
+             
+                sysTableLookup = SysTableLookup::newParameters(tableNum(EcoResSize), _formControl);
+                queryBuildDataSource = query.addDataSource(tableNum(EcoResSize));
+                sysTableLookup.addLookupField(fieldNum(EcoResSize, Name));
+              
+                sysTableLookup.parmQuery(query);
+                sysTableLookup.performFormLookup();
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>Style</DataField>
+						<Methods>
+							<Method>
+								<Name>lookup</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            /// <param name = "_formControl"></param>
+            /// <param name = "_filterStr"></param>
+            public void lookup(FormControl _formControl, str _filterStr)
+            {
+                // super(_formControl, _filterStr);
+                Query                   query = new Query();
+                QueryBuildDataSource    queryBuildDataSource;
+                SysTableLookup          sysTableLookup;
+
+             
+                sysTableLookup = SysTableLookup::newParameters(tableNum(EcoResStyle), _formControl);
+                queryBuildDataSource = query.addDataSource(tableNum(EcoResStyle));
+                sysTableLookup.addLookupField(fieldNum(EcoResStyle, Name));
+              
+                sysTableLookup.parmQuery(query);
+                sysTableLookup.performFormLookup();
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+					<Field>
+						<DataField>Warehouse</DataField>
+						<Methods>
+							<Method>
+								<Name>modified</Name>
+								<Source><![CDATA[
+            /// <summary>
+            ///
+            /// </summary>
+            public void modified()
+            {
+                super();
+
+                ETGBinJournalLine.SiteId = InventLocation::find(ETGBinJournalLine.Warehouse).inventSiteid;
+            }
+
+]]></Source>
+							</Method>
+						</Methods>
+					</Field>
+				</Fields>
+			</DataSource>
+		</DataSources>
+		<DataControls xmlns="">
+			<Control>
+				<Name>SelectGRN</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// sends arguments to another form
+        /// </summary>
+        public void clicked()
+        {
+            super();
+
+            Args args;
+            FormRun formRun;
+            ;
+            super();
+            args = new args(formstr(ETGBinJournalGRNSelection)); // sending Args(record) to FormB
+            args.record(ETGBinJournalLine);
+            formrun = classfactory.formrunclass(args);
+            formrun.init();
+            formrun.run();
+            formrun.wait();
+            formrun.detach();
+                     
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>TransferGRNCreate</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        /// creates transfer journal
+        /// </summary>
+        public void clicked()
+        {
+
+            if(ETGBinJournalLine.RetailvariantId == '')
+            {
+                throw error(strFmt('@ETGReport:VariantIdValidation'));
+            }
+
+            if(ETGBinJournalLine.SiteId == '')
+            {
+                throw error(strFmt('@ETGReport:SiteIdvalidation'));
+            }
+
+            if(ETGBinJournalLine.Warehouse == '')
+            {
+                throw error(strFmt('@ETGReport:WarehouseValidation'));
+            }
+
+            if(ETGBinJournalLine.Location == '')
+            {
+                throw error(strFmt('@ETGReport:LocationValidation'));
+            }
+
+            if(ETGBinJournalLine.ToBatch == '')
+            {
+                throw error(strFmt('@ETGReport:ToBatchValidation'));
+            }
+
+            if(InventParameters::find().ETGBinTransferJournalName == '')
+            {
+                throw error(strFmt('%1','@ETGReport:DefineJournalNameInInventoryParameters'));
+            }
+
+            super();
+
+            if (box::yesNo('@ETGReport:BinJournalCreationConfirmation', dialogButton::Yes, '@ETGReport:Confirmation') == dialogButton::Yes)
+            {
+                ETGGlobal::CreateTransferJournal(ETGBinJournalLine.RecId);
+                ETGBinJournalLine_ds.research(true);
+            }
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>WeightAdjustment</Name>
+				<Type>MenuButton</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void clicked()
+        {
+           
+
+            if(InventJournalTable::find(ETGBinJournalLine.TransferJRNId).Posted == NoYes::No)
+            {
+                throw error(strFmt('%1','Atleast one Bin Transfer Journal has been created and Posted required.'));
+            }
+
+            super();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ETGBinLotLine</Name>
+				<Type>MenuFunctionButton</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void clicked()
+        {
+           
+
+            if(InventJournalTable::find(ETGBinJournalLine.TransferJRNId).Posted == NoYes::No)
+            {
+                throw error(strFmt('%1','Atleast one Bin Transfer Journal has been created and Posted required.'));
+            }
+
+            super();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+		</DataControls>
+		<Members xmlns="" />
+	</SourceCode>
+	<DataSources>
+		<AxFormDataSource xmlns="">
+			<Name>ETGBinJournalLine</Name>
+			<Table>ETGBinJournalLine</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>BinFGRNLocked</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>BinLineLocked</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>BinQty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>BinQtyOriginal</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>BinRate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>BinRateFinal</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Colour</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Configuration</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CreatedBy</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CreatedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DiffereceQty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>FGRNQty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventSerialId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ItemId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>JournalId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LineNum</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Location</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ModifiedBy</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ModifiedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Port</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ProcessingEndDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ProcessingPlant</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ProcessingStartDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Quantity</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RefRecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RetailvariantId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SiteId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Size</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Style</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ToBatch</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TransDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TransferJRNId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Warehouse</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Waste</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<CounterField>LineNum</CounterField>
+			<InsertIfEmpty>No</InsertIfEmpty>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+	</DataSources>
+	<Design>
+		<Caption xmlns="">Bin Journal Lines</Caption>
+		<DataSource xmlns="">ETGBinJournalLine</DataSource>
+		<Controls xmlns="">
+			<AxFormControl xmlns=""
+				i:type="AxFormActionPaneControl">
+				<Name>FormActionPaneControl1</Name>
+				<Type>ActionPane</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormButtonGroupControl">
+						<Name>FormButtonGroupControl1</Name>
+						<Type>ButtonGroup</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonControl">
+								<Name>SelectGRN</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<Type>Button</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Text>Get GRN details</Text>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormMenuFunctionButtonControl">
+								<Name>BatchDetails</Name>
+								<Type>MenuFunctionButton</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<MenuItemName>ETGBinJournalBatchDetails</MenuItemName>
+								<Text>Line Batch Info</Text>
+							</AxFormControl>
+						</Controls>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormButtonGroupControl">
+						<Name>FormButtonGroupControl2</Name>
+						<Type>ButtonGroup</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonControl">
+								<Name>TransferGRNCreate</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<Type>Button</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Text>Create BIN (Transfer)</Text>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormMenuButtonControl">
+								<Name>WeightAdjustment</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<Type>MenuButton</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormMenuFunctionButtonControl">
+										<Name>BIN2BinTO</Name>
+										<Type>MenuFunctionButton</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataSource>ETGBinJournalLine</DataSource>
+										<MenuItemName>ETGBin2BinTransferHistory</MenuItemName>
+										<Text>Bin 2 Bin Transfer</Text>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormMenuFunctionButtonControl">
+										<Name>BinAdjustment</Name>
+										<Type>MenuFunctionButton</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataSource>ETGBinJournalLine</DataSource>
+										<MenuItemName>ETGBinAdjustmentDetails</MenuItemName>
+										<Text>Bin Adjustment</Text>
+									</AxFormControl>
+								</Controls>
+								<Text>Weight Adjustment</Text>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormMenuFunctionButtonControl">
+								<Name>ETGBinLotLine</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<Type>MenuFunctionButton</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataSource>ETGBinJournalLine</DataSource>
+								<MenuItemName>ETGBinLotLine</MenuItemName>
+							</AxFormControl>
+						</Controls>
+					</AxFormControl>
+				</Controls>
+				<DataSource>ETGBinJournalLine</DataSource>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGridControl">
+				<Name>FormGridControl1</Name>
+				<Type>Grid</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormGroupControl">
+						<Name>GP1</Name>
+						<AutoDeclaration>Yes</AutoDeclaration>
+						<Type>Group</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormDateControl">
+								<Name>FormGridControl1_TransDate</Name>
+								<Type>Date</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>TransDate</DataField>
+								<DataSource>ETGBinJournalLine</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>FormGridControl1_JournalId</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>JournalId</DataField>
+								<DataSource>ETGBinJournalLine</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>FormGridControl1_ItemId</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>ItemId</DataField>
+								<DataSource>ETGBinJournalLine</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>FormGridControl1_RetailvariantId</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>RetailvariantId</DataField>
+								<DataSource>ETGBinJournalLine</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>FormGridControl1_Configuration</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>Configuration</DataField>
+								<DataSource>ETGBinJournalLine</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>FormGridControl1_Size</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>Size</DataField>
+								<DataSource>ETGBinJournalLine</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>FormGridControl1_Colour</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>Colour</DataField>
+								<DataSource>ETGBinJournalLine</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>FormGridControl1_Style</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>Style</DataField>
+								<DataSource>ETGBinJournalLine</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>FormGridControl1_SiteId</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>SiteId</DataField>
+								<DataSource>ETGBinJournalLine</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>FormGridControl1_Warehouse</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>Warehouse</DataField>
+								<DataSource>ETGBinJournalLine</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>FormGridControl1_Location</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>Location</DataField>
+								<DataSource>ETGBinJournalLine</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>FormGridControl1_ToBatch</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>ToBatch</DataField>
+								<DataSource>ETGBinJournalLine</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormRealControl">
+								<Name>FormGridControl1_BinQty</Name>
+								<Type>Real</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>BinQty</DataField>
+								<DataSource>ETGBinJournalLine</DataSource>
+							</AxFormControl>
+						</Controls>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGBinJournalLine_InventSerialId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>InventSerialId</DataField>
+						<DataSource>ETGBinJournalLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormRealControl">
+						<Name>FormGridControl1_FGRNQty</Name>
+						<Type>Real</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>FGRNQty</DataField>
+						<DataSource>ETGBinJournalLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormGroupControl">
+						<Name>GP2</Name>
+						<AutoDeclaration>Yes</AutoDeclaration>
+						<Type>Group</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormRealControl">
+								<Name>FormGridControl1_DiffereceQty</Name>
+								<Type>Real</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>DiffereceQty</DataField>
+								<DataSource>ETGBinJournalLine</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>FormGridControl1_TransferJRNId</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>TransferJRNId</DataField>
+								<DataSource>ETGBinJournalLine</DataSource>
+							</AxFormControl>
+						</Controls>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGBinJournalLine_Port</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Port</DataField>
+						<DataSource>ETGBinJournalLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGBinJournalLine_ProcessingPlant</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ProcessingPlant</DataField>
+						<DataSource>ETGBinJournalLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormDateControl">
+						<Name>ETGBinJournalLine_ProcessingStartDate</Name>
+						<Type>Date</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ProcessingStartDate</DataField>
+						<DataSource>ETGBinJournalLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormDateControl">
+						<Name>ETGBinJournalLine_ProcessingEndDate</Name>
+						<Type>Date</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ProcessingEndDate</DataField>
+						<DataSource>ETGBinJournalLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormRealControl">
+						<Name>ETGBinJournalLine_BinRate</Name>
+						<Type>Real</Type>
+						<Visible>No</Visible>
+						<FormControlExtension
+							i:nil="true" />
+						<DataMethod>BinRateDisplay</DataMethod>
+						<DataSource>ETGBinJournalLine</DataSource>
+						<Label>Bin Rate</Label>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormRealControl">
+						<Name>ETGBinJournalLine_BinRateFinal</Name>
+						<Type>Real</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>BinRateFinal</DataField>
+						<DataSource>ETGBinJournalLine</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormRealControl">
+						<Name>ETGBinJournalLine_Waste</Name>
+						<Type>Real</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>Waste</DataField>
+						<DataSource>ETGBinJournalLine</DataSource>
+					</AxFormControl>
+				</Controls>
+				<DataSource>ETGBinJournalLine</DataSource>
+			</AxFormControl>
+		</Controls>
+	</Design>
+	<Parts />
+</AxForm>

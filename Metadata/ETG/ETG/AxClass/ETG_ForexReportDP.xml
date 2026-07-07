@@ -1,0 +1,480 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_ForexReportDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// 
+/// </summary>
+[
+SRSReportParameterAttribute(classStr(ETG_ForexReportContract))
+]
+class ETG_ForexReportDP extends SrsReportDataProviderPreProcessTempDB
+{
+    ETGForexReportTmp               eTGForexReportTmp;
+    ETGSRSReportMultiParametersTmp  ssrsReportMultiParametersTmp;
+    ETG_ForexReportContract         contract;
+    FromDate                        fromDate;
+    ToDate                          toDate;
+  
+    utcDateTime                     utcFromDate, utcToDate;
+    Ledger    ledger = Ledger::find(Ledger::current()) ;
+   
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>eTGForexReportTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tablestr(ETGForexReportTmp))]
+    public ETGForexReportTmp eTGForexReportTmp()
+    {
+        select eTGForexReportTmp;
+        return eTGForexReportTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {  
+        ETG_TransationType      transactionType;
+
+        contract            = this.parmDataContract() as ETG_ForexReportContract;
+        transactionType     = contract.parmTransationType();
+        fromDate            = contract.parmFromDate();
+        toDate              = contract.parmToDate();
+
+        utcFromDate = DateTimeUtil::newDateTime(fromDate, 0,DateTimeUtil::getClientMachineTimeZone());
+        utcToDate   = DateTimeUtil::newDateTime(toDate, 86399,DateTimeUtil::getClientMachineTimeZone());
+
+        eTGForexReportTmp.CompanyLogo  = FormLetter::companyLogo();
+        eTGForexReportTmp.insert();
+
+        if(transactionType == ETG_TransationType::AccountsPayable)
+            this.getpurchaseData();
+       
+        else if(transactionType == ETG_TransationType::AccountsReceivable)
+            this.getSalesData();
+        
+        else
+        {
+            this.getpurchaseData();
+            this.getSalesData();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getExchangeRate</Name>
+				<Source><![CDATA[
+    public real getExchangeRate(TransDate _transDate,CurrencyCode _fromCurrency,CurrencyCode _toCurrency,Noyes _reverse = NoYes::No)
+    {
+        ExchangeRateCurrencyPair    exchangeRateCurrencyPair ;
+        ExchangeRate                exchangeRate ;
+        real                        exchRate;
+
+        select firstonly validtimestate(_transDate) exchangeRate
+            order by exchangeRate.ValidFrom desc
+                where  exchangeRate.ValidFrom <= _transDate
+        join exchangeRateCurrencyPair
+            where exchangeRateCurrencyPair.RecId == exchangeRate.ExchangeRateCurrencyPair
+                && exchangeRateCurrencyPair.ExchangeRateType ==  ledger.DefaultExchangeRateType
+                && exchangeRateCurrencyPair.FromCurrencyCode ==  _fromCurrency
+                && exchangeRateCurrencyPair.ToCurrencyCode   == _toCurrency;
+               
+        if(exchangeRate.ExchangeRate)
+            exchRate = exchangeRate.ExchangeRate / 100 ;
+
+        if(_reverse && exchRate)
+            exchRate = exchangeRateCurrencyPair.ExchangeRateDisplayFactor / exchRate;
+
+
+        return  exchRate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getDefaultDimensionValue</Name>
+				<Source><![CDATA[
+    public void getDefaultDimensionValue(RefRecId  _defaultDimension)
+    {
+        DefaultDimensionView        defaultDimesnionView;
+        Name                        item = enum2Str(DimensionHierarchytype::Item);
+
+        while select DisplayValue,Name from defaultDimesnionView
+            where defaultDimesnionView.DefaultDimension == _defaultDimension
+                && (defaultDimesnionView.Name  == item
+                    || defaultDimesnionView.Name == 'SubVertical')
+        {
+            if(defaultDimesnionView.Name  == item)
+                eTGForexReportTmp.Commodity   = defaultDimesnionView.DisplayValue;
+
+            else
+                eTGForexReportTmp.SubVertical   = defaultDimesnionView.DisplayValue;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insVendTrans</Name>
+				<Source><![CDATA[
+    public void insVendTrans(VendTrans  _vendTrans)
+    {
+        eTGForexReportTmp.TransDate                 = _vendTrans.TransDate;
+        eTGForexReportTmp.TransType                 = _vendTrans.TransType;
+        eTGForexReportTmp.Invoice                   = _vendTrans.Invoice;
+        eTGForexReportTmp.Voucher                   = _vendTrans.Voucher;
+        eTGForexReportTmp.CustomerOrVendor          = enum2Str(LedgerTransType::Vend);//"Vendor";
+        eTGForexReportTmp.TransactionCurrency       = _vendTrans.CurrencyCode;
+        eTGForexReportTmp.BalanceAmount             = _vendTrans.remainAmountCur();
+        eTGForexReportTmp.TransactionExchnageRate   = _vendTrans.displayAccountingExchangeRate();
+        eTGForexReportTmp.TransactionAmount         = _vendTrans.AmountCur;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insCustTrans</Name>
+				<Source><![CDATA[
+    public void insCustTrans(CustTrans  _custTrans)
+    {
+        eTGForexReportTmp.TransDate                 = _custTrans.TransDate;
+        eTGForexReportTmp.TransType                 = _custTrans.TransType;
+        eTGForexReportTmp.Invoice                   = _custTrans.Invoice;
+        eTGForexReportTmp.Voucher                   = _custTrans.Voucher;
+        eTGForexReportTmp.CustomerOrVendor          = enum2Str(LedgerTransType::Cust);//"Vendor";
+        eTGForexReportTmp.TransactionCurrency       = _custTrans.CurrencyCode;
+        eTGForexReportTmp.BalanceAmount             = _custTrans.remainAmountCur();
+        eTGForexReportTmp.TransactionExchnageRate   = _custTrans.displayAccountingExchangeRate();
+        eTGForexReportTmp.TransactionAmount         = _custTrans.AmountCur;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getUnrealizedAmt</Name>
+				<Source><![CDATA[
+    public Amount getUnrealizedAmt(Voucher  _voucher,Amount  _amount)
+    {
+        GeneralJournalEntry         generalJournalEntry;
+        GeneralJournalAccountEntry  generalJournalAccountEntry;
+        Amount                      realizedAmt;
+
+        select firstonly RecId from generalJournalEntry
+            where generalJournalEntry.SubledgerVoucher == _voucher
+        join PostingType from generalJournalAccountEntry
+            where generalJournalAccountEntry.GeneralJournalEntry == generalJournalEntry.RecId
+                && (generalJournalAccountEntry.PostingType == LedgerPostingType::ExchRateGain
+                || generalJournalAccountEntry.PostingType == LedgerPostingType::ExchRateLoss);
+
+        if(generalJournalAccountEntry.PostingType == LedgerPostingType::ExchRateGain)
+            realizedAmt = _amount;
+
+        else if(generalJournalAccountEntry.PostingType == LedgerPostingType::ExchRateLoss)
+            realizedAmt = -_amount;
+
+        return  realizedAmt;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insOpenVendTrans</Name>
+				<Source><![CDATA[
+    public void insOpenVendTrans()
+    {
+        VendTransOpen    vendTransOpen;
+        VendTrans        vendTrans,vendtransInvoice,vendtransSettleEx;
+        VendSettlement   vendSettlement;
+        date             exchangeFromDate;
+
+        while select vendTrans
+            order by TransDate asc
+                where vendTrans.TransDate       < fromDate
+                   && vendTrans.CurrencyCode    != ledger.AccountingCurrency
+        join vendTransOpen
+            where vendTransOpen.RefRecId == vendTrans.RecId
+        {
+            eTGForexReportTmp.clear();
+            this.insVendTrans(vendTrans);
+            
+            exchangeFromDate = fromDate - 1;
+            
+            if(exchangeFromDate < vendTrans.TransDate)
+                eTGForexReportTmp.PeriodBeginningExRate     = vendTrans.displayAccountingExchangeRate();
+
+            else
+            {
+                eTGForexReportTmp.PeriodBeginningExRate = this.getExchangeRate(exchangeFromDate,vendTrans.CurrencyCode,ledger.AccountingCurrency);
+                
+                if(!eTGForexReportTmp.PeriodBeginningExRate)
+                    eTGForexReportTmp.PeriodBeginningExRate = this.getExchangeRate(exchangeFromDate,ledger.AccountingCurrency,vendTrans.CurrencyCode,NoYes::Yes);
+            }
+
+            this.getDefaultDimensionValue(vendTrans.DefaultDimension);
+
+            eTGForexReportTmp.PeriodClosingExRate = this.getExchangeRate(toDate,vendTrans.CurrencyCode,ledger.AccountingCurrency);
+                
+            if(!eTGForexReportTmp.PeriodClosingExRate)
+                eTGForexReportTmp.PeriodClosingExRate = this.getExchangeRate(toDate,ledger.AccountingCurrency,vendTrans.CurrencyCode,NoYes::Yes);
+        
+            if(vendTrans.TransType == LedgerTransType::Payment )
+            {
+                select firstonly SettlementVoucher from vendSettlement
+                    where vendSettlement.OffsetTransVoucher == vendTrans.Voucher
+                join Invoice from vendtransInvoice
+                    where vendtransInvoice.Voucher == vendSettlement.SettlementVoucher;
+
+                eTGForexReportTmp.Invoice = vendtransInvoice.Invoice;
+            }
+            
+            eTGForexReportTmp.MovementDuringThePeriod   =  (eTGForexReportTmp.ClosingUnrealised) + (eTGForexReportTmp.RealisedExGainAndLoss);
+           
+            eTGForexReportTmp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getpurchaseData</Name>
+				<Source><![CDATA[
+    public void getpurchaseData()
+    {
+        VendTrans                   vendTrans,vendtransInvoice,vendtransSettleEx,vendTransSameVoucher;
+        VendSettlement              vendSettlement;
+        VendTransOpen               vendTransOpen; 
+       
+        this.insOpenVendTrans();
+       
+        while select vendTrans
+            order by TransDate asc
+                where vendTrans.TransDate       >= fromDate
+                   && vendTrans.TransDate       <= toDate
+                   && vendTrans.CurrencyCode    != ledger.AccountingCurrency
+                   && (vendTrans.TransType != LedgerTransType::Settlement 
+                   || (vendTrans.TransType == LedgerTransType::Settlement  && vendTrans.AmountCur >  0))
+        {
+            eTGForexReportTmp.clear();
+            this.insVendTrans(vendTrans);
+
+            if(vendTrans.TransType == LedgerTransType::Settlement )
+            {
+                eTGForexReportTmp.SettlementDate          = vendTrans.LastSettleDate;
+                eTGForexReportTmp.SettlementRate          = vendTrans.displayAccountingExchangeRate();
+                eTGForexReportTmp.SettlementAmount        = vendTrans.AmountCur;  
+                
+                select firstonly CurrencyCode,ExchRate from vendtransSettleEx
+                    where vendtransSettleEx.Invoice == vendTrans.Invoice
+                        && vendtransSettleEx.TransType == LedgerTransType::Vend;
+
+                eTGForexReportTmp.PeriodBeginningExRate     = vendtransSettleEx.displayAccountingExchangeRate();
+            }
+            else
+            { 
+                eTGForexReportTmp.TransactionExchnageRate   = vendTrans.displayAccountingExchangeRate();
+                eTGForexReportTmp.TransactionAmount         = vendTrans.AmountCur;
+                eTGForexReportTmp.PeriodBeginningExRate     = vendTrans.displayAccountingExchangeRate();         
+            }
+
+            this.getDefaultDimensionValue(vendTrans.DefaultDimension);
+         
+            eTGForexReportTmp.PeriodClosingExRate = this.getExchangeRate(toDate,vendTrans.CurrencyCode,ledger.AccountingCurrency);
+                
+            if(!eTGForexReportTmp.PeriodClosingExRate)
+                eTGForexReportTmp.PeriodClosingExRate = this.getExchangeRate(toDate,ledger.AccountingCurrency,vendTrans.CurrencyCode,NoYes::Yes);
+        
+            if(eTGForexReportTmp.SettlementRate)
+                eTGForexReportTmp.RealisedExGainAndLoss =  ((eTGForexReportTmp.PeriodBeginningExRate - eTGForexReportTmp.SettlementRate)*(eTGForexReportTmp.SettlementAmount));
+
+            //else
+            //    eTGForexReportTmp.ClosingUnrealised = (eTGForexReportTmp.BalanceAmount) * (eTGForexReportTmp.PeriodClosingExRate - eTGForexReportTmp.TransactionExchnageRate);
+
+            if(vendTrans.TransType == LedgerTransType::Payment )
+            {
+                select firstonly SettlementVoucher from vendSettlement
+                    where vendSettlement.OffsetTransVoucher == vendTrans.Voucher
+                join Invoice from vendtransInvoice
+                    where vendtransInvoice.Voucher == vendSettlement.SettlementVoucher;
+
+                eTGForexReportTmp.Invoice = vendtransInvoice.Invoice;
+            }
+            eTGForexReportTmp.MovementDuringThePeriod   =  (eTGForexReportTmp.ClosingUnrealised) + (eTGForexReportTmp.RealisedExGainAndLoss);
+
+            if(vendTrans.TransType == LedgerTransType::ExchAdjustment)
+             //   && vendTrans.AmountMST < 0)
+            {
+                select firstonly RecId from vendTransSameVoucher
+                    where vendTransSameVoucher.Voucher == vendTrans.Voucher
+                        && vendTransSameVoucher.TransType == LedgerTransType::Settlement;
+
+                if(!vendTransSameVoucher)
+                {
+                    eTGForexReportTmp.ClosingUnrealised = this.getUnrealizedAmt(vendTrans.Voucher,vendTrans.AmountMST);
+                    eTGForexReportTmp.MovementDuringThePeriod   =  (eTGForexReportTmp.ClosingUnrealised) + (eTGForexReportTmp.RealisedExGainAndLoss);
+                    eTGForexReportTmp.insert();
+                }
+            }
+
+            else if(vendTrans.TransType != LedgerTransType::ExchAdjustment)
+                eTGForexReportTmp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insOpenCustTrans</Name>
+				<Source><![CDATA[
+    public void insOpenCustTrans()
+    {
+        CustTransOpen    custTransOpen;
+        CustTrans        custTrans,custtransInvoice,custtransSettleEx;
+        CustSettlement   custSettlement;
+        date             exchangeFromDate;
+
+        while select custTrans
+            order by TransDate asc
+                where custTrans.TransDate       < fromDate
+                   && custTrans.CurrencyCode    != ledger.AccountingCurrency
+        join custTransOpen
+            where custTransOpen.RefRecId == custTrans.RecId
+        {
+            eTGForexReportTmp.clear();
+            this.inscustTrans(custTrans);
+            
+            exchangeFromDate = fromDate - 1;
+            
+            if(exchangeFromDate < custTrans.TransDate)
+                eTGForexReportTmp.PeriodBeginningExRate     = custTrans.displayAccountingExchangeRate();
+
+            else
+            {
+                eTGForexReportTmp.PeriodBeginningExRate = this.getExchangeRate(exchangeFromDate,custTrans.CurrencyCode,ledger.AccountingCurrency);
+                
+                if(!eTGForexReportTmp.PeriodBeginningExRate)
+                    eTGForexReportTmp.PeriodBeginningExRate = this.getExchangeRate(exchangeFromDate,ledger.AccountingCurrency,custTrans.CurrencyCode,NoYes::Yes);
+            }
+
+            this.getDefaultDimensionValue(custTrans.DefaultDimension);
+
+            eTGForexReportTmp.PeriodClosingExRate = this.getExchangeRate(toDate,custTrans.CurrencyCode,ledger.AccountingCurrency);
+                
+            if(!eTGForexReportTmp.PeriodClosingExRate)
+                eTGForexReportTmp.PeriodClosingExRate = this.getExchangeRate(toDate,ledger.AccountingCurrency,custTrans.CurrencyCode,NoYes::Yes);
+        
+            if(custTrans.TransType == LedgerTransType::Payment )
+            {
+                select firstonly SettlementVoucher from custSettlement
+                    where custSettlement.OffsetTransVoucher == custTrans.Voucher
+                join Invoice from custtransInvoice
+                    where custtransInvoice.Voucher == custSettlement.SettlementVoucher;
+
+                eTGForexReportTmp.Invoice = custtransInvoice.Invoice;
+            }
+            
+            eTGForexReportTmp.MovementDuringThePeriod   =  (eTGForexReportTmp.ClosingUnrealised) + (eTGForexReportTmp.RealisedExGainAndLoss);
+            eTGForexReportTmp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getSalesData</Name>
+				<Source><![CDATA[
+    public void getSalesData()
+    {
+        CustTrans                   custTrans,custtransInvoice,custtransSettleEx,custTransSameVoucher;
+        CustSettlement              custSettlement;
+        CustTransOpen               custTransOpen;
+
+        this.insOpencustTrans();
+       
+        while select custTrans
+            order by TransDate asc
+                where custTrans.TransDate       >= fromDate
+                   && custTrans.TransDate       <= toDate
+                   && custTrans.CurrencyCode    != ledger.AccountingCurrency
+                   && (custTrans.TransType != LedgerTransType::Settlement
+                   || (custTrans.TransType == LedgerTransType::Settlement  && custTrans.AmountCur >  0))
+        {
+            eTGForexReportTmp.clear();
+            this.inscustTrans(custTrans);
+
+            if(custTrans.TransType == LedgerTransType::Settlement )
+            {
+                eTGForexReportTmp.SettlementDate          = custTrans.LastSettleDate;
+                eTGForexReportTmp.SettlementRate          = custTrans.displayAccountingExchangeRate();
+                eTGForexReportTmp.SettlementAmount        = custTrans.AmountCur;
+                
+                select firstonly CurrencyCode,ExchRate from custtransSettleEx
+                    where custtransSettleEx.Invoice == custTrans.Invoice
+                    && custtransSettleEx.TransType == LedgerTransType::Sales
+                    || custtransSettleEx.TransType == LedgerTransType::Cust;
+
+                eTGForexReportTmp.PeriodBeginningExRate     = custtransSettleEx.displayAccountingExchangeRate();
+            }
+            else
+            {
+                eTGForexReportTmp.TransactionExchnageRate   = custTrans.displayAccountingExchangeRate();
+                eTGForexReportTmp.TransactionAmount         = custTrans.AmountCur;
+                eTGForexReportTmp.PeriodBeginningExRate     = custTrans.displayAccountingExchangeRate();
+            }
+
+            this.getDefaultDimensionValue(custTrans.DefaultDimension);
+         
+            eTGForexReportTmp.PeriodClosingExRate = this.getExchangeRate(toDate,custTrans.CurrencyCode,ledger.AccountingCurrency);
+                
+            if(!eTGForexReportTmp.PeriodClosingExRate)
+                eTGForexReportTmp.PeriodClosingExRate = this.getExchangeRate(toDate,ledger.AccountingCurrency,custTrans.CurrencyCode,NoYes::Yes);
+        
+            if(eTGForexReportTmp.SettlementRate)
+                eTGForexReportTmp.RealisedExGainAndLoss =  ((eTGForexReportTmp.PeriodBeginningExRate - eTGForexReportTmp.SettlementRate)*(eTGForexReportTmp.SettlementAmount));
+
+            //else
+            //    eTGForexReportTmp.ClosingUnrealised = (eTGForexReportTmp.BalanceAmount) * (eTGForexReportTmp.PeriodClosingExRate - eTGForexReportTmp.TransactionExchnageRate);
+
+            if(custTrans.TransType == LedgerTransType::Payment )
+            {
+                select firstonly SettlementVoucher from custSettlement
+                    where custSettlement.OffsetTransVoucher == custTrans.Voucher
+                join Invoice from custtransInvoice
+                    where custtransInvoice.Voucher == custSettlement.SettlementVoucher;
+
+                eTGForexReportTmp.Invoice = custtransInvoice.Invoice;
+            }
+
+            eTGForexReportTmp.MovementDuringThePeriod   =  (eTGForexReportTmp.ClosingUnrealised) + (eTGForexReportTmp.RealisedExGainAndLoss);
+
+            if(custTrans.TransType == LedgerTransType::ExchAdjustment)
+              //  && custTrans.AmountMST < 0)
+            {
+                select firstonly RecId from custTransSameVoucher
+                    where custTransSameVoucher.Voucher == custTrans.Voucher
+                        && custTransSameVoucher.TransType == LedgerTransType::Settlement;
+
+                if(!custTransSameVoucher)
+                {
+                    eTGForexReportTmp.ClosingUnrealised         = this.getUnrealizedAmt(custTrans.Voucher,custTrans.AmountMST);
+                    eTGForexReportTmp.MovementDuringThePeriod   =  (eTGForexReportTmp.ClosingUnrealised) + (eTGForexReportTmp.RealisedExGainAndLoss);
+                    eTGForexReportTmp.insert();
+                }
+            }
+        
+            else if(custTrans.TransType != LedgerTransType::ExchAdjustment)
+                eTGForexReportTmp.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

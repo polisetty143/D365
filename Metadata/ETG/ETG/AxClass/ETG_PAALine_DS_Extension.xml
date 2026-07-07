@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_PAALine_DS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formdatasourcestr(PurchAgreement, ALine))]
+final class ETG_PAALine_DS_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {
+        int                     ret;
+        AgreementReference      agreementReference;
+        boolean                 isTPAgreement    = false;
+        boolean                 isReleased       = true;
+        FormDataSource          ALine_DS                = any2Object(this) as FormDataSource;
+        formRun                 formRun                 = ALine_DS.formRun();
+        FormDataSource          PurchAgreementHeader_DS = formRun.dataSource(formDataSourceStr(PurchAgreement, PurchAgreementHeader)) as FormDataSource;
+        PurchAgreementHeader    purchAgreementHeader    = purchAgreementHeader_ds.cursor();       
+        FormDataSource          aLineQtyCommitment_ds   = formRun.dataSource(formDataSourceStr(PurchAgreement, ALine_AgreementLineQuantityCommitment)) as FormDataSource;
+        FormDataSource          agreementLineDefault_ds = formRun.dataSource(formDataSourceStr(PurchAgreement, AgreementLineDefault)) as FormDataSource;
+        FormDataSource          inventDim_ds            = formRun.dataSource(formDataSourceStr(PurchAgreement, InventDim)) as FormDataSource;
+        ETG_Parameters          parameter               = ETG_Parameters::find();
+       
+        //NS, DLT, 04-06-2025 Change request design level enable and disble
+        //if agreement status is on-hold then enable all fields else disble all fields
+        FormDataSource          aLineVolCommitmentPurch_ds   = formRun.dataSource(formDataSourceStr(SalesAgreement,ALine_AgreementLineVolumeCommitment)) as FormDataSource;
+        //NE, DLT, 04-06-2025 Change request design level enable and disble
+
+        ret = next active();
+
+        select firstonly agreementReference
+            where agreementReference.DerivedAgreement == purchAgreementHeader.RecId;
+       
+        if(purchAgreementHeader.ETG_TradingStatusPurch != ETG_TradingStatus::None)
+        {
+            isReleased = false;
+        }
+
+        if(parameter.ETG_FrozenValidations
+            && parameter.ETG_FrozenValidationPurchaseAgreement
+            && (purchAgreementHeader.ETG_IsThirdParty || agreementReference))
+        {
+            isTPAgreement = true;            
+        }
+
+        if(!isReleased)
+        {
+            //aline_ds.allowEdit(false);
+            //aline_ds.allowCreate(false);
+            //aline_ds.allowDelete(false);
+            //inventDim_ds.allowEdit(false);
+            //aLineQtyCommitment_ds.allowEdit(false);
+        }
+        else if(isTPAgreement)
+        {
+            //aline_ds.allowCreate(false);
+            //aline_ds.allowDelete(false);
+            //agreementLineDefault_ds.allowEdit(false);
+            //allowEditFieldGroup(InventDim_DS, tableFieldGroupStr(InventDim_DS, StorageDimensions)); 
+            //allowEditFieldGroup(aline_ds, tableFieldGroupStr(aline_ds, Dimension));
+
+            //if(VendTable::find(purchAgreementHeader.VendAccount).interCompanyTradingRelationActive())
+            //    allowEditFieldGroup(aLineQtyCommitment_ds, tableFieldGroupStr(aLineQtyCommitment_ds, AgreementFieldsEditableIC));
+
+            //else
+            //    allowEditFieldGroup(aLineQtyCommitment_ds, tableFieldGroupStr(aLineQtyCommitment_ds, AgreementFieldsEditable));
+
+            agreementLineDefault_ds.allowEdit(true);
+            aLineQtyCommitment_ds.allowEdit(true);
+            aline_ds.allowCreate(true);
+            aline_ds.allowDelete(true);
+            aline_ds.allowEdit(true);
+            inventDim_ds.allowEdit(true);
+        }
+        else
+        {
+            agreementLineDefault_ds.allowEdit(true);
+            aLineQtyCommitment_ds.allowEdit(true);
+            aline_ds.allowCreate(true);
+            aline_ds.allowDelete(true);
+            aline_ds.allowEdit(true);
+            inventDim_ds.allowEdit(true);
+        }
+
+        if(ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+        {
+            if (purchAgreementHeader.AgreementState == AgreementState::OnHold)
+            {
+                PurchAgreementHeader_DS.allowEdit(true);
+                agreementLineDefault_ds.allowEdit(true);
+                ALine_DS.allowCreate(true);
+                ALine_DS.allowDelete(true);
+                ALine_DS.allowEdit(true);
+                inventDim_ds.allowEdit(true);
+                aLineQtyCommitment_ds.allowEdit(true);
+                aLineQtyCommitment_ds.allowCreate(true);
+                aLineQtyCommitment_ds.allowDelete(true);
+                agreementLineDefault_ds.allowCreate(true);
+                agreementLineDefault_ds.allowEdit(true);
+                agreementLineDefault_ds.allowDelete(true);
+
+                // --- NEW FIX: UNLOCK UNIT PRICE FIELD ---
+                FormDataObject priceField = aLineQtyCommitment_ds.object(fieldNum(AgreementLineQuantityCommitment, PricePerUnit));
+                if (priceField)
+                {
+                    priceField.allowEdit(true);
+                }
+                
+                // --- NEW FIX: UNLOCK UNIT PRICE UI CONTROL ---
+                FormControl priceControl = formRun.design().controlName('ALine_AgreementLineQuantityCommitment_PricePerUnit');
+                if (priceControl)
+                {
+                    priceControl.allowEdit(true);
+                    priceControl.enabled(true);
+                }
+                // ---------------------------------------------
+
+                // FIXED SYNTAX ERROR:
+                formRun.design().viewEditMode(ViewEditMode::Edit);
+            }
+            else
+            {
+                //PurchAgreementHeader_DS.allowEdit(false);
+                //agreementLineDefault_ds.allowEdit(false);
+                //ALine_DS.allowCreate(false);
+                //ALine_DS.allowDelete(false);
+                //ALine_DS.allowEdit(false);
+                //inventDim_ds.allowEdit(false);
+                //aLineQtyCommitment_ds.allowEdit(false);
+                //aLineQtyCommitment_ds.allowCreate(false);
+                //aLineQtyCommitment_ds.allowDelete(false);
+                //agreementLineDefault_ds.allowCreate(false);
+                //agreementLineDefault_ds.allowEdit(false);
+                //agreementLineDefault_ds.allowDelete(false);
+                //element.design(ViewEditMode::View);
+            }
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGVendTransGrouping</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGVendTransGrouping
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>dialog</Name>
+				<Source><![CDATA[
+    public void dialog()
+    {
+        Dialog                       dialog;
+        TransDate                    fromDate,toDate;
+        DialogField                  dialogFromDate,dialogToDate;
+        DialogField                  dialogVendBalance;
+        dialog = new dialog("Vendor transactions list group");
+        dialogFromDate       = dialog.addField(extendedTypeStr(TransDate), "From date");
+        dialogToDate         = dialog.addField(extendedTypeStr(TransDate), "To date");
+        dialog.run();
+        if(dialogFromDate.value() >= dialogToDate.value())
+        {
+            throw error("To date should be greater than From date'");
+        }
+        else if (dialog.run())
+        {
+            this.createVendTransGroupData(dialogFromDate.value(), dialogToDate.value());
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createVendTransGroupData</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name = "_fromdate"></param>
+    /// <param name = "_todate"></param>
+    public void createVendTransGroupData(date _fromdate, date _todate)
+    {
+        ETGVendTransGroup vendTransGroup;
+        VendTrans vendTrans, vendTransLocal,vendTransCredit, vendTransOpen;
+        date fromdate, todate;
+        timeofday fromtime, totime;       
+        AmountCur creditBal, openBal;
+
+        str businessUnitValue,verticalValue,
+            MAIN_COMMODITYValue, SUB_COMMODITYValue, lineOfBusinessValue, contractValue, plantWarehouseOfficeValue,
+            departmentValue, interCompanyValue, trader_EmployeeValue, itemValue;;
+        str businessUnitStr = "BusinessUnit";       
+        str verticalStr = "Vertical";
+        str MAIN_COMMODITYStr = "MAIN_COMMODITY";
+        str SUB_COMMODITYStr = "SUB_COMMODITY";
+        str lineOfBusinessStr = "Line_of_Business";
+        str contractsStr = "Contract";
+        str plantWarehouseOfficeStr = "Plant_Warehouse_Office";
+        str departmentStr = "Department";
+        str interCompanyStr = "InterCompany";
+        str trader_EmployeeStr = "Trader_Employee";
+        str itemStr = "Item";
+        Args args = new Args();
+        ;
+        ttsbegin;
+        delete_from vendTransGroup;
+        ttscommit;
+
+        // Debit
+
+        while select CurrencyCode, AccountNum from vendTransLocal group by vendTransLocal.CurrencyCode,
+                                        vendTransLocal.AccountNum
+            where vendTransLocal.DataAreaId == curext()
+            && (vendTransLocal.Closed >= _fromdate && vendTransLocal.Closed <= _todate
+            || vendTransLocal.Closed == dateNull())
+        if(vendTransLocal)
+        {
+            vendTransGroup.AccountNum = vendTransLocal.AccountNum;
+            vendTransGroup.ETGVendName = vendTransLocal.vendTableName();
+            vendTransGroup.CurrencyCode = vendTransLocal.CurrencyCode;
+
+            select sum(AmountCur), sum(SettleAmountCur),CurrencyCode, AccountNum from vendTrans group by vendTrans.CurrencyCode,
+                                        vendTrans.AccountNum
+            where vendTrans.DataAreaId == curext()
+           && vendTrans.AccountNum == vendTransLocal.AccountNum
+           && vendTrans.CurrencyCode == vendTransLocal.CurrencyCode
+           && vendTrans.AmountCur < 0.00
+           && (vendTrans.Closed >= _fromdate && vendTrans.Closed <= _todate
+           || vendTrans.Closed == dateNull());
+            {
+                vendTransGroup.AmountCredit = abs(vendTrans.AmountCur) - abs(vendTrans.SettleAmountCur);
+            }
+            //credit - Start
+            select sum(AmountCur), sum(SettleAmountCur), CurrencyCode, AccountNum from vendTransCredit group by vendTransCredit.CurrencyCode,
+                                            vendTransCredit.AccountNum
+                where vendTransCredit.DataAreaId == curext()
+                && vendTransCredit.AccountNum == vendTransLocal.AccountNum
+                && vendTransCredit.CurrencyCode == vendTransLocal.CurrencyCode
+                && vendTransCredit.AmountCur > 0.00
+                && (vendTransCredit.Closed >= _fromdate && vendTransCredit.Closed <= _todate
+                || vendTransCredit.Closed == dateNull());
+            {
+                creditBal = 0.00;
+                vendTransGroup.AmountDebit = abs(vendTransCredit.AmountCur) - abs(vendTransCredit.SettleAmountCur);
+            }
+       
+  
+            select sum(AmountCur), sum(SettleAmountCur), CurrencyCode, AccountNum from vendTransOpen group by vendTransOpen.CurrencyCode,
+                                        vendTransOpen.AccountNum
+            where vendTransOpen.DataAreaId == curext()
+            && vendTransOpen.AccountNum == vendTransLocal.AccountNum
+            && vendTransOpen.CurrencyCode == vendTransLocal.CurrencyCode
+            && vendTransOpen.TransDate < _fromdate
+            && (vendTransOpen.Closed == dateNull() || vendTransOpen.TransDate < _fromdate);
+            {                
+                vendTransGroup.OpeningBalance = abs(vendTransOpen.AmountCur) - abs(vendTransOpen.SettleAmountCur);
+            }
+            openBal = vendTransGroup.AmountDebit - vendTransGroup.AmountDebit;
+            vendTransGroup.SumAmount = vendTransGroup.OpeningBalance + openBal;
+
+            businessUnitValue = ETGBankTransFinDim::getDimensionDisplayValue(vendTransLocal.DefaultDimension, businessUnitStr);
+
+            if(businessUnitValue)
+            {
+                vendTransGroup.BusinessUnit = businessUnitValue;
+            }
+
+            verticalValue = ETGBankTransFinDim::getDimensionDisplayValue(vendTransLocal.DefaultDimension, verticalStr);
+
+            if(verticalValue)
+            {
+                vendTransGroup.Vertical = verticalValue;
+            }
+
+            MAIN_COMMODITYValue = ETGBankTransFinDim::getDimensionDisplayValue(vendTransLocal.DefaultDimension, MAIN_COMMODITYStr);
+
+            if(MAIN_COMMODITYValue)
+            {
+                vendTransGroup.MainCommodity = MAIN_COMMODITYValue;
+            }
+
+            SUB_COMMODITYValue = ETGBankTransFinDim::getDimensionDisplayValue(vendTransLocal.DefaultDimension, SUB_COMMODITYStr);
+
+            if(SUB_COMMODITYValue)
+            {
+                vendTransGroup.SubCommodity = SUB_COMMODITYValue;
+            }
+
+            lineOfBusinessValue = ETGBankTransFinDim::getDimensionDisplayValue(vendTransLocal.DefaultDimension, lineOfBusinessStr);
+
+            if(lineOfBusinessValue)
+            {
+                vendTransGroup.LineOfBusiness = lineOfBusinessValue;
+            }
+
+            contractValue = ETGBankTransFinDim::getDimensionDisplayValue(vendTransLocal.DefaultDimension, contractsStr);
+
+            if(contractValue)
+            {
+                vendTransGroup.Contract = contractValue;
+            }
+
+            plantWarehouseOfficeValue = ETGBankTransFinDim::getDimensionDisplayValue(vendTransLocal.DefaultDimension, plantWarehouseOfficeStr);
+
+            if(plantWarehouseOfficeValue)
+            {
+                vendTransGroup.PlantWarehouseOffice = plantWarehouseOfficeValue;
+            }
+
+            departmentValue = ETGBankTransFinDim::getDimensionDisplayValue(vendTransLocal.DefaultDimension, departmentStr);
+
+            if(departmentValue)
+            {
+                vendTransGroup.Department = departmentValue;
+            }
+
+            interCompanyValue = ETGBankTransFinDim::getDimensionDisplayValue(vendTransLocal.DefaultDimension, interCompanyStr);
+
+            if(interCompanyValue)
+            {
+                vendTransGroup.InterCompany = interCompanyValue;
+            }
+
+            trader_EmployeeValue = ETGBankTransFinDim::getDimensionDisplayValue(vendTransLocal.DefaultDimension, trader_EmployeeStr);
+
+            if(trader_EmployeeValue)
+            {
+                vendTransGroup.TraderEmployee = trader_EmployeeValue;
+            }
+
+            itemValue = ETGBankTransFinDim::getDimensionDisplayValue(vendTransLocal.DefaultDimension, itemStr);
+
+            if(itemValue)
+            {
+                vendTransGroup.Item = itemValue;
+            }
+            vendTransGroup.insert();
+        }
+        
+        new MenuFunction(menuItemdisplayStr(ETGVendTransGroup),MenuItemType::Display).run();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    public void run()
+    {
+        this.dialog();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name = "_args"></param>
+    public static void main(Args _args)
+    {
+        ETGVendTransGrouping vendTransGrouping;
+        vendTransGrouping = new ETGVendTransGrouping();
+        vendTransGrouping.run();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

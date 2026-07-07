@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesAgreementHeaderEventHandler</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGSalesAgreementHeaderEventHandler
+{
+    
+    
+
+
+ 
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>SalesInvoiceLineV3Entity_onPostedLoad</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="_sender"></param>
+    /// <param name="_eventArgs"></param>
+    [DataEventHandler(tableStr(SalesInvoiceLineV3Entity), DataEventType::PostedLoad)]
+    public static void SalesInvoiceLineV3Entity_onPostedLoad(Common _sender, DataEventArgs _eventArgs)
+    {
+        SalesInvoiceLineV3Entity salesInvoiceLineV3Entity = _sender as SalesInvoiceLineV3Entity;
+        ETG_SalesTableTrade ETG_SalesTableTradeOrg;
+        CustBankAccount custBankAccount;
+        LogisticsPostalAddress logisticsPostalAddress, logisticsPostalAddressLoc;
+        InventTable inventTable;
+        CustTable custTable;
+        TaxInformation_IN taxInformation_IN;
+        CustInvoicePackingSlipQuantityMatch custInvoicePackingSlipQuantityMatch;
+        SalesLine salesLine;
+
+        select * from ETG_SalesTableTradeOrg
+            where ETG_SalesTableTradeOrg.SalesId == salesInvoiceLineV3Entity.SalesId;
+
+        salesInvoiceLineV3Entity.PortOfLoadingDesc = ETG_SalesTableTradeOrg.PortOfLoadingDesc;
+        salesInvoiceLineV3Entity.PortOfDischargeDesc = ETG_SalesTableTradeOrg.PortOfDischargeDesc;
+        salesInvoiceLineV3Entity.POLCountry = ETG_SalesTableTradeOrg.PortOfLoading;
+        salesInvoiceLineV3Entity.PODCountry = ETG_SalesTableTradeOrg.PortOfDischarge;
+        salesInvoiceLineV3Entity.NotifyToDifferentParty = ETG_SalesTableTradeOrg.Notifytodifferentparty;
+        salesInvoiceLineV3Entity.CountryOfOriginOfGoods = ETG_SalesTableTradeOrg.CountryOfOriginOfGoods;
+        salesInvoiceLineV3Entity.CountryOfFinalDestination = ETG_SalesTableTradeOrg.CountryOfFinalDestination;
+        salesInvoiceLineV3Entity.SalesAgreementId = SalesAgreementHeader::find(salesInvoiceLineV3Entity.MatchingAgreement).SalesNumberSequence;
+
+        select * from custBankAccount
+            where custBankAccount.CustAccount == salesInvoiceLineV3Entity.InvoiceAccount;
+
+        salesInvoiceLineV3Entity.BankName = custBankAccount.Name;
+        salesInvoiceLineV3Entity.BankAddress = custBankAccount.addressing();
+
+        select * from logisticsPostalAddress
+            where logisticsPostalAddress.RecId == salesInvoiceLineV3Entity.DeliveryPostalAddress;
+
+        salesInvoiceLineV3Entity.ETGDeliveryAddress = logisticsPostalAddress.Address;
+
+        select * from logisticsPostalAddressLoc
+            where logisticsPostalAddressLoc.RecId == salesInvoiceLineV3Entity.InvoicePostalAddress;
+
+        salesInvoiceLineV3Entity.ETGInvoiceAddress = logisticsPostalAddressLoc.Address;
+
+        select * from inventTable
+            where inventTable.ItemId == salesInvoiceLineV3Entity.ItemId;
+
+        salesInvoiceLineV3Entity.ETGMainCommodity = inventTable.ETGCommodity;
+
+        select * from custTable
+            where custTable.AccountNum == salesInvoiceLineV3Entity.InvoiceAccount;
+
+        select * from custInvoicePackingSlipQuantityMatch where
+            custInvoicePackingSlipQuantityMatch.InvoiceSourceDocumentLine == salesInvoiceLineV3Entity.SourceDocumentLine;
+                     
+        salesInvoiceLineV3Entity.RelationWithPS = int642Str(custInvoicePackingSlipQuantityMatch.PackingSlipSourceDocumentLine);
+       
+        select * from salesLine where salesLine.SalesId == salesInvoiceLineV3Entity.SalesId
+            && salesLine.ItemId == salesInvoiceLineV3Entity.ItemId;
+
+        salesInvoiceLineV3Entity.ETGRefSalesId = salesLine.ETGRefSalesId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>SalesAgreementHeader_OnActivated</Name>
+				<Source><![CDATA[
+       [FormDataSourceEventHandler(formDataSourceStr(SalesAgreementListPage, SalesAgreementHeader), FormDataSourceEventType::Activated)]
+        public static void SalesAgreementHeader_OnActivated(FormDataSource sender, FormDataSourceEventArgs e)
+        {
+            SalesAgreementHeader          _salesAgreementHeader     = sender.cursor(); //selected record
+            FormDataSource      salesAgreementHeader_ds   = sender.formRun().dataSource("SalesAgreementHeader"); //DataSource
+            FormRun             element       = sender.formRun(); //form element
+            FormControl         myNewButton   = element.design(0).controlName("ETGProformaInvoice");
+            //button on the form
+        if(_salesAgreementHeader.ETGWorkflowStatus == VersioningDocumentState::Approved)
+        {
+            myNewButton.enabled(true);
+        }
+            else
+        {
+            myNewButton.enabled(false);
+        }
+        }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

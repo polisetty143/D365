@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerJournalDaily_DS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formDataSourceStr(LedgerJournalTransDaily,LedgerJournalTrans ))]
+final class ETGLedgerJournalDaily_DS_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>write</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// 
+    /// </summary>
+    public void write()
+    {
+        if(curExt() == "Y002")
+        {
+            LedgerJournalTrans ledgerJournalTrans;
+            FormDataSource ledgerJournalTrans_DS;
+            ledgerJournalTrans_DS = this;
+            ledgerJournalTrans = ledgerJournalTrans_DS.cursor();
+
+            ETGRecordLevelSecurity recordLevelSecurity, recordLevelSecurityOrg, recordLevelSecurityOff;
+            DimensionValue subVertical, offsetsubVertical;
+            str businessUnit = "BusinessUnit";
+
+            if(ledgerJournalTrans.AccountType == LedgerJournalACType::Ledger)
+            {
+                subVertical = ETG_GetLedgerDimensionValue::getDimValue(ledgerJournalTrans.LedgerDimension, businessUnit);
+
+                select * from recordLevelSecurity
+                   where recordLevelSecurity.UserId == curUserId();
+
+                if(recordLevelSecurity)
+                {
+                    select * from recordLevelSecurityOrg where
+                    recordLevelSecurityOrg.UserId == curUserId() &&
+                    recordLevelSecurityOrg.DimensionValue == subVertical;
+
+                    if(recordLevelSecurityOrg)
+                    {
+                        if(ledgerJournalTrans.AccountType == LedgerJournalACType::Ledger)
+                        {
+                            if(recordLevelSecurityOrg.DimensionValue != subVertical && subVertical != "")
+                            {
+                                throw error(strFmt("You don't have access to post the entries for %1", subVertical));
+                            }
+                        }
+                    }
+                    else
+                    {
+                        throw error(strFmt("You don't have access to post the entries for %1", subVertical));
+                    }
+                }
+            }
+            if(ledgerJournalTrans.OffsetAccountType == LedgerJournalACType::Ledger)
+            {
+                offsetsubVertical = ETG_GetLedgerDimensionValue::getDimValue(ledgerJournalTrans.OffsetLedgerDimension, businessUnit);
+            
+                if(offsetsubVertical)
+                {
+                    select * from recordLevelSecurityOff where
+                    recordLevelSecurityOff.UserId == curUserId() &&
+                    recordLevelSecurityOff.DimensionValue == offsetsubVertical;
+
+                    if(recordLevelSecurityOff)
+                    {
+                        if(ledgerJournalTrans.OffsetAccountType == LedgerJournalACType::Ledger)
+                        {
+                            if(recordLevelSecurityOff.DimensionValue != offsetsubVertical && offsetsubVertical != "")
+                            {
+                                throw error(strFmt("You don't have access to post the entries for %1", offsetsubVertical));
+                            }
+                        }
+                    }
+                    else
+                    {
+                        throw error(strFmt("You don't have access to post the entries for %1", offsetsubVertical));
+                    }
+                }
+            }
+        }
+
+        next write();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

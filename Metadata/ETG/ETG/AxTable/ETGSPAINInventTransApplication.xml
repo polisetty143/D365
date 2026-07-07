@@ -1,0 +1,346 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxTable xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSPAINInventTransApplication</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// <c>ETGSPAINInventTransApplication</c> table is used to store the applied quantity of the transactions.
+/// </summary>
+public class ETGSPAINInventTransApplication extends common
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>findTransId</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Searches for an Application record.
+    /// </summary>
+    /// <param name="_transId">Transaction id number.</param>
+    /// <param name="_forUpdate">If it will be updated.</param>
+    /// <returns>Returns <c>ETGSPAINInventTransApplication</c> record.</returns>
+    public static ETGSPAINInventTransApplication findTransId(
+        InventTransId _transId,
+        boolean _forUpdate = false)
+    {
+        ETGSPAINInventTransApplication ETGSPAINInventTransApplication;
+
+        ETGSPAINInventTransApplication.selectForUpdate(_forUpdate);
+
+        select firstonly ETGSPAINInventTransApplication
+            where ETGSPAINInventTransApplication.InventTransId == _transId;
+
+        return ETGSPAINInventTransApplication;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>exist</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Method to check if the record exists.
+    /// </summary>
+    /// <param name="_transId">Transaction id number.</param>
+    /// <returns>Returns true if the record exists.</returns>
+    public static boolean exist(InventTransId _transId)
+    {
+        return _transId && (select firstonly RecId
+            from ETGSPAINInventTransApplication
+            where ETGSPAINInventTransApplication.InventTransId == _transId).RecId != 0;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createMovementFromInventJournalTrans</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates applied quantity movement.
+    /// </summary>
+    /// <param name="_inventJournalTrans">Transfer journal line record.</param>
+    public static void createMovementFromInventJournalTrans(InventJournalTrans _inventJournalTrans)
+    {
+        ETGSPAINInventTransApplication          ETGSPAINInventTransApplicationOrigin;
+        ETGSPAINInventTransApplication          ETGSPAINInventTransApplicationNew;
+        ETGSPAINInventTransApplicationMovement  ETGSPAINInventTransApplicationMovement;
+        Qty                                     appliedQtyFromOriginal;
+        Qty                                     appliedQtyFromNew;
+        Qty                                     appliedQtyMoved;
+        boolean                                 isFromSales;
+        boolean                                 isFromPurch;
+        boolean                                 isToSales;
+        boolean                                 isToPurch;
+
+        if (_inventJournalTrans.ETGSPAINInventAppliedQty < 0)
+        {
+            ttsbegin;
+
+            isFromSales     = SalesTable::exist(_inventJournalTrans.inventDim().InventDimension1);
+            isFromPurch     = PurchTable::exist(_inventJournalTrans.inventDim().InventDimension1);
+            isToSales   = SalesTable::exist(_inventJournalTrans.toInventDim().InventDimension1);
+            isToPurch   = PurchTable::exist(_inventJournalTrans.toInventDim().InventDimension1);
+
+            if (isFromSales)
+            {
+                // Searches for the applied transaction from origin (Sale: Negative Quantity)
+                select firstonly forupdate ETGSPAINInventTransApplicationOrigin
+                    where ETGSPAINInventTransApplicationOrigin.ItemId               == _inventJournalTrans.ItemId
+                        && ETGSPAINInventTransApplicationOrigin.inventDimId         == _inventJournalTrans.InventDimId
+                        && ETGSPAINInventTransApplicationOrigin.SalesApplicationQty <= _inventJournalTrans.ETGSPAINInventAppliedQty;
+
+                if (!ETGSPAINInventTransApplicationOrigin)
+                {
+                    throw Error("@ETGSPAINLabels:InventTransAppliedQtyNotFoundForDimensions");
+                }
+                else
+                {
+                    appliedQtyMoved         = abs(_inventJournalTrans.ETGSPAINInventAppliedQty);
+                    appliedQtyFromOriginal  = ETGSPAINInventTransApplicationOrigin.SalesApplicationQty;
+                    appliedQtyFromNew       = appliedQtyFromOriginal + appliedQtyMoved;
+
+                    ETGSPAINInventTransApplicationOrigin.SalesApplicationQty = appliedQtyFromNew;
+                    ETGSPAINInventTransApplicationOrigin.update();
+                }
+            }
+            else if (isFromPurch)
+            {
+                // Searches for the applied transaction from origin (Purchase: Positive Quantity)
+                select firstonly forupdate ETGSPAINInventTransApplicationOrigin
+                    where ETGSPAINInventTransApplicationOrigin.ItemId               == _inventJournalTrans.ItemId
+                        && ETGSPAINInventTransApplicationOrigin.inventDimId         == _inventJournalTrans.InventDimId
+                        && ETGSPAINInventTransApplicationOrigin.PurchApplicationQty >= abs(_inventJournalTrans.ETGSPAINInventAppliedQty);
+
+                if (!ETGSPAINInventTransApplicationOrigin)
+                {
+                    throw Error("@ETGSPAINLabels:InventTransAppliedQtyNotFoundForDimensions");
+                }
+                else
+                {
+                    appliedQtyMoved         = abs(_inventJournalTrans.ETGSPAINInventAppliedQty);
+                    appliedQtyFromOriginal  = ETGSPAINInventTransApplicationOrigin.PurchApplicationQty;
+                    appliedQtyFromNew       = appliedQtyFromOriginal - appliedQtyMoved;
+
+                    ETGSPAINInventTransApplicationOrigin.PurchApplicationQty = appliedQtyFromNew;
+                    ETGSPAINInventTransApplicationOrigin.update();
+                }
+            }
+
+            if (!isToSales && !isToPurch)
+            {
+                throw Error(strFmt("@ETGSPAINLabels:NotFoundApplicationOrder", _inventJournalTrans.toInventDim().InventDimension1));
+            }
+
+            // Creates the applied transaction for destination (Purchase: Positive Quantity)
+            ETGSPAINInventTransApplicationNew.clear();
+            ETGSPAINInventTransApplicationNew.initValue();
+            ETGSPAINInventTransApplicationNew.InventTransId         = _inventJournalTrans.ToInventTransId;
+            ETGSPAINInventTransApplicationNew.ItemId                = _inventJournalTrans.ItemId;
+            ETGSPAINInventTransApplicationNew.InventDimId           = _inventJournalTrans.ToInventDimId;
+            ETGSPAINInventTransApplicationNew.InventJournalId       = _inventJournalTrans.JournalId;
+            ETGSPAINInventTransApplicationNew.SalesApplicationQty   = isToSales ? _inventJournalTrans.ETGSPAINInventAppliedQty : 0;
+            ETGSPAINInventTransApplicationNew.PurchApplicationQty   = isToPurch ? abs(_inventJournalTrans.ETGSPAINInventAppliedQty) : 0;
+            ETGSPAINInventTransApplicationNew.DateApplicationQty    = _inventJournalTrans.TransDate;
+            ETGSPAINInventTransApplicationNew.insert();
+
+            // Creates movement history log
+            ETGSPAINInventTransApplicationMovement.clear();
+            ETGSPAINInventTransApplicationMovement.initValue();
+            ETGSPAINInventTransApplicationMovement.InventTransApplicationFromRefRecId   = ETGSPAINInventTransApplicationOrigin.RecId;
+            ETGSPAINInventTransApplicationMovement.InventTransApplicationToRefRecId     = ETGSPAINInventTransApplicationNew.RecId;
+            ETGSPAINInventTransApplicationMovement.AppliedQtyMoved                      = appliedQtyMoved;
+            ETGSPAINInventTransApplicationMovement.AppliedQtyFromOriginal               = appliedQtyFromOriginal;
+            ETGSPAINInventTransApplicationMovement.AppliedQtyFromNew                    = appliedQtyFromNew;
+            ETGSPAINInventTransApplicationMovement.insert();
+
+            ttscommit;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>delete</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Deletes the record.
+    /// </summary>
+    public void delete()
+    {
+        super();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insert</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Inserts the record.
+    /// </summary>
+    public void insert()
+    {
+        super();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+	<Label>@ETGSPAINLabels:AppliedQty</Label>
+	<SubscriberAccessLevel>
+		<Read>Allow</Read>
+	</SubscriberAccessLevel>
+	<TitleField1>ItemId</TitleField1>
+	<PrimaryIndex>InventTransIdx</PrimaryIndex>
+	<DeleteActions />
+	<FieldGroups>
+		<AxTableFieldGroup>
+			<Name>AutoReport</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoLookup</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoIdentification</Name>
+			<AutoPopulate>Yes</AutoPopulate>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoSummary</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>AutoBrowse</Name>
+			<Fields />
+		</AxTableFieldGroup>
+		<AxTableFieldGroup>
+			<Name>All</Name>
+			<Fields>
+				<AxTableFieldGroupField>
+					<DataField>SalesApplicationQty</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>PurchApplicationQty</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>DateApplicationQty</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>inventDimId</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>ItemId</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>InventTransId</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>SalesId</DataField>
+				</AxTableFieldGroupField>
+				<AxTableFieldGroupField>
+					<DataField>PurchId</DataField>
+				</AxTableFieldGroupField>
+			</Fields>
+		</AxTableFieldGroup>
+	</FieldGroups>
+	<Fields>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldReal">
+			<Name>SalesApplicationQty</Name>
+			<ExtendedDataType>Qty</ExtendedDataType>
+			<Label>@ETGSPAINLabels:SalesApplication</Label>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldReal">
+			<Name>PurchApplicationQty</Name>
+			<ExtendedDataType>Qty</ExtendedDataType>
+			<Label>@ETGSPAINLabels:PurchApplication</Label>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldDate">
+			<Name>DateApplicationQty</Name>
+			<ExtendedDataType>TransDate</ExtendedDataType>
+			<Label>@ETGSPAINLabels:DateApplication</Label>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldString">
+			<Name>inventDimId</Name>
+			<AllowEdit>No</AllowEdit>
+			<AllowEditOnCreate>No</AllowEditOnCreate>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>InventDimId</ExtendedDataType>
+			<IgnoreEDTRelation>Yes</IgnoreEDTRelation>
+			<Mandatory>Yes</Mandatory>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldString">
+			<Name>ItemId</Name>
+			<AllowEdit>No</AllowEdit>
+			<AllowEditOnCreate>No</AllowEditOnCreate>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>ItemId</ExtendedDataType>
+			<IgnoreEDTRelation>Yes</IgnoreEDTRelation>
+			<Mandatory>Yes</Mandatory>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldString">
+			<Name>InventTransId</Name>
+			<AllowEdit>No</AllowEdit>
+			<AllowEditOnCreate>No</AllowEditOnCreate>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>TradeInventTransId</ExtendedDataType>
+			<Mandatory>Yes</Mandatory>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldString">
+			<Name>SalesId</Name>
+			<AllowEdit>No</AllowEdit>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>SalesIdBase</ExtendedDataType>
+			<IgnoreEDTRelation>Yes</IgnoreEDTRelation>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldString">
+			<Name>PurchId</Name>
+			<AllowEdit>No</AllowEdit>
+			<AssetClassification>Customer Content</AssetClassification>
+			<ExtendedDataType>PurchIdBase</ExtendedDataType>
+			<IgnoreEDTRelation>Yes</IgnoreEDTRelation>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldString">
+			<Name>InventJournalId</Name>
+			<ExtendedDataType>InventJournalId</ExtendedDataType>
+		</AxTableField>
+	</Fields>
+	<FullTextIndexes />
+	<Indexes>
+		<AxTableIndex>
+			<Name>InventTransIdx</Name>
+			<Fields>
+				<AxTableIndexField>
+					<DataField>InventTransId</DataField>
+				</AxTableIndexField>
+			</Fields>
+		</AxTableIndex>
+		<AxTableIndex>
+			<Name>DimIdx</Name>
+			<AllowDuplicates>Yes</AllowDuplicates>
+			<Fields>
+				<AxTableIndexField>
+					<DataField>ItemId</DataField>
+				</AxTableIndexField>
+				<AxTableIndexField>
+					<DataField>inventDimId</DataField>
+				</AxTableIndexField>
+			</Fields>
+		</AxTableIndex>
+	</Indexes>
+	<Mappings />
+	<Relations />
+	<StateMachines />
+</AxTable>

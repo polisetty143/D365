@@ -1,0 +1,544 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>IFRDimensionHelper</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Clase con funciones de ayuda para el manejo de dimensiones.
+/// </summary>
+class IFRDimensionHelper
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>CompareDefaultDimensionAttributeValue</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Compara si el valor de una dimensión es el mismo entre dos DimensionDefault.
+    /// </summary>
+    /// <param name = "_dimensionDefault1">DimensionDefault 1 a comparar</param>
+    /// <param name = "_dimensionDefault2">DimensionDefault 2 a comparar</param>
+    /// <param name = "_dimensionName">Dimensión que se comparará</param>
+    /// <returns>Devuelve true en caso de que la dimensión tenga el mismo valor en los dos DimensionDefault, false en caso contrario.</returns>
+    public static boolean CompareDefaultDimensionAttributeValue(DimensionDefault _dimensionDefault1,
+        DimensionDefault _dimensionDefault2,
+        Name _dimensionName)
+    {
+        boolean ret;
+        
+        if (IFRDimensionHelper::GetDefaultDimensionAttributeValue(_dimensionDefault1, _dimensionName) ==
+            IFRDimensionHelper::GetDefaultDimensionAttributeValue(_dimensionDefault2, _dimensionName))
+        {
+            ret = true;
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>SetLedgerDimensionSegmentValue</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Rellena (o limpia) una dimensión de un ledger dimension.
+    /// </summary>
+    /// <param name="_ledgerDimension">Valor del RecId del ledger dimension.</param>
+    /// <param name="_dimensionName">Nombre de la dimensión a sustituir.</param>
+    /// <param name="_dimensionValue">Valor de la dimensión a sustituir. Si se deja en blanco, se limpia.
+    /// </param>
+    /// <returns>Valor del RecId del nuevo ledger dimension.</returns>
+    /// <remarks>En caso de no informar valor en _dimensionValue, se borrará el valor.</remarks>
+    public static DimensionDynamicAccount SetLedgerDimensionSegmentValue(LedgerDimensionAccount _ledgerDimension,
+        Name                   _dimensionName,
+        DimensionValue         _dimensionValue)
+    {
+        DimensionStorage        dimensionStorage;
+        DimensionAttribute      dimensionAttribute;
+        DimensionAttributeValue dimensionAttributeValue;
+        MainAccount             mainAccount;
+        
+  
+        if (_dimensionName)
+        {
+            dimensionAttribute      = dimensionAttribute::findByName(_dimensionName);
+            dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, _dimensionValue);
+            
+            dimensionStorage = DimensionStorage::findById(_ledgerDimension);
+            
+            mainAccount = mainAccount::findByLedgerDimension(_ledgerDimension);
+            
+            if (_dimensionValue)
+            {
+                dimensionStorage.setSegment(IFRDimensionHelper::getLedgerDimensionSegmentIdx(mainAccount.RecId, _dimensionName),
+                    DimensionStorageSegment::constructFromValue(_dimensionValue, dimensionAttributeValue));
+            }
+            else
+            {
+                dimensionStorage.clearSegment(IFRDimensionHelper::getLedgerDimensionSegmentIdx(mainAccount.RecId, _dimensionName));
+            }
+            
+            return dimensionStorage.save();
+        }
+        else
+        {
+            return _ledgerDimension;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>CompareLedgerDimensionSegmentValue</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Compara un valor de dimensión entre dos LedgerDimensions
+    /// </summary>
+    /// <param name = "_ledgerDimension1">LedgerDimension 1</param>
+    /// <param name = "_ledgerDimension2">LedgerDimension 2</param>
+    /// <param name = "_dimensionName">Dimension a comparar entre ambas LedgerDimensions</param>
+    /// <returns>Devuelve true en caso de que la dimensión sea la misma en ambas LedgerDimensions, false en caso contrario.</returns>
+    public static boolean CompareLedgerDimensionSegmentValue(LedgerDimensionAccount _ledgerDimension1,
+        LedgerDimensionAccount _ledgerDimension2,
+        Name                   _dimensionName)
+    {
+        boolean ret;
+
+        if (IFRDimensionHelper::GetLedgerDimensionSegmentValue(_ledgerDimension1, _dimensionName) ==
+            IFRDimensionHelper::GetLedgerDimensionSegmentValue(_ledgerDimension2, _dimensionName))
+        {
+            ret = true;
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>CopyDimensionAttribute2LedgerDimension</Name>
+				<Source><![CDATA[
+    static public DimensionDynamicAccount CopyDimensionAttribute2LedgerDimension(DimensionDefault       _defaultDimensionOrigin,
+                                                                                 LedgerDimensionAccount _ledgerDimensionDestination,
+                                                                                 Name                   _dimensionName)
+    {
+        return IFRDimensionHelper::setLedgerDimensionSegmentValue(_ledgerDimensionDestination,
+            _dimensionName,
+            IFRDimensionHelper::GetDefaultDimensionAttributeValue(_defaultDimensionOrigin, _dimensionName));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>CopySegment2DefaultDimension</Name>
+				<Source><![CDATA[
+    static public DimensionDefault CopySegment2DefaultDimension(LedgerDimensionAccount _ledgerDimensionOrigin,
+                                                                DimensionDefault       _defaultDimensionDestination,
+                                                                Name                   _dimensionName)
+    {
+        return IFRDimensionHelper::SetDefaultDimensionAttributeValue(_defaultDimensionDestination,
+            _dimensionName,
+            IFRDimensionHelper::GetLedgerDimensionSegmentValue(_ledgerDimensionOrigin, _dimensionName));
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>CreateLedgerDimensionFriendly</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Crea una LedgerDimension partiendo de una cuenta contable y de DimensionDefaults (opcionales).
+    /// </summary>
+    /// <param name = "_mainAccountNum">Cuenta contable</param>
+    /// <param name = "_dimensionDefault1">DimensionDefault 1 a fusionar</param>
+    /// <param name = "_dimensionDefault2">DimensionDefault 2 a fusionar</param>
+    /// <param name = "_dimensionDefault3">DimensionDefault 3 a fusionar</param>
+    /// <returns>Devuelve la LedgerDimension.</returns>
+    /// <remarks>La funcionalidad del estándar en la que pone dimensiones por defecto NO está incluida en esta función.</remarks>
+    client server public static LedgerDimensionAccount CreateLedgerDimensionFriendly(
+        MainAccountNum   _mainAccountNum,
+        DimensionDefault _dimensionDefault1 = 0,
+        DimensionDefault _dimensionDefault2 = 0,
+        DimensionDefault _dimensionDefault3 = 0)
+    {
+        DimensionDynamicAccount ledgerDimensionRecId;
+
+        //TODO: Mejorar esta función incluyendo la funcionalidad del estándar que pone dimensiones por defecto.
+
+        ledgerDimensionRecId = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(_mainAccountNum, LedgerJournalACType::Ledger);
+        return LedgerDimensionFacade::serviceCreateLedgerDimension(ledgerDimensionRecId, _dimensionDefault1, _dimensionDefault2, _dimensionDefault3);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>GetDimensionStructure</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Obtiene la estructura de dimensiones para una cuenta contable.
+    /// </summary>
+    /// <param name = "_mainAccountRecId">Cuenta contable para la que recuperar la estructura.</param>
+    /// <returns>Devuelve la structura contable.</returns>
+    static container GetDimensionStructure(RecId _mainAccountRecId = 0)
+    {
+        DimensionHierarchyLevel         dimensionHierarchyLevel;
+        LedgerStructure                 LedgerStructure;
+        RefRecId                        ledgerRecId = Ledger::current();
+        DimensionAttribute              dimAttr;
+        DimensionAttributeSetItem       dimAttrSetItem;
+        DimensionEnumeration            dimensionSetId;
+        container                       dimValues;
+
+        dimensionSetId = DimensionCache::getDimensionAttributeSetForLedger();
+
+        while select dimensionHierarchyLevel
+             order by Level
+                where dimensionHierarchyLevel.DimensionHierarchy == DimensionHierarchy::getAccountStructure(_mainAccountRecId)
+                 join LedgerStructure
+                where LedgerStructure.DimensionHierarchy == dimensionHierarchyLevel.DimensionHierarchy
+                   && LedgerStructure.Ledger      == ledgerRecId
+                 join dimAttr
+                where dimAttr.RecId == dimensionHierarchyLevel.DimensionAttribute
+                   && dimAttr.Type  != DimensionAttributeType::MainAccount
+                 join RecId
+                 from dimAttrSetItem
+                where dimAttrSetItem.DimensionAttribute == dimAttr.RecId
+                   && dimAttrSetItem.DimensionAttributeSet == dimensionSetId
+           /*outer join RecId
+                 from dimAttrSetItemEditable
+                where dimAttrSetItemEditable.DimensionAttributeSet == 0
+                   && dimAttrSetItemEditable.DimensionAttribute == dimAttr.RecId
+                   && dimAttrSetItemEditable.EnumerationValue == NoYes::Yes*/
+        {
+            dimValues += [dimAttr.Name];
+        }
+
+        return dimValues;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>GetDimensionName</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Obtiene el nombre del valor (descripción / nombre) de una dimensión partiendo del nombre de la dimensión y del valor de la dimensión.
+    /// </summary>
+    /// <param name = "_dimensionName">Nombre de la dimensión a la que pertenece el valor.</param>
+    /// <param name = "_dimensionValue">Valor de la dimensión de la que queremos consultar su descripción.</param>
+    /// <returns>Devuelve el nombre del valor (descripción) de la dimensión.</returns>
+    public static Name GetDimensionName(Name _dimensionName, DimensionValue _dimensionValue)
+    {
+        DimensionAttributeValue dimensionAttributeValue;
+
+        dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(DimensionAttribute::findByName(_dimensionName),
+            _dimensionValue,
+            false,
+            false);
+
+        return dimensionAttributeValue.getName();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>GetLedgerDimensionSegmentValue</Name>
+				<Source><![CDATA[
+    public static DimensionValue GetLedgerDimensionSegmentValue(LedgerDimensionAccount _ledgerDimension, Name _dimensionName)
+    {
+        return IFRDimensionHelper::GetDefaultDimensionAttributeValue(
+            LedgerDimensionFacade::GetDefaultDimensionFromLedgerDimension(_ledgerDimension), _dimensionName);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>GetLedgerDimensionSegmentIdx</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Obtiene el nivel en el que se encuentra una dimensión para una cuenta contable.
+    /// </summary>
+    /// <param name = "_mainAccountRecId">Cuenta contable</param>
+    /// <param name = "_dimensionName">Nombre de la dimensión a consultar.</param>
+    /// <returns>Devuelve el nivel al que se encuentra el parámetro 2 para la cuenta contable del parámetro 1.</returns>
+    public static Level GetLedgerDimensionSegmentIdx(RecId _mainAccountRecId, Name _dimensionName)
+    {
+        //DimensionHierarchy          dimensionHierarchy;
+        DimensionHierarchyLevel     dimensionHierarchyLevel;
+        LedgerStructure             ledgerStructure;
+        DimensionAttribute          dimAttr;
+        DimensionAttributeSetItem   dimAttrSetItem;
+        //DimensionAttributeSetItem   dimAttrSetItemEditable;
+        DimensionEnumeration        dimensionSetId;
+        int                         excludedType = DimensionAttributeType::MainAccount;  // use fake enum value to get it to pick up all types
+        //#LedgerDimensions
+        
+        dimensionSetId = DimensionCache::getDimensionAttributeSetForLedger();
+        
+        select firstOnly dimensionHierarchyLevel
+            //order by Level
+            where dimensionHierarchyLevel.DimensionHierarchy == DimensionHierarchy::getAccountStructure(_mainAccountRecId)
+            join ledgerStructure
+                where ledgerStructure.DimensionHierarchy == dimensionHierarchyLevel.DimensionHierarchy //&&
+                //ledgerStructure.chartChartOfAccounts      == chartOfAccountsId
+                && ledgerStructure.Ledger == Ledger::current()
+                join dimAttr
+                    where dimAttr.RecId == dimensionHierarchyLevel.DimensionAttribute &&
+                    dimAttr.Type  != excludedType
+                    && dimAttr.Name  == _dimensionName
+                    join RecId from dimAttrSetItem
+                    where dimAttrSetItem.DimensionAttribute == dimAttr.RecId &&
+                        dimAttrSetItem.DimensionAttributeSet == dimensionSetId;
+
+        return dimensionHierarchyLevel.Level;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>LookupDimensionValue</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Monta un lookup de valores de dimensión.
+    /// </summary>
+    /// <param name = "_formStringControl">Control del formulario sobre el que se mostrará el lookup.</param>
+    /// <param name = "_dimensionName">Nombre de la dimensión para la que se montará el lookup.</param>
+    /// <param name = "_languageId">Idioma, por defecto el del sistema.</param>
+    public static void LookupDimensionValue(FormStringControl _formStringControl,
+        Name _dimensionName,
+        LanguageId _languageId = SystemParameters::find().SystemLanguageId)
+    {
+        DimensionValueLookupHelper::lookupDimensionValues(DimensionAttribute::findByLocalizedName(_dimensionName, false, _languageId),
+            _formStringControl);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>CreateLedgerDimension</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Crea una LedgerDimension partiendo de un DimensionDynamicAccount y un DimensionDefault.
+    /// </summary>
+    /// <param name = "_dimensionDynamicAccount">DimensionDynamicAccount</param>
+    /// <param name = "_defaultDimension">DimensionDefault</param>
+    /// <returns>Devuelve la LedgerDimension.</returns>
+    /// <remarks>Esta función pone las dimensiones por defecto de la cuenta contable (mainAccountLegalEntity.DefaultDimension).</remarks>
+    [SuppressBPWarning("BPUnusedStrFmtArgument", "Falso positivo.")]
+    public static DimensionDynamicAccount CreateLedgerDimension(DimensionDynamicAccount _dimensionDynamicAccount, DimensionDefault _defaultDimension)
+    {
+        MainAccountRecId mainAccountRecId = MainAccount::getMainAccountRecIdFromLedgerDimension(_dimensionDynamicAccount);
+        MainAccountLegalEntity mainAccountLegalEntity = MainAccountLegalEntity::findByMainAccountLegalEntity(mainAccountRecId, CompanyInfo::current());
+
+        LedgerDimensionAccount ledgerDimensionAccount = LedgerDimensionFacade::serviceCreateLedgerDimension(_dimensionDynamicAccount,
+            mainAccountLegalEntity.DefaultDimension,
+            _defaultDimension);
+        
+        if (!ledgerDimensionAccount)
+        {
+            throw error (strFmt("@IFRDimensionUtil:WrongSetupForLedgerAccount",
+                MainAccount::getMainAccountIdFromLedgerDimension(_dimensionDynamicAccount)));
+        }
+
+        return ledgerDimensionAccount;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>GetDefaultDimensionAttributeValue</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///  Obtiene el valor de una dimensión partiendo de un DimensionDefault y un nombre de dimensión.
+    /// </summary>
+    /// <param name = "_dimensionDefault">DimensionDefault donde se encuentra la dimensión que queremos consultar.</param>
+    /// <param name = "_dimensionName">Nombre de la dimensión que queremos consultar.</param>
+    /// <returns>Devuelve el valor de la dimensión.</returns>
+    /// <remarks>Esta función es privada porque debería desaparecer en futuras versiones.</remarks>
+    private static DimensionValue GetDefaultDimensionAttributeValue(DimensionDefault _dimensionDefault, Name _dimensionName)
+    {
+        DimensionAttributeValueSetStorage dimensionAttributeValueSetStorage;
+        dimensionAttributeValueSetStorage = DimensionAttributeValueSetStorage::find(_dimensionDefault);
+        
+        return dimensionAttributeValueSetStorage.getDisplayValueByDimensionAttribute(DimensionAttribute::findByName(_dimensionName).RecId);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>SetDefaultDimensionAttributeValue</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Asigna el valor de una dimensión a un DimensionDefault.
+    /// </summary>
+    /// <param name = "_dimensionDefault">DimensionDefault</param>
+    /// <param name = "_dimensionName">Nombre de la dimensión</param>
+    /// <param name = "_dimensionValue">Valor de la dimensión a asignar</param>
+    /// <returns>Devuelve el DimensionDefault con el valor de la nueva dimensión asignada.</returns>
+    /// <remarks>Esta función es privada porque debería desaparecer en futuras versiones.</remarks>
+    private static DimensionDefault SetDefaultDimensionAttributeValue(DimensionDefault _dimensionDefault,
+        Name _dimensionName,
+        DimensionValue _dimensionValue)
+    {
+        DimensionAttributeValueSetStorage   dimensionAttributeValueSetStorage;
+        DimensionAttribute                  dimensionAttribute;
+        DimensionAttributeValue             dimensionAttributeValue;
+
+        dimensionAttributeValueSetStorage = DimensionAttributeValueSetStorage::find(_dimensionDefault);
+
+        dimensionAttribute = dimensionAttribute::findByName(_dimensionName);
+
+        if (_dimensionValue)
+        {
+            dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, _dimensionValue, false, true);
+        }
+
+        if (dimensionAttributeValue)
+        {
+            dimensionAttributeValueSetStorage.addItem(dimensionAttributeValue);
+        }
+        else
+        {
+            dimensionAttributeValueSetStorage.removeDimensionAttribute(dimensionAttribute.RecId);
+        }
+  
+        return dimensionAttributeValueSetStorage.save();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>CheckDefaultDimensionAttributeValueExists</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Comprueba que el valor de una dimensión exista en el sistema.
+    /// </summary>
+    /// <param name = "_dimensionName">Nombre de la dimensión</param>
+    /// <param name = "_dimensionValue">Valor de la dimensión</param>
+    /// <returns>Deuvelve true en caso de que exista, false en caso contrario.</returns>
+    [SuppressBPWarning("BPUnusedStrFmtArgument", "Falso positivo.")]
+    public static boolean CheckDefaultDimensionAttributeValueExists(Name _dimensionName, DimensionValue _dimensionValue)
+    {
+        DimensionAttribute                  dimensionAttribute;
+        DimensionAttributeValue dimensionAttributeValue;
+
+        boolean ret;
+
+        if (_dimensionName && _dimensionValue)
+        {
+            ret = true;
+
+            dimensionAttribute = DimensionAttribute::findByName(_dimensionName);
+
+            dimensionAttributeValue = DimensionAttributeValue::findByDimensionAttributeAndValue(dimensionAttribute, _dimensionValue, false, false);
+        
+            if (!dimensionAttributeValue)
+            {
+                ret = checkFailed(strFmt("@IFRDimensionUtil:DimensionValueDoesNotExistForDimensionName", _dimensionValue, _dimensionName));
+            }
+        }
+        else
+        {
+            ret = checkFailed(strFmt("@IFRDimensionUtil:DimensionValueDoesNotExistForDimensionName", _dimensionValue, _dimensionName));
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>GetDefaultAccountFromLedgerDimension</Name>
+				<Source><![CDATA[
+    public static LedgerDimensionAccount GetDefaultAccountFromLedgerDimension(LedgerDimensionAccount _ledgerDimensionAccount)
+    {
+        return LedgerDefaultAccountHelper::getDefaultAccountFromLedgerDimension(_ledgerDimensionAccount);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>GetDefaultAccountFromMainAccountId</Name>
+				<Source><![CDATA[
+    public static LedgerDimensionAccount GetDefaultAccountFromMainAccountId(MainAccountNum _mainAccountId)
+    {
+        return LedgerDefaultAccountHelper::getDefaultAccountFromMainAccountId(_mainAccountId);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>GetDefaultAccountFromMainAccountRecId</Name>
+				<Source><![CDATA[
+    public static LedgerDimensionAccount GetDefaultAccountFromMainAccountRecId(MainAccountRecId _mainAccountRecId)
+    {
+        return LedgerDefaultAccountHelper::getDefaultAccountFromMainAccountRecId(_mainAccountRecId);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>GetAccountNumberFromDynamicAccount</Name>
+				<Source><![CDATA[
+    public static LedgerJournalAC GetAccountNumberFromDynamicAccount(DimensionDynamicAccount _dimensionDynamicAccount)
+    {
+        return LedgerDynamicAccountHelper::getAccountNumberFromDynamicAccount(_dimensionDynamicAccount);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>GetDynamicAccountFromAccountNumber</Name>
+				<Source><![CDATA[
+    public static DimensionDynamicAccount GetDynamicAccountFromAccountNumber(LedgerJournalAC _ledgerJournalAC, LedgerJournalACType _ledgerJournalACType)
+    {
+        return LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(_ledgerJournalAC, _ledgerJournalACType);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>GetDefaultDimensionFromLedgerDimension</Name>
+				<Source><![CDATA[
+    public static DimensionDefault GetDefaultDimensionFromLedgerDimension(LedgerDimensionBase _ledgerDimensionBase)
+    {
+        return LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(_ledgerDimensionBase);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>GetMainAccountFromLedgerDimension</Name>
+				<Source><![CDATA[
+    public static MainAccount GetMainAccountFromLedgerDimension(LedgerDimensionBase _ledgerDimensionBase)
+    {
+        return LedgerDimensionFacade::getMainAccountFromLedgerDimension(_ledgerDimensionBase);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>GetMainAccountIdFromLedgerDimension</Name>
+				<Source><![CDATA[
+    public static MainAccountNum GetMainAccountIdFromLedgerDimension(LedgerDimensionBase _ledgerDimensionBase)
+    {
+        return LedgerDimensionFacade::getMainAccountIdFromLedgerDimension(_ledgerDimensionBase);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>GetMainAccountRecIdFromLedgerDimension</Name>
+				<Source><![CDATA[
+    public static MainAccountRecId GetMainAccountRecIdFromLedgerDimension(LedgerDimensionBase _ledgerDimensionBase)
+    {
+        return LedgerDimensionFacade::getMainAccountRecIdFromLedgerDimension(_ledgerDimensionBase);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

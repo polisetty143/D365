@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerAccrualTrans_AllocationKey</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGLedgerAccrualTrans_AllocationKey extends ETGLedgerAccrualTrans
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>allocate</Name>
+				<Source><![CDATA[
+    boolean allocate()
+    {
+        LedgerAllocateTrans ledgerAllocateTrans;
+        AmountCur           amountCurAccrued;
+        recId               recId;
+        boolean             ok;
+
+        ok = super();
+
+        if (ok)
+        {
+            ttsbegin;
+
+            while select FreqCode, Freq, PctProportion, DefaultDimension from ledgerAllocateTrans
+                order by Sort1980
+                where ledgerAllocateTrans.Key == ledgerAccrualTable.AllocateKeyId
+            {
+                switch (ledgerAllocateTrans.FreqCode)
+                {
+                    case PeriodUnit::Day:
+                        ledgerJournalTransAccrualTrans.DocumentDate = ledgerJournalTransAccrual.TransDate + ledgerAllocateTrans.Freq;
+                        break;
+                    case PeriodUnit::Month:
+                        ledgerJournalTransAccrualTrans.DocumentDate = dateMthFwd(ledgerJournalTransAccrual.TransDate, ledgerAllocateTrans.Freq);
+                        break;
+                    case PeriodUnit::Year:
+                        ledgerJournalTransAccrualTrans.DocumentDate = dateMthFwd(ledgerJournalTransAccrual.TransDate, 12 * ledgerAllocateTrans.Freq);
+                        break;
+                }
+
+                ledgerJournalTransAccrualTrans.TransDate = LedgerFiscalCalendar::findFirstOpenStartDateInAnyYear(calendarRecId,ledgerJournalTransAccrualTrans.DocumentDate);
+                ledgerJournalTransAccrualTrans.AmountCur = CurrencyExchangeHelper::amount(ledgerJournalTransAccrual.AmountCur * ledgerAllocateTrans.PctProportion / 100, baseCurrencyCode);
+
+                periodStartDate = ledgerJournalTransAccrualTrans.DocumentDate;
+                periodEndDate   = ledgerJournalTransAccrualTrans.DocumentDate;
+
+                if (ledgerJournalTransAccrualTrans.AmountCur)
+                {
+                    //this.setVoucher(); //Voucher will set durng posting
+                    this.setTransTxt();
+                    ledgerJournalTransAccrualTrans.LedgerDimension = baseLedgerDimension;
+                    ledgerJournalTransAccrualTrans.insert();
+                    recId = ledgerJournalTransAccrualTrans.RecId;
+                    amountCurAccrued += ledgerJournalTransAccrualTrans.AmountCur;
+
+                    this.parmOffsetDefaultDimension(ledgerAllocateTrans.DefaultDimension);
+                    this.saveOffset();
+                }
+            }
+            if (ledgerJournalTransAccrualTrans && amountCurAccrued != ledgerJournalTransAccrual.AmountCur)
+            {
+                ledgerJournalTransAccrualTrans.AmountCur -= ledgerJournalTransAccrual.AmountCur - amountCurAccrued;
+                ledgerJournalTransAccrualTrans.update();
+                select firstonly forupdate ledgerJournalTransAccrualTrans where ledgerJournalTransAccrualTrans.RecId == recid;
+                ledgerJournalTransAccrualTrans.AmountCur += ledgerJournalTransAccrual.AmountCur - amountCurAccrued;
+                ledgerJournalTransAccrualTrans.update();
+            }
+
+            ttscommit;
+        }
+        return ok;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>endDate</Name>
+				<Source><![CDATA[
+    TransDate endDate(TransDate _transDate)
+    {
+        LedgerAllocateTrans ledgerAllocateTrans;
+        TransDate           ret;
+
+        select firstonly FreqCode, Freq from ledgerAllocateTrans
+            order by Sort1980 desc
+            where ledgerAllocateTrans.Key == ledgerAccrualTable.AllocateKeyId;
+
+        switch (ledgerAllocateTrans.FreqCode)
+        {
+            case PeriodUnit::Day :
+                ret = ledgerJournalTransAccrual.TransDate + ledgerAllocateTrans.Freq;
+                break;
+
+            case PeriodUnit::Month :
+                ret = dateMthFwd(ledgerJournalTransAccrual.TransDate, ledgerAllocateTrans.Freq);
+                break;
+
+            case PeriodUnit::Year:
+                ret = dateMthFwd(ledgerJournalTransAccrual.TransDate, 12 * ledgerAllocateTrans.Freq);
+                break;
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

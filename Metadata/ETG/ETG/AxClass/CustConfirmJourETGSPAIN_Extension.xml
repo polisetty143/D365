@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>CustConfirmJourETGSPAIN_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the <c>CustConfirmJour</c> table for the ETGSPAIN model.
+/// </summary>
+[ExtensionOf(tableStr(CustConfirmJour))]
+final class CustConfirmJourETGSPAIN_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initFromSalesTable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>initFromSalesTable</c> method to populate the fields of
+    /// the ETGSPAIN model.
+    /// </summary>
+    /// <param name="_salesTable">SalesTable record</param>
+    void initFromSalesTable(SalesTable  _salesTable)
+    {
+        next initFromSalesTable(_salesTable);
+        ContactPerson       contactPerson;
+        AgreementHeader     agreementHeader;
+        CustTable           custTable       = _salesTable.custTable_CustAccount();
+        
+        // Añadimos los nuevos campos
+        // Contacto
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            select firstonly contactPerson
+            where        contactPerson.CustAccount == custTable.AccountNum
+            &&           contactPerson.Inactive    == NoYes::No;
+
+            if (contactPerson)
+            {
+                this.ETGSPAINContactName = contactPerson.personName();
+            }
+
+            // Contrato
+            if (_salesTable.MatchingAgreement)
+            {
+                agreementHeader = AgreementHeader::find(_salesTable.MatchingAgreement);
+
+                this.ETGSPAINAgreementId = agreementHeader.ETGSPAINgetAgreementId();
+
+                // Cupo
+                if (agreementHeader.ETGSPAINPurchHasAgreementQuotas)
+                {
+                    // Solo mes y año: Ejemplo: Julio 2022
+                    this.ETGSPAINMonthQuota = strFmt("%1 %2", mthName(mthOfYr(_salesTable.ETGSPAINPurchExecutionFromDate)), year(_salesTable.ETGSPAINPurchExecutionFromDate));
+                }
+
+                // Días de Plancha
+                if (agreementHeader.ETGSPAINPurchPlateDaysNumber)
+                {
+                    this.ETGSPAINPurchPlateDaysNumber = agreementHeader.ETGSPAINPurchPlateDaysNumber;
+                    this.ETGSPAINPlateDueDate         = _salesTable.ETGSPAINPlateDueDate;
+                }
+            }
+
+            // Condición de entrega
+            this.ETGSPAINDlvTerm = _salesTable.DlvTerm;
+
+            // Nombre del cliente
+            this.ETGSPAINCustName = custTable.name();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

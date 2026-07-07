@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGVendTable_Table_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tableStr(VendTable))]
+internal final class ETGVendTable_Table_Extension
+{
+   
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>modifiedField</Name>
+				<Source><![CDATA[
+    public void modifiedField(FieldId _fieldId)
+    {
+        Amount tradeLimitOriginal;
+
+        switch (_fieldId)
+        {
+            case fieldNum(VendTable, ETGTradeLimitPurchReal) :
+                tradeLimitOriginal = this.orig().ETGTradeLimitPurchReal;
+                break;
+        }
+
+        next modifiedField(_fieldId);
+
+        switch (_fieldId)
+        {
+            case fieldNum(VendTable, ETGTradeLimitPurchReal) :
+                if(ETGACFParameters::find().EnableTradeLimit == NoYes::Yes)
+                {
+                    this.updateTradeLimitFields(tradeLimitOriginal);
+                }
+                break;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateTradeLimitFields</Name>
+				<Source><![CDATA[
+    public void updateTradeLimitFields(Amount tradeLimitOriginal)
+    {
+        if(this.ETGRemainingTradeLimitPurchReal == 0)
+        {
+            this.ETGRemainingTradeLimitPurchReal = this.ETGTradeLimitPurchReal;
+        }
+        else
+        {
+            if(this.ETGTradeLimitPurchReal > tradeLimitOriginal)
+            {
+                this.ETGRemainingTradeLimitPurchReal = (this.ETGTradeLimitPurchReal - tradeLimitOriginal) + this.ETGRemainingTradeLimitPurchReal;
+            }
+        }
+       
+        if(this.Currency == Ledger::accountingCurrency())
+        {
+            this.ETGTradeLimitInVendorCurrency = this.ETGTradeLimitPurchReal;
+        }
+        else
+        {
+            CurrencyExchangeHelper currencyExchangeHelper = CurrencyExchangeHelper::newExchangeDate(Ledger::current(),
+                                                            DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()));
+            this.ETGTradeLimitInVendorCurrency          = currencyExchangeHelper.calculateCurrencyToCurrency(Ledger::accountingCurrency(),
+                                                                           this.Currency, this.ETGTradeLimitPurchReal, true);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateWrite</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// This method will validate if Trade limit is greater than Credit limit/ credit max or remaining trade limit or 0
+    /// </summary>
+    /// <returns></returns>
+    public boolean validateWrite()
+    {
+        boolean isValid = next validateWrite();
+
+        if(isValid && this.ETGApplicableTradeLimit == NoYes::Yes && ETGACFParameters::find().EnableTradeLimit == NoYes::Yes)
+        {
+            if(this.ETGTradeLimitPurchReal < this.CreditMax)
+            {
+                isValid = checkFailed(strFmt("@ETG_New:TradeLimitCustLimitErrorMsg", this.ETGTradeLimitPurchReal, this.CreditMax));
+            }
+            if(this.ETGTradeLimitPurchReal < this.ETGRemainingTradeLimitPurchReal)
+            {
+                isValid = checkFailed(strFmt("@ETG_New:TradeLimitRemainingErrorMsg", this.ETGTradeLimitPurchReal, this.ETGRemainingTradeLimitPurchReal));
+            }
+            if(this.ETGTradeLimitPurchReal <= 0)
+            {
+                isValid = checkFailed(strFmt("@ETG_New:TradeLimitCheckBoxLimitBlankErrorVend", this.AccountNum));
+            }
+        }
+
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>tradeLimitWithCurrency</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Display method to show "Trade Limit in Vendor Currency (CurrencyCode)"
+    /// </summary>
+    [SysClientCacheDataMethodAttribute(true)] // Caches the result for performance
+    public display str tradeLimitWithCurrency()
+    {
+        CompanyInfo companyInfo;
+        VendTable vendTable;
+        str currencyCode = '';
+
+        // Get current company’s currency from CompanyInfo table
+        companyInfo = CompanyInfo::find();
+        if (companyInfo)
+        {
+            currencyCode = vendTable.Currency;
+        }
+
+        return strFmt("Trade Limit in Vendor Currency (%1)", currencyCode);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateField</Name>
+				<Source><![CDATA[
+    boolean validateField(FieldId p1)
+    {
+        boolean                     ret;
+
+        ret = next validateField(p1);
+
+        if (ret)
+        {
+            switch (p1)
+            {
+                case fieldNum(VendTable, ETGTradeLimitPurchReal) :
+                    if(ETGACFParameters::find().EnableTradeLimit == NoYes::Yes
+                            && (this.ETGTradeLimitPurchReal < this.orig().ETGTradeLimitPurchReal)
+                            && this.ETGRemainingTradeLimitPurchReal != 0)
+                    {
+                        ret = checkFailed(strFmt("Trade limit can not be reduced since trade limit is already consumed for vendor %1", this.AccountNum));
+                    }
+
+                    break;
+            }
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

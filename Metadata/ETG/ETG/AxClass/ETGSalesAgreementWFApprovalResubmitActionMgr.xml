@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSalesAgreementWFApprovalResubmitActionMgr</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The ETGSalesAgreementWFApprovalResubmitActionMgr menu item action event handler.
+/// </summary>
+public class ETGSalesAgreementWFApprovalResubmitActionMgr 
+{
+    SalesAgreementHeader salesAgreementHeader;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args args)
+    {
+        RecID                           recID = args.record().RecId;
+        SalesAgreementHeader            _salesAgreementHeaderloc = args.record();;
+        WorkflowWorkItemTable           workItem = args.caller().getActiveWorkflowWorkItem();
+        WorkflowWorkItemActionDialog    workflowWorkItemActionDialog;
+        SalesAgreementHeader salesAgreementHeader = args.record();
+        boolean isValid = true;
+
+        if (ETGACFParameters::find().EnableMandatoryFields == NoYes::Yes)
+        {
+            isValid = ETGSalesAgreementWFApprovalResubmitActionMgr::validateIsValid(salesAgreementHeader, args);
+        }
+
+        if (isValid)
+        {
+            if (workItem.RecId > 0)
+            {
+                try
+                {
+                    workflowWorkItemActionDialog = WorkflowWorkItemActionDialog::construct( workItem,
+                        WorkflowWorkItemActionType::Resubmit,
+                        new MenuFunction(args.menuItemName(),args.menuItemType()));
+                    workflowWorkItemActionDialog.run();
+
+                    if (workflowWorkItemActionDialog.parmIsClosedOK())
+                    {
+                        workItem = args.caller().getActiveWorkflowWorkItem();
+                        WorkflowWorkItemActionManager::dispatchWorkItemAction(workItem,
+                                                                        workflowWorkItemActionDialog.parmWorkflowComment(),
+                                                                        workflowWorkItemActionDialog.parmTargetUser(),
+                                                                        WorkflowWorkItemActionType::Resubmit,
+                                                                        args.menuItemName(),
+                                                                        'False');
+                        ETGSalesAgreementWFApprovalResubmitActionMgr::newSalesAgreement(_salesAgreementHeaderloc).createResubmit();
+                    }
+                    else
+                    {
+                        throw Exception::Error;
+                    }
+                }
+                catch(Exception::Error)
+                {
+                    throw error(strfmt("Error. Can not resubmit"));
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>newSalesAgreement</Name>
+				<Source><![CDATA[
+    public static ETGSalesAgreementWFApprovalResubmitActionMgr newSalesAgreement(SalesAgreementHeader _salesAgreementHeader)
+    {
+        ETGSalesAgreementWFApprovalResubmitActionMgr resubmit = ETGSalesAgreementWFApprovalResubmitActionMgr::construct();
+        resubmit.parmSalesAgreement(_salesAgreementHeader);
+        return resubmit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Construct method
+    /// </summary>
+    /// <returns>new instance of ETGSalesAgreementWFApprovalResubmitActionMgr</returns>
+    protected static ETGSalesAgreementWFApprovalResubmitActionMgr construct()
+    {
+        return new ETGSalesAgreementWFApprovalResubmitActionMgr();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmSalesAgreement</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// parameter method for SalesTable
+    /// </summary>
+    /// <param name = "_salesTable">salesTable value</param>
+    /// <returns>salesTable value</returns>
+    protected SalesAgreementHeader parmSalesAgreement(SalesAgreementHeader _salesAgreementHeader = salesAgreementHeader)
+    {
+        salesAgreementHeader = _salesAgreementHeader;
+
+        return salesAgreementHeader;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createResubmit</Name>
+				<Source><![CDATA[
+    public void createResubmit()
+    {
+        salesAgreementHeader = this.parmSalesAgreement();
+
+        ttsbegin;
+
+        if(salesAgreementHeader.ETGWorkflowStatus == VersioningDocumentState::Rejected || salesAgreementHeader.ETGWorkflowStatus == VersioningDocumentState::InReview)
+        {
+            salesAgreementHeader::updateWorkflowStatus(salesAgreementHeader.RecId, VersioningDocumentState::InReview);
+        }
+        
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateIsValid</Name>
+				<Source><![CDATA[
+    public static boolean validateIsValid(SalesAgreementHeader salesAgreementHeader, Args args)
+    {
+        AgreementLine agreementLine;
+        boolean allValid = true;
+        FormRun formRun = args.caller() as FormRun;
+        boolean isValid = true;
+
+        select RecId,  ETG_UnderDeliveryPct, ETG_OverDeliveryPct from agreementLine where agreementLine.Agreement == salesAgreementHeader.RecId;
+
+        if(!salesAgreementHeader || !agreementLine.RecId)
+        {
+            throw Error(strFmt("Sales agreement %1 can not be submitted since no lines exists", salesAgreementHeader.SalesNumberSequence));
+            isValid = false;
+            return isValid;
+        }
+
+        allValid = ETGSalesAgreementMandatoryValidation::validateFormHeaders(formRun) && ETGSalesAgreementMandatoryValidation::validateFormLines(formRun);
+        if(!allValid)
+        {
+            isValid = false;
+            return isValid;
+        }
+
+        if(agreementLine.ETG_UnderDeliveryPct == 0 && agreementLine.ETG_OverDeliveryPct == 0)
+        {
+            DialogButton         diagBut;
+            str strMessage = "@ETG_New:UnderOverDeliveryDialog";
+            str strTitle   = "@ETG_New:OverUnderDeliveryTitle";
+
+            diagBut        = Box::yesNo(strMessage, DialogButton::Yes, strTitle);
+
+            if (diagBut == DialogButton::No)
+            {
+                isValid = true;
+                return isValid;
+            }
+            else if(diagBut == DialogButton::Yes)
+            {
+                isValid = false;
+                return isValid;
+            }
+        }
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

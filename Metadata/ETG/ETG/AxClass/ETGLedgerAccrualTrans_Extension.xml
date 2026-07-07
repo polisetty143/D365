@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerAccrualTrans_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension class for LedgerAccrualTrans Class
+/// </summary>
+[ExtensionOf(classStr(LedgerAccrualTrans))]
+public final class ETGLedgerAccrualTrans_Extension
+{
+    public LedgerJournalTrans ledgerJournalTrans;
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>parmLedgerJournalTransETG</Name>
+				<Source><![CDATA[
+    public LedgerJournalTrans parmLedgerJournalTransETG(LedgerJournalTrans _ledgerJournalTrans)
+    {
+        ledgerJournalTrans = _ledgerJournalTrans;
+        return ledgerJournalTrans;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    public static LedgerAccrualTrans construct(LedgerJournalTransAccrual _ledgerJournalTransAccrual)
+    {
+        LedgerAccrualTrans  ledgerAccrualTrans;
+
+        ledgerAccrualTrans = next construct(_ledgerJournalTransAccrual);
+
+        if (ETGACFParameters::find().EnableAccrualSchemePostingMonthly)
+        {
+            LedgerAccrualTable  ledgerAccrualTable = LedgerAccrualTable::find(_ledgerJournalTransAccrual.AccrualId);
+            
+
+            ledgerAccrualTrans = new ETGLedgerAccrualTransPost();
+
+            ledgerAccrualTrans.parmLedgerJournalTransAccrual(_ledgerJournalTransAccrual);
+            ledgerAccrualTrans.parmLedgerAccrualTable(ledgerAccrualTable);
+            ledgerAccrualTrans.parmCalendarRecId(CompanyInfoHelper::fiscalCalendarRecId());
+        }
+
+        return ledgerAccrualTrans;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmLedgerJournalTrans</Name>
+				<Source><![CDATA[
+    public void parmLedgerJournalTrans(LedgerJournalTrans _ledgerJournalTrans)
+    {
+        next parmLedgerJournalTrans(_ledgerJournalTrans);
+
+        if (ETGACFParameters::find().EnableAccrualSchemePostingMonthly)
+        {
+            this.parmLedgerJournalTransETG(_ledgerJournalTrans);
+            this.parmLedgerAccrualTable(LedgerAccrualTable::find(ETGLedgerJournalTransAccrual::find(_ledgerJournalTrans.TableId,_ledgerJournalTrans.RecId).AccrualId));
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getOffsetLedgerDimension</Name>
+				<Source><![CDATA[
+    public LedgerDimensionAccount getOffsetLedgerDimension(AmountCur _amountCur)
+    {
+        LedgerDimensionDefaultAccount defaultLedgerDimension = (_amountCur < 0 ? ledgerAccrualTable.CreditLedgerDimension : ledgerAccrualTable.DebitLedgerDimension);
+
+        LedgerDimensionAccount mergedLedgerDimension = next getOffsetLedgerDimension(_amountCur);
+
+        ETGLedgerJournalTransAccrual etgLedgerJournalTransAccrual = ETGLedgerJournalTransAccrual::find(ledgerJournalTrans.TableId,ledgerJournalTrans.RecId);
+
+        if (etgLedgerJournalTransAccrual.Accountoffsetaccount == AccountOffsetaccount::OffsetAccount)
+        {
+            mergedLedgerDimension = LedgerDimensionFacade::serviceMergeLedgerDimensions(defaultLedgerDimension, ledgerJournaltrans.OffsetLedgerDimension);
+        }
+        else
+        {
+            mergedLedgerDimension = LedgerDimensionFacade::serviceMergeLedgerDimensions(defaultLedgerDimension, ledgerJournaltrans.LedgerDimension);
+        }
+
+        return mergedLedgerDimension;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

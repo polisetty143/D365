@@ -1,0 +1,566 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_VendBalanceList</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETG_VendBalanceList extends ETG_CustVendBalanceList
+{
+    ETG_VendTmpAccountSum vendTmpAccountSum;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>calculateDetails</Name>
+				<Source><![CDATA[
+    void calculateDetails(CustVendTable _vendTable)
+    {
+        var query = new Query();
+
+        query.addDataSource(tableNum(VendTable)).addRange(fieldNum(VendTable, AccountNum)).value(queryValue(_vendTable.AccountNum));
+
+        agingCalculation = this.constructAgingCalculation(new QueryRun(query));
+
+        this.insertIntoTmpAccountSumV2(agingCalculation);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>releaseTempTables</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///     Explicitly releases temp tables used in this class.
+    /// </summary>
+    /// <remarks>
+    ///    Aging calculations create temp tables which are not released in a timely fashion.
+    ///    The <c>releaseTempTables</c> method should to be called immediately after an aging calculations is completed and the results consumed.
+    /// </remarks>
+    public void releaseTempTables()
+    {
+        vendTmpAccountSum.dispose();
+        agingPeriodScaleTmp.dispose();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateDetailsForMultiple</Name>
+				<Source><![CDATA[
+    public void calculateDetailsForMultiple(QueryRun _queryRun, Query _transactionQuery = null, boolean _withAmountCur = true, boolean _withAmountMst = true)
+    {
+        agingCalculation = this.constructAgingCalculation(_queryRun, _transactionQuery);
+
+        this.insertIntoTmpAccountSumV2(agingCalculation, _withAmountCur, _withAmountMst);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>calculateDetailsSrl</Name>
+				<Source><![CDATA[
+    ETG_AccountSumMap calculateDetailsSrl(CustVendAC _accountNum)
+    {
+        var query = new Query();
+
+        query.addDataSource(tableNum(VendTable)).addRange(fieldNum(VendTable, AccountNum)).value(queryValue(_accountNum));
+
+        agingCalculation = this.constructAgingCalculation(new QueryRun(query));
+
+        this.insertIntoTmpAccountSumV2(agingCalculation, false, true);
+
+        return tmpAccountSum;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>constructAgingCalculation</Name>
+				<Source><![CDATA[
+    protected CustVendAgingCalculation constructAgingCalculation(QueryRun _queryRun, Query _transactionQuery = null)
+    {
+        CustVendAgingCalculation custVendAgingCalculation = CustVendAgingCalculation::construct(
+                SysModule::Vend,
+                _queryRun,
+                this.getAgedBy(),
+                agingPeriodScaleTmp,
+                transactionDate,
+                agingBucketCount - 1,
+                payments,
+                printReversed,
+                details,
+                excludeZeroBalance,
+                excludeNegativeBalance,
+                null,
+                NoYes::No,
+                _transactionQuery);
+
+        custVendAgingCalculation.process();
+
+        return custVendAgingCalculation;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getAgedBy</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Gets the date which will be used to assign aging bucket to transaction.
+    /// </summary>
+    /// <returns>
+    /// Due date, Document date or Transaction date.
+    /// </returns>
+    protected DateTransactionDuedate getAgedBy()
+    {
+        return DateTransactionDuedate::DueDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertIntoTmpAccountSum</Name>
+				<Source><![CDATA[
+    [SysObsolete('The insertIntoTmpAccountSum method is obsolete. Use the insertIntoTmpAccountSumV2 method instead.', false, 30\6\2020)]
+    protected void insertIntoTmpAccountSum(CustVendAgingCalculation _agingCalculation, boolean _withAmountCur = true, boolean _withAmountMST = true, CustVendTable _toCustVendTable = null)
+    {
+        CustVendAgingCalculatedTmp agingCalculatedTmp = _agingCalculation.getAgingCalculated();
+
+        if (direction == ForwardBackwardPrinting::Backward || agingBucket == '')
+        {
+            update_recordSet agingCalculatedTmp
+                setting
+                    BucketNumber = agingBucketCount - agingCalculatedTmp.BucketNumber
+                where agingCalculatedTmp.BucketNumber != 0;
+        }
+
+        var vendors = agingCalculation.getCustVendTransAging();
+
+        insert_recordset vendTmpAccountSum (AccountNum, CurrencyCode, InvoiceId, TransDate, Txt, Voucher, Name, GroupId)
+            select AccountNum, CurrencyCode, InvoiceId, TransDate, Txt, Voucher
+                from agingCalculatedTmp
+                group by AccountNum, CurrencyCode, TransDate, InvoiceId, Voucher, Txt
+                join Name, GroupId from vendors
+                group by Name, GroupId
+                    where agingCalculatedTmp.AccountNum == vendors.AccountNum
+                notexists join vendTmpAccountSum // Avoid inserting a duplicate
+                    where vendTmpAccountSum.AccountNum == agingCalculatedTmp.AccountNum
+                            && agingCalculatedTmp.CurrencyCode == vendTmpAccountSum.CurrencyCode
+                            && agingCalculatedTmp.TransDate == vendTmpAccountSum.TransDate
+                            && agingCalculatedTmp.InvoiceId == vendTmpAccountSum.InvoiceId
+                            && agingCalculatedTmp.Voucher == vendTmpAccountSum.Voucher
+                            && agingCalculatedTmp.Txt == vendTmpAccountSum.Txt;
+
+        int withAmountCur = _withAmountCur;
+        int withAmountMST = _withAmountMST;
+
+        #localmacro.updateBalance // accumulate from bucket %1 to balance %2 and the total balance (01)
+    update_recordSet vendTmpAccountSum
+        setting
+            Balance01 = vendTmpAccountSum.Balance01 + agingCalculatedTmp.Amount * withAmountMST,
+            Balance%2 = vendTmpAccountSum.Balance%2 + agingCalculatedTmp.Amount * withAmountMST,
+            Balance01Cur = vendTmpAccountSum.Balance01Cur + agingCalculatedTmp.AmountCur * withAmountCur,
+            Balance%2Cur = vendTmpAccountSum.Balance%2Cur + agingCalculatedTmp.AmountCur * withAmountCur
+        join agingCalculatedTmp
+            where vendTmpAccountSum.AccountNum == agingCalculatedTmp.AccountNum
+                    && agingCalculatedTmp.BucketNumber == %1
+                    && agingCalculatedTmp.CurrencyCode == vendTmpAccountSum.CurrencyCode
+                    && agingCalculatedTmp.TransDate == vendTmpAccountSum.TransDate
+                    && agingCalculatedTmp.InvoiceId == vendTmpAccountSum.InvoiceId
+                    && agingCalculatedTmp.Voucher == vendTmpAccountSum.Voucher
+                    && agingCalculatedTmp.Txt == vendTmpAccountSum.Txt;
+#endmacro
+
+        #updateBalance(1,02)
+        #updateBalance(2,03)
+        #updateBalance(3,04)
+        #updateBalance(4,05)
+        #updateBalance(5,06)
+        #updateBalance(6,07)
+
+        tmpAccountSum = vendTmpAccountSum;
+
+        _agingCalculation.releaseTempTables();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>new</Name>
+				<Source><![CDATA[
+    void new(
+            PositiveDays _interval,
+            TransDate _transactionDate = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()),
+            TransDate _zeroDate = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()),
+            NoYes _payments = NoYes::Yes,
+            DayMonth _period = DayMonth::Day,
+            ForwardBackwardPrinting _direction = ForwardBackwardPrinting::Backward,
+            CustVendReportName _agingBucket = '',
+            NoYes _printReversed = NoYes::No,
+            NoYes _details = NoYes::Yes,
+            NoYes _excludeZeroBalance = NoYes::No,
+            NoYes _excludeNegativeBalance = NoYes::No)
+    {
+        super(_interval, _transactionDate, _zeroDate, _payments, _period, _direction, _agingBucket,
+                _printReversed, _details, _excludeZeroBalance, _excludeNegativeBalance);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmTmpAccountSum</Name>
+				<Source><![CDATA[
+    public ETG_AccountSumMap parmTmpAccountSum(ETG_AccountSumMap _tmpAccountSum, boolean _returnAmountMST = true)
+    {
+        if (_returnAmountMST)
+        {
+            QueryRun qr = new QueryRun(this.buildParmTmpAccountSumQuery());
+            qr.setCursor(vendTmpAccountSum);
+
+            qr.next();
+
+            vendTmpAccountSum = qr.get(tableNum(ETG_VendTmpAccountSum));
+
+            this.setAccountSumMapBalanceFields(_tmpAccountSum);
+            this.setAccountSumMapReportingCurrencyBalanceFields(_tmpAccountSum);
+        }
+
+        return _tmpAccountSum;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setAccountSumMapBalanceFields</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Sets the balance fields on the <c>AccountSumMap</c> from <c>VendTmpAccountSum</c> table buffer.
+    /// </summary>
+    /// <param name = "_tmpAccountSum">The account sum map.</param>
+    protected void setAccountSumMapBalanceFields(ETG_AccountSumMap _tmpAccountSum)
+    {
+        _tmpAccountSum.Balance01 = vendTmpAccountSum.Balance01;
+        _tmpAccountSum.Balance02 = vendTmpAccountSum.Balance02;
+        _tmpAccountSum.Balance03 = vendTmpAccountSum.Balance03;
+        _tmpAccountSum.Balance04 = vendTmpAccountSum.Balance04;
+        _tmpAccountSum.Balance05 = vendTmpAccountSum.Balance05;
+        _tmpAccountSum.Balance06 = vendTmpAccountSum.Balance06;
+        _tmpAccountSum.Balance07 = vendTmpAccountSum.Balance07;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setAccountSumMapReportingCurrencyBalanceFields</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Sets the reporting currency balance fields on the <c>AccountSumMap</c> from <c>VendTmpAccountSum</c> table buffer.
+    /// </summary>
+    /// <param name = "_tmpAccountSum">The account sum map.</param>
+    protected void setAccountSumMapReportingCurrencyBalanceFields(ETG_AccountSumMap _tmpAccountSum)
+    {
+        _tmpAccountSum.Balance01ReportingCurrency = vendTmpAccountSum.Balance01ReportingCurrency;
+        _tmpAccountSum.Balance02ReportingCurrency = vendTmpAccountSum.Balance02ReportingCurrency;
+        _tmpAccountSum.Balance03ReportingCurrency = vendTmpAccountSum.Balance03ReportingCurrency;
+        _tmpAccountSum.Balance04ReportingCurrency = vendTmpAccountSum.Balance04ReportingCurrency;
+        _tmpAccountSum.Balance05ReportingCurrency = vendTmpAccountSum.Balance05ReportingCurrency;
+        _tmpAccountSum.Balance06ReportingCurrency = vendTmpAccountSum.Balance06ReportingCurrency;
+        _tmpAccountSum.Balance07ReportingCurrency = vendTmpAccountSum.Balance07ReportingCurrency;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buildParmTmpAccountSumQuery</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Builds the query used to summarize the <c>VendTmpAccountSum</c> table buffer.
+    /// </summary>
+    /// <returns>The summarizing query.</returns>
+    protected Query buildParmTmpAccountSumQuery()
+    {
+        Query q = new Query();
+
+        QueryBuildDataSource qbdsVendTmpAccountSum = q.addDataSource(tableNum(ETG_VendTmpAccountSum));
+
+        qbdsVendTmpAccountSum.fields().clearFieldList();
+        
+        qbdsVendTmpAccountSum.addGroupByField(fieldNum(ETG_VendTmpAccountSum, AccountNum));
+
+        qbdsVendTmpAccountSum.addSelectionField(fieldNum(ETG_VendTmpAccountSum, Balance01), SelectionField::Sum);
+        qbdsVendTmpAccountSum.addSelectionField(fieldNum(ETG_VendTmpAccountSum, Balance01ReportingCurrency), SelectionField::Sum);
+
+        qbdsVendTmpAccountSum.addSelectionField(fieldNum(ETG_VendTmpAccountSum, Balance02), SelectionField::Sum);
+        qbdsVendTmpAccountSum.addSelectionField(fieldNum(ETG_VendTmpAccountSum, Balance02ReportingCurrency), SelectionField::Sum);
+
+        qbdsVendTmpAccountSum.addSelectionField(fieldNum(ETG_VendTmpAccountSum, Balance03), SelectionField::Sum);
+        qbdsVendTmpAccountSum.addSelectionField(fieldNum(ETG_VendTmpAccountSum, Balance03ReportingCurrency), SelectionField::Sum);
+
+        qbdsVendTmpAccountSum.addSelectionField(fieldNum(ETG_VendTmpAccountSum, Balance04), SelectionField::Sum);
+        qbdsVendTmpAccountSum.addSelectionField(fieldNum(ETG_VendTmpAccountSum, Balance04ReportingCurrency), SelectionField::Sum);
+
+        qbdsVendTmpAccountSum.addSelectionField(fieldNum(ETG_VendTmpAccountSum, Balance05), SelectionField::Sum);
+        qbdsVendTmpAccountSum.addSelectionField(fieldNum(ETG_VendTmpAccountSum, Balance05ReportingCurrency), SelectionField::Sum);
+
+        qbdsVendTmpAccountSum.addSelectionField(fieldNum(ETG_VendTmpAccountSum, Balance06), SelectionField::Sum);
+        qbdsVendTmpAccountSum.addSelectionField(fieldNum(ETG_VendTmpAccountSum, Balance06ReportingCurrency), SelectionField::Sum);
+
+        qbdsVendTmpAccountSum.addSelectionField(fieldNum(ETG_VendTmpAccountSum, Balance07), SelectionField::Sum);
+        qbdsVendTmpAccountSum.addSelectionField(fieldNum(ETG_VendTmpAccountSum, Balance07ReportingCurrency), SelectionField::Sum);
+
+        return q;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>resetTmpAccountSum</Name>
+				<Source><![CDATA[
+    public void resetTmpAccountSum()
+    {
+        vendTmpAccountSum = null;
+        tmpAccountSum = vendTmpAccountSum;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertIntoTmpAccountSumV2</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Translates output from the <c>CustVendAgingCalculatedTmp</c> table to the <c>VendTmpAccountSum</c> table.
+    /// </summary>
+    /// <param name="_agingCalculation">
+    /// An instance of the <c>CustVendAgingCalculation</c> class.
+    /// </param>
+    /// <param name="_withAmountCur">
+    /// Translate amounts in transaction currency?
+    /// </param>
+    /// <param name="_withAmountMST">
+    /// Translate amounts in accounting currency?
+    /// </param>
+    /// <param name="_withAmountMSTSecondary">
+    /// Translate amounts in reporting currency?
+    /// </param>
+    /// <param name="_toCustVendTable">
+    /// A <c>CustVendTable</c> table buffer for the customer or vendor to associate the aging with.
+    /// </param>
+    /// <remarks>
+    /// If _toCustVendTable is missing the results are recorded under the original customer. The _toCustVendTable is used for
+    /// cross-company calculations where the aging for multiple customers in different companies are accumulated to one
+    /// customer. When used for cross-company aging, only one customer can be aged at a time.
+    /// </remarks>
+    protected void insertIntoTmpAccountSumV2(CustVendAgingCalculation _agingCalculation, boolean _withAmountCur = true, boolean _withAmountMST = true, boolean _withAmountMSTSecondary = true, CustVendTable _toCustVendTable = null)
+    {
+        CustVendAgingCalculatedTmp agingCalculatedTmp = _agingCalculation.getAgingCalculated();
+
+        if (direction == ForwardBackwardPrinting::Backward || agingBucket == '')
+        {
+            update_recordSet agingCalculatedTmp
+                setting
+                    BucketNumber = agingBucketCount - agingCalculatedTmp.BucketNumber
+                where agingCalculatedTmp.BucketNumber != 0;
+        }
+
+        var vendors = agingCalculation.getCustVendTransAging();
+
+        ETG_VendBalanceListParameters vendBalanceListParameters = ETG_VendBalanceListParameters::construct();
+        vendBalanceListParameters.custVendAgingCalculatedTmp = agingCalculatedTmp;
+        vendBalanceListParameters.vendTmpAccountSum = vendTmpAccountSum;
+        vendBalanceListParameters.custVendTransAging = vendors;
+
+        ETG_VendTmpAccountSumFromVendBalanceList vendTmpAccountSumFromVendBalanceList = ETG_VendTmpAccountSumFromVendBalanceList::newFromVendBalanceList(vendBalanceListParameters);
+        vendTmpAccountSumFromVendBalanceList.execute();
+
+        MapEnumerator bucketMapEnumerator = this.buildBucketToBalanceFieldsMap().getBucketMapEnumerator();
+        Query updateBalanceQuery = this.buildUpdateVendTmpAccountSumBalanceFieldsForBucketQuery(agingCalculatedTmp);
+        QueryBuildRange bucketRange = SysQuery::findOrCreateRange(updateBalanceQuery.dataSourceTable(tableNum(CustVendAgingCalculatedTmp)),
+            fieldNum(CustVendAgingCalculatedTmp, BucketNumber));
+        Map balanceFieldSetMap;
+
+        while (bucketMapEnumerator.moveNext())
+        {
+            bucketRange.value(queryValue(bucketMapEnumerator.currentKey()));
+
+            balanceFieldSetMap = this.buildBalanceUpdateFieldMap(
+                updateBalanceQuery.dataSourceTable(tableNum(ETG_VendTmpAccountSum)).name(),
+                updateBalanceQuery.dataSourceTable(tableNum(CustVendAgingCalculatedTmp)).name(),
+                bucketMapEnumerator.currentValue() as CustVendBalanceListBalanceFieldsParameters,
+                _withAmountMst,
+                _withAmountCur,
+                _withAmountMSTSecondary);
+
+            Query::update_recordset(balanceFieldSetMap, updateBalanceQuery, true, true, true);
+        }
+
+        tmpAccountSum = vendTmpAccountSum;
+
+        _agingCalculation.releaseTempTables();
+      
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buildBucketToBalanceFieldsMap</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Constructs the contract that maps aging buckets to their corresponding fields in the <c>VendTmpAccountSum</c> table buffer.
+    /// </summary>
+    /// <returns>The <c>CustVendBalanceListBucketToBalanceFieldReturn</c> instance with the map of bucket to fields.</returns>
+    [Wrappable]
+    protected final CustVendBalanceListBucketToBalanceFieldReturn buildBucketToBalanceFieldsMap()
+    {
+        CustVendBalanceListBucketToBalanceFieldReturn bucketsToFields = CustVendBalanceListBucketToBalanceFieldReturn::construct();
+
+        bucketsToFields.addBucket(1,
+            this.constructCustVendBalanceListBalanceFieldsParameters(fieldNum(ETG_VendTmpAccountSum, Balance02),
+                fieldNum(ETG_VendTmpAccountSum, Balance02Cur),
+                fieldNum(ETG_VendTmpAccountSum, Balance02ReportingCurrency)));
+
+        bucketsToFields.addBucket(2,
+            this.constructCustVendBalanceListBalanceFieldsParameters(fieldNum(ETG_VendTmpAccountSum, Balance03),
+                fieldNum(ETG_VendTmpAccountSum, Balance03Cur),
+                fieldNum(ETG_VendTmpAccountSum, Balance03ReportingCurrency)));
+        
+        bucketsToFields.addBucket(3,
+            this.constructCustVendBalanceListBalanceFieldsParameters(fieldNum(ETG_VendTmpAccountSum, Balance04),
+                fieldNum(ETG_VendTmpAccountSum, Balance04Cur),
+                fieldNum(ETG_VendTmpAccountSum, Balance04ReportingCurrency)));
+
+        bucketsToFields.addBucket(4,
+            this.constructCustVendBalanceListBalanceFieldsParameters(fieldNum(ETG_VendTmpAccountSum, Balance05),
+                fieldNum(ETG_VendTmpAccountSum, Balance05Cur),
+                fieldNum(ETG_VendTmpAccountSum, Balance05ReportingCurrency)));
+
+        bucketsToFields.addBucket(5,
+            this.constructCustVendBalanceListBalanceFieldsParameters(fieldNum(ETG_VendTmpAccountSum, Balance06),
+                fieldNum(ETG_VendTmpAccountSum, Balance06Cur),
+                fieldNum(ETG_VendTmpAccountSum, Balance06ReportingCurrency)));
+
+        bucketsToFields.addBucket(6,
+            this.constructCustVendBalanceListBalanceFieldsParameters(fieldNum(ETG_VendTmpAccountSum, Balance07),
+                fieldNum(ETG_VendTmpAccountSum, Balance07Cur),
+                fieldNum(ETG_VendTmpAccountSum, Balance07ReportingCurrency)));
+
+        return bucketsToFields;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>constructCustVendBalanceListBalanceFieldsParameters</Name>
+				<Source><![CDATA[
+    private CustVendBalanceListBalanceFieldsParameters constructCustVendBalanceListBalanceFieldsParameters(FieldId _balanceAmountMSTField, FieldId _balanceAmountCurField, FieldId _balanceReportingAmountField)
+    {
+        CustVendBalanceListBalanceFieldsParameters param = CustVendBalanceListBalanceFieldsParameters::construct();
+        param.balanceMSTField = _balanceAmountMSTField;
+        param.balanceCurField = _balanceAmountCurField;
+        param.balanceReportingCurrencyField = _balanceReportingAmountField;
+
+        return param;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buildUpdateVendTmpAccountSumBalanceFieldsForBucketQuery</Name>
+				<Source><![CDATA[
+    private Query buildUpdateVendTmpAccountSumBalanceFieldsForBucketQuery(CustVendAgingCalculatedTmp _agingCalculatedTmp)
+    {
+        Query q = new Query();
+
+        QueryBuildDataSource qbdsVendTmpAccountSum = q.addDataSource(tableNum(ETG_VendTmpAccountSum));
+
+        qbdsVendTmpAccountSum.cursor(vendTmpAccountSum);
+
+        QueryBuildDataSource qbdsAgingCalculatedTmp = qbdsVendTmpAccountSum.addDataSource(tableNum(CustVendAgingCalculatedTmp));
+        qbdsAgingCalculatedTmp.addLink(fieldNum(ETG_VendTmpAccountSum, CurrencyCode), fieldNum(CustVendAgingCalculatedTmp, CurrencyCode));
+        qbdsAgingCalculatedTmp.addLink(fieldNum(ETG_VendTmpAccountSum, TransDate), fieldNum(CustVendAgingCalculatedTmp, TransDate));
+        qbdsAgingCalculatedTmp.addLink(fieldNum(ETG_VendTmpAccountSum, InvoiceId), fieldNum(CustVendAgingCalculatedTmp, InvoiceId));
+        qbdsAgingCalculatedTmp.addLink(fieldNum(ETG_VendTmpAccountSum, Voucher), fieldNum(CustVendAgingCalculatedTmp, Voucher));
+        qbdsAgingCalculatedTmp.addLink(fieldNum(ETG_VendTmpAccountSum, Txt), fieldNum(CustVendAgingCalculatedTmp, Txt));
+        qbdsAgingCalculatedTmp.addLink(fieldNum(ETG_VendTmpAccountSum, AccountNum), fieldNum(CustVendAgingCalculatedTmp, AccountNum));
+
+        qbdsAgingCalculatedTmp.joinMode(JoinMode::InnerJoin);
+
+        qbdsAgingCalculatedTmp.cursor(_agingCalculatedTmp);
+
+        return q;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buildBalanceUpdateFieldMap</Name>
+				<Source><![CDATA[
+    private Map buildBalanceUpdateFieldMap(str _vendTmpAccountSumQbdsName,
+        str _agingCalculatedTmpQbdsName,
+        CustVendBalanceListBalanceFieldsParameters _balanceFields,
+        boolean _shouldIncludeAmountMst,
+        boolean _shouldIncludeAmountCur,
+        boolean _shouldIncludeAmountMSTSecondary)
+    {
+        Map fieldSetMap = new Map(Types::String, Types::String);
+
+        if (_shouldIncludeAmountMst)
+        {
+            FieldId balance01FieldId = fieldNum(ETG_VendTmpAccountSum, Balance01);
+            FieldId amountFieldId = fieldNum(CustVendAgingCalculatedTmp, Amount);
+            FieldId balanceMSTFieldId = _balanceFields.balanceMSTField;
+
+            fieldSetMap.insert(fieldId2Name(tableNum(ETG_VendTmpAccountSum), balance01FieldId),
+                this.buildUpdateCalculationStrForBalances(_vendTmpAccountSumQbdsName, balance01FieldId, _agingCalculatedTmpQbdsName, amountFieldId));
+
+            fieldSetMap.insert(fieldId2Name(tableNum(VendTmpAccountSum), balanceMSTFieldId),
+                this.buildUpdateCalculationStrForBalances(_vendTmpAccountSumQbdsName, balanceMSTFieldId, _agingCalculatedTmpQbdsName, amountFieldId));
+        }
+
+        if (_shouldIncludeAmountCur)
+        {
+            FieldId balance01FieldId = fieldNum(ETG_VendTmpAccountSum, Balance01Cur);
+            FieldId amountFieldId = fieldNum(CustVendAgingCalculatedTmp, AmountCur);
+            FieldId balanceCurFieldId = _balanceFields.balanceCurField;
+
+            fieldSetMap.insert(fieldId2Name(tableNum(ETG_VendTmpAccountSum), balance01FieldId),
+                this.buildUpdateCalculationStrForBalances(_vendTmpAccountSumQbdsName, balance01FieldId, _agingCalculatedTmpQbdsName, amountFieldId));
+
+            fieldSetMap.insert(fieldId2Name(tableNum(ETG_VendTmpAccountSum), balanceCurFieldId),
+                this.buildUpdateCalculationStrForBalances(_vendTmpAccountSumQbdsName, balanceCurFieldId, _agingCalculatedTmpQbdsName, amountFieldId));
+        }
+
+        if (_shouldIncludeAmountMSTSecondary)
+        {
+            FieldId balance01FieldId = fieldNum(ETG_VendTmpAccountSum, Balance01ReportingCurrency);
+            FieldId amountFieldId = fieldNum(CustVendAgingCalculatedTmp, AmountReporting);
+            FieldId balanceReportingFieldId = _balanceFields.balanceReportingCurrencyField;
+
+            fieldSetMap.insert(fieldId2Name(tableNum(ETG_VendTmpAccountSum), balance01FieldId),
+                this.buildUpdateCalculationStrForBalances(_vendTmpAccountSumQbdsName, balance01FieldId, _agingCalculatedTmpQbdsName, amountFieldId));
+
+            fieldSetMap.insert(fieldId2Name(tableNum(ETG_VendTmpAccountSum), balanceReportingFieldId),
+                this.buildUpdateCalculationStrForBalances(_vendTmpAccountSumQbdsName, balanceReportingFieldId, _agingCalculatedTmpQbdsName, amountFieldId));
+        }
+
+        return fieldSetMap;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buildUpdateCalculationStrForBalances</Name>
+				<Source><![CDATA[
+    private str buildUpdateCalculationStrForBalances(str _vendTmpAccountSumQbdsName, FieldId _vendTmpAccountSumField, str _agingCalculatedTmpQbdsName, FieldId _agingCalculatedTmpField)
+    {
+        return strFmt('%1.%3 + %2.%4',
+            _vendTmpAccountSumQbdsName,
+            _agingCalculatedTmpQbdsName,
+            fieldId2Name(tableNum(ETG_VendTmpAccountSum), _vendTmpAccountSumField),
+            fieldId2Name(tableNum(CustVendAgingCalculatedTmp), _agingCalculatedTmpField));
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

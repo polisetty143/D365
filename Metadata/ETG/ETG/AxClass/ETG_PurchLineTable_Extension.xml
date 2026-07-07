@@ -1,0 +1,499 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_PurchLineTable_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tableStr(PurchLine))]
+final class ETG_PurchLineTable_Extension
+{
+    
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initFromAgreementLine</Name>
+				<Source><![CDATA[
+    public void initFromAgreementLine(AgreementLine _agreementLine)
+    {
+        next initFromAgreementLine(_agreementLine);
+
+        this.ETG_IsGrossWeight       = _agreementLine.ETG_IsGrossWeight;
+        this.ETG_ItemAlternativeName = _agreementLine.ETG_ItemAlternativeName;
+        this.ETG_ItemQuantityGroup   = _agreementLine.ETG_ItemQuantityGroup;
+        this.OverDeliveryPct         = _agreementLine.ETG_OverDeliveryPct;
+        this.UnderDeliveryPct        = _agreementLine.ETG_UnderDeliveryPct;
+        this.ETG_IsThirdParty        = _agreementLine.ETG_IsThirdParty;
+        this.DefaultDimension        = _agreementLine.DefaultDimension;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>vendNameETG</Name>
+				<Source><![CDATA[
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display Name vendNameETG(PurchLine _this)
+    {
+        return _this.purchTable().vendorName();;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insert</Name>
+				<Source><![CDATA[
+    public void insert(boolean     dropInvent,
+        boolean     findMarkup,
+        boolean     updatePurchTableDistributions,
+        boolean     _skipPurchTableUpdate,
+        boolean     _skipInterCompanyCalcDisc)
+    {
+        ETG_PurchLineNotes                  purchLineNotes;
+        ETG_AgreementLineNotes              agreementLineNotes;
+        AgreementLineQuantityCommitment     agreementLineDerived;
+        SalesLine                           salesLine,salesLineloc;
+        boolean                             isNotes = false,isSpecs = false;
+        RecordInsertList    tmpInsNotes = new RecordInsertList(tableNum(ETG_PurchLineNotes));
+        RecordInsertList    tmpInsSpecs = new RecordInsertList(tableNum(ETG_ProductReceiptQualityGrp));
+        ETG_PurchLineQualityGrp             purchLineQualityGrp;
+        ETG_AgreementLineQualityGrp         agreementLineQualityGrpSrc;
+        ETG_ProductReceiptQualityGrp        productReceiptQualityGrp;
+        ETGAgrrementQualitySpecsLine        agreementQualitySpecsLine;
+        ProdTable                           prodTable,prodTableloc;
+        SalesTable                          salesTableloc;
+        PurchLine purchLineloc;
+        
+        //CS - Update PO Header Financial Dimension - Sunena
+        if (this.InventRefId)
+        {
+            prodTable = ProdTable::find(this.InventRefId);
+
+            if (prodTable.RecId)
+            {
+                this.DefaultDimension = prodTable.DefaultDimension;
+                
+            }
+        }
+        //CE
+        next insert(dropInvent ,findMarkup,updatePurchTableDistributions,_skipPurchTableUpdate,_skipInterCompanyCalcDisc);
+
+       
+        // Update PO Header Financial Dimension - Sunena
+        if(this.ItemRefType == InventRefType::ProdLine && this.InventRefId)
+        {
+        
+           prodTable = ProdTable::find(this.InventRefId);
+            PurchTable purchTable = this.purchTable();
+
+            if (prodTable.RecId && prodTable.DefaultDimension)
+            {
+                if (purchTable)
+                {
+                    ttsbegin;
+                    purchTable.selectForUpdate(true);
+                    purchTable.DefaultDimension = prodTable.DefaultDimension;
+                    purchTable.doUpdate();
+                    
+                    ttscommit;
+                }
+            }            
+        }
+        //CE
+
+        if(this.MatchingAgreementLine)
+        {
+            while select GroupId from agreementLineQualityGrpSrc
+                where agreementLineQualityGrpSrc.AgreementLine  == this.MatchingAgreementLine
+            {
+                purchLineQualityGrp.GroupId         = agreementLineQualityGrpSrc.GroupId;
+                purchLineQualityGrp.Value           = agreementLineQualityGrpSrc.Value;
+                purchLineQualityGrp.InventTransId   = this.InventTransId;
+                purchLineQualityGrp.insert();
+            }
+
+            while select * from agreementQualitySpecsLine
+              where agreementQualitySpecsLine.AgreementLineRefrecid == this.MatchingAgreementLine          
+            {
+                productReceiptQualityGrp.GroupID               = agreementQualitySpecsLine.GroupID;
+                productReceiptQualityGrp.MaxRange              = agreementQualitySpecsLine.MaxRange;
+                productReceiptQualityGrp.MinRange              = agreementQualitySpecsLine.MinRange;
+                productReceiptQualityGrp.InventTransId         = this.InventTransId;
+                productReceiptQualityGrp.PurchId               = this.PurchId;
+                productReceiptQualityGrp.SubGroupID            = agreementQualitySpecsLine.SubGrpId;
+                productReceiptQualityGrp.SubGroupDescription   = agreementQualitySpecsLine.SubGroupDescription;
+                productReceiptQualityGrp.MeasurementType       = agreementQualitySpecsLine.MeasurementType;
+                productReceiptQualityGrp.AdjustmentType        = agreementQualitySpecsLine.AdjustmentType;
+                productReceiptQualityGrp.Increment             = agreementQualitySpecsLine.Increment;
+                productReceiptQualityGrp.FixedValue            = agreementQualitySpecsLine.FixedValue;              
+                tmpInsSpecs.add(productReceiptQualityGrp);
+                isSpecs = true;
+            }
+            if(isSpecs)
+            {
+                tmpInsSpecs.insertDatabase();
+                isSpecs = false;
+            }
+
+            while select EnumNotes,Description,ItemId,PrintNotesInContract from agreementLineNotes
+                where agreementLineNotes.AgreementLine == this.MatchingAgreementLine
+            {
+                purchLineNotes.InventTransId        = this.InventTransId;
+                purchLineNotes.EnumNotes            = agreementLineNotes.EnumNotes;
+                purchLineNotes.Description          = agreementLineNotes.Description;
+                purchLineNotes.ItemId               = agreementLineNotes.ItemId;
+                purchLineNotes.PrintNotesInContract = agreementLineNotes.PrintNotesInContract;
+                tmpInsNotes.add(purchLineNotes);
+                isNotes = true;
+            }
+            if(isNotes)
+            {
+                tmpInsNotes.insertDatabase();
+                isNotes = false;
+            }
+       
+            if(this.ETG_IsThirdParty && !this.ETG_TPInventTransId)
+            {
+                select firstonly * from agreementLineDerived
+                    where agreementLineDerived.ETG_DerivedTP == this.MatchingAgreementLine;
+
+                if(agreementLineDerived)
+                {
+                    salesLine =  ETG_ReleaseOrder::createSalesLine(agreementLineDerived,this);
+                    this.ETG_TPInventTransId = salesLine.InventTransId;
+                    if(!this.InterCompanyInventTransId)
+                    {
+                        this.InventRefId         = salesLine.SalesId;
+                        this.InventRefTransId    = salesLine.InventTransId;
+                    }
+                    this.doUpdate();
+                }
+            }
+        }
+
+        ttsbegin;
+        //CS - Abhinav -Auto post Purchase order in intercompany scenario
+        if(ETGCanadaParameters::find().EnableAutoPosting)
+        {
+            PurchTable purchtable = this.purchTable();
+            ProdBOM ProdBOM;
+
+            select count(RecId) from ProdBOM
+                where ProdBOM.ProdId == this.InventRefId
+                && ProdBOM.EndConsump == NoYes::No
+                && ProdBOM.VendId != '';
+
+            if(purchtable.InterCompanyOrder && purchtable.InterCompanySalesId && this.ItemRefType == InventRefType::ProdLine && ProdBOM.RecId == this.LineNumber)
+            {
+                changecompany(purchtable.InterCompanyCompanyId)
+                {
+                    //CS - Update FD in Salesline - Abhinav
+                    ProdTable prodTableLocal = ProdTable::find(prodTable.ETGChildProdId);
+                    SalesTable salestable = SalesTable::find(purchtable.InterCompanySalesId);
+                    ttsbegin;
+                    salestable.selectForUpdate(true);
+                    salestable.DefaultDimension = prodTableLocal.DefaultDimension;
+                    salestable.update();
+
+                    SalesLine saleslineUpd;
+
+                    update_recordset saleslineUpd
+                        setting DefaultDimension = prodTableLocal.DefaultDimension
+                        where saleslineUpd.SalesId == salestable.SalesId;
+                    ttscommit;
+                    //CE
+
+                    PurchLine::autoPostIntercompanySalesOrder(salestable);
+                }
+                if(purchtable.DefaultDimension)
+                {
+                    boolean                     isValid = true;
+                    boolean                     isValidLine;
+                    DimensionValidationStatus   dimensionValidationStatus;
+                    DimensionValidationStatus   dimensionValidationStatusLine;
+                    LedgerDimensionAccount      ledgerDimension;
+                    VendPostingProfile          postingprofile = purchtable.PostingProfile ? purchtable.PostingProfile : VendParameters::find().PostingProfile;
+                   
+                    ledgerDimension = LedgerDimensionFacade::serviceCreateLedgerDimension(VendLedgerAccounts::summaryLedgerDimension(purchtable.OrderAccount,postingprofile,true),purchtable.DefaultDimension);
+                    dimensionValidationStatus = LedgerDimensionValidationHelper::validateByTree(ledgerDimension, purchtable.DeliveryDate, true, true);
+
+                    if(dimensionValidationStatus == DimensionValidationStatus::Valid)
+                    {
+                        PurchLine purchLine;
+
+                        while select purchLine
+                            where purchLine.PurchId == purchtable.PurchId
+                        {
+                            ledgerDimension = LedgerDimensionFacade::serviceCreateLedgerDimension(VendLedgerAccounts::summaryLedgerDimension(purchtable.OrderAccount,postingprofile,true),purchLine.DefaultDimension);
+                            dimensionValidationStatusLine = LedgerDimensionValidationHelper::validateByTree(ledgerDimension, purchtable.DeliveryDate, true, true);
+
+                            if(dimensionValidationStatusLine == DimensionValidationStatus::Valid)
+                            {
+                                isValidLine = true;
+                            }
+                            else
+                            {
+                                isValidLine = false;
+                                break;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        isValid = false;
+                    }
+
+                    if(isValid && isValidLine)
+                    {
+                        PurchFormLetter                 purchFormLetterCnf;
+                        PurchFormLetter_Invoice         purchFormLetter;
+                        PurchFormLetter_PackingSlip     purchFormLetterPsilp;
+                        CustpackingSlipJour             custPackingSlipJour;
+                        CustInvoiceJour                 custInvoiceJour;
+
+                        changecompany(purchtable.InterCompanyCompanyId)
+                        {
+                            select firstOnly custPackingSlipJour
+                                order by DeliveryDate desc, PackingSlipId desc
+                            where custPackingSlipJour.SalesId == purchtable.InterCompanySalesId;
+
+                            select firstOnly custInvoiceJour
+                                order by InvoiceDate desc, CreatedDateTime desc
+                            where custInvoiceJour.SalesId == purchtable.InterCompanySalesId;
+                        }
+
+                        purchFormLetterCnf = PurchFormLetter::construct(DocumentStatus::PurchaseOrder);
+
+                        purchFormLetterCnf.update(
+                                        purchTable,
+                                        strFmt('%1-%2', purchTable.PurchId, DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone())),
+                                        SystemDateGet(),
+                                        PurchUpdate::All,
+                                        AccountOrder::None,
+                                        NoYes::No,
+                                        NoYes::No
+                                    );
+
+
+                        
+
+                        purchTable.reread();
+
+                        InventTrans                 inventTrans;
+                        InventTransWMS_Register     inventTransWMS_register;
+                        TmpInventTransWMS           tmpInventTransWMS;
+                        PurchLine                   purchLine;
+
+                        inventTrans = InventTrans::findTransId(this.InventTransId);
+                        tmpInventTransWMS.initFromInventTrans(inventTrans);
+                        tmpInventTransWMS.InventQty = this.PurchQty;
+                        tmpInventTransWMS.insert();
+
+                        inventTransWMS_register = inventTransWMS_register::newStandard(tmpInventTransWMS);
+                        inventTransWMS_register.updateInvent(this);
+                    
+                        this.PurchReceivedNow = this.PurchQty;
+
+                        try
+                        {
+                            ttsbegin;
+                            if (purchTable.DocumentState == VersioningDocumentState::Confirmed)
+                            {
+                                purchFormLetterPsilp = PurchFormLetter::construct(DocumentStatus::PackingSlip);
+ 
+                                purchFormLetterPsilp.update( purchTable,
+                                                custPackingSlipJour.PackingSlipId,
+                                                SystemDateGet(),
+                                                PurchUpdate::All,
+                                                AccountOrder::None,
+                                                false,
+                                                false);
+                            }
+                            ttscommit;
+                        }
+                        catch
+                        {
+                            warning("@ETG_New:PurchasePackingSLipError");
+                        }
+
+                        try
+                        {
+                            ttsbegin;
+                            if (purchTable.DocumentStatus != DocumentStatus::Invoice)
+                            {
+                                purchFormLetter = PurchFormLetter::construct(DocumentStatus::Invoice);
+
+                                purchFormLetter.update( purchTable,
+                                                custInvoiceJour.InvoiceId,
+                                                systemDateGet(),
+                                                PurchUpdate::PackingSlip,
+                                                AccountOrder::None,
+                                                false,
+                                                false
+                                                );
+                            }
+                            ttsCommit;
+                        }
+                        catch
+                        {
+                            warning("@ETG_New:PurchaseInvoiceError");
+                        }
+                    }
+                    else
+                    {
+                        warning("@ETG_New:MandatoryFDValues");
+                    }
+                }
+                else
+                {
+                    warning("@ETG_New:ManadatoryFDValuesNotInvendor");
+                }
+            }
+        }
+        ttscommit;
+        //CE
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>canRateCardApply</Name>
+				<Source><![CDATA[
+    //CS , DLT, 29-01-2025 rate card can apply
+    public boolean canRateCardApply()
+    {
+        PurchLine           purchLineCheck;
+        boolean             canApply;
+
+        select firstonly RecId from purchLineCheck
+            where purchLineCheck.PurchId == this.PurchId
+                && purchLineCheck.ItemId == this.ItemId
+                && purchLineCheck.ETGRateCardApplied == NoYes::Yes;
+
+        if(purchLineCheck.RecId == 0)
+        {
+            canApply = true;
+        }
+
+        return canApply;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>autoPostIntercompanySalesOrder</Name>
+				<Source><![CDATA[
+    //CE , DLT, 29-01-2025 rate card can apply
+
+
+    /// Abhinav7-4-2026 
+    /// Auto post intercompany sales order 
+    public static void autoPostIntercompanySalesOrder(SalesTable salesTableLoc)
+    {
+        if(salesTableLoc.InterCompanyOrder)
+        {
+            if(salesTableLoc.DefaultDimension)
+            {
+                boolean                     isValid = true;
+                boolean                     isValidLine;
+                DimensionValidationStatus   dimensionValidationStatus;
+                DimensionValidationStatus   dimensionValidationStatusLine;
+                LedgerDimensionAccount      ledgerDimension;
+                CustPostingProfile          postingprofile = salesTableLoc.PostingProfile ? salesTableLoc.PostingProfile : CustParameters::find().PostingProfile;
+                   
+                ledgerDimension = LedgerDimensionFacade::serviceCreateLedgerDimension(CustLedgerAccounts::summaryLedgerDimension(salesTableLoc.CustAccount,postingprofile,true),salesTableLoc.DefaultDimension);
+                dimensionValidationStatus = LedgerDimensionValidationHelper::validateByTree(ledgerDimension, salesTableLoc.DeliveryDate, true, true);
+
+                if(dimensionValidationStatus == DimensionValidationStatus::Valid)
+                {
+                    SalesLine SalesLine;
+                        
+                    while select SalesLine
+                        where SalesLine.salesid == salesTableLoc.SalesId
+                    {
+                        ledgerDimension = LedgerDimensionFacade::serviceCreateLedgerDimension(CustLedgerAccounts::summaryLedgerDimension(SalesLine.CustAccount,postingprofile,true),SalesLine.DefaultDimension);
+                        dimensionValidationStatusLine = LedgerDimensionValidationHelper::validateByTree(ledgerDimension, salesTableLoc.DeliveryDate, true, true);
+
+                        if(dimensionValidationStatusLine == DimensionValidationStatus::Valid)
+                        {
+                            isValidLine = true;
+                        }
+                        else
+                        {
+                            isValidLine = false;
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    isValid = false;
+                }
+
+
+                if(isValid && isValidLine)
+                {
+                    SalesFormLetter_PackingSlip  salesFormLetterPackingSlip;
+                    SalesFormLetter_Invoice  salesFormLetterInvoice;
+        
+                    if (SalesLine::exist(salesTableLoc.SalesId))
+                    {
+                        try
+                        {
+                            ttsBegin;
+                            salesFormLetterPackingSlip = SalesFormLetter::construct(DocumentStatus::PackingSlip);
+            
+                            salesFormLetterPackingSlip.update(salesTableLoc,
+                                            DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()),
+                                            SalesUpdate::All,
+                                            AccountOrder::None,
+                                            NoYes::No,
+                                            NoYes::No );
+                            ttsCommit;
+                        }
+                        catch
+                        {
+                            warning("@ETG_New:SalesOrderPackingSlipPostingError");
+                        }
+
+                        if (salesTableLoc && salesTableLoc.SalesStatus != SalesStatus::Invoiced)
+                        {
+                            try
+                            {
+                                ttsBegin;
+                                salesFormLetterInvoice = SalesFormLetter::construct(DocumentStatus::Invoice);
+
+                                salesFormLetterInvoice.update(salesTableLoc,
+                                            DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()),
+                                            SalesUpdate::PackingSlip,
+                                            AccountOrder::None,
+                                            NoYes::No,
+                                            NoYes::No );
+
+                                ttsCommit;
+                            }
+                            catch
+                            {
+                                warning("@ETG_New:SalesOrderInvoicePostingError");
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    warning("@ETG_New:MandatoryFDValuesSO");
+                }
+            }
+            else
+            {
+                warning("@ETG_New:MandatoryFDValuesNotAvailable");
+            }
+            
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

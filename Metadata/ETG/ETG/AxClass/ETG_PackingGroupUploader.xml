@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_PackingGroupUploader</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+using System.IO;
+using OfficeOpenXml;
+using OfficeOpenXml.ExcelPackage;
+using OfficeOpenXml.ExcelRange;
+
+class ETG_PackingGroupUploader
+{
+    
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Runs the class with the specified arguments.
+    /// </summary>
+    /// <param name = "_args">The specified arguments.</param>
+    public static void main(Args _args)
+    {
+        System.IO.Stream		    stream;
+        ExcelSpreadsheetName	    sheeet;
+        FileUploadBuild			    fileUpload;
+        DialogGroup				    dlgUploadGroup;
+        FileUploadBuild			    fileUploadBuild;
+        FormBuildControl		    formBuildControl;
+
+        int                         counter;
+        ETG_PackingGroup            packingGroup;
+       Name                         packGrp;
+       //  Name.......................packGrp;
+        
+        
+              
+        Dialog dialog = new Dialog("Import Packing Group Master");
+
+        dlgUploadGroup		= dialog.addGroup("Select Excel File to Upload.");
+        formBuildControl	= dialog.formBuildDesign().control(dlgUploadGroup.name());
+        fileUploadBuild		= formBuildControl.addControlEx(classstr(FileUpload), 'Upload');
+
+        fileUploadBuild.style(FileUploadStyle::MinimalWithFilename);
+        fileUploadBuild.fileTypesAccepted('.xlsx');
+
+    
+        if (dialog.run() && dialog.closedOk())
+        {
+            FileUpload fileUploadControl					  = dialog.formRun().control(dialog.formRun().controlId('Upload'));
+            FileUploadTemporaryStorageResult fileUploadResult = fileUploadControl.getFileUploadResult();
+
+            if (fileUploadResult != null && fileUploadResult.getUploadStatus())
+            {
+                stream = fileUploadResult.openResult();
+                using (ExcelPackage Package = new ExcelPackage(stream))
+                {
+                    int rowCount, i;
+
+                    Package.Load(stream);
+                    ExcelWorksheet worksheet		= package.get_Workbook().get_Worksheets().get_Item(1);
+                    OfficeOpenXml.ExcelRange range	= worksheet.Cells;
+                    rowCount = worksheet.Dimension.End.Row - worksheet.Dimension.Start.Row + 1;
+
+                    for (i = 2; i<= rowCount; i++)
+                    {
+                        packGrp               = range.get_Item(i, 1).Value;
+                        
+                        
+                        select firstonly packingGroup
+                            where packingGroup.PackingGroup == packGrp;
+                        
+                        
+                        if(packingGroup)
+                        {
+                            error(strFmt('Packing group %1 already exists', packGrp));
+                        }
+
+                        if(!packingGroup)
+                        {
+                            packingGroup.clear();
+                          
+                            try
+                            { 
+                                packingGroup.PackingGroup           =  packGrp;
+                                packingGroup.Description            =  range.get_Item(i, 2).Value;
+
+                                  
+                                ttsbegin;
+                                if(packingGroup.validateWrite())
+                                {
+                                    packingGroup.insert();
+                                }
+                                ttscommit;
+                                counter++;
+
+                            }
+                            catch(Exception::Error)
+                            {
+                                ttsabort;
+                            }
+                        }
+                        else
+                        {
+                            info(strFmt('Purchase Agreement or Sales Agreement Number must be there to insert charge codes'));
+                        }
+                    }
+                    info(strFmt('Packing Group Uploaded Sucessfully. Total Lines %1 : ',counter));
+                }
+            }
+            
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

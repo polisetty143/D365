@@ -1,0 +1,451 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerVoucherTransactionDetailsDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Data Provider class for ETG Ledger Voucher Transaction Details SSRS Report
+/// </summary>
+[SRSReportParameterAttribute(classStr(ETGLedgerVoucherTransactionDetailsContract))]
+public class ETGLedgerVoucherTransactionDetailsDP extends SRSReportDataProviderPreProcessTempDB
+{
+    ETG_GeneralJournalAccountEntryEntityTMP tmpTable;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETG_GeneralJournalAccountEntryEntityTMP</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETG_GeneralJournalAccountEntryEntityTMP))]
+    public ETG_GeneralJournalAccountEntryEntityTMP getETG_GeneralJournalAccountEntryEntityTMP()
+    {
+        select * from tmpTable;
+        return tmpTable;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Process the report data
+    /// </summary>
+    public void processReport()
+    {
+        ETGLedgerVoucherTransactionDetailsContract contract = this.parmDataContract() as ETGLedgerVoucherTransactionDetailsContract;
+        
+        if (contract.parmFilterByCreatedDate())
+        {
+            this.processLedgerVoucherByCreatedDate(contract.parmFromDate(), contract.parmToDate());
+        }
+        else
+        {
+            this.processLedgerVoucherByAccountingDate(contract.parmFromDate(), contract.parmToDate());
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processLedgerVoucherByAccountingDate</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Process ledger voucher data by accounting date
+    /// </summary>
+    /// <param name="_fromDate">From date</param>
+    /// <param name="_toDate">To date</param>
+    private void processLedgerVoucherByAccountingDate(TransDate _fromDate, TransDate _toDate)
+    {
+        GeneralJournalAccountEntry generalJournalAccountEntry;
+        GeneralJournalEntry generalJournalEntry;
+        LedgerJournalTrans ledgerJournalTrans;
+        MainAccount mainAccount;
+        DimensionAttributeLevelValueAllView dimAttriView;
+        DimensionAttribute dimAttri;
+        Ledger ledger;
+        CustTrans custTrans;
+        VendTrans vendTrans;
+        InventTable inventTable;
+        EcoResProductTranslation ecoResProductTranslation;
+        str counterParty, counterPartyName, mainAccount1;
+
+        // Security variables
+        ETGRecordLevelSecurity etgSecurity;
+        Set allowedBusinessUnits = new Set(Types::String);
+        boolean isRestrictedEntity = (curExt() == 'y002');
+        boolean shouldFilter = false;
+
+        // Dimension names
+        str businessUnit = "BusinessUnit";
+        str costCenter   = "CostCenter";
+        str item         = "Item";
+        str locations    = "Locations";
+        str profitCenter = "ProfitCenter";
+        str vertical     = "Vertical";
+        str subCommodity = "SubCommodity";
+        str region = "Region";
+        str subVertical = "SubVertical";
+        str contract = "Contract";
+        str intercompany = "Intercompany";
+        str line_of_Businesss = "Line_of_Businesss";
+        str project = "Project";
+        str mainCommodity = "MainCommodity";
+        str product_Service = "Product_Service";
+        str department = "Department";
+        
+        // 1. Pre-fetch security permissions if we are in the restricted entity
+        if (isRestrictedEntity)
+        {
+            // Check if user exists in the security table at all
+            select firstonly RecId from etgSecurity
+                where etgSecurity.UserId == curUserId();
+            
+            if (etgSecurity.RecId)
+            {
+                // User exists, so we must filter based on their assigned values
+                shouldFilter = true;
+                
+                while select DimensionValue from etgSecurity
+                    where etgSecurity.UserId == curUserId()
+                       && etgSecurity.DimensionAttribute == businessUnit
+                {
+                    allowedBusinessUnits.add(etgSecurity.DimensionValue);
+                }
+            }
+            // Else: User does not exist, shouldFilter remains false (Show All)
+        }
+
+        while select generalJournalEntry
+            where generalJournalEntry.SubledgerVoucherDataAreaId == curExt() &&
+                  generalJournalEntry.AccountingDate >= _fromDate &&
+                  generalJournalEntry.AccountingDate <= _toDate
+            join generalJournalAccountEntry
+                where generalJournalAccountEntry.GeneralJournalEntry == generalJournalEntry.RecId
+        {
+            tmpTable.clear();
+            
+            // Basic journal entry data
+            tmpTable.AccountingCurrencyAmount = generalJournalAccountEntry.AccountingCurrencyAmount;
+            tmpTable.AccountingDate = generalJournalEntry.AccountingDate;
+            tmpTable.JournalNumber = generalJournalEntry.JournalNumber;
+            tmpTable.SubledgerVoucher = generalJournalEntry.SubledgerVoucher;
+            tmpTable.DocumentDate = generalJournalEntry.DocumentDate;
+            tmpTable.DocumentNumber = generalJournalEntry.DocumentNumber;
+            tmpTable.JournalCategory = generalJournalEntry.JournalCategory;
+            tmpTable.LedgerAccount = generalJournalAccountEntry.LedgerAccount;
+            
+            tmpTable.LedgerDimension = generalJournalAccountEntry.LedgerDimension;
+           
+            tmpTable.PostingType = generalJournalAccountEntry.PostingType;
+            tmpTable.Quantity = generalJournalAccountEntry.Quantity;
+            tmpTable.ReportingCurrencyAmount = generalJournalAccountEntry.ReportingCurrencyAmount;
+            tmpTable.Text = generalJournalAccountEntry.Text;
+            tmpTable.TransactionCurrencyAmount = generalJournalAccountEntry.TransactionCurrencyAmount;
+            tmpTable.TransactionCurrencyCode = generalJournalAccountEntry.TransactionCurrencyCode;
+            tmpTable.MainAccount = generalJournalAccountEntry.MainAccount;
+            tmpTable.TransactionText = generalJournalAccountEntry.Text;
+            tmpTable.ETGCreatedBy = generalJournalEntry.CreatedBy;
+            tmpTable.ETGCreatedDate = generalJournalEntry.CreatedDateTime;
+            tmpTable.JournalrecId = generalJournalAccountEntry.RecId;
+
+            // Get ledger journal trans data
+            select ledgerJournalTrans
+                where ledgerJournalTrans.Voucher == generalJournalEntry.SubledgerVoucher;
+            
+            if (ledgerJournalTrans)
+            {
+                tmpTable.ETGCTRMInvoiceReferance = ledgerJournalTrans.Invoice;
+                tmpTable.ETGIntegrationContractNumber = ledgerJournalTrans.ETGIntegrationContractNumber;
+                tmpTable.PaymentReference     =   ledgerJournalTrans.PaymReference;
+            }
+
+            // Get main account display value
+            select DisplayValue from dimAttriView
+                where dimAttriView.ValueCombinationRecId == generalJournalAccountEntry.LedgerDimension
+                join BackingEntityType from dimAttri
+                    where dimAttri.RecId == dimAttriView.DimensionAttribute &&
+                          dimAttri.Name == "MainAccount";
+
+            if (dimAttriView)
+            {
+                mainAccount1 = dimAttriView.DisplayValue;
+            }
+            tmpTable.LedgerCode = mainAccount1;
+
+            // Get ledger and main account name
+            select ledger where ledger.Name == curExt();
+            select mainAccount
+                where mainAccount.MainAccountId == tmpTable.LedgerCode &&
+                      mainAccount.LedgerChartOfAccounts == ledger.ChartOfAccounts;
+
+            tmpTable.LedgerName = mainAccount.Name;
+
+            // Get counterparty information
+            counterParty = '';
+            counterPartyName = '';
+
+            select custTrans where custTrans.Voucher == generalJournalEntry.SubledgerVoucher;
+            if (custTrans)
+            {
+                counterParty = CustTable::find(custTrans.AccountNum).AccountNum;
+                counterPartyName = CustTable::find(custTrans.AccountNum).name();
+            }
+            else
+            {
+                select vendTrans where vendTrans.Voucher == generalJournalEntry.SubledgerVoucher;
+                if (vendTrans)
+                {
+                    counterParty = VendTable::find(vendTrans.AccountNum).AccountNum;
+                    counterPartyName = VendTable::find(vendTrans.AccountNum).name();
+                }
+            }
+
+            tmpTable.CounterpartyCode = counterParty;
+            tmpTable.CounterpartyName = counterPartyName;
+
+            // Get dimension values
+            tmpTable.BusinessUnit      = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, businessUnit);
+            
+            // 2. SECURITY CHECK
+            // If we are in entity y002 AND the user was found in the security table, apply filter
+            if (isRestrictedEntity && shouldFilter)
+            {
+                if (!allowedBusinessUnits.in(tmpTable.BusinessUnit))
+                {
+                    continue; // Skip this record as the user does not have access
+                }
+            }
+
+            tmpTable.CostCenter        = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, costCenter);
+            tmpTable.Item              = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, item);
+            tmpTable.Location          = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, locations);
+            tmpTable.ProfitCenter      = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, profitCenter);
+            tmpTable.Vertical          = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, Vertical);
+            tmpTable.ETGSubCommodity   = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension,SubCommodity);
+            tmpTable.ETGSubVertical    = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension,subVertical);
+            tmpTable.InterCompany      = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension,intercompany);
+            tmpTable.Project           = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension,project);
+            tmpTable.ETGCommodity      = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension,mainCommodity);
+            tmpTable.Product_Service   = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension,product_Service);
+            tmpTable.Department        = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension,department);
+            tmpTable.Region            = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension,region);
+            tmpTable.Contract          = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension,contract);
+            tmpTable.LineOfBusiness    = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension,line_of_Businesss);
+            select InventTable where InventTable.ItemId == tmpTable.Item;
+
+            if(InventTable)
+            {
+                select ecoResProductTranslation where ecoResProductTranslation.Product == InventTable.Product;
+                tmpTable.CommodityDescription  =  ecoResProductTranslation.Description;
+            }
+            
+            tmpTable.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processLedgerVoucherByCreatedDate</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Process ledger voucher data by created date
+    /// </summary>
+    /// <param name="_fromDate">From date</param>
+    /// <param name="_toDate">To date</param>
+    private void processLedgerVoucherByCreatedDate(TransDate _fromDate, TransDate _toDate)
+    {
+        GeneralJournalAccountEntry generalJournalAccountEntry;
+        GeneralJournalEntry generalJournalEntry;
+        LedgerJournalTrans ledgerJournalTrans;
+        MainAccount mainAccount;
+        DimensionAttributeLevelValueAllView dimAttriView;
+        DimensionAttribute dimAttri;
+        Ledger ledger;
+        CustTrans custTrans;
+        VendTrans vendTrans;
+        InventTable inventTable;
+        EcoResProductTranslation ecoResProductTranslation;
+        str counterParty, counterPartyName, mainAccount1;
+
+        // Security variables
+        ETGRecordLevelSecurity etgSecurity;
+        Set allowedBusinessUnits = new Set(Types::String);
+        boolean isRestrictedEntity = (curExt() == 'y002');
+        boolean shouldFilter = false;
+
+        // Dimension names
+        str businessUnit = "BusinessUnit";
+        str costCenter   = "CostCenter";
+        str item         = "Item";
+        str locations    = "Locations";
+        str profitCenter = "ProfitCenter";
+        str vertical     = "Vertical";
+        str subCommodity = "SubCommodity";
+        str region = "Region";
+        str subVertical = "SubVertical";
+        str contract = "Contract";
+        str intercompany = "Intercompany";
+        str line_of_Businesss = "Line_of_Businesss";
+        str project = "Project";
+        str mainCommodity = "MainCommodity";
+        str product_Service = "Product_Service";
+        str department = "Department";
+
+        // 1. Pre-fetch security permissions if we are in the restricted entity
+        if (isRestrictedEntity)
+        {
+            // Check if user exists in the security table at all
+            select firstonly RecId from etgSecurity
+                where etgSecurity.UserId == curUserId();
+            
+            if (etgSecurity.RecId)
+            {
+                // User exists, so we must filter based on their assigned values
+                shouldFilter = true;
+                
+                while select DimensionValue from etgSecurity
+                    where etgSecurity.UserId == curUserId()
+                       && etgSecurity.DimensionAttribute == businessUnit
+                {
+                    allowedBusinessUnits.add(etgSecurity.DimensionValue);
+                }
+            }
+            // Else: User does not exist, shouldFilter remains false (Show All)
+        }
+
+        while select generalJournalEntry
+            where generalJournalEntry.SubledgerVoucherDataAreaId == curExt() &&
+                  generalJournalEntry.CreatedDateTime >= datetobeginUtcDateTime(_fromDate, DateTimeUtil::getUserPreferredTimeZone()) &&
+                  generalJournalEntry.CreatedDateTime <= datetobeginUtcDateTime(_toDate + 1, DateTimeUtil::getUserPreferredTimeZone())
+            join generalJournalAccountEntry
+                where generalJournalAccountEntry.GeneralJournalEntry == generalJournalEntry.RecId
+        {
+            tmpTable.clear();
+            
+            // Basic journal entry data
+            tmpTable.AccountingCurrencyAmount = generalJournalAccountEntry.AccountingCurrencyAmount;
+            tmpTable.AccountingDate = generalJournalEntry.AccountingDate;
+            tmpTable.JournalNumber = generalJournalEntry.JournalNumber;
+            tmpTable.SubledgerVoucher = generalJournalEntry.SubledgerVoucher;
+            tmpTable.DocumentDate = generalJournalEntry.DocumentDate;
+            tmpTable.DocumentNumber = generalJournalEntry.DocumentNumber;
+            tmpTable.JournalCategory = generalJournalEntry.JournalCategory;
+            tmpTable.HistoricalExchangeRateDate = generalJournalAccountEntry.HistoricalExchangeRateDate;
+            tmpTable.LedgerAccount = generalJournalAccountEntry.LedgerAccount;
+            tmpTable.LedgerDimension = generalJournalAccountEntry.LedgerDimension;
+            tmpTable.PostingType = generalJournalAccountEntry.PostingType;
+            tmpTable.Quantity = generalJournalAccountEntry.Quantity;
+            tmpTable.ReportingCurrencyAmount = generalJournalAccountEntry.ReportingCurrencyAmount;
+            tmpTable.Text = generalJournalAccountEntry.Text;
+            tmpTable.TransactionCurrencyAmount = generalJournalAccountEntry.TransactionCurrencyAmount;
+            tmpTable.TransactionCurrencyCode = generalJournalAccountEntry.TransactionCurrencyCode;
+            tmpTable.MainAccount = generalJournalAccountEntry.MainAccount;
+            tmpTable.TransactionText = generalJournalAccountEntry.Text;
+            tmpTable.ETGCreatedBy = generalJournalEntry.CreatedBy;
+            tmpTable.ETGCreatedDate = generalJournalEntry.CreatedDateTime;
+            tmpTable.JournalrecId = generalJournalAccountEntry.RecId;
+
+            // Get ledger journal trans data
+            select ledgerJournalTrans
+                where ledgerJournalTrans.Voucher == generalJournalEntry.SubledgerVoucher;
+            
+            if (ledgerJournalTrans)
+            {
+                tmpTable.ETGCTRMInvoiceReferance = ledgerJournalTrans.Invoice;
+                tmpTable.ETGIntegrationContractNumber = ledgerJournalTrans.ETGIntegrationContractNumber;
+                tmpTable.PaymentReference     =   ledgerJournalTrans.PaymReference;
+            }
+
+            // Get main account display value
+            select DisplayValue from dimAttriView
+                where dimAttriView.ValueCombinationRecId == generalJournalAccountEntry.LedgerDimension
+                join BackingEntityType from dimAttri
+                    where dimAttri.RecId == dimAttriView.DimensionAttribute &&
+                          dimAttri.Name == "MainAccount";
+
+            if (dimAttriView)
+            {
+                mainAccount1 = dimAttriView.DisplayValue;
+            }
+            tmpTable.LedgerCode = mainAccount1;
+
+            // Get ledger and main account name
+            select ledger where ledger.Name == curExt();
+            select mainAccount
+                where mainAccount.MainAccountId == tmpTable.LedgerCode &&
+                      mainAccount.LedgerChartOfAccounts == ledger.ChartOfAccounts;
+
+            tmpTable.LedgerName = mainAccount.Name;
+
+            // Get counterparty information
+            counterParty = '';
+            counterPartyName = '';
+
+            select custTrans where custTrans.Voucher == generalJournalEntry.SubledgerVoucher;
+            if (custTrans)
+            {
+                counterParty = CustTable::find(custTrans.AccountNum).AccountNum;
+                counterPartyName = CustTable::find(custTrans.AccountNum).name();
+            }
+            else
+            {
+                select vendTrans where vendTrans.Voucher == generalJournalEntry.SubledgerVoucher;
+                if (vendTrans)
+                {
+                    counterParty = VendTable::find(vendTrans.AccountNum).AccountNum;
+                    counterPartyName = VendTable::find(vendTrans.AccountNum).name();
+                }
+            }
+
+            tmpTable.CounterpartyCode = counterParty;
+            tmpTable.CounterpartyName = counterPartyName;
+
+            // Get dimension values
+            tmpTable.BusinessUnit      = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, businessUnit);
+            
+            // 2. SECURITY CHECK
+            // If we are in entity y002 AND the user was found in the security table, apply filter
+            if (isRestrictedEntity && shouldFilter)
+            {
+                if (!allowedBusinessUnits.in(tmpTable.BusinessUnit))
+                {
+                    continue; // Skip this record
+                }
+            }
+
+            tmpTable.CostCenter        = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, costCenter);
+            tmpTable.Item              = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, item);
+            tmpTable.Location          = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, locations);
+            tmpTable.ProfitCenter      = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, profitCenter);
+            tmpTable.Vertical          = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, Vertical);
+            tmpTable.ETGSubCommodity   = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension,SubCommodity);
+            tmpTable.ETGSubVertical    = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension,subVertical);
+            tmpTable.InterCompany      = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension,intercompany);
+            tmpTable.Project           = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension,project);
+            tmpTable.ETGCommodity      = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension,mainCommodity);
+            tmpTable.Product_Service   = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension,product_Service);
+            tmpTable.Department        = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension,department);
+            tmpTable.Region            = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension,region);
+            tmpTable.Contract          = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension,contract);
+            tmpTable.LineOfBusiness    = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension,line_of_Businesss);
+            select InventTable where InventTable.ItemId == tmpTable.Item;
+
+            if(InventTable)
+            {
+                select ecoResProductTranslation where ecoResProductTranslation.Product == InventTable.Product;
+                tmpTable.CommodityDescription  =  ecoResProductTranslation.Description;
+            }
+            
+            
+            tmpTable.insert();
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

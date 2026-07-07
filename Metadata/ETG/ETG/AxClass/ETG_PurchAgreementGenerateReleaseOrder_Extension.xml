@@ -1,0 +1,345 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_PurchAgreementGenerateReleaseOrder_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classstr(PurchAgreementGenerateReleaseOrder))]
+final class ETG_PurchAgreementGenerateReleaseOrder_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>check</Name>
+				<Source><![CDATA[
+    public boolean check()
+    {
+        AgreementReference      agreementReference;
+        SalesAgreementHeader    salesAgreementHeader;
+        ETG_Parameters          etgParameters;
+        TmpPurchLine            tmpPurchLineLoc;
+        boolean                 ok = true;
+
+        if(purchAgreementHeader.ETG_IsThirdParty)
+        {
+            select firstonly SalesNumberSequence from salesAgreementHeader
+                where salesAgreementHeader.SalesNumberSequence == purchAgreementHeader.ETG_SalesAgreementIdTP
+                    && salesAgreementHeader.AgreementState == AgreementState::Effective;
+
+            if(!salesAgreementHeader.SalesNumberSequence)
+            {
+                ok = checkFailed(strFmt('Third party sales agreement %1 must be confirmed',salesAgreementHeader.SalesNumberSequence));
+            }
+            
+        }
+
+        next check();
+
+        etgParameters = ETG_Parameters::find();
+
+        tmpPurchLineLoc.setTmpData(releaseOrderLine);
+
+        if (etgParameters && etgParameters.ETG_OneItemMultipleVariant == NoYes::Yes && this.validationOneItemwithMultipleVariant(tmpPurchLineLoc) > 0 )
+        {
+            ok = checkFailed(strFmt('Purchase agreement line is having multiple item when parameter is enabled'));
+
+        }
+
+        return ok;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validationOneItemwithMultipleVariant</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Validating the lines for one item
+    /// </summary>
+    /// <param name = "_tmpPurchLine"></param>
+    /// <returns> integer value for count of record</returns>
+    public int  validationOneItemwithMultipleVariant(TmpPurchLine   _tmpPurchLine)
+    {
+        int             recCount    =   0;
+        int             loopcount   =   0;
+        ItemIdSmall     itemId;
+
+        while select _tmpPurchLine
+             group by ItemId
+                where _tmpPurchLine.PurchQty != 0
+        {
+            if (loopcount == 0)
+            {
+                itemId      =   _tmpPurchLine.ItemId;
+            }
+
+            if (loopcount > 0)
+            {
+                if (itemId != _tmpPurchLine.ItemId)
+                {
+                    recCount ++;
+                }
+            }
+
+            loopcount ++;
+        }
+
+        return recCount;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createOrder</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Populating maintain charges from purchase agreement to purchase order header.
+    /// </summary>
+    /// <param name = "_releaseOrderLine"></param>
+    /// <param name = "_releaseOrderTable"></param>
+    protected void createOrder(TmpPurchLine  _releaseOrderLine,
+                               TmpPurchTable _releaseOrderTable)
+    {
+        MarkupTrans                         markUpTrans;
+        purchTable                          purchTable;
+        PurchAgreementHeader                purchAgreementHeader;
+        ETG_ChargeCodes                     ChargeCodes,ChargeCodesloc;
+        AgreementLineQuantityCommitment     agreementLineQuantityCommitment,agreementLineQuantityCommitmentloc;
+        PurchLine                           purchLine;
+        
+        next createOrder(_releaseOrderLine,_releaseOrderTable);
+
+        if(ETGACFParameters::find().EnableProvisionalCharges == NoYes::Yes)
+        {
+            try
+            {
+                purchAgreementHeader = PurchAgreementHeader::find(_releaseOrderTable.PurchAgreementHeader);
+
+                select purchTable
+                order by RecId desc
+                where purchTable.MatchingAgreement == purchAgreementHeader.RecId;
+
+                select sum(ETGRemainingQuantity) from agreementLineQuantityCommitment
+                    where agreementLineQuantityCommitment.Agreement == purchAgreementHeader.RecId;
+
+                while  select ChargeCodes
+                where ChargeCodes.PurchNumberSequence == purchAgreementHeader.PurchNumberSequence
+                {
+                    LineAmount              lineAmount;
+                    markupTrans.initFromMarkupTable(MarkupTable::find(MarkupModuleType::Vend,  ChargeCodes.MarkupCode));
+                    markupTrans.initFromPurchTable(purchTable);
+                    markupTrans.LineNum = MarkupTrans::lastLineNum(markupTrans.TransTableId, markupTrans.TransRecId)+1;
+                    markupTrans.modifiedField(fieldNum(markupTrans ,Value ));
+                    markupTrans.MarkupCode = ChargeCodes.MarkupCode;
+                    markupTrans.Txt = ChargeCodes.TransTxt;
+                    if(ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Pcs)
+                    {
+                        markupTrans.MarkupCategory = MarkupCategory::Pcs;
+                    }
+                    else if(ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Fixed)
+                    {
+                        markupTrans.MarkupCategory = MarkupCategory::Fixed;
+                        while select  purchLine
+                            where purchLine.PurchId == purchTable.PurchId
+                        {
+                            lineAmount += (ChargeCodes.RemainingValue/agreementLineQuantityCommitment.ETGRemainingQuantity) * purchLine.PurchQty;
+
+                            select forupdate agreementLineQuantityCommitmentloc
+                                where agreementLineQuantityCommitmentloc.RecId == purchLine.MatchingAgreementLine;
+                            if(agreementLineQuantityCommitmentloc)
+                            {
+                                ttsbegin;
+                                agreementLineQuantityCommitmentloc.ETGRemainingQuantity = agreementLineQuantityCommitmentloc.CommitedQuantity - purchLine.PurchQty;
+                                agreementLineQuantityCommitmentloc.update();
+                                ttscommit;
+                            }
+                        }
+                    }
+                    else if(ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Percentage)
+                    {
+                        markupTrans.MarkupCategory = MarkupCategory::Percent;
+                        lineAmount                 =  ChargeCodes.Value;
+                    }
+
+                    markupTrans.Value                 = lineAmount;
+                    markupTrans.CurrencyCode          = ChargeCodes.CurrencyCode;
+                    markupTrans.ModuleType            = MarkupModuleType::Vend;
+                    markupTrans.ModuleCategory        = HeadingLine::Heading;
+                    markupTrans.ETGProvisionalCharges = NoYes::Yes;
+                    markupTrans.insert();
+
+                    select forupdate ChargeCodesloc where ChargeCodesloc.RecId == ChargeCodes.RecId;
+                    if(ChargeCodesloc)
+                    {
+                        ttsbegin;
+                        if(ChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Fixed)
+                        {
+                            ChargeCodesloc.RemainingValue = ChargeCodes.Value - lineAmount;
+                        }
+                        ChargeCodesloc.IsProvisionalChargesCreated = NoYes::Yes;
+                        ChargeCodesloc.update();
+                        ttscommit;
+                    }
+                }
+
+            }
+            catch(Exception::Error)
+            {
+                return;
+            }
+        }
+
+        //NS, DLT ,11032025, Provisional charges IncoTerms
+        if(purchAgreementHeader.ETG_SalesAgreementIdTP)
+        {
+            SalesAgreementHeader salesAgreementHeader = SalesAgreementHeader::findAgreementId(purchAgreementHeader.ETG_SalesAgreementIdTP);
+            SalesTable salesTable;
+            select firstonly salesTable order by RecId desc
+                where salesTable.MatchingAgreement == salesAgreementHeader.RecId;
+            ETGProvisionalChargesBackToBackOrder::createChargesSales(salesTable, salesAgreementHeader);
+        }
+        //NE, DLT ,11032025, Provisional charges IncoTerms
+
+
+        if(ETGACFParameters::find().EnablePTBFContractsPurch == NoYes::Yes)
+        {
+            ttsbegin;
+            
+            PurchAgreementHeader purchAgreementHeaderLoc;
+            purchAgreementHeaderLoc = PurchAgreementHeader::find(_releaseOrderTable.PurchAgreementHeader);
+            PurchTable purchTableLoc;
+
+            select purchTableLoc
+                order by RecId desc
+                where purchTableLoc.MatchingAgreement == purchAgreementHeaderLoc.RecId;
+
+            AgreementHeader aHeader;
+            AgreementLine aLine;
+
+            aHeader = AgreementHeader::find(purchAgreementHeaderLoc.RecId);
+            
+            while select aLine
+                where aLine.Agreement == aHeader.RecId
+            {
+                PurchLine purchLineUpd;
+                
+                select firstonly purchLineUpd where purchLineUpd.MatchingAgreementLine == aline.RecId
+                    && purchLineUpd.PurchId == purchTableLoc.PurchId;
+               
+                if(purchLineUpd)
+                {
+                    purchLineUpd.selectForUpdate(true);
+                    purchLineUpd.ETGPriceTolerance = aline.ETGPriceTolerance;
+                    purchLineUpd.doUpdate();
+                }
+            }
+            ttscommit;
+        }
+
+
+        if (ETGACFParameters::find().EnableDMSIntegration == NoYes::Yes
+            && BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGDMSReverePurchAgreementIntegrationEventClass)))
+        {
+            PurchAgreementHeader purchAgreementHeaderLocReve;
+
+
+           
+            //PurchAgreementHeader                          purchAgreementHeaderLocReve;
+            PurchTable                                    purchTableLocrev;
+            AgreementLineQuantityCommitment               agreementLineQtyCommit;
+            Qty                                           totalCommittedQty = 0;
+            Qty                                           totalRemainingQty = 0;
+            Qty                                           totalReleasedQty = 0;
+            boolean                                       isFullRelease = false;
+           // str                                           formattedDateTime;
+           // ETGDMSReverePurchAgreementIntegrationContract contract;
+           // ETGDMSReverePurchAgreementIntegrationEventClass eventClass;
+
+            purchAgreementHeaderLocReve = PurchAgreementHeader::find(_releaseOrderTable.PurchAgreementHeader);
+
+            select purchTableLocrev
+    order by RecId desc
+    where purchTableLocrev.MatchingAgreement == purchAgreementHeaderLocReve.RecId;
+
+    //        select sum(CommitedQuantity) from agreementLineQtyCommit
+    //where agreementLineQtyCommit.Agreement == purchAgreementHeaderLocReve.RecId;
+    //        totalCommittedQty = agreementLineQtyCommit.CommitedQuantity;
+
+    //        select sum(ETGRemainingQuantity) from agreementLineQtyCommit
+    //where agreementLineQtyCommit.Agreement == purchAgreementHeaderLocReve.RecId;
+    //        totalRemainingQty = agreementLineQtyCommit.ETGRemainingQuantity;
+
+           // totalReleasedQty = totalCommittedQty - totalRemainingQty;
+
+        //    if (totalCommittedQty > 0)
+        //    {
+        //        isFullRelease = (totalRemainingQty == 0);
+        //    }
+        //    else
+        //    {
+        //        PurchLine purchLineLoc;
+        //        while select sum(PurchQty) from purchLineLoc
+        //join purchTable
+        //    where purchTable.PurchId == purchLineLoc.PurchId
+        //       && purchTable.MatchingAgreement == purchAgreementHeaderLocReve.RecId
+        //        {
+        //            totalReleasedQty = purchLineLoc.PurchQty;
+        //        }
+        //        isFullRelease = false;
+
+
+                //purchAgreementHeaderLocReve  = PurchAgreementHeader::find(_releaseOrderTable.PurchAgreementHeader);
+
+                //PurchTable purchTableLocrev;
+
+                //select purchTableLocrev
+                //    order by RecId desc
+                //    where purchTableLocrev.MatchingAgreement == purchAgreementHeaderLocReve.RecId;
+
+                //select firstOnly purchLine
+                //where purchLine.PurchId == purchTableLocrev.PurchId;
+               
+
+                str formattedDateTime = DateTimeUtil::toStr(purchTableLocrev.CreatedDateTime);
+
+                ETGDMSReverePurchAgreementIntegrationContract contract = new ETGDMSReverePurchAgreementIntegrationContract();
+
+                contract.parmDealNumber(purchAgreementHeaderLocReve.ETGDMSDealNumbers);
+                contract.parmDataAreaId(curExt());
+                contract.parmDocumentNumber(purchTableLocrev.PurchId);
+                contract.parmDocumentDate(formattedDateTime);
+                contract.parmActivityOwner(purchTableLocrev.CreatedBy);
+
+                contract.parmOperationType("Order Release - Released");
+                contract.parmActivityName("Purchase Agreement Order Release");
+                contract.parmActivityRemarks(strFmt("The  Purchase agreement %1 is released with purchase order %2", purchAgreementHeaderLocReve.PurchNumberSequence,purchTableLocrev.PurchId));
+               
+                //if (purchLine.RemainPurchPhysical == 0)
+                //{
+                //    contract.parmOperationType("Order Release - Released");
+                //    contract.parmActivityName("Purchase Agreement Full Order Release");
+                //    contract.parmActivityRemarks(strFmt("The  Purchase agreement %1 is fully released with purchase order %2", purchAgreementHeaderLocReve.PurchNumberSequence,purchTableLocrev.PurchId));
+                //}
+                //else
+                //{
+
+                //    contract.parmOperationType("Order Release - Partial Released");
+                //    contract.parmActivityName("Purchase Agreement Partial Order Release");
+                //    contract.parmActivityRemarks(strFmt("The  Purchase agreement %1 is partially released with purchase order %2", purchAgreementHeaderLocReve.PurchNumberSequence,purchTableLocrev.PurchId));
+                //}
+
+                ETGDMSReverePurchAgreementIntegrationEventClass eventClass = ETGDMSReverePurchAgreementIntegrationEventClass::newFromContract(contract);
+                eventClass.send();
+           // }
+
+
+
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

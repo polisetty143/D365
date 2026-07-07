@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>PurchLine_ETGSPAIN_Table_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the <c>PurchLine</c> table for the ETGSPAIN model.
+/// </summary>
+[ExtensionOf(tableStr(PurchLine))]
+final class PurchLine_ETGSPAIN_Table_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initFromAgreementLine</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>initFromAgreementLine</c> method of the <c>PurchLine</c> table.
+    /// </summary>
+    /// <param name="_agreementLine">AgreementLine.</param>
+    public void initFromAgreementLine(AgreementLine _agreementLine)
+    {
+        next initFromAgreementLine(_agreementLine);
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            if (_agreementLine.AgreementLineType == CommitmentType::ProductQuantity)
+            {
+                AgreementLineQuantityCommitment agreementLineQuantityCommitment = AgreementLineQuantityCommitment::find(_agreementLine.RecId);
+
+                this.OverDeliveryPct                = agreementLineQuantityCommitment.ETGSPAINOverDeliveryPct;
+                this.UnderDeliveryPct               = agreementLineQuantityCommitment.ETGSPAINUnderDeliveryPct;
+                this.ETGSPAINPurchLoadPortId        = agreementLineQuantityCommitment.ETGSPAINPurchLoadPortId;
+                this.ETGSPAINPurchUnloadPortId      = agreementLineQuantityCommitment.ETGSPAINPurchUnloadPortId;
+                this.ETGSPAINPurchExecutionFromDate = agreementLineQuantityCommitment.ETGSPAINPurchExecutionFromDate;
+                this.ETGSPAINPurchExecutionDueDate  = agreementLineQuantityCommitment.ETGSPAINPurchExecutionDueDate;
+
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGSPAINsetDimensionValue</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Generates the new Default Dimension with the specified attribute value.
+    /// </summary>
+    /// <param name="_dimAttrName">Name of the Financial Dimension.</param>
+    /// <param name="_newDimensionValue">New value to insert.</param>
+    /// <param name="_newDimensionDescription">Description of the new value to insert.</param>
+    public void ETGSPAINsetDimensionValue(Name _dimAttrName, DimensionValue _newDimensionValue, Description _newDimensionDescription)
+    {
+        DimensionAttribute                  dimensionAttribute = DimensionAttribute::findByName(_dimAttrName);
+        DimensionFinancialTag               dimensionFinancialTag;
+        DimensionFinancialTag               dimensionFinancialTagValue;
+        RecId                               dimFinancialCategoryRecid;
+        IFRDimensionDefaultDimensionBuilder ifrDimensionDefaultDimensionBuilder;
+
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            if (dimensionAttribute)
+            {
+                dimFinancialCategoryRecid = dimensionAttribute.financialTagCategory();
+
+                // Comprobamos que exista el Valor en los valores de la Dimensión Financiera
+                select firstonly dimensionFinancialTag
+                where        dimensionFinancialTag.FinancialTagCategory == dimFinancialCategoryRecid
+                &&           dimensionFinancialTag.Value                == _newDimensionValue;
+
+                // Si no existe, lo generamos antes de asignarlo.
+                if(!dimensionFinancialTag.RecId)
+                {
+                    dimensionFinancialTagValue.clear();
+                    dimensionFinancialTagValue.initValue();
+                    dimensionFinancialTagValue.Value                = _newDimensionValue;
+                    dimensionFinancialTagValue.Description          = _newDimensionDescription;
+                    dimensionFinancialTagValue.FinancialTagCategory = dimFinancialCategoryRecid;
+                    dimensionFinancialTagValue.insert();
+                }
+            
+                ifrDimensionDefaultDimensionBuilder = IFRDimensionDefaultDimensionBuilder::construct(this.DefaultDimension);
+                this.DefaultDimension               = ifrDimensionDefaultDimensionBuilder.addDimensionValue(_dimAttrName, _newDimensionValue).getDefaultDimension();
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>delete</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>delete</c> method.
+    /// </summary>
+    /// <param name="_showInfoDelReserv">Boolean indicating whether to show information deletion reservation.</param>
+    /// <param name="_updateOrderLineOfDeliverySchedule">Boolean indicating whether to update the order line of the delivery schedule.</param>
+    void delete(boolean _showInfoDelReserv, boolean _updateOrderLineOfDeliverySchedule)
+    {
+       
+        /*
+        VendInvoiceTrans            vendInvoiceTrans        = VendInvoiceTrans::findInventTransid(this.InventTransId);
+        VendPackingSlipTrans        vendPackingSlipTrans    = VendPackingSlipTrans::findInventTransId_RU(this.InventTransId);
+
+        if (!vendInvoiceTrans && !vendPackingSlipTrans)
+        {
+            update_recordset etgspainUnsoldInventTrans
+                setting UnsoldQty = 0
+                join inventTrans
+                    where inventTrans.RecId                     == etgspainUnsoldInventTrans.RefRecId
+                    join inventTransOrigin
+                        where inventTransOrigin.RecId           == inventTrans.InventTransOrigin
+                            && inventTransOrigin.InventTransId  == this.InventTransId;
+        }
+        */
+        next delete(_showInfoDelReserv, _updateOrderLineOfDeliverySchedule);
+        
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            ETGSPAINUnsoldInventTrans::deleteFromCommon(this.orig());
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

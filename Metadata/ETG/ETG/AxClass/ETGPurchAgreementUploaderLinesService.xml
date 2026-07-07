@@ -1,0 +1,404 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchAgreementUploaderLinesService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+using System.IO;
+using OfficeOpenXml;
+using OfficeOpenXml.ExcelPackage;
+using OfficeOpenXml.ExcelRange;
+public final class ETGPurchAgreementUploaderLinesService extends SysOperationServiceBase
+{
+    System.IO.Stream                 stream;
+    FileUploadTemporaryStorageResult fileUploadResult;
+    ExcelSpreadsheetName             sheeet;
+    Filename                         filename;
+    ETGBrokerageCommissionType       brokerageCommissionType;
+    DimensionParameters              dimensionParameters = DimensionParameters::find();
+    protected   CommaStreamIo importFile;
+    ETG_PlaceOfLoading placeOfLoading;
+    ETG_PlaceOfDischarge placeOfDischarge;
+    LineNum     lineNum;
+    str         purchNumberSequenceLoc;
+    str         ETGReasonCodePurch;
+    str         ItemId;
+    str         name;
+    str         configId;
+    str         InventSizeId;
+    str         InventColorId;
+    str         InventStyleId;
+    str         InventSiteId;
+    str         InventLocationId;
+    real        CommitedQuantity;
+    str         ProductUnitOfMeasure;
+    real        PdsCWCommitedQuantity;
+    str         pdsCWUnitId;
+    real        NetAmount;
+    real        LineDiscountPercent;
+    real        PricePerUnit;
+    date        ExpirationDate;
+    real        LineDiscountAmount;
+    real        PriceUnit;
+    NoYesId     IsPriceInformationMandatory;
+    int         ETGPriceTolerance;
+    str         wMSLocationId;
+    str         ETG_ItemAlternativeName;
+    NoYesId     ETG_IsGrossWeight;
+    str         ETG_PriceType;
+    str         ETGPriceCondition;
+    real        ETGFuturePrice, ETGPremiumPrice;
+    str         PurchId;
+    real        PurchPrice;
+    real        PurchQty;
+    real        ETG_UnderDeliveryPct;
+    real        ETG_OverDeliveryPct;
+    str         QuantityConditions;
+    str         ETGPortOfLoading;
+    str         ETGPortOfLoadingDesc;
+    str         ETGPortOfDischarge;
+    str         ETGPortOfDischargeDesc;
+    str         ETGFinalPlaceOfDelivery;
+    ETG_ToleranceAction ETG_ToleranceAction;
+    real        ETG_ReleaseOrderLowerLimit;
+    real        ETG_ReleaseOrderUpperLimit;
+    str         Groupid;
+    str         groupDescription;
+    str         ETG_QualitySpecification, maxInforced;
+    str         defaultDimStr, BusinessUnit, Contract, costcenter, Department, InterCompany, Items, Line_of_Business, MainCommodity, 
+                Plant_Warehouse_Office, SubCommodity, TraderEmployee, Vertical ;
+    
+
+
+
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>importPurchContractsLines</Name>
+				<Source><![CDATA[
+    public void importPurchContractsLines(ETGPurchAgreementUploaderContract  _contract)
+    {
+        #OCCRetryCount
+
+        ReqItemTable                    reqItemTable,reqItemTableDim;
+        InventDim                       inventDim;
+        InventTable                     inventTable;
+
+        try
+        {
+            if (_contract.parmStorageResult() != conNull())
+            {
+                FileUploadTemporaryStorageResult fileUploadResultLoc = new FileUploadTemporaryStorageResult();
+                fileUploadResultLoc.unpack(_contract.parmStorageResult());
+
+
+                if (fileUploadResultLoc != null && fileUploadResultLoc.getUploadStatus())
+                {
+                    stream = fileUploadResultLoc.openResult();
+
+                    using (ExcelPackage Package = new ExcelPackage(stream))
+                    {
+                        int                         rowCount, i,columncount,j;
+                        Package.Load(stream);
+                        ExcelWorksheet              worksheet   = package.get_Workbook().get_Worksheets().get_Item(1);
+                        OfficeOpenXml.ExcelRange    range       = worksheet.Cells;
+                        rowCount                                = (worksheet.Dimension.End.Row) - (worksheet.Dimension.Start.Row)  + 1;
+                        columncount                             = (worksheet.Dimension.End.Column);
+
+                        for (i = 2; i<= rowCount; i++)
+                        {
+                            try
+                            {
+                                this.initilizeLine(range, i);
+                                this.createLines();
+                            }
+                            catch
+                            {
+                                warning(ETGSalesOrderUploaderService::getError());
+                                continue;
+                            }
+                            catch(Exception::Error)
+                            {
+                                warning(ETGSalesOrderUploaderService::getError());
+                                continue;
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    throw error(strfmt("@SYS62207",filename));
+                }
+            }
+        }
+
+        catch (Exception::Deadlock)
+        {
+            retry;
+        }
+
+        catch (Exception::UpdateConflict)
+        {
+            if (appl.ttsLevel() == 0)
+            {
+                if (xSession::currentRetryCount() >= #RetryNum)
+                {
+                    throw Exception::UpdateConflictNotRecovered;
+                }
+                else
+                {
+                    retry;
+                }
+            }
+            else
+            {
+                throw Exception::UpdateConflict;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initilizeLine</Name>
+				<Source><![CDATA[
+    public void initilizeLine(OfficeOpenXml.ExcelRange range, int i)
+    {
+        purchNumberSequenceLoc    = range.get_Item(i, 1).value;
+        lineNum                   = range.get_Item(i, 2).value;
+        ItemId                    = range.get_Item(i, 3).value;
+        name                      = range.get_Item(i, 4).value;
+        configId                  = range.get_Item(i, 5).value;
+        InventSizeId              = range.get_Item(i, 6).value;
+        InventColorId             = range.get_Item(i, 7).value;
+        InventStyleId             = range.get_Item(i, 8).value;
+        InventSiteId              = range.get_Item(i, 9).value;
+        InventLocationId          = range.get_Item(i, 10).value;
+        wMSLocationId             = range.get_Item(i, 11).value;
+        CommitedQuantity          = range.get_Item(i, 12).value;
+        ProductUnitOfMeasure      = range.get_Item(i, 13).value;
+        NetAmount                 = range.get_Item(i, 14).value;
+        LineDiscountPercent       = range.get_Item(i, 15).value;
+        PricePerUnit              = range.get_Item(i, 16).value;
+      //  ExpirationDate            = range.get_Item(i, 17).value;
+        LineDiscountAmount        = range.get_Item(i, 18).value;
+        PriceUnit                 = range.get_Item(i, 19).value;
+        IsPriceInformationMandatory = range.get_Item(i, 20).value;
+        ETGPriceTolerance         = range.get_Item(i, 21).value;
+        ETG_ItemAlternativeName   = range.get_Item(i, 22).value;
+        ETG_IsGrossWeight         = range.get_Item(i, 23).value;
+        ETG_PriceType             = range.get_Item(i, 24).value;
+        ETGPriceCondition         = range.get_Item(i, 25).value;
+        ETGPremiumPrice           = range.get_Item(i, 26).value;
+        ETGFuturePrice            = range.get_Item(i, 27).value;
+        ETG_UnderDeliveryPct      = range.get_Item(i, 28).value;
+        ETG_OverDeliveryPct       = range.get_Item(i, 29).value;
+        QuantityConditions         = range.get_Item(i, 30).value;
+        ETGPortOfLoading           = range.get_Item(i, 31).value;
+        ETGPortOfLoadingDesc       = range.get_Item(i, 32).value;
+        ETGPortOfDischarge         = range.get_Item(i, 33).value;
+        ETGPortOfDischargeDesc     = range.get_Item(i, 34).value;
+        ETGFinalPlaceOfDelivery    = range.get_Item(i, 35).value;
+        ETG_ToleranceAction        = range.get_Item(i, 36).value;
+        ETG_ReleaseOrderLowerLimit = range.get_Item(i, 37).value;
+        ETG_ReleaseOrderUpperLimit = range.get_Item(i, 38).value;
+        BusinessUnit               = range.get_Item(i, 39).value;
+        Contract                   = range.get_Item(i, 40).value;
+        costcenter                 = range.get_Item(i, 41).value;
+        InterCompany               = range.get_Item(i, 42).value;
+        Items                      = range.get_Item(i, 43).value;
+        Line_of_Business           = range.get_Item(i, 44).value;
+        MainCommodity              = range.get_Item(i, 45).value;
+        Plant_Warehouse_Office     = range.get_Item(i, 46).value;
+        SubCommodity               = range.get_Item(i, 47).value;
+        TraderEmployee             = range.get_Item(i, 48).value;
+        Vertical                   = range.get_Item(i, 49).value;
+        ETGReasonCodePurch         = range.get_Item(i, 50).value;
+        maxInforced                = range.get_Item(i, 51).value;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getError</Name>
+				<Source><![CDATA[
+    public static str getError()
+    {
+        SysInfologEnumerator    sysInfologEnumerator;
+        SysInfologMessageStruct infoMessageStruct;
+        str                     logMessage;
+        str                           logString;
+        str                          ret;
+        int                          i;
+        #Define.NewLine('\n')
+        sysInfologEnumerator = SysInfologEnumerator::newData(infolog.infologData());
+        while (sysInfologEnumerator.moveNext())
+        {
+            i = 1;
+            if (logMessage)
+            {
+                logMessage += #Newline;
+            }
+            infoMessageStruct = SysInfologMessageStruct::construct(sysInfologEnumerator.currentMessage());
+
+            while (i <= infoMessageStruct.prefixDepth())
+            {
+                logString = logString + infoMessageStruct.preFixTextElement(i) + '. ';
+                i++;
+            }
+
+            logString = logString + infoMessageStruct.message();
+            logMessage = logMessage + infoMessageStruct.message();
+        }
+
+        infolog().clear();
+
+        return logMessage;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createLines</Name>
+				<Source><![CDATA[
+    public void createLines()
+    {
+        PurchPurchaseAgreementLineV2Entity      purchAgreementLine;
+        PurchPurchaseAgreementHeaderV2Entity    purchAgreementHeader;
+        AgreementLine                           agreementLine;
+
+        select firstonly purchAgreementHeader where purchAgreementHeader.PurchAgreementId == purchNumberSequenceLoc;
+
+        purchAgreementLine.PURCHASEAGREEMENTID                  = purchNumberSequenceLoc;
+        purchAgreementLine.Agreement                            = purchAgreementHeader.RecId;
+        purchAgreementLine.ItemNumber                           = ItemId;
+        if(name)
+        {
+            purchAgreementLine.ItemName                         = name;
+        }
+        else
+        {
+            purchAgreementLine.ItemName                         = InventTable::find(ItemId).productNameInSystemLanguage();
+        }
+        
+        purchAgreementLine.LineNumber                           = lineNum;
+        purchAgreementLine.InvoiceVendorAccountNumber           = purchAgreementHeader.InvoiceVendorAccountNumber;
+        purchAgreementLine.AgreementVendorAccountNumber         = purchAgreementHeader.AgreementVendorAccountNumber;
+        purchAgreementLine.CommitmentType                       = purchAgreementHeader.DefaultCommitmentType;
+        purchAgreementLine.CommittedQuantity                    = CommitedQuantity;
+        purchAgreementLine.EffectiveDate                        = purchAgreementHeader.DefaultEffectiveDate;
+        purchAgreementLine.ProductConfigurationId               = configId;
+        purchAgreementLine.ProductSizeId                        = InventSizeId;
+        purchAgreementLine.ProductColorId                       = InventColorId;
+        purchAgreementLine.ProductStyleId                       = InventStyleId;
+        purchAgreementLine.ReceivingSiteId                      = InventSiteId;
+        purchAgreementLine.ReceivingWarehouseId                 = InventLocationId;
+        purchAgreementLine.wMSLocationId                        = wMSLocationId;
+      //  purchAgreementLine.CommittedAmount                      = NetAmount;
+        purchAgreementLine.LineDiscountPercentage               = LineDiscountPercent;
+        purchAgreementLine.PricePerUnit                         = PricePerUnit;
+        purchAgreementLine.ExpirationDate                       = purchAgreementHeader.DefaultExpirationDate;
+        purchAgreementLine.LineDiscountAmount                   = LineDiscountAmount;
+        purchAgreementLine.Price                                = PricePerUnit;
+        purchAgreementLine.PriceUnit                            = PriceUnit;
+        purchAgreementLine.ETG_ItemAlternativeName              = ETG_ItemAlternativeName;
+        purchAgreementLine.ETG_IsGrossWeight                    = ETG_IsGrossWeight;
+        if(ETG_PriceType == "None")
+        {
+            purchAgreementLine.ETG_PriceType                        = ETG_PriceType::None;
+        }
+        else if(ETG_PriceType == "Fixed")
+        {
+            purchAgreementLine.ETG_PriceType                        = ETG_PriceType::Fixed;
+        }
+        else if(ETG_PriceType == "Floating")
+        {
+            purchAgreementLine.ETG_PriceType                        = ETG_PriceType::Floating;
+        }
+        
+        purchAgreementLine.ETGPriceCondition                    = ETGPriceCondition;
+        purchAgreementLine.ETGFuturePrice                       = ETGFuturePrice;
+        purchAgreementLine.ETGPremiumPrice                      = ETGPremiumPrice;
+        purchAgreementLine.ETG_UnderDeliveryPct                 = ETG_UnderDeliveryPct;
+        purchAgreementLine.ETG_OverDeliveryPct                  = ETG_OverDeliveryPct;
+        purchAgreementLine.ETG_QuantityConditions               = QuantityConditions;
+        purchAgreementLine.ETGPortOfLoading                        = ETGPortOfLoading;
+        purchAgreementLine.ETGPortOfLoadingDesc                    = ETGPortOfLoadingDesc;
+        purchAgreementLine.ETGPortOfDischarge                      = ETGPortOfDischarge;
+        purchAgreementLine.ETGPortOfDischargeDesc                  = ETGPortOfDischargeDesc;
+        purchAgreementLine.PurchaseAgreementLegalEntityId       = curExt();
+        purchAgreementLine.InvoiceVendorAccountNumber           = purchAgreementHeader.InvoiceVendorAccountNumber;
+        purchAgreementLine.UnitSymbol                           = ProductUnitOfMeasure;
+        purchAgreementLine.ETG_ToleranceAction                  = ETG_ToleranceAction;
+        purchAgreementLine.ETG_ReleaseOrderLowerLimit           = ETG_ReleaseOrderLowerLimit;
+        purchAgreementLine.ETG_ReleaseOrderUpperLimit           = ETG_ReleaseOrderUpperLimit;
+        purchAgreementLine.EffectiveDate                        = purchAgreementHeader.DefaultEffectiveDate;
+        purchAgreementLine.ExpirationDate                       = purchAgreementHeader.DefaultExpirationDate;
+        purchAgreementLine.IsPriceInformationMandatory          = IsPriceInformationMandatory;
+        purchAgreementLine.ETGReasonCodePurch                   = ETGReasonCodePurch;
+        if(maxInforced == "Yes" || maxInforced == "YES")
+        {
+            purchAgreementLine.IsMaxEnforced                    = NoYes::Yes;
+        }
+        else
+        {
+            purchAgreementLine.IsMaxEnforced                    = NoYes::No;
+        }
+
+        purchAgreementLine.ETG_QualitySpecification              = ETG_QualitySpecification;
+        purchAgreementLine.DefaultLedgerDimensionDisplayValue     = Vertical + "|"
+                                                                    + BusinessUnit + "|"
+                                                                    + MainCommodity + "|"
+                                                                    + SubCommodity + "|"
+                                                                    + Contract + "|"
+                                                                    + TraderEmployee + "|"
+                                                                    + Intercompany + "|"
+                                                                    + costcenter + "|"
+                                                                    + Line_of_Business + "|"
+                                                                    + Plant_Warehouse_Office + "|"
+                                                                    + Items;
+
+      //  Vertical|BusinessUnit|MainCommodity|SubCommodity|Contract|Trader_Employee|Intercompany|Department|Line_of_Businesss|Plant_Warehouse_Office|Item
+
+
+
+        purchAgreementLine.PricePerUnit = PricePerUnit;
+        purchAgreementLine.ETGFinalPlaceOfDelivery   = ETGFinalPlaceOfDelivery;
+        if(purchAgreementLine.validateWrite())
+        {
+            select firstonly RecId from agreementLine 
+                where agreementLine.Agreement == purchAgreementLine.Agreement
+                && agreementLine.LineNumber == purchAgreementLine.LineNumber
+                && agreementLine.ItemDataAreaId == purchAgreementHeader.BuyingLegalEntityId;
+
+            if(agreementLine.RecId)
+            {
+                ttsbegin;
+                purchAgreementLine.selectForUpdate();
+                purchAgreementLine.update();
+                ttscommit;
+            }
+            else
+            {
+                purchAgreementLine.insert();
+                info(strFmt("Agreement id %1 item %2  line number %3 is successfully created", 
+                    purchAgreementHeader.PurchAgreementId, 
+                    purchAgreementLine.ItemNumber,
+                    purchAgreementLine.LineNumber));
+            }
+        }
+        else
+        {
+            warning(strFmt("Agreement id %1 item %2  line number %3 is not uploaded",
+                purchAgreementHeader.PurchAgreementId,
+                purchAgreementLine.ItemNumber,
+                purchAgreementLine.LineNumber));
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

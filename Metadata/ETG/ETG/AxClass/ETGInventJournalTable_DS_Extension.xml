@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGInventJournalTable_DS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension for InventJournalTable datasource on InventJournalBOM form.
+/// Controls the enable/disable behavior of "Create FG Movement Journal" button
+/// based on journal status and configuration.
+/// </summary>
+[ExtensionOf(formdatasourcestr(InventJournalBOM,InventJournalTable))]
+final class ETGInventJournalTable_DS_Extension
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {
+        int ret = next active();
+
+        InventJournalTable  journalTable        = this.cursor();
+        InventJournalTable  inventJournalTable;
+        InventJournalTrans  inventJournalTrans  = this.formRun().dataSource(formdatasourcestr(InventJournalBOM,InventJournalTrans)).cursor();
+        ETGCanadaParameters parameters          = ETGCanadaParameters::find();
+        FormRun formRun                         = this.formRun();
+        FormControl btn                         = formRun.design().controlName(formControlStr(InventJournalBOM,ETGCreateFGMovementJournal));
+
+        select firstonly inventJournalTable where inventJournalTable.JournalId == inventJournalTrans.ETGFGMovementJournalId;
+        if (btn && journalTable )
+        {
+            boolean enableButton = false;
+
+            if (journalTable.Posted == NoYes::Yes
+                && parameters.EnableAutoMovementJournalCreation == NoYes::Yes && !inventJournalTable && inventJournalTrans.BOMLine==NoYes::No)
+            {
+                enableButton = true;
+            }
+            else
+            {
+                   enableButton = false;
+            }
+
+            btn.enabled(enableButton);
+            
+        }
+        return ret;
+       
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>selectionChanged</Name>
+				<Source><![CDATA[
+    public void selectionChanged()
+    {
+        next selectionChanged();
+        InventJournalTable journalTable = this.cursor();
+        InventJournalTable inventJournalTable;
+        InventJournalTrans inventJournalTrans;
+        ETGCanadaParameters parameters = ETGCanadaParameters::find();
+
+        FormRun formRun = this.formRun();
+
+        FormControl btn = formRun.design().controlName(formControlStr(InventJournalBOM,ETGCreateFGMovementJournal));
+        select firstonly inventJournalTrans where inventJournalTrans.JournalId==journalTable.JournalId 
+            && inventJournalTrans.BOMLine==NoYes::No && inventJournalTrans.ETGFGMovementJournalId=='';
+
+        
+        if (btn && journalTable )
+        {
+            boolean enableButton = false;
+
+            if (journalTable.Posted == NoYes::Yes
+                && parameters.EnableAutoMovementJournalCreation == NoYes::Yes && inventJournalTrans)
+            
+            {
+                enableButton = true;
+            }
+            else
+            {
+                enableButton = false;
+            }
+
+            btn.enabled(enableButton);
+            this.refresh();
+            
+           
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_AgreementLineHandlers</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_AgreementLineHandlers
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>ItemId_OnModified</Name>
+				<Source><![CDATA[
+    [FormDataFieldEventHandler(formDataFieldStr(PurchAgreement, ALine, ItemId), FormDataFieldEventType::Modified)]
+    public static void ItemId_OnModified(FormDataObject sender, FormDataFieldEventArgs e)
+    {  
+        FormDataSource        aline_ds  =  sender.datasource();
+        AgreementLineQuantityCommitment         aline     =  aline_ds.cursor();
+        ItemId                itemId    = sender.getValue();       
+        InventTableModule     inventTableModule = InventTableModule::find(itemId,ModuleInventPurchSales::Purch);
+
+        aline.ETG_OverDeliveryPct  = inventTableModule.OverDeliveryPct;
+        aline.ETG_UnderDeliveryPct = inventTableModule.UnderDeliveryPct;
+        aline.ETG_PriceType        = ETG_PriceType::Fixed;
+        aline.DefaultDimension     = InventTable::find(itemId).DefaultDimension;
+        aline.IsMaxEnforced        = NoYes::Yes;
+        aline.CommitedQuantity     = 0;
+        // NS, DLT , 04/03/2025 Item description  - should not show item number but actual product description
+        aline.ETG_ItemAlternativeName = aline.name();
+        // NE, DLT , 04/03/2025 Item description  - should not show item number but actual description
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ItemId_OnModifiedSales</Name>
+				<Source><![CDATA[
+    [FormDataFieldEventHandler(formDataFieldStr(SalesAgreement, ALine, ItemId), FormDataFieldEventType::Modified)]
+    public static void ItemId_OnModifiedSales(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        FormDataSource        aline_ds  =  sender.datasource();
+        AgreementLineQuantityCommitment         aline     =  aline_ds.cursor();
+        ItemId                itemId    = sender.getValue();
+        InventTableModule     inventTableModule = InventTableModule::find(itemId,ModuleInventPurchSales::Purch);
+
+        /*aline.ETG_OverDeliveryPct  = inventTableModule.OverDeliveryPct;
+        aline.ETG_UnderDeliveryPct = inventTableModule.UnderDeliveryPct;
+        aline.ETG_PriceType        = ETG_PriceType::Fixed;
+        aline.DefaultDimension     = InventTable::find(itemId).DefaultDimension;
+        aline.IsMaxEnforced        = NoYes::Yes;
+        aline.CommitedQuantity     = 0;*/
+        // NS, DLT , 04/03/2025 Item description  - should not show item number but actual description
+        aline.ETG_ItemAlternativeName = aline.name();
+        // NE, DLT , 04/03/2025 Item description  - should not show item number but actual description
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ALine_OnWritten</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataSourceEventHandler(formDataSourceStr(PurchAgreement, ALine), FormDataSourceEventType::Written)]
+    public static void ALine_OnWritten(FormDataSource sender, FormDataSourceEventArgs e)
+    {
+        AgreementLineQuantityCommitment aline      =  sender.cursor();
+       
+        ETG_AgreementLineNotes       agreementlineNotes,agreementlineNotesDel;
+        ETG_ItemQualityGrp           itemQualityGrp;
+        ETG_ItemQualitySpecDetails   itemQualitySpecDetails;
+        ETG_AgreementLineQualityGrp  agreementLineQualityGrp;
+        ETGAgrrementQualitySpecsLine agreementQualitySpecsDetails;
+        ETG_IsCreatedAgreement       isCreatedAgreement;
+
+        ETGTradingNotes         tradingNotes;
+        boolean                 isNotes = false;
+        RecordInsertList        tmpInsNotes = new RecordInsertList(tableNum(ETG_AgreementLineNotes));
+        RecordInsertList        tmpInsSpecGrp = new RecordInsertList(tableNum(ETG_AgreementLineQualityGrp));
+        RecordInsertList        tmpInsSpecDetails = new RecordInsertList(tableNum(ETGAgrrementQualitySpecsLine));
+
+        select firstonly isCreatedAgreement
+            where isCreatedAgreement.AgreementLine == aline.RecId;
+       
+        if(!isCreatedAgreement)
+        {
+            isCreatedAgreement.clear();
+            isCreatedAgreement.AgreementLine = aline.RecId;
+            isCreatedAgreement.insert();
+
+            while select EnumNotes,Description,PrintNotesInContract from tradingNotes
+                where tradingNotes.ItemId == aline.ItemId
+            {
+                agreementlineNotes.AgreementLine = aline.RecId;
+                agreementlineNotes.EnumNotes     = tradingNotes.EnumNotes;
+                agreementlineNotes.Description   = tradingNotes.Description;
+                agreementlineNotes.PrintNotesInContract = tradingNotes.PrintNotesInContract;
+                agreementlineNotes.ItemId               = aline.ItemId;
+                tmpInsNotes.add(agreementlineNotes);
+            }
+              
+            while select * from itemQualityGrp
+                where itemQualityGrp.ItemId  == aline.ItemId
+            {
+                agreementLineQualityGrp.GroupId         = itemQualityGrp.GroupId;
+                agreementLineQualityGrp.AgreementLine   = aline.RecId;
+                tmpInsSpecGrp.add(agreementLineQualityGrp);
+            }
+
+            while select * from itemQualitySpecDetails
+                where itemQualitySpecDetails.ItemId == aline.ItemId
+            {
+                agreementQualitySpecsDetails.GroupID               = itemQualitySpecDetails.GroupID;
+                agreementQualitySpecsDetails.MaxRange              = itemQualitySpecDetails.MaxRange;
+                agreementQualitySpecsDetails.MinRange              = itemQualitySpecDetails.MinRange;
+                agreementQualitySpecsDetails.AgreementLineRefrecid = aline.RecId;
+                agreementQualitySpecsDetails.SubGrpId              = itemQualitySpecDetails.SubGrpId;
+                agreementQualitySpecsDetails.SubGroupDescription   = itemQualitySpecDetails.SubGroupDescription;
+                agreementQualitySpecsDetails.MeasurementType       = itemQualitySpecDetails.MeasurementType;
+                agreementQualitySpecsDetails.AdjustmentType        = itemQualitySpecDetails.AdjustmentType;
+                agreementQualitySpecsDetails.Increment             = itemQualitySpecDetails.Increment;
+                agreementQualitySpecsDetails.FixedValue            = itemQualitySpecDetails.FixedValue;
+                tmpInsSpecDetails.add(agreementQualitySpecsDetails);
+            }
+
+            tmpInsNotes.insertDatabase();
+            tmpInsSpecGrp.insertDatabase();
+            tmpInsSpecDetails.insertDatabase();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ALine_OnValidatedWrite</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataSourceEventHandler(formDataSourceStr(PurchAgreement, ALine), FormDataSourceEventType::ValidatedWrite)]
+    public static void ALine_OnValidatedWrite(FormDataSource sender, FormDataSourceEventArgs e)
+    {
+        AgreementLineQuantityCommitment aline      =  sender.cursor();
+
+        if(aline.ETG_PriceType == ETG_PriceType::Fixed && !aline.PricePerUnit)
+            throw Error('Unit price should be mandatory for fixed price type');
+
+        if(aline.CommitedQuantity == 0)
+            throw Error('Quantity must be filled in');
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

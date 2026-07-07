@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGInventJourBomFetchItems_EventHandler</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+internal final class ETGInventJourBomFetchItems_EventHandler
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>ETGFetchItems_OnClicked</Name>
+				<Source><![CDATA[
+    [FormControlEventHandler(formControlStr(InventJournalBOM, ETGFetchItems), FormControlEventType::Clicked)]
+    public static void ETGFetchItems_OnClicked(FormControl sender, FormControlEventArgs e)
+    {
+        FormRun                 formRun;
+        FormDataSource          inventJournalTransDS;
+        InventJournalTrans      currentLine;
+        InventTable             inventTable;
+        InventJournalTable      journalTable;
+        InventDim               inventDim_Loc;
+
+        formRun                 = sender.formRun();
+        inventJournalTransDS    = formRun.dataSource(formDataSourceStr(InventJournalBOM, InventJournalTrans));
+        currentLine             = inventJournalTransDS.cursor();
+        inventTable             = InventTable::find(currentLine.ItemId);
+        journalTable            = InventJournalTable::find(currentLine.JournalId);
+
+        ttsbegin;
+
+        if (inventTable.ETGSfgMapping)
+        {
+            InventDim           baseDim;
+            InventDim           inventDim;
+            InventDimId         inventDimId;
+            InventJournalTrans  newLine;
+            InventTableModule   inventTableModule;
+            InventTable         locInventTable = InventTable::find(inventTable.ETGSFGMapping);
+
+            newLine.clear();
+
+            newLine.JournalId           = currentLine.JournalId;
+            newLine.InventTransIdFather = currentLine.InventTransId;
+            newLine.TransDate           = currentLine.TransDate;
+            newLine.ItemId              = inventTable.ETGSfgMapping;
+            newLine.DefaultDimension    = locInventTable.DefaultDimension;
+            newLine.BOMLine             = NoYes::Yes;
+            newLine.JournalType         = InventJournalType::BOM;
+
+            inventTableModule   = InventTableModule::find(newLine.ItemId, ModuleInventPurchSales::Invent);
+            newLine.Unit        = inventTableModule.UnitId;
+
+            baseDim = InventDim::find(inventTable::getInventDimId(newLine.ItemId));
+
+            inventDim.clear();
+
+            inventDim.InventColorId = baseDim.InventColorId;
+            inventDim.InventSizeId  = baseDim.InventSizeId;
+            inventDim.InventStyleId = baseDim.InventStyleId;
+            inventDim.ConfigId      = baseDim.ConfigId;
+            inventDim.InventSiteId  = journalTable.InventSiteId;
+            inventDim.InventLocationId = journalTable.InventLocationId;
+
+            //CS, DLT, SB, Assign Custom BatchId
+            inventDim.inventBatchId = locInventTable.ETGDefaultBatchNumber;
+            //CE, DLT, SB
+
+            inventDimId = InventDim::findOrCreate(inventDim).InventDimId;
+            
+            newLine.InventDimId = inventDimId;
+            newLine.Qty         = -abs(currentLine.Qty * inventTable.ETG_SFGQuantity);
+            newLine.UnitQty     = newLine.Qty;
+
+            newLine.insert();
+ 
+        }
+
+        if (inventTable.ETGPackagingMaterial)
+        {
+            InventDim               locBaseDim;
+            InventDim               locInventDim;
+            InventDimId             locInventDimId;
+            InventJournalTrans      locNewLine;
+            UnitOfMeasureConversion unitOfMeasureConversion;
+            UnitOfMeasure           unitOfMeasure;
+            InventTableModule       locInventTableModule;
+            InventTable             locInventTable = InventTable::find(inventTable.ETGPackagingMaterial);
+
+            real                    uomFactor;
+
+            locNewLine.clear();
+
+            locNewLine.JournalId            = currentLine.JournalId;
+            locNewLine.InventTransIdFather  = currentLine.InventTransId;
+            locNewLine.TransDate            = currentLine.TransDate;
+            locNewLine.ItemId               = inventTable.ETGPackagingMaterial;
+            locNewLine.DefaultDimension     = locInventTable.DefaultDimension;
+            locNewLine.BOMLine              = NoYes::Yes;
+            locNewLine.JournalType          = InventJournalType::BOM;
+
+            locInventTableModule    = InventTableModule::find(locNewLine.ItemId, ModuleInventPurchSales::Invent);
+            locNewLine.Unit         = locInventTableModule.UnitId;
+
+            locBaseDim = InventDim::find(inventTable::getInventDimId(locNewLine.ItemId));
+
+            locInventDim.clear();
+
+            locInventDim.InventColorId = locBaseDim.InventColorId;
+            locInventDim.InventSizeId  = locBaseDim.InventSizeId;
+            locInventDim.InventStyleId = locBaseDim.InventStyleId;
+            locInventDim.ConfigId      = locBaseDim.ConfigId;
+            locInventDim.InventSiteId  = journalTable.InventSiteId;
+            locInventDim.InventLocationId = journalTable.InventLocationId;
+
+            //CS, DLT, SB, Assign Custom BatchId
+            locInventDim.inventBatchId = locInventTable.ETGDefaultBatchNumber;
+            //CE, DLT, SB
+
+            locInventDimId = InventDim::findOrCreate(locInventDim).InventDimId;
+            locNewLine.InventDimId = locInventDimId;
+
+            uomFactor = ETGInventJourBomFetchItems_EventHandler::getUnitFactor(locNewLine.ItemId,currentLine.Unit,locNewLine.Unit);
+
+            locNewLine.Qty      = -abs(currentLine.Qty / uomFactor);
+            locNewLine.UnitQty  = locNewLine.Qty;
+
+            locNewLine.insert();
+ 
+        }
+
+        ttscommit;
+
+        inventJournalTransDS.research(true);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getUnitFactor</Name>
+				<Source><![CDATA[
+    public static real getUnitFactor(ItemId _itemId,UnitOfMeasureSymbol _fromUnitSymbol,UnitOfMeasureSymbol _toUnitSymbol)
+    {
+        InventTable             inventTable = InventTable::find(_itemId);
+        UnitOfMeasure           fromUOM, toUOM;
+        UnitOfMeasureConversion uomConv;
+
+        if (_fromUnitSymbol == _toUnitSymbol)
+        {
+            return 1;
+        }
+
+        select firstOnly RecId from fromUOM
+            where fromUOM.Symbol == _fromUnitSymbol;
+
+        select firstOnly RecId from toUOM
+            where toUOM.Symbol == _toUnitSymbol;
+
+        if (!fromUOM || !toUOM)
+        {
+            throw error(strFmt("Unit of measure not found. From: %1, To: %2",_fromUnitSymbol,_toUnitSymbol));
+        }
+
+        //Direct conversion (FROM → TO)
+        select firstOnly uomConv
+            where uomConv.Product == inventTable.Product
+            && uomConv.FromUnitOfMeasure == fromUOM.RecId
+            && uomConv.ToUnitOfMeasure   == toUOM.RecId;
+
+        if (uomConv)
+        {
+            return uomConv.Factor;
+        }
+
+        //Reverse conversion (TO → FROM) → invert factor
+        select firstOnly uomConv
+            where uomConv.Product == inventTable.Product
+            && uomConv.FromUnitOfMeasure == toUOM.RecId
+            && uomConv.ToUnitOfMeasure   == fromUOM.RecId;
+
+        if (uomConv)
+        {
+            return 1 / uomConv.Factor;
+        }
+
+        throw error(strFmt("No Unit of measure conversion found for Item %1 (%2 ↔ %3)",_itemId,_fromUnitSymbol,_toUnitSymbol));
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>SalesInvoiceBusinessEventContract</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[DataContract]
+public final class SalesInvoiceBusinessEventContract extends BusinessEventsContract
+{
+    private CustInvoiceId       invoiceId;
+    private TransDate           transactionDate;
+    private SalesId             salesId;
+    private SalesAgreementId    salesAgreementNumber;
+    private str                 dealNumber;
+    private str                 source;
+    private CustAccount         customerNo;
+    private AmountCur           invoiceAmount;
+    private CurrencyCode        currency;
+    private RefRecId            recordId;
+    private str                 transactionType;
+    
+    // Lines collection
+    private List                lines;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initialize</Name>
+				<Source><![CDATA[
+    protected void initialize(CustInvoiceJour _journal)
+    {
+        SalesTable              salesTable;
+        SalesAgreementHeader    salesAgreementHeader;
+        AgreementHeaderDefault  agreementHeaderDefault;
+
+        // Hardcoded values
+        transactionType = 'SalesInvoice';
+        source          = 'D365';
+        
+        // Populate standard header fields from journal
+        invoiceId       = _journal.InvoiceId;
+        transactionDate = _journal.InvoiceDate;
+        salesId         = _journal.SalesId;
+        customerNo      = _journal.OrderAccount;
+        currency        = _journal.CurrencyCode;
+        recordId        = _journal.RecId;
+
+        // Lookup SalesAgreement and Deal Number
+        salesTable = SalesTable::find(_journal.SalesId);
+        
+        select firstonly salesAgreementHeader
+            where salesAgreementHeader.RecId == salesTable.MatchingAgreement;
+
+        if (salesAgreementHeader.RecId)
+        {
+            salesAgreementNumber = salesAgreementHeader.SalesNumberSequence;
+
+            select firstonly agreementHeaderDefault
+                where agreementHeaderDefault.AgreementHeader == salesAgreementHeader.RecId;
+
+            if (agreementHeaderDefault.RecId)
+            {
+                dealNumber = agreementHeaderDefault.ETGDealNumber;
+            }
+        }
+        
+        // Initialize lines list
+        lines = new List(Types::Class);
+
+        // Populate lines and calculate total invoice amount
+        this.populateLines(_journal);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>populateLines</Name>
+				<Source><![CDATA[
+    private void populateLines(CustInvoiceJour _journal)
+    {
+        CustInvoiceTrans invoiceTrans;
+
+        invoiceAmount = 0;
+
+        // Loop through lines for this specific invoice
+        while select invoiceTrans
+            where invoiceTrans.SalesId == _journal.SalesId
+               && invoiceTrans.InvoiceId == _journal.InvoiceId
+               && invoiceTrans.InvoiceDate == _journal.InvoiceDate
+        {
+            // Accumulate total header amount
+            invoiceAmount += invoiceTrans.LineAmount;
+            
+            // Instantiate the line contract and pass down header values (like InvoiceId and Currency) + Line values
+            SalesInvoiceLineBusinessEventContract lineContract = SalesInvoiceLineBusinessEventContract::construct(
+                _journal.InvoiceId,
+                invoiceTrans.Qty,
+                invoiceTrans.LineAmount,
+                invoiceTrans.ItemId,
+                _journal.CurrencyCode,
+                invoiceTrans.TaxGroup, // Used TaxGroup for TaxCode, can be changed to TaxItemGroup if preferred
+                invoiceTrans.TaxAmount);
+
+            lines.addEnd(lineContract);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>newFromCustInvoiceJour</Name>
+				<Source><![CDATA[
+    public static SalesInvoiceBusinessEventContract newFromCustInvoiceJour(CustInvoiceJour _journal)
+    {
+        var contract = new SalesInvoiceBusinessEventContract();
+        contract.initialize(_journal);
+        return contract;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmLines</Name>
+				<Source><![CDATA[
+    // --- Data Members for Collections ---
+
+    [DataMember('Lines'),
+     DataCollectionAttribute(Types::Class, classStr(SalesInvoiceLineBusinessEventContract)),
+     BusinessEventsDataMember('Invoice Lines')]
+    public List parmLines(List _lines = lines)
+    {
+        lines = _lines;
+        return lines;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmInvoiceNo</Name>
+				<Source><![CDATA[
+    // --- Data Members for Header Fields (Exact Match) ---
+
+    [DataMember('Invoice No'), BusinessEventsDataMember('Invoice No')]
+    public CustInvoiceId parmInvoiceNo(CustInvoiceId _invoiceId = invoiceId)
+    {
+        invoiceId = _invoiceId;
+        return invoiceId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmTransactionDate</Name>
+				<Source><![CDATA[
+    [DataMember('Transaction Date'), BusinessEventsDataMember('Transaction Date')]
+    public TransDate parmTransactionDate(TransDate _transactionDate = transactionDate)
+    {
+        transactionDate = _transactionDate;
+        return transactionDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmSalesOrderNumber</Name>
+				<Source><![CDATA[
+    [DataMember('Sales order number'), BusinessEventsDataMember('Sales order number')]
+    public SalesId parmSalesOrderNumber(SalesId _salesId = salesId)
+    {
+        salesId = _salesId;
+        return salesId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmSalesAgreementNumber</Name>
+				<Source><![CDATA[
+    [DataMember('Sales agreement number'), BusinessEventsDataMember('Sales agreement number')]
+    public SalesAgreementId parmSalesAgreementNumber(SalesAgreementId _salesAgreementNumber = salesAgreementNumber)
+    {
+        salesAgreementNumber = _salesAgreementNumber;
+        return salesAgreementNumber;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmDealNumber</Name>
+				<Source><![CDATA[
+    [DataMember('Deal Number'), BusinessEventsDataMember('Deal Number')]
+    public str parmDealNumber(str _dealNumber = dealNumber)
+    {
+        dealNumber = _dealNumber;
+        return dealNumber;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmSource</Name>
+				<Source><![CDATA[
+    [DataMember('Source'), BusinessEventsDataMember('Source')]
+    public str parmSource(str _source = source)
+    {
+        source = _source;
+        return source;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmCustomerNo</Name>
+				<Source><![CDATA[
+    [DataMember('Customer No'), BusinessEventsDataMember('Customer No')]
+    public CustAccount parmCustomerNo(CustAccount _customerNo = customerNo)
+    {
+        customerNo = _customerNo;
+        return customerNo;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmInvoiceAmount</Name>
+				<Source><![CDATA[
+    [DataMember('Invoice Amount'), BusinessEventsDataMember('Invoice Amount')]
+    public AmountCur parmInvoiceAmount(AmountCur _invoiceAmount = invoiceAmount)
+    {
+        invoiceAmount = _invoiceAmount;
+        return invoiceAmount;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmCurrency</Name>
+				<Source><![CDATA[
+    [DataMember('Currency'), BusinessEventsDataMember('Currency')]
+    public CurrencyCode parmCurrency(CurrencyCode _currency = currency)
+    {
+        currency = _currency;
+        return currency;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmRecId</Name>
+				<Source><![CDATA[
+    [DataMember('Rec ID'), BusinessEventsDataMember('Rec ID')]
+    public RefRecId parmRecId(RefRecId _recordId = recordId)
+    {
+        recordId = _recordId;
+        return recordId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmTransactionType</Name>
+				<Source><![CDATA[
+    [DataMember('Transaction Type'), BusinessEventsDataMember('Transaction Type')]
+    public str parmTransactionType(str _transactionType = transactionType)
+    {
+        transactionType = _transactionType;
+        return transactionType;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

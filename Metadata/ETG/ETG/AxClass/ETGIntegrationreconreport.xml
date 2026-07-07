@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGIntegrationreconreport</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+ class ETGIntegrationreconreport
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>dialog</Name>
+				<Source><![CDATA[
+    public void dialog()
+    {
+        Dialog                       dialog;
+        TransDate                    fromDate,toDate;
+        DialogField                  dialogFromDate,dialogToDate;
+        DialogField                  dialogTransType;
+        ;
+        dialog = new dialog("Integration Recon Report");
+        dialogFromDate       = dialog.addField(extendedTypeStr(TransDate), "From date");
+        dialogToDate         = dialog.addField(extendedTypeStr(TransDate), "To date");
+        dialog.run();
+        if(!dialogFromDate.value() || !dialogToDate.value() )
+        {
+            throw error("Date Should Not Be Null");
+        }
+        else if(dialogFromDate.value() >= dialogToDate.value())
+        {
+            throw error("From date should be less than Todate");
+        }
+        else if (dialog.run())
+        {
+            this.Tbl_Autorecondata_ax(dialogFromDate.value(),dialogToDate.value());
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>Tbl_Autorecondata_ax</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name = "_fromdate"></param>
+    /// <param name = "_todate"></param>
+    public void Tbl_Autorecondata_ax(date _fromdate, date _todate)
+    {
+        ETGIntegrationReconTable eTGIntegrationReconTable;
+        ETG_ARAP_MSGHEADER TBL_ARAP_MsgHeader,TBL_ARAP_MsgHeaderLocal;
+        ETG_ARAP_MSGLINES TBL_ARAP_MsgLines;
+        CustTrans  custtarns;
+        VendTrans   vendtrans;
+        CustTable  custtable;
+        VendTable  vendTable;
+        date fromdate,todate;
+        timeofday fromtime,totime;
+        Args args = new Args();
+        real CustAmount,CustAmountreversal;
+        real vendamount,vendamountreversal;
+        str counterparty;
+        ;
+        ttsbegin;
+        delete_from eTGIntegrationReconTable;
+        ttscommit;
+        while select TBL_ARAP_MsgHeader where TBL_ARAP_MsgHeader.ETGARAPREF
+&& TBL_ARAP_MsgHeader.ETGLegalEntity == curext()
+&& TBL_ARAP_MsgHeader.createdDateTime >= datetobeginUtcDateTime(_fromdate, DateTimeUtil::getUserPreferredTimeZone())
+&& TBL_ARAP_MsgHeader.createdDateTime <= datetoendUtcDateTime(_todate, DateTimeUtil::getUserPreferredTimeZone())
+
+             if(TBL_ARAP_MsgHeader)
+        {
+            eTGIntegrationReconTable.InvoiceNumber      = TBL_ARAP_MsgHeader.ETGARAPREF;
+            eTGIntegrationReconTable.ContractNumber     = TBL_ARAP_MsgHeader.ETGCONTRACTNUMBER;
+            eTGIntegrationReconTable.CXCNetAmount       = str2num(TBL_ARAP_MsgHeader.AXNetAmount);
+            eTGIntegrationReconTable.CXCTaxAmount       = str2num(TBL_ARAP_MsgHeader.AXTaxAmount);
+            eTGIntegrationReconTable.TriggerType        = TBL_ARAP_MsgHeader.ETGTriggerCode;
+            eTGIntegrationReconTable.Currency           = TBL_ARAP_MsgHeader.ETGCurrency;
+            eTGIntegrationReconTable.DocType            = TBL_ARAP_MsgHeader.ETGDocuType;
+            // eTGIntegrationReconTable.D365TaxAmount      = str2num(TBL_ARAP_MsgHeader.AXTaxAmount);
+ 
+            select * from TBL_ARAP_MsgHeaderlocal where TBL_ARAP_MsgHeaderlocal.RecId == TBL_ARAP_MsgHeader.RecId
+&&    TBL_ARAP_MsgHeaderlocal.ETGIntegrationsStatus != ETGIntegrationStatus::Error;
+            if(TBL_ARAP_MsgHeaderlocal)
+            {
+                eTGIntegrationReconTable.TransActionDate    = str2Date(TBL_ARAP_MsgHeaderlocal.AXDocDate, 321);
+                eTGIntegrationReconTable.D365NetAmount      = str2num(TBL_ARAP_MsgHeaderlocal.AXNetAmount);
+                eTGIntegrationReconTable.D365TaxAmount      = str2num(TBL_ARAP_MsgHeaderlocal.AXTaxAmount);
+ 
+                
+                select * from vendtable where VendTable.ETGCxcCounterPartyMapping == TBL_ARAP_MsgHeaderlocal.ETGCOUNTERPARTY;
+                if(vendtable)
+                {
+                    // eTGIntegrationReconTable.CounterParty
+                    counterparty = null;
+                    counterparty = vendtable.AccountNum;
+                }
+                else if(!vendtable)
+                {
+                    select * from custtable where custtable.ETGCxcCounterPartyMapping == TBL_ARAP_MsgHeaderlocal.ETGCOUNTERPARTY;
+                    if(custtable)
+                    {
+                        //eTGIntegrationReconTable.CounterParty
+                        counterparty = null;
+                        counterparty = custtable.AccountNum;
+                    }
+                }
+                eTGIntegrationReconTable.CounterParty = counterparty;
+ 
+            }
+            eTGIntegrationReconTable.insert();
+        }
+        new MenuFunction(menuItemdisplayStr(IntegrationReportReportDisplayMI),MenuItemType::Display).run();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    public void run()
+    {
+        this.dialog();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name = "_args"></param>
+    public static void main(Args _args)
+    {
+        ETGIntegrationreconreport Integrationreconreport;
+        Integrationreconreport = new ETGIntegrationreconreport();
+
+        Integrationreconreport.run();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

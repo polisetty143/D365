@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGPurchPackingSlipDp_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This DP class is used for the customized fields.
+/// </summary>
+[ExtensionOf(classstr(PurchPackingSlipDp))]
+final class ETGPurchPackingSlipDp_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initializeProductReceiptHeader</Name>
+				<Source><![CDATA[
+    protected PurchPackingSlipHeaderTmp initializeProductReceiptHeader()
+    {
+
+    PurchPackingSlipHeaderTmp               purchPackingSlipHeaderTmp;
+    PurchLine                               purchline;
+    PurchTable                              purchTable;
+    InventLocation                          inventLocation;
+    PurchParmTable                          purchParmTable;
+    LogisticsPostalAddress                  logisticsPostalAddress;
+    VendPackingSlipVersion                  vendPackingSlipVersion;
+    VendPackingSlipJour                     vendPackingSlipJour;
+    DirPartyTable                           dirPartyTable;
+    DirPartyLocation                        dirPartyLocation;
+    TaxRegistration                         taxRegistration;
+    Description1000                         teleFax;
+
+        purchPackingSlipHeaderTmp = next initializeProductReceiptHeader();
+        purchTable = PurchTable::find(this.parmVendPackingSlipJour().PurchId);
+
+        select firstonly purchline
+            where purchline.PurchId == purchTable.PurchId;
+        select firstonly inventlocation
+            where inventLocation.InventLocationId == purchTable.InventLocationId;
+        select firstonly purchparmtable
+            where purchparmtable.purchid == purchTable.PurchId;
+        select firstonly RegistrationNumber from  taxRegistration
+            exists join dirPartyLocation
+           where  dirPartyLocation.RecId == taxRegistration.DirPartyLocation
+            exists join dirPartyTable
+           where dirPartyTable.RecId == dirPartyLocation.Party;
+        select firstonly vendPackingSlipJour
+           where vendPackingSlipJour.PurchId == purchTable.PurchId
+        join vendPackingSlipVersion
+           where vendPackingSlipVersion.VendPackingSlipJour == vendPackingSlipJour.RecId;
+
+        logisticsPostalAddress                             =        inventlocation.logisticsPostalAddress();
+        purchPackingSlipHeaderTmp.ETGAddress               =        InventLocation::find(InventDim::find(purchline.InventDimId).InventLocationId).logisticsPostalAddress().Address;
+        teleFax                                            =       'Tel : ' + CompanyInfo::find().phone() + '   Fax :' + CompanyInfo::find().teleFax();
+        purchPackingSlipHeaderTmp.ETGWarehouseAddress      =        InventDim::find(purchline.InventDimId).InventLocationId;
+        purchPackingSlipHeaderTmp.ETGNumber                =        this.parmVendPackingSlipJour().PackingSlipId;
+        purchPackingSlipHeaderTmp.ETGInternalNumber        =        vendPackingSlipVersion.InternalPackingSlipId;
+        purchPackingSlipHeaderTmp.ETGAttentionInformation  =        purchParmTable.Num;
+        purchPackingSlipHeaderTmp.ETGTeleFax               =        teleFax;
+        purchPackingSlipHeaderTmp.CompanyEmail             =        strFmt('Email : %1  Web : %2',CompanyInfo::find().email(),CompanyInfo::find().url());
+        purchPackingSlipHeaderTmp.CompanyAddress           =        strReplace(purchPackingSlipHeaderTmp.CompanyAddress,'\n',' ');
+        purchPackingSlipHeaderTmp.CompanyCoRegNum          =        taxRegistration.RegistrationNumber;
+        purchPackingSlipHeaderTmp.VendAccount              =        purchTable.OrderAccount;
+
+        PurchPackingSlipHeaderTmp.insert();
+        return purchPackingSlipHeaderTmp;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

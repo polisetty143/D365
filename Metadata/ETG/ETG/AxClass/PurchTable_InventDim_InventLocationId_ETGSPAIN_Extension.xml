@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>PurchTable_InventDim_InventLocationId_ETGSPAIN_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension of the <c>PurchTable.InventDim.InventLocationId</c> form data source field for the ETGSPAIN model.
+/// </summary>
+[ExtensionOf(formDataFieldStr(PurchTable, InventDim, InventLocationId))]
+final class PurchTable_InventDim_InventLocationId_ETGSPAIN_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>modified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Extension of the <c>modified</c> method to update financial dimensions based on InventLocationId changes.
+    /// </summary>
+    /// <remarks>
+    /// This method updates the Financial Dimensions (Operation, Contract, Application) in the PurchLine based on the InventLocationId modifications.
+    /// </remarks>
+    public void modified()
+    {                        
+        next modified();
+
+        FormDataObject      formDataObject      = any2Object(this) as FormDataObject;
+        FormDataSource      formDataSource      = formDataObject.datasource();
+        InventDim           inventDim           = formDataSource.cursor();        
+
+        InventDimension1    inventDimension1    = inventDim.orig().InventDimension1;
+        InventSerialId      inventSerialId      = inventDim.orig().InventSerialId;
+        InventBatchId       inventBatchId       = inventDim.orig().InventBatchId;
+        
+        LedgerParameters    ledgerParameters    = LedgerParameters::find();        
+        FormDataSource      purchline_ds        = formDataSource.formRun().dataSource(formDataSourceStr(PurchLine, purchLine));
+        PurchLine           purchLine           = purchline_ds.cursor();
+        
+        if(CompanyInfo::find().ETGSpanishCompany == NoYes::Yes)
+        {
+            ttsbegin;
+            if (inventDimension1 || inventSerialId || inventBatchId)
+            {
+                purchLine.ETGSPAINsetDimensionValue(ledgerParameters.ETGSPAINFinDimOperation,   inventBatchId,   ETGSPAINPurchOperationTable::find(inventBatchId).Name);
+                purchLine.ETGSPAINsetDimensionValue(ledgerParameters.ETGSPAINFinDimContract,    inventSerialId,    inventSerialId);
+                purchLine.ETGSPAINsetDimensionValue(ledgerParameters.ETGSPAINFinDimApplication, inventDimension1, inventDimension1);
+            }
+            /*
+        PurchTable  purchTable  = purchLine.purchTable();
+        InventDim inventDimNew = purchLine.inventDim();
+
+        inventDimNew.InventDimension1 = inventDimension1;
+        inventDimNew.inventSerialId = inventSerialId;
+        inventDimNew.inventBatchId = inventBatchId;
+
+        inventDimNew = inventDim::findOrCreate(inventDimNew);
+
+        purchLine.InventDimId = inventDimNew.inventDimId;
+        purchLine.update();
+
+        ETGSPAINInventTransApplication etgSPAINInventTransApplication = ETGSPAINInventTransApplication::findTransId(purchLine.InventTransId, true);
+        if (etgSPAINInventTransApplication)
+        {
+            etgSPAINInventTransApplication.inventDimId = inventDim.inventDimId;
+            etgSPAINInventTransApplication.update();
+        }
+        */
+            ttscommit;
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

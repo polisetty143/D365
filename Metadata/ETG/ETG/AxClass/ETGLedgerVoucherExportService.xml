@@ -1,0 +1,252 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerVoucherExportService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETGLedgerVoucherExportService extends SysOperationServiceBase
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport(ETGLedgerVoucherExportContract _contract)
+    {
+        TransDate   fromDate;
+        TransDate   toDate;
+        boolean     useCreatedDate;
+
+        if (!_contract)
+        {
+            throw error("Contract is null");
+        }
+
+        try
+        {
+            useCreatedDate = (_contract.parmFilterByCreatedDate() == NoYes::Yes);
+
+            
+            if (_contract.parmIsIncremental())
+            {
+                // DAILY BATCH MODE: Always run for Yesterday
+                fromDate = systemDateGet() - 1;
+                toDate   = systemDateGet();
+                
+                
+                useCreatedDate = true;
+                
+                info(strFmt("Running Incremental Load for: %1 (Forced Created Date)", fromDate));
+            }
+            else
+            {
+                // MANUAL MODE
+                fromDate = _contract.parmFromDate();
+                toDate   = _contract.parmToDate();
+                info(strFmt("Running Manual Load for: %1 to %2", fromDate, toDate));
+            }
+
+            this.processLedgerVoucherData(fromDate, toDate, useCreatedDate);
+        }
+        catch (Exception::Error)
+        {
+            throw error("Error processing report.");
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processLedgerVoucherData</Name>
+				<Source><![CDATA[
+    private void processLedgerVoucherData(
+        TransDate _fromDate,
+        TransDate _toDate,
+        boolean _useCreatedDate)
+    {
+        ETGLedgerVoucherExportTable     exportTable;
+        GeneralJournalAccountEntry      generalJournalAccountEntry;
+        GeneralJournalEntry             generalJournalEntry;
+        LedgerJournalTrans              ledgerJournalTrans;
+        MainAccount                     mainAccount;
+        CustTrans                       custTrans;
+        VendTrans                       vendTrans;
+        EcoResProductTranslation        ecoResProductTranslation;
+        
+        RecordInsertList                insertList = new RecordInsertList(tableNum(ETGLedgerVoucherExportTable));
+
+        str businessUnitName = "BusinessUnit";
+        str powerBIExecutionId = "PowerBI_Live";
+
+    
+        UtcDateTime startDateTime;
+        UtcDateTime endDateTime;
+
+        if (_useCreatedDate)
+        {
+            
+            startDateTime = datetobeginUtcDateTime(_fromDate, DateTimeUtil::getUserPreferredTimeZone());
+            endDateTime   = datetobeginUtcDateTime(_toDate + 1, DateTimeUtil::getUserPreferredTimeZone());
+        }
+
+        
+        if (_useCreatedDate)
+        {
+            delete_from exportTable
+                where exportTable.ETGCreatedDate >= startDateTime
+                   && exportTable.ETGCreatedDate < endDateTime // Use < endDateTime to match DP logic perfectly
+                   && exportTable.BatchExecutionId == powerBIExecutionId;
+        }
+        else
+        {
+            delete_from exportTable
+                where exportTable.AccountingDate >= _fromDate
+                   && exportTable.AccountingDate <= _toDate
+                   && exportTable.BatchExecutionId == powerBIExecutionId;
+        }
+
+       
+        Query query = new Query();
+        QueryBuildDataSource qbdsEntry = query.addDataSource(tableNum(GeneralJournalEntry));
+        QueryBuildDataSource qbdsAccount = qbdsEntry.addDataSource(tableNum(GeneralJournalAccountEntry));
+        qbdsAccount.relations(true);
+        qbdsAccount.joinMode(JoinMode::InnerJoin);
+        QueryBuildDataSource qbdsMainAccount = qbdsAccount.addDataSource(tableNum(MainAccount));
+        qbdsMainAccount.joinMode(JoinMode::OuterJoin);
+        qbdsMainAccount.addLink(fieldNum(GeneralJournalAccountEntry, MainAccount), fieldNum(MainAccount, RecId));
+
+        qbdsEntry.addRange(fieldNum(GeneralJournalEntry, SubledgerVoucherDataAreaId)).value(curExt());
+
+       
+        if (_useCreatedDate)
+        {
+            // SysQuery::range translates the DateTime properly so the query engine doesn't return 0 records
+            qbdsEntry.addRange(fieldNum(GeneralJournalEntry, CreatedDateTime))
+                .value(SysQuery::range(startDateTime, endDateTime));
+        }
+        else
+        {
+            qbdsEntry.addRange(fieldNum(GeneralJournalEntry, AccountingDate))
+                .value(SysQuery::range(_fromDate, _toDate));
+        }
+
+        QueryRun qr = new QueryRun(query);
+
+        while (qr.next())
+        {
+            generalJournalEntry         = qr.get(tableNum(GeneralJournalEntry));
+            generalJournalAccountEntry  = qr.get(tableNum(GeneralJournalAccountEntry));
+            mainAccount                 = qr.get(tableNum(MainAccount));
+
+            exportTable.clear();
+            
+            exportTable.BatchExecutionId = powerBIExecutionId;
+            exportTable.LineNum          = generalJournalAccountEntry.RecId;
+
+            exportTable.BusinessUnit = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, businessUnitName);
+
+            if (mainAccount.RecId)
+            {
+                exportTable.LedgerCode = mainAccount.MainAccountId;
+                exportTable.LedgerName = mainAccount.Name;
+            }
+            
+            exportTable.AccountingCurrencyAmount   = generalJournalAccountEntry.AccountingCurrencyAmount;
+            exportTable.AccountingDate             = generalJournalEntry.AccountingDate;
+            exportTable.JournalNumber              = generalJournalEntry.JournalNumber;
+            exportTable.SubledgerVoucher           = generalJournalEntry.SubledgerVoucher;
+            exportTable.DocumentDate               = generalJournalEntry.DocumentDate;
+            exportTable.DocumentNumber             = generalJournalEntry.DocumentNumber;
+            exportTable.JournalCategory            = generalJournalEntry.JournalCategory;
+            exportTable.LedgerAccount              = generalJournalAccountEntry.LedgerAccount;
+            exportTable.LedgerDimension            = generalJournalAccountEntry.LedgerDimension;
+            exportTable.PostingType                = generalJournalAccountEntry.PostingType;
+            exportTable.Quantity                   = generalJournalAccountEntry.Quantity;
+            exportTable.ReportingCurrencyAmount    = generalJournalAccountEntry.ReportingCurrencyAmount;
+            exportTable.TransactionCurrencyAmount  = generalJournalAccountEntry.TransactionCurrencyAmount;
+            exportTable.TransactionCurrencyCode    = generalJournalAccountEntry.TransactionCurrencyCode;
+            exportTable.TransactionText            = generalJournalAccountEntry.Text;
+            exportTable.ETGCreatedBy               = generalJournalEntry.CreatedBy;
+            exportTable.ETGCreatedDate             = generalJournalEntry.CreatedDateTime;
+            exportTable.JournalrecId               = generalJournalAccountEntry.RecId;
+
+            if (_useCreatedDate)
+            {
+                exportTable.HistoricalExchangeRateDate = generalJournalAccountEntry.HistoricalExchangeRateDate;
+            }
+
+            select firstonly Invoice, ETGIntegrationContractNumber, PaymReference
+                from ledgerJournalTrans
+                where ledgerJournalTrans.Voucher == generalJournalEntry.SubledgerVoucher;
+            
+            if (ledgerJournalTrans.RecId)
+            {
+                exportTable.ETGCTRMInvoiceReferance        = ledgerJournalTrans.Invoice;
+                exportTable.ETGIntegrationContractNumber   = ledgerJournalTrans.ETGIntegrationContractNumber;
+                exportTable.PaymentReference               = ledgerJournalTrans.PaymReference;
+            }
+
+            // Counterparty Logic
+            str counterParty = '';
+            str counterPartyName = '';
+
+            select firstonly AccountNum from custTrans where custTrans.Voucher == generalJournalEntry.SubledgerVoucher;
+            if (custTrans.RecId)
+            {
+                counterParty = custTrans.AccountNum;
+                counterPartyName = CustTable::find(custTrans.AccountNum).name();
+            }
+            else
+            {
+                select firstonly AccountNum from vendTrans where vendTrans.Voucher == generalJournalEntry.SubledgerVoucher;
+                if (vendTrans.RecId)
+                {
+                    counterParty = vendTrans.AccountNum;
+                    counterPartyName = VendTable::find(vendTrans.AccountNum).name();
+                }
+            }
+            exportTable.CounterpartyCode = counterParty;
+            exportTable.CounterpartyName = counterPartyName;
+
+            // Dimensions
+            exportTable.CostCenter        = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "CostCenter");
+            exportTable.Item              = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "Item");
+            exportTable.Location          = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "Locations");
+            exportTable.ProfitCenter      = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "ProfitCenter");
+            exportTable.Vertical          = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "Vertical");
+            exportTable.ETGSubCommodity   = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "SubCommodity");
+            exportTable.ETGSubVertical    = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "SubVertical");
+            exportTable.InterCompany      = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "Intercompany");
+            exportTable.Project           = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "Project");
+            exportTable.ETGCommodity      = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "MainCommodity");
+            exportTable.Product_Service   = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "Product_Service");
+            exportTable.Department        = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "Department");
+            exportTable.Region            = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "Region");
+            exportTable.Contract          = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "Contract");
+            exportTable.LineOfBusiness    = ETG_GetLedgerDimensionValue::getAttributeValueFromCombination(generalJournalAccountEntry.LedgerDimension, "Line_of_Businesss");
+
+            if (exportTable.Item)
+            {
+                InventTable inventTable;
+                select firstonly Description from ecoResProductTranslation
+                    exists join inventTable
+                    where inventTable.Product == ecoResProductTranslation.Product
+                       && inventTable.ItemId == exportTable.Item;
+                
+                if (ecoResProductTranslation.RecId)
+                {
+                    exportTable.CommodityDescription = ecoResProductTranslation.Description;
+                }
+            }
+            
+            insertList.add(exportTable);
+        }
+        
+        insertList.insertDatabase();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

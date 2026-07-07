@@ -1,0 +1,714 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_ChargeCodesHelper</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_ChargeCodesHelper
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>PurchAgreement_MarkupCode_OnLookup</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(ETG_ChargeCodes, PurchAgreement_MarkupCode), FormControlEventType::Lookup)]
+    public static void PurchAgreement_MarkupCode_OnLookup(FormControl sender, FormControlEventArgs e)
+    {
+        Query                   query = new Query();
+        QueryBuildDataSource    queryBuildDataSource;
+        SysTableLookup          sysTableLookup;
+        PurchAgreementHeader    purchAgreementHeader;
+        AgreementLine           agreementLine;
+
+        FormDataSource ETGChargeCodes_ds = sender.dataSourceObject();
+        ETG_ChargeCodes eTGChargeCodes   = ETGChargeCodes_ds.cursor();
+
+
+        sysTableLookup       = SysTableLookup::newParameters(tableNum(MarkupTable), sender);
+        queryBuildDataSource = query.addDataSource(tableNum(MarkupTable));
+
+        sysTableLookup.addLookupField(fieldNum(MarkupTable, MarkupCode), true);
+        sysTableLookup.addLookupField(fieldNum(MarkupTable, Txt));
+        select firstonly RecId 
+                    from purchAgreementHeader
+                   where purchAgreementHeader.PurchNumberSequence == eTGChargeCodes.PurchNumberSequence
+                   join  agreementLine
+                   where agreementLine.Agreement == purchAgreementHeader.RecId;
+        if(purchAgreementHeader)
+        {
+            queryBuildDataSource.addRange(fieldNum(MarkupTable, ModuleType)).value('@ETG_New:Vend');
+            //queryBuildDataSource.addRange(fieldNum(MarkupTable, ETGContractPosting)).value('@ETG_New:Yes');
+        }
+        else
+        {
+            queryBuildDataSource.addRange(fieldNum(MarkupTable, ModuleType)).value('@ETG_New:Cust');
+           // queryBuildDataSource.addRange(fieldNum(MarkupTable, ETGContractPosting)).value('@ETG_New:Yes');
+        }
+        sysTableLookup.parmQuery(query);
+        sysTableLookup.performFormLookup();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>MarkupCode_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataFieldEventHandler(formDataFieldStr(ETG_ChargeCodes, ETGChargeCodes, MarkupCode), FormDataFieldEventType::Modified)]
+    public static void MarkupCode_OnModified(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        MarkupTable                      markupTable;
+        AgreementLine                    agreementLine;
+        PurchAgreementHeader             purchAgreementHeader;
+        SalesAgreementHeader             salesAgreementHeader;
+        AgreementHeader                  agreementHeader;
+        AgreementLineQuantityCommitment  agreementLineQuantityCommitment;
+        ExchangeRate                     exchangeRate;
+        ExchangeRateType                 ExchangeRateType;
+        ExchangeRateCurrencyPair         exchangeRateCurrencyPair,exchangeRateReportCurrencyPair;
+        real                             exchRate;
+        CurrencyExchangeHelper           currencyExchangeRateCur;
+
+        
+        CurrencyCode fromCurrency      = Ledger::find(Ledger::current()).AccountingCurrency ; 
+        CurrencyCode reportingCurency  = Ledger::find(Ledger::current()).ReportingCurrency ; 
+        TransDate    transDate         = today();
+
+        FormDataSource ETGChargeCodes_ds = sender.datasource();
+        ETG_ChargeCodes eTGChargeCodes   = ETGChargeCodes_ds.cursor();
+
+        select * from markupTable
+                where markupTable.MarkupCode == eTGChargeCodes.MarkupCode;
+
+        eTGChargeCodes.TransTxt = markupTable.Txt;
+
+        select firstonly RecId 
+                    from purchAgreementHeader 
+                   where purchAgreementHeader.PurchNumberSequence == eTGChargeCodes.PurchNumberSequence;
+        if(purchAgreementHeader)
+        {
+            select firstonly RecId 
+                        from agreementLine 
+                       where agreementLine.Agreement == purchAgreementHeader.RecId;
+        /////modification done by sujith for charge code exchange rate on Aug18th+++   
+             select firstonly agreementHeader
+                where agreementHeader.RecId     == purchAgreementHeader.RecId;
+       /////modification done by sujith for charge code exchange rate on Aug18th--
+        }
+        select firstonly RecId 
+                    from salesAgreementHeader 
+                   where salesAgreementHeader.SalesNumberSequence == eTGChargeCodes.PurchNumberSequence;
+        if(salesAgreementHeader)
+        {
+            select firstonly RecId 
+                        from agreementLine
+                       where agreementLine.Agreement == salesAgreementHeader.RecId;
+      /////modification done by sujith for charge code exchange rate on Aug18th++ 
+            select firstonly agreementHeader
+                where agreementHeader.RecId     == salesAgreementHeader.RecId;
+     /////modification done by sujith for charge code exchange rate on Aug18th--
+        }
+        select firstonly RecId 
+                    from agreementLineQuantityCommitment 
+                   where agreementLineQuantityCommitment.RecId == agreementLine.RecId;
+
+        eTGChargeCodes.Qty = agreementLineQuantityCommitment.CommitedQuantity;
+        if(eTGChargeCodes.CurrencyCode == '')
+        {
+          eTGChargeCodes.CurrencyCode = agreementLineQuantityCommitment.Currency;
+
+        /////modification done by sujith for charge code exchange rate on Aug18th+++      
+        }
+        if(eTGChargeCodes.CurrencyCode == '')
+        {
+            eTGChargeCodes.CurrencyCode = agreementheader.Currency;
+        }
+        /////modification done by sujith for charge code exchange rate on Aug18th---
+    
+        if(fromCurrency)
+        {
+            currencyExchangeRateCur     = CurrencyExchangeHelper::newExchangeDate(Ledger::current(), systemDateGet());
+            eTGChargeCodes.ExchangeRate = currencyExchangeRateCur.calculateCurrencyToCurrency(eTGChargeCodes.CurrencyCode, Ledger::accountingCurrency(), 1, true);
+        }
+        if(reportingCurency)
+        {
+            currencyExchangeRateCur              = CurrencyExchangeHelper::newExchangeDate(Ledger::current(), systemDateGet());
+            eTGChargeCodes.ReportingExchangeRate = currencyExchangeRateCur.calculateCurrencyToCurrency(eTGChargeCodes.CurrencyCode, Ledger::reportingCurrency(), 1, true);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>CurrencyCode_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataFieldEventHandler(formDataFieldStr(ETG_ChargeCodes, ETGChargeCodes, CurrencyCode), FormDataFieldEventType::Modified)]
+    public static void CurrencyCode_OnModified(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        ExchangeRate                    exchangeRate;
+        ExchangeRateType                ExchangeRateType;
+        ExchangeRateCurrencyPair        exchangeRateCurrencyPair,exchangeRateReportCurrencyPair;
+        real                            exchRate;
+        AgreementLine                   agreementLine;
+        PurchAgreementHeader            purchAgreementHeader;
+        SalesAgreementHeader            salesAgreementHeader;
+        AgreementLineQuantityCommitment agreementLineQuantityCommitment;
+        CurrencyExchangeHelper          currencyExchangeRateCur;
+
+        FormDataSource  ETGChargeCodes_ds   = sender.datasource();
+        ETG_ChargeCodes eTGChargeCodes      = ETGChargeCodes_ds.cursor();
+        CurrencyCode    toCurrency          = eTGChargeCodes.CurrencyCode;
+        CurrencyCode    fromCurrency        = Ledger::find(Ledger::current()).AccountingCurrency ;
+        CurrencyCode    reportingCurency    = Ledger::find(Ledger::current()).ReportingCurrency ; 
+        TransDate       transDate           = today();
+        if(fromCurrency)
+        {
+            currencyExchangeRateCur     = CurrencyExchangeHelper::newExchangeDate(Ledger::current(), systemDateGet());
+            eTGChargeCodes.ExchangeRate = currencyExchangeRateCur.calculateCurrencyToCurrency(eTGChargeCodes.CurrencyCode, Ledger::accountingCurrency(), 1, true);
+        }
+        if(reportingCurency)
+        {
+            currencyExchangeRateCur              = CurrencyExchangeHelper::newExchangeDate(Ledger::current(), systemDateGet());
+            eTGChargeCodes.ReportingExchangeRate = currencyExchangeRateCur.calculateCurrencyToCurrency(eTGChargeCodes.CurrencyCode, Ledger::reportingCurrency(), 1, true);
+        }
+        select firstonly RecId 
+                    from purchAgreementHeader 
+                   where purchAgreementHeader.PurchNumberSequence == eTGChargeCodes.PurchNumberSequence;
+        if(purchAgreementHeader)
+        {
+            select firstonly RecId 
+                       from  agreementLine 
+                       where agreementLine.Agreement == purchAgreementHeader.RecId;
+        }
+        select firstonly RecId  
+                    from salesAgreementHeader  
+                   where salesAgreementHeader.SalesNumberSequence == eTGChargeCodes.PurchNumberSequence;
+        if(salesAgreementHeader)
+        {
+            select firstonly RecId 
+                       from  agreementLine 
+                       where agreementLine.Agreement == salesAgreementHeader.RecId;
+        }
+        select firstonly RecId 
+                    from agreementLineQuantityCommitment 
+                   where agreementLineQuantityCommitment.RecId == agreementLine.RecId;
+
+        if(eTGChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Pcs)
+        {
+            eTGChargeCodes.AmountMST                  = eTGChargeCodes.Value * eTGChargeCodes.Qty;
+            eTGChargeCodes.Amountinaccountingcurrency = eTGChargeCodes.ExchangeRate * eTGChargeCodes.AmountMST;
+            eTGChargeCodes.Amountinreportingcurrency  = eTGChargeCodes.ReportingExchangeRate * eTGChargeCodes.AmountMST;
+
+        }
+        else if(eTGChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Fixed)
+        {
+            eTGChargeCodes.AmountMST                  = eTGChargeCodes.Value;
+            eTGChargeCodes.Amountinaccountingcurrency = eTGChargeCodes.ExchangeRate * eTGChargeCodes.AmountMST;
+            eTGChargeCodes.Amountinreportingcurrency  = eTGChargeCodes.ReportingExchangeRate * eTGChargeCodes.AmountMST;
+        }
+        else if(eTGChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Percentage)
+        {
+            eTGChargeCodes.AmountMST                  = ((agreementLineQuantityCommitment.CommitedQuantity * agreementLineQuantityCommitment.PricePerUnit) -(((agreementLineQuantityCommitment.LineDiscountPercent) * (agreementLineQuantityCommitment.CommitedQuantity * agreementLineQuantityCommitment.PricePerUnit))/100)) *(eTGChargeCodes.Value/100);
+            eTGChargeCodes.Amountinaccountingcurrency = eTGChargeCodes.ExchangeRate * eTGChargeCodes.AmountMST;
+            eTGChargeCodes.Amountinreportingcurrency  = eTGChargeCodes.ReportingExchangeRate * eTGChargeCodes.AmountMST;
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>Qty_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataFieldEventHandler(formDataFieldStr(ETG_ChargeCodes, ETGChargeCodes, Qty), FormDataFieldEventType::Modified)]
+    public static void Qty_OnModified(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        AgreementLine                       agreementLine;
+        PurchAgreementHeader                purchAgreementHeader;
+        SalesAgreementHeader                salesAgreementHeader;
+        AgreementLineQuantityCommitment     agreementLineQuantityCommitment;
+
+        FormDataSource  ETGChargeCodes_ds  = sender.datasource();
+        ETG_ChargeCodes eTGChargeCodes     = ETGChargeCodes_ds.cursor();
+       
+
+        select firstonly purchAgreementHeader 
+                   where purchAgreementHeader.PurchNumberSequence == eTGChargeCodes.PurchNumberSequence;
+        if(purchAgreementHeader)
+        {
+            select firstonly agreementLine 
+                       where agreementLine.Agreement == purchAgreementHeader.RecId;
+        }
+        select firstonly salesAgreementHeader  
+                   where salesAgreementHeader.SalesNumberSequence == eTGChargeCodes.PurchNumberSequence;
+        if(salesAgreementHeader)
+        {
+            select firstonly agreementLine 
+                       where agreementLine.Agreement == salesAgreementHeader.RecId;
+        }
+        select firstonly agreementLineQuantityCommitment 
+                   where agreementLineQuantityCommitment.RecId == agreementLine.RecId;
+
+        if(eTGChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Pcs)
+        {
+            eTGChargeCodes.AmountMST                  = eTGChargeCodes.Value * eTGChargeCodes.Qty; 
+            eTGChargeCodes.Amountinaccountingcurrency = eTGChargeCodes.ExchangeRate * eTGChargeCodes.AmountMST;
+            eTGChargeCodes.Amountinreportingcurrency  = eTGChargeCodes.ReportingExchangeRate * eTGChargeCodes.AmountMST;
+
+        }
+        else if(eTGChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Fixed)
+        {
+            eTGChargeCodes.AmountMST                  = eTGChargeCodes.Value;
+            eTGChargeCodes.Amountinaccountingcurrency = eTGChargeCodes.ExchangeRate * eTGChargeCodes.AmountMST;
+            eTGChargeCodes.Amountinreportingcurrency  = eTGChargeCodes.ReportingExchangeRate * eTGChargeCodes.AmountMST;
+        }
+        else if(eTGChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Percentage)
+        {
+            eTGChargeCodes.AmountMST                   = ((agreementLineQuantityCommitment.CommitedQuantity * agreementLineQuantityCommitment.PricePerUnit) -
+                                                          (((agreementLineQuantityCommitment.LineDiscountPercent) * (agreementLineQuantityCommitment.CommitedQuantity * agreementLineQuantityCommitment.PricePerUnit))/100)) *(eTGChargeCodes.Value/100);
+            eTGChargeCodes.Amountinaccountingcurrency  = eTGChargeCodes.ExchangeRate * eTGChargeCodes.AmountMST;
+            eTGChargeCodes.Amountinreportingcurrency   = eTGChargeCodes.ReportingExchangeRate * eTGChargeCodes.AmountMST;
+        }
+
+        //eTG_ActualAgreementNew.Balance = eTG_ActualAgreementNew.ETGEstimatedQty - eTG_ActualAgreementNew.Qty;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETG_MarkupCategory_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataFieldEventHandler(formDataFieldStr(ETG_ChargeCodes, ETGChargeCodes, ETG_MarkupCategory), FormDataFieldEventType::Modified)]
+    public static void ETG_MarkupCategory_OnModified(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        AgreementLine                    agreementLine;
+        PurchAgreementHeader             purchAgreementHeader;
+        SalesAgreementHeader             salesAgreementHeader;
+        AgreementLineQuantityCommitment  agreementLineQuantityCommitment;
+
+        FormDataSource  ETGChargeCodes_ds = sender.datasource();
+        ETG_ChargeCodes eTGChargeCodes   = ETGChargeCodes_ds.cursor();
+       
+
+        select firstonly purchAgreementHeader
+                   where purchAgreementHeader.PurchNumberSequence == eTGChargeCodes.PurchNumberSequence;
+        if(purchAgreementHeader)
+        {
+            select firstonly agreementLine 
+                       where agreementLine.Agreement == purchAgreementHeader.RecId;
+        }
+        select firstonly salesAgreementHeader  
+                   where salesAgreementHeader.SalesNumberSequence == eTGChargeCodes.PurchNumberSequence;
+        if(salesAgreementHeader)
+        {
+            select firstonly agreementLine 
+                       where agreementLine.Agreement == salesAgreementHeader.RecId;
+        }
+        select firstonly agreementLineQuantityCommitment 
+                   where agreementLineQuantityCommitment.RecId == agreementLine.RecId;
+
+        //NS, DLT ,11032025, Provisional charges IncoTerms
+        if(ETGACFParameters::find().EnableProvisionalCharges)
+        {
+            AgreementLineQuantityCommitment agreementLineQuantityCommitmentETG;
+            if(purchAgreementHeader && AgreementClassification::find(purchAgreementHeader.AgreementClassification).ETGIncoTerms == NoYes::Yes)
+            {
+                select sum(CommitedQuantity) from agreementLineQuantityCommitmentETG where agreementLineQuantityCommitmentETG.Agreement == purchAgreementHeader.RecId;
+            }
+            if(salesAgreementHeader && AgreementClassification::find(salesAgreementHeader.AgreementClassification).ETGIncoTerms == NoYes::Yes)
+            {
+                select sum(CommitedQuantity) from agreementLineQuantityCommitmentETG where agreementLineQuantityCommitmentETG.Agreement == salesAgreementHeader.RecId;
+            }
+            eTGChargeCodes.Qty = agreementLineQuantityCommitmentETG.CommitedQuantity;
+        }
+        else
+        {
+            eTGChargeCodes.Qty = agreementLineQuantityCommitment.CommitedQuantity;
+        }
+        //NE, DLT ,11032025, Provisional charges IncoTerms
+
+
+        if(eTGChargeCodes.CurrencyCode == '')
+        {
+            eTGChargeCodes.CurrencyCode = agreementLineQuantityCommitment.Currency;
+        }
+
+        if(eTGChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Pcs)
+        {
+            eTGChargeCodes.AmountMST                    = eTGChargeCodes.Value * eTGChargeCodes.Qty;
+            eTGChargeCodes.Amountinaccountingcurrency   = eTGChargeCodes.ExchangeRate * eTGChargeCodes.AmountMST;
+            eTGChargeCodes.Amountinreportingcurrency    = eTGChargeCodes.ReportingExchangeRate * eTGChargeCodes.AmountMST;
+        }
+        else if(eTGChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Fixed)
+        {
+            eTGChargeCodes.AmountMST                  = eTGChargeCodes.Value ;
+            eTGChargeCodes.Amountinaccountingcurrency = eTGChargeCodes.ExchangeRate * eTGChargeCodes.AmountMST;
+            eTGChargeCodes.Amountinreportingcurrency  = eTGChargeCodes.ReportingExchangeRate * eTGChargeCodes.AmountMST;
+        }
+        else if(eTGChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Percentage)
+        {
+            eTGChargeCodes.AmountMST                  = ((agreementLineQuantityCommitment.CommitedQuantity * agreementLineQuantityCommitment.PricePerUnit) -
+                                                        (((agreementLineQuantityCommitment.LineDiscountPercent) * (agreementLineQuantityCommitment.CommitedQuantity * agreementLineQuantityCommitment.PricePerUnit))/100)) *(eTGChargeCodes.Value/100);
+            eTGChargeCodes.Amountinaccountingcurrency = eTGChargeCodes.ExchangeRate * eTGChargeCodes.AmountMST;
+            eTGChargeCodes.Amountinreportingcurrency  = eTGChargeCodes.ReportingExchangeRate * eTGChargeCodes.AmountMST;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>Value_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataFieldEventHandler(formDataFieldStr(ETG_ChargeCodes, ETGChargeCodes, Value), FormDataFieldEventType::Modified)]
+    public static void Value_OnModified(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        AgreementLine                       agreementLine;
+        PurchAgreementHeader                purchAgreementHeader;
+        SalesAgreementHeader                salesAgreementHeader;
+        AgreementLineQuantityCommitment     agreementLineQuantityCommitment;
+
+        FormDataSource  ETGChargeCodes_ds    = sender.datasource();
+        ETG_ChargeCodes eTGChargeCodes       = ETGChargeCodes_ds.cursor();
+       
+        if(eTGChargeCodes.Value < 0)
+        {
+            throw error('Charge value should not be negative');
+        }
+        select firstonly purchAgreementHeader 
+                   where purchAgreementHeader.PurchNumberSequence == eTGChargeCodes.PurchNumberSequence;
+        {
+            select firstonly agreementLine
+                       where agreementLine.Agreement == purchAgreementHeader.RecId;
+        }
+        select firstonly salesAgreementHeader  
+                   where salesAgreementHeader.SalesNumberSequence == eTGChargeCodes.PurchNumberSequence;
+        if(salesAgreementHeader)
+        {
+            select firstonly agreementLine 
+                       where agreementLine.Agreement == salesAgreementHeader.RecId;
+        }
+        select firstonly agreementLineQuantityCommitment 
+                   where agreementLineQuantityCommitment.RecId == agreementLine.RecId;
+
+        if(eTGChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Pcs)
+        {
+            eTGChargeCodes.AmountMST                  = eTGChargeCodes.Value * eTGChargeCodes.Qty;
+            eTGChargeCodes.Amountinaccountingcurrency = eTGChargeCodes.ExchangeRate * eTGChargeCodes.AmountMST;
+            eTGChargeCodes.Amountinreportingcurrency  = eTGChargeCodes.ReportingExchangeRate * eTGChargeCodes.AmountMST;
+        }
+        else if(eTGChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Fixed)
+        {
+            eTGChargeCodes.AmountMST                  = eTGChargeCodes.Value;
+            eTGChargeCodes.Amountinaccountingcurrency = eTGChargeCodes.ExchangeRate * eTGChargeCodes.AmountMST;
+            eTGChargeCodes.Amountinreportingcurrency  = eTGChargeCodes.ReportingExchangeRate * eTGChargeCodes.AmountMST;
+        }
+        else if(eTGChargeCodes.ETG_MarkupCategory == ETG_MarkupCategory::Percentage)
+        {
+            eTGChargeCodes.AmountMST                  = ((agreementLineQuantityCommitment.CommitedQuantity * agreementLineQuantityCommitment.PricePerUnit) -
+                                                        (((agreementLineQuantityCommitment.LineDiscountPercent) * (agreementLineQuantityCommitment.CommitedQuantity * agreementLineQuantityCommitment.PricePerUnit))/100)) *(eTGChargeCodes.Value/100);
+            eTGChargeCodes.Amountinaccountingcurrency = eTGChargeCodes.ExchangeRate * eTGChargeCodes.AmountMST;
+            eTGChargeCodes.Amountinreportingcurrency  = eTGChargeCodes.ReportingExchangeRate * eTGChargeCodes.AmountMST;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>Value_OnModifiedActual</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataFieldEventHandler(formDataFieldStr(ETG_ActualAgreement, ETG_ActualAgreementNew, Value), FormDataFieldEventType::Modified)]
+    public static void Value_OnModifiedActual(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        AgreementLine                    agreementLine;
+        PurchAgreementHeader             purchAgreementHeader;
+        SalesAgreementHeader             salesAgreementHeader;
+        AgreementLineQuantityCommitment  agreementLineQuantityCommitment;
+        real                             eachvalue;
+        ETG_Chargecodelines              eTG_Chargecodelines;
+
+        FormDataSource          ETG_ActualAgreementNew_ds   = sender.datasource();
+        ETG_ActualAgreementNew  eTG_ActualAgreementNew      = ETG_ActualAgreementNew_ds.cursor();
+
+        select firstonly eTG_Chargecodelines 
+                   where eTG_Chargecodelines.RecId == eTG_ActualAgreementNew.RefRecId;
+
+        if(eTG_ActualAgreementNew.ETG_MarkupCategory == ETG_MarkupCategory::Pcs)
+        {
+            eTG_ActualAgreementNew.AmountMST                  = eTG_ActualAgreementNew.Value * eTG_ActualAgreementNew.Qty;
+            eTG_ActualAgreementNew.Amountinaccountingcurrency = eTG_ActualAgreementNew.ExchangeRate * eTG_ActualAgreementNew.AmountMST;
+            eTG_ActualAgreementNew.Amountinreportingcurrency  = eTG_ActualAgreementNew.ReportingExchangeRate * eTG_ActualAgreementNew.AmountMST;
+        }
+        else if(eTG_ActualAgreementNew.ETG_MarkupCategory == ETG_MarkupCategory::Fixed)
+        {
+            select firstonly purchAgreementHeader 
+                       where purchAgreementHeader.PurchNumberSequence == eTG_ActualAgreementNew.PurchNumberSequence;
+            {
+                select agreementLine where agreementLine.Agreement == purchAgreementHeader.RecId;
+            }
+            select firstonly salesAgreementHeader  
+                       where salesAgreementHeader.SalesNumberSequence == eTG_ActualAgreementNew.PurchNumberSequence;
+            if(salesAgreementHeader)
+            {
+                select firstonly agreementLine 
+                           where agreementLine.Agreement == salesAgreementHeader.RecId;
+            }
+            select firstonly agreementLineQuantityCommitment 
+                       where agreementLineQuantityCommitment.RecId == agreementLine.RecId;
+
+            eTG_ActualAgreementNew.AmountMST                  = ((eTG_ActualAgreementNew.Value / agreementLineQuantityCommitment.CommitedQuantity) * (eTG_ActualAgreementNew.Qty));
+            eTG_ActualAgreementNew.Amountinaccountingcurrency = eTG_ActualAgreementNew.ExchangeRate * eTG_ActualAgreementNew.AmountMST;
+            eTG_ActualAgreementNew.Amountinreportingcurrency  = eTG_ActualAgreementNew.ReportingExchangeRate * eTG_ActualAgreementNew.AmountMST;
+        }
+        else if(eTG_ActualAgreementNew.ETG_MarkupCategory == ETG_MarkupCategory::Percentage)
+        {
+            eachvalue                                         = eTG_Chargecodelines.AmountMST / eTG_Chargecodelines.Value;
+            eTG_ActualAgreementNew.AmountMST                  = eachvalue * eTG_ActualAgreementNew.Value;
+            eTG_ActualAgreementNew.Amountinaccountingcurrency = eTG_ActualAgreementNew.ExchangeRate * eTG_ActualAgreementNew.AmountMST;
+            eTG_ActualAgreementNew.Amountinreportingcurrency  = eTG_ActualAgreementNew.ReportingExchangeRate * eTG_ActualAgreementNew.AmountMST;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>AmountMST_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataFieldEventHandler(formDataFieldStr(ETG_ActualAgreement, ETG_ActualAgreementNew, AmountMST), FormDataFieldEventType::Modified)]
+    public static void AmountMST_OnModified(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        AgreementLine                    agreementLine;
+        PurchAgreementHeader             purchAgreementHeader;
+        SalesAgreementHeader             salesAgreementHeader;
+        AgreementLineQuantityCommitment  agreementLineQuantityCommitment;
+        ETG_Chargecodelines              eTG_ChargecodelinesLoc;
+        real                             eachvalue;
+
+        FormDataSource         ETG_ActualAgreementNew_ds = sender.datasource();
+        ETG_ActualAgreementNew eTG_ActualAgreementNew    = ETG_ActualAgreementNew_ds.cursor();
+
+        select * from eTG_ChargecodelinesLoc 
+                where eTG_ChargecodelinesLoc.RecId == eTG_ActualAgreementNew.RefRecId;
+        if(eTG_ActualAgreementNew.ETG_MarkupCategory == ETG_MarkupCategory::Pcs)
+        {
+            eachvalue = eTG_ActualAgreementNew.AmountMST / eTG_ActualAgreementNew.Qty;
+
+            eTG_ActualAgreementNew.Value                      = eachvalue;
+            eTG_ActualAgreementNew.Amountinaccountingcurrency = eTG_ActualAgreementNew.AmountMST * eTG_ActualAgreementNew.ExchangeRate;
+            eTG_ActualAgreementNew.Amountinreportingcurrency  = eTG_ActualAgreementNew.AmountMST * eTG_ActualAgreementNew.ReportingExchangeRate;
+        }
+        if(eTG_ActualAgreementNew.ETG_MarkupCategory == ETG_MarkupCategory::Percentage)
+        {
+            eTG_ActualAgreementNew.Value                      = ((eTG_ActualAgreementNew.AmountMST / eTG_ChargecodelinesLoc.AmountMST)*(eTG_ChargecodelinesLoc.Value));
+            eTG_ActualAgreementNew.Amountinaccountingcurrency = eTG_ActualAgreementNew.AmountMST * eTG_ActualAgreementNew.ExchangeRate;
+            eTG_ActualAgreementNew.Amountinreportingcurrency  = eTG_ActualAgreementNew.AmountMST * eTG_ActualAgreementNew.ReportingExchangeRate;
+        }
+        if(eTG_ActualAgreementNew.ETG_MarkupCategory == ETG_MarkupCategory::Fixed)
+        {
+            select firstonly purchAgreementHeader 
+                       where purchAgreementHeader.PurchNumberSequence == eTG_ActualAgreementNew.PurchNumberSequence;
+            {
+                select firstonly agreementLine 
+                           where agreementLine.Agreement == purchAgreementHeader.RecId;
+            }
+            select firstonly salesAgreementHeader  
+                       where salesAgreementHeader.SalesNumberSequence == eTG_ActualAgreementNew.PurchNumberSequence;
+            if(salesAgreementHeader)
+            {
+                select firstonly agreementLine 
+                           where agreementLine.Agreement == salesAgreementHeader.RecId;
+            }
+            select firstonly agreementLineQuantityCommitment 
+                       where agreementLineQuantityCommitment.RecId == agreementLine.RecId;
+
+            eachvalue                                         = eTG_ActualAgreementNew.AmountMST / eTG_ActualAgreementNew.Qty;
+            eTG_ActualAgreementNew.Value                      = eachvalue *  agreementLineQuantityCommitment.CommitedQuantity;
+            eTG_ActualAgreementNew.Amountinaccountingcurrency = eTG_ActualAgreementNew.AmountMST * eTG_ActualAgreementNew.ExchangeRate;
+            eTG_ActualAgreementNew.Amountinreportingcurrency  = eTG_ActualAgreementNew.AmountMST * eTG_ActualAgreementNew.ReportingExchangeRate;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>VendAccount_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataFieldEventHandler(formDataFieldStr(ETG_ActualAgreement, ETG_ActualagreementNew, VendAccount), FormDataFieldEventType::Modified)]
+    public static void VendAccount_OnModified(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        VendTable               vendTable;
+        FormDataSource          ETG_Actualagreement = sender.datasource();
+        ETG_ActualAgreementNew  eTGActialAgreement = ETG_Actualagreement.cursor();
+
+        select firstonly vendTable 
+                   where vendTable.AccountNum == eTGActialAgreement.VendAccount;
+        eTGActialAgreement.Name = vendTable.name();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>Qty_OnModifiedAct</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataFieldEventHandler(formDataFieldStr(ETG_ActualAgreement, ETG_ActualAgreementNew, Qty), FormDataFieldEventType::Modified)]
+    public static void Qty_OnModifiedAct(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        PurchAgreementHeader purchAgreementHeader;
+        SalesAgreementHeader salesAgreementHeader;
+        AgreementLine agreementLine;
+        AgreementLineQuantityCommitment agreementLineQuantityCommitment;
+        ETG_Chargecodelines eTG_Chargecodelines;
+        real eachvalue;
+        FormDataSource          ETG_Actualagreement = sender.datasource();
+        ETG_ActualAgreementNew  eTG_ActualAgreementNewLoc, eTGActialAgreement = ETG_Actualagreement.cursor();
+        //ETG_Chargecodelines 
+
+        select firstonly eTG_Chargecodelines
+                   where eTG_Chargecodelines.RecId == eTGActialAgreement.RefRecId;
+
+        select eTG_ActualAgreementNewLoc order by RecId desc
+                   where eTG_ActualAgreementNewLoc.PurchId            == eTGActialAgreement.PurchId &&
+                          eTG_ActualAgreementNewLoc.ETG_MarkupCategory == eTGActialAgreement.ETG_MarkupCategory &&
+                          eTG_ActualAgreementNewLoc.ETGLineestimationno == eTGActialAgreement.ETGLineestimationno &&
+                          eTG_ActualAgreementNewLoc.RecId != eTGActialAgreement.RecId;
+        if(eTG_ActualAgreementNewLoc.Balance > 0)
+        {
+            //eTGActialAgreement.AmountMST                  = eTGActialAgreement.Value * eTGActialAgreement.Qty;
+            eTGActialAgreement.Balance                    = eTG_ActualAgreementNewLoc.Balance - eTGActialAgreement.Qty;
+            //eTGActialAgreement.Amountinaccountingcurrency =  ((eTGActialAgreement.AmountMST) * (eTGActialAgreement.ExchangeRate)) ;
+            //eTGActialAgreement.Amountinreportingcurrency  =  ((eTGActialAgreement.AmountMST) * (eTGActialAgreement.ReportingExchangeRate));
+        }
+        if(eTG_ActualAgreementNewLoc.Balance == 0)
+        {
+           // eTGActialAgreement.AmountMST                  = eTGActialAgreement.Value * eTGActialAgreement.Qty;
+            eTGActialAgreement.Balance                    = eTGActialAgreement.ETGEstimatedQty - eTGActialAgreement.Qty;
+            //eTGActialAgreement.Amountinaccountingcurrency =  ((eTGActialAgreement.AmountMST) * (eTGActialAgreement.ExchangeRate));
+            //eTGActialAgreement.Amountinreportingcurrency  =   ((eTGActialAgreement.AmountMST) * (eTGActialAgreement.ReportingExchangeRate));
+        }
+        if(eTG_ActualAgreementNewLoc.ETG_MarkupCategory == ETG_MarkupCategory::Pcs)
+        {
+            eTGActialAgreement.AmountMST                  = eTGActialAgreement.Value * eTGActialAgreement.Qty;
+            eTGActialAgreement.Amountinaccountingcurrency = eTGActialAgreement.ExchangeRate * eTGActialAgreement.AmountMST;
+            eTGActialAgreement.Amountinreportingcurrency  = eTGActialAgreement.ReportingExchangeRate * eTGActialAgreement.AmountMST;
+        }
+        else if(eTG_ActualAgreementNewLoc.ETG_MarkupCategory == ETG_MarkupCategory::Fixed)
+        {
+            select firstonly purchAgreementHeader
+                       where purchAgreementHeader.PurchNumberSequence == eTG_ActualAgreementNewLoc.PurchNumberSequence;
+            {
+                select agreementLine where agreementLine.Agreement == purchAgreementHeader.RecId;
+            }
+            select firstonly salesAgreementHeader
+                       where salesAgreementHeader.SalesNumberSequence == eTG_ActualAgreementNewLoc.PurchNumberSequence;
+            if(salesAgreementHeader)
+            {
+                select firstonly agreementLine
+                           where agreementLine.Agreement == salesAgreementHeader.RecId;
+            }
+            select firstonly agreementLineQuantityCommitment
+                       where agreementLineQuantityCommitment.RecId == agreementLine.RecId;
+
+            eTGActialAgreement.AmountMST                  = ((eTGActialAgreement.Value / agreementLineQuantityCommitment.CommitedQuantity) * (eTGActialAgreement.Qty));
+            eTGActialAgreement.Amountinaccountingcurrency = eTGActialAgreement.ExchangeRate * eTGActialAgreement.AmountMST;
+            eTGActialAgreement.Amountinreportingcurrency  = eTGActialAgreement.ReportingExchangeRate * eTGActialAgreement.AmountMST;
+        }
+        else if(eTGActialAgreement.ETG_MarkupCategory == ETG_MarkupCategory::Percentage)
+        {
+            eachvalue                                         = eTG_Chargecodelines.AmountMST / eTG_Chargecodelines.Value;
+            eTGActialAgreement.AmountMST                  = eachvalue * eTGActialAgreement.Value;
+            eTGActialAgreement.Amountinaccountingcurrency = eTGActialAgreement.ExchangeRate * eTGActialAgreement.AmountMST;
+            eTGActialAgreement.Amountinreportingcurrency  = eTGActialAgreement.ReportingExchangeRate * eTGActialAgreement.AmountMST;
+        }
+
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>Qty_OnValidated</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataFieldEventHandler(formDataFieldStr(ETG_ActualAgreement, ETG_ActualAgreementNew, Qty), FormDataFieldEventType::Validated)]
+    public static void Qty_OnValidated(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        FormDataSource          ETG_Actualagreement = sender.datasource();
+        ETG_ActualAgreementNew  eTG_ActualAgreementNewLoc,eTGActialAgreement = ETG_Actualagreement.cursor();
+
+        select eTG_ActualAgreementNewLoc order by RecId desc
+                   where eTG_ActualAgreementNewLoc.PurchId              == eTGActialAgreement.PurchId &&
+                          eTG_ActualAgreementNewLoc.ETG_MarkupCategory  == eTGActialAgreement.ETG_MarkupCategory &&
+                          eTG_ActualAgreementNewLoc.ETGLineestimationno == eTGActialAgreement.ETGLineestimationno &&
+                          eTG_ActualAgreementNewLoc.RecId               != eTGActialAgreement.RecId;
+        if((eTG_ActualAgreementNewLoc) && (eTGActialAgreement.Qty > eTG_ActualAgreementNewLoc.Balance))
+        {
+            throw Error(strFmt("@ETG_New:ETGQtyShould",eTG_ActualAgreementNewLoc.Balance));
+        }
+        if(!(eTG_ActualAgreementNewLoc) && (eTGActialAgreement.Qty > eTGActialAgreement.ETGEstimatedQty))
+        {
+            throw Error(strFmt("@ETG_New:ETGQtyShould",eTGActialAgreement.ETGEstimatedQty));
+        }
+        if((eTGActialAgreement.Qty > eTGActialAgreement.ETGEstimatedQty) && (eTGActialAgreement.Balance == 0.00))
+        {
+            throw Error(strFmt("@ETG_New:ETGQtyShould",eTGActialAgreement.ETGEstimatedQty));
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

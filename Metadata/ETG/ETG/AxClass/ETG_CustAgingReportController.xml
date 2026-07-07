@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_CustAgingReportController</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///    The <c>ETG_CustAgingReportController</c> class is the controller class for the <c>CustAgingReport</c>
+///    SRS report.
+/// </summary>
+public class ETG_CustAgingReportController extends SrsReportRunController
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getReportName</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///     Gets the vendor aging report name.
+    /// </summary>
+    /// <param name = "_contract">
+    ///     An instance of <c>ETG_VendAgingReportContract</c> class.
+    /// </param>
+    /// <returns>
+    ///     The report name.
+    /// </returns>
+    [Wrappable(true)]
+    protected final str getReportName(ETG_CustAgingReportContract _contract)
+    {
+        str reportNameLocal;
+
+        if (_contract.parmDetailed())
+        {
+           /* if (_contract.parmIncludeAmountCur())
+            {
+                reportNameLocal = ssrsReportStr (ETG_CustomerAgingReport, DesignWithDetailAndWithTransactionCur);
+            }
+            else
+            {*/
+                reportNameLocal = ssrsReportStr(ETG_CustomerAgingReport, DesignWithDetailAndNoTransactionCur);
+            //}
+        }
+        else
+        {
+           /* if (_contract.parmIncludeAmountCur())
+            {
+                //reportNameLocal = ssrsReportStr(ETG_VendAgingReport, DesignWithNoDetailAndWithTransactionCur);
+            }
+            else
+            {*/
+                reportNameLocal = ssrsReportStr(ETG_CustomerAgingReport, DesignWithNoDetailAndNoTransactionCur);
+            //}
+        }
+        //reportNameLocal = ssrsReportStr(ETG_CustomerAgingReport, DesignWithDetailAndNoTransactionCur);
+        return reportNameLocal;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>prePromptModifyContract</Name>
+				<Source><![CDATA[
+    protected void prePromptModifyContract()
+    {
+        ETG_CustAgingReportContract contract = this.parmReportContract().parmRdpContract() as ETG_CustAgingReportContract;
+
+        this.setRanges(this.parmReportContract().parmQueryContracts().lookup(this.getFirstQueryContractKey()), contract);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>preRunModifyContract</Name>
+				<Source><![CDATA[
+    protected void preRunModifyContract()
+    {
+        ETG_CustAgingReportContract contract = this.parmReportContract().parmRdpContract() as ETG_CustAgingReportContract;
+        this.parmReportContract().parmReportName(this.getReportName(contract));
+        super();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>preRunValidate</Name>
+				<Source><![CDATA[
+    protected container preRunValidate()
+    {
+        // Now that this report is a preprocess tempdb report, we no longer need
+        // the limits that were required in the SYS version of the report. In order
+        // to accomplish this, we are removing the internals of this method to not
+        // call super(), but to just return what the original base class returns.
+        return [SrsReportPreRunState::Run, ''];
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>queryChanged</Name>
+				<Source><![CDATA[
+    protected void queryChanged(str _key, Query _query)
+    {
+        super(_key, _query);
+
+        SysOperationDataContractInfo queryInfo = this.getDataContractInfoObjectsRecursively().lookup(_key);
+        SysOperationQueryDataContractInfo queryDataContractInfo = queryInfo as SysOperationQueryDataContractInfo;
+
+        // checking to see if queryInfo is an object of SysOperationQueryDataContractInfo, if yes only then
+        // check sorting information
+        if (queryDataContractInfo != null)
+        {
+            int datasourceCount = _query.dataSourceCount();
+
+            for (int i = 1; i <= datasourceCount; i+=1)
+            {
+                int sortFieldCount = _query.dataSourceNo(i).sortFieldCount();
+
+                if (sortFieldCount)
+                {
+                    boolean found = false;
+                    int j = 1;
+                    QueryBuildDataSource qbds = _query.dataSourceNo(i);
+                    str tableName = tableId2Name(qbds.table());
+
+                    while (!found && j <= sortFieldCount)
+                    {
+                        found = (tableName == tableStr(CustTable)
+                                    && qbds.sortField(j) != fieldNum(CustTable, AccountNum)
+                                    && qbds.sortField(j) != fieldNum(CustTable, CustGroup))
+                            || (tableName == tableStr(DirPartyTable) && qbds.sortField(j) != fieldNum(DirPartyTable, Name));
+
+                        j++;
+                    }
+                    if (found)
+                    {
+                        info(strFmt("@AccountsReceivable:FieldsToSortInAgingReport", fieldPName(CustTable, AccountNum), fieldPName(DirPartyTable, Name), fieldPName(CustTable, CustGroup)));
+                    }
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setRanges</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Sets the report query ranges, depending on the caller.
+    /// </summary>
+    /// <param name="_query">
+    /// The query of the report.
+    /// </param>
+    /// <param name="_contract">
+    /// The <c>ETG_VendAgingReportContract</c> object of the report.
+    /// </param>
+    public void setRanges(Query _query, ETG_CustAgingReportContract _contract)
+    {
+        CustAgingReportTmp custAgingReportTmp;
+
+        // Checking the current table number
+        if (this.parmArgs() && this.parmArgs().record() && this.parmArgs().record().TableId == tableNum(CustAgingReportTmp))
+        {
+            custAgingReportTmp = this.parmArgs().record();
+
+            // Modifying the query
+            _query.dataSourceTable(tableNum(CustTable)).rangeField(fieldNum(CustTable, AccountNum)).value(custAgingReportTmp.AccountNum);
+
+            // Setting the ranges
+            _contract.parmDateTransactionDuedate(any2int(custAgingReportTmp.Balance01));
+            _contract.parmAgingBuckets(custAgingReportTmp.Txt);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args _args)
+    {
+        ETG_CustAgingReportController controller = new ETG_CustAgingReportController();
+        controller.parmReportName(ssrsReportStr(ETG_CustomerAgingReport, DesignWithNoDetailAndNoTransactionCur));
+        controller.parmArgs(_args);
+        controller.startOperation();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

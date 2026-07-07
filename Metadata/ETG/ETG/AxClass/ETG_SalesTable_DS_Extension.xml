@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesTable_DS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formdatasourcestr(SalesTable, SalesTable))]
+final class ETG_SalesTable_DS_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {
+        int                 ret;
+        boolean             isAgreementOrder = true;
+        boolean             isInvoiced       = true;
+        FormDataSource      SalesTable_DS    = any2Object(this) as FormDataSource;
+        formRun             formRun          = SalesTable_DS.formRun();
+        SalesTable          SalesTable       = SalesTable_ds.cursor();
+        ETG_Parameters      parameter        = ETG_Parameters::find();
+        FormDataSource      salesTrade_DS    = formRun.dataSource(formDataSourceStr(SalesTable, ETG_SalesTableTrade)) as FormDataSource;
+        FormDataSource      TMSSalesTable_DS = formRun.dataSource(formDataSourceStr(SalesTable, TMSSalesTable)) as FormDataSource;
+        FormDataSource      salesLineQualityGrp_ds = formRun.dataSource(formDataSourceStr(SalesTable, ETG_SalesLineQualityGrp)) as FormDataSource;
+        FormDataSource      MCRSalesTable_ds       = formRun.dataSource(formDataSourceStr(SalesTable, MCRSalesTable)) as FormDataSource;
+        ETGSalesEditLines       salesEditLines;
+        FormControl     invoicebutton = formRun.design().controlName("buttonUpdateInvoice");
+        FormControl     workflowFormMenu = formRun.design().controlName("ETGSalesEditLines");
+        FormControl     pickinglist = formRun.design().controlName("buttonUpdatePickingList");
+        FormControl     packingslip = formRun.design().controlName("buttonUpdatePackingSlip");
+        ETGACFParameters    ACFParameters = ETGACFParameters::find();
+        
+
+        ret = next active();
+
+        //CS - Abhinav
+        if(ACFParameters.EnableSalesInvoiceWorkflow == NoYes::Yes)
+        {
+            CustPackingSlipJour custPackingSlipJour;
+
+            select firstonly RecId from custPackingSlipJour where custPackingSlipJour.SalesId == SalesTable.SalesId;
+            if(custPackingSlipJour.RecId)
+            {
+                workflowFormMenu.enabled(true);
+            }
+            else
+            {
+                workflowFormMenu.enabled(false);
+            }
+        }
+        else
+        {
+            workflowFormMenu.visible(false);
+        }
+        //CE
+
+        if(parameter.ETG_FrozenValidations == NoYes::Yes
+            && parameter.ETG_FrozenValidationPurchaseOrder == NoYes::Yes
+            && SalesTable.MatchingAgreement)
+        {
+            isAgreementOrder           = false;
+
+            if (SalesTable.SalesStatus == SalesStatus::Invoiced)
+            {
+                isInvoiced  = false;
+            }
+        }
+       // formRun.design().controlName(formcontrolstr(SalesTable,LogisticsLocationSelectHeader)).enabled(isInvoiced);
+        formRun.design().controlName(formcontrolstr(SalesTable,DirPartyPostalAddressNewHeader)).enabled(isInvoiced);
+        formRun.design().controlName(formcontrolstr(SalesTable,TabFinancialDimensionTable)).allowEdit(isInvoiced);
+        formRun.design().controlName(formcontrolstr(SalesTable,HeaderDeliveryAddress)).allowEdit(isInvoiced);
+        formRun.design().controlName(formcontrolstr(SalesTable,GroupReferencesHeaderOverview)).allowEdit(isInvoiced);
+       // formRun.design().controlName(formcontrolstr(SalesTable,Payment_Payment)).allowEdit(isInvoiced);
+        formRun.design().controlName(formcontrolstr(SalesTable,TabFinancialDimensionLine)).allowEdit(isInvoiced);
+        formRun.design().controlName(formcontrolstr(SalesTable,Currency)).allowEdit(isAgreementOrder);
+        formRun.design().controlName(formcontrolstr(SalesTable,editReasonCode_TH)).allowEdit(isAgreementOrder);
+        formRun.design().controlName(formcontrolstr(SalesTable,GroupCustomer)).allowEdit(isAgreementOrder);
+        
+        
+
+        salesLineQualityGrp_ds.allowCreate(isAgreementOrder);
+        salesLineQualityGrp_ds.allowDelete(isAgreementOrder);
+        salesLineQualityGrp_ds.allowEdit(isAgreementOrder);
+        MCRSalesTable_ds.allowEdit(isAgreementOrder);
+
+        if(!isInvoiced)
+        {
+            salesTrade_DS.allowEdit(false);
+            SalesTable_DS.allowEdit(false);
+            TMSSalesTable_DS.allowEdit(false);
+            salesLineQualityGrp_ds.allowCreate(false);
+            salesLineQualityGrp_ds.allowDelete(false);
+            salesLineQualityGrp_ds.allowEdit(false);
+        }
+        
+        else if(!isAgreementOrder)
+        {
+            allowEditFieldGroup(salesTrade_DS, tableFieldGroupStr(salesTrade_DS, AgreementFieldsEditable));
+            allowEditFieldGroup(SalesTable_DS, tableFieldGroupStr(SalesTable_DS, AgreementFieldsEditable));
+            TMSSalesTable_DS.allowEdit(false);           
+        }
+        else
+        {
+            ETG_salesTableTrade     salesTableTrade = salesTrade_DS.cursor();
+           
+            salesTrade_DS.allowEdit(true);
+            SalesTable_DS.allowEdit(true);
+            TMSSalesTable_DS.allowEdit(true);            
+
+            if (salesTableTrade.BuyerSecondaryBank || salesTableTrade.BuyerBank)
+                salesTrade_DS.object(fieldNum(ETG_salesTableTrade, BuyerSecondaryBank)).allowEdit(false);
+
+            if (salesTableTrade.SellerSecondaryBank || salesTableTrade.SellerBank)
+                salesTrade_DS.object(fieldNum(ETG_salesTableTrade, SellerSecondaryBank)).allowEdit(false);
+
+            if (salesTableTrade.PortOfLoadingDesc || salesTableTrade.PortOfLoading)
+                salesTrade_DS.object(fieldNum(ETG_salesTableTrade, PortOfLoadingDesc)).allowEdit(false);
+            
+            if (salesTableTrade.PortOfDischargeDesc  || salesTableTrade.PortOfDischarge)
+                salesTrade_DS.object(fieldNum(ETG_salesTableTrade, PortOfDischargeDesc)).allowEdit(false);
+                     
+        }
+
+        //NS cylinder tracking feature, hide custom design if not enabled, DLT, 19092024
+        SalesTable_DS.object(fieldNum(SalesTable, ETGBusinessSegment)).visible(SalesParameters::find().ETGEnableCylinderTracking);
+        //NE cylinder tracking feature, hide custom design if not enabled, DLT, 19092024
+        //SalesTable_DS.refresh();
+        //SalesTable_DS.reread();
+        //SalesTable_DS.research();
+
+        //CS - Abhinav
+        if(SalesTable.InterCompanyOrder)
+        {
+            formRun.design().controlName(formcontrolstr(SalesTable, ETGAutoPostPackAndInvoice)).visible(true);
+        }
+        else
+        {
+            formRun.design().controlName(formcontrolstr(SalesTable, ETGAutoPostPackAndInvoice)).visible(false);
+        }
+        //CE
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

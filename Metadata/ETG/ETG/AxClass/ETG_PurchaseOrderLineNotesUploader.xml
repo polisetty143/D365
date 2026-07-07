@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_PurchaseOrderLineNotesUploader</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+using System.IO;
+using OfficeOpenXml;
+using OfficeOpenXml.ExcelPackage;
+using OfficeOpenXml.ExcelRange;
+
+class ETG_PurchaseOrderLineNotesUploader
+{
+    
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Runs the class with the specified arguments.
+    /// </summary>
+    /// <param name = "_args">The specified arguments.</param>
+    public static void main(Args _args)
+    {
+        System.IO.Stream		    stream;
+        ExcelSpreadsheetName	    sheeet;
+        FileUploadBuild			    fileUpload;
+        DialogGroup				    dlgUploadGroup;
+        FileUploadBuild			    fileUploadBuild;
+        FormBuildControl		    formBuildControl;
+
+        int                         counter;
+        InventTable				    inventTable;       
+        PurchTable			        purchTable, purchTableUpd;
+        PurchLine		            purchline;
+        ItemId					    itemID;
+        PurchId                     purchId;
+        InventTransId               inventTransId;
+        ETG_PurchLineNotes          purchLineNotes;
+        ETGNote                     etgNote;
+        NoYesId                     noyes;
+        TradeLineNumber             lineNum;
+              
+        Dialog dialog = new Dialog("Import Purchase Order Line Notes");
+
+        dlgUploadGroup		= dialog.addGroup("Select Excel File to Upload.");
+        formBuildControl	= dialog.formBuildDesign().control(dlgUploadGroup.name());
+        fileUploadBuild		= formBuildControl.addControlEx(classstr(FileUpload), 'Upload');
+
+        fileUploadBuild.style(FileUploadStyle::MinimalWithFilename);
+        fileUploadBuild.fileTypesAccepted('.xlsx');
+
+    
+        if (dialog.run() && dialog.closedOk())
+        {
+            FileUpload fileUploadControl					  = dialog.formRun().control(dialog.formRun().controlId('Upload'));
+            FileUploadTemporaryStorageResult fileUploadResult = fileUploadControl.getFileUploadResult();
+
+            if (fileUploadResult != null && fileUploadResult.getUploadStatus())
+            {
+                stream = fileUploadResult.openResult();
+                using (ExcelPackage Package = new ExcelPackage(stream))
+                {
+                    int rowCount, i;
+
+                    Package.Load(stream);
+                    ExcelWorksheet worksheet		= package.get_Workbook().get_Worksheets().get_Item(1);
+                    OfficeOpenXml.ExcelRange range	= worksheet.Cells;
+                    rowCount = worksheet.Dimension.End.Row - worksheet.Dimension.Start.Row + 1;
+
+                    for (i = 2; i<= rowCount; i++)
+                    {
+                        
+                        PurchId         = range.get_Item(i, 1).Value;
+                        lineNum         = str2Int64(range.get_Item(i, 2).Value);
+                        select firstonly purchline
+                            where purchline.PurchId == purchId
+                            && purchline.LineNumber == lineNum;
+                        itemID		    = range.get_Item(i, 3).Value;
+                        inventTable	    = InventTable::find(itemID,false);
+                        purchTable      = purchTable::find(purchId);
+                       
+                        select firstonly purchTableUpd
+                            where purchTableUpd.PurchId == purchline.PurchId;
+                        
+                        if(!purchTable)
+                        {
+                            error(strFmt('Purchase Order %1 does not Exist',purchId));
+                        }
+                       
+                        if(inventTable && purchTable && purchline)
+                        {
+                            purchLineNotes.clear();
+                          
+                            try
+                            { 
+                                purchLineNotes.InventTransId            = purchline.InventTransId;
+                                purchLineNotes.ItemId                   = range.get_Item(i, 3).Value;
+                                purchLineNotes.EnumNotes                = str2Enum(etgNote, range.get_Item(i, 4).Value);
+                                purchLineNotes.Description              = range.get_Item(i, 5).Value;
+                                purchLineNotes.PrintNotesInContract     = str2Enum(noyes, range.get_Item(i, 6).Value);
+                                  
+                                ttsbegin;
+                                if(purchLineNotes.validateWrite())
+                                {
+                                    purchLineNotes.insert();
+                                }
+                                ttscommit;
+                                counter++;
+
+                            }
+                            catch(Exception::Error)
+                            {
+                                ttsabort;
+                            }
+                        }
+                        else
+                        {
+                            info(strFmt('Item ID %1 not exist in released product. Please released the item in current entity and process uploading.' ,itemID));
+                        }
+                    }
+                    info(strFmt('Purchase Order Lines Notes Uploaded Sucessfully. Total Lines %1 : ',counter));
+                }
+            }
+            else
+            {
+                error("Error During Upload. Please Contact System Admin. Item ID %1",itemID);
+            }
+
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

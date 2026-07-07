@@ -1,0 +1,371 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGSPAINUnsoldJournalCheckPostService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Service class for processing Unsold Journal entries in the ETGSPAIN model.
+/// </summary>
+class ETGSPAINUnsoldJournalCheckPostService extends SysOperationServiceBase
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>process</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Main process method to update the unsold journal transactions and post the journal if valid.
+    /// </summary>
+    /// <param name="_contract">The data contract containing the journal details.</param>
+    public void process(ETGSPAINUnsoldJournalCheckPostContract _contract)
+    {
+        ETGSPAINUnsoldJournalTable  etgspainUnsoldJournalTable  = ETGSPAINUnsoldJournalTable::find(_contract.parmETGSPAINUnsoldJournalId(), true);
+        boolean                     isUnsoldInventTransExist    = false;
+
+        ETGSPAINUnsoldJournalTrans  etgspainUnsoldJournalTrans;
+
+        if (this.validateJournal(_contract.parmETGSPAINUnsoldJournalId()))
+        {
+            ttsbegin;
+            while select etgspainUnsoldJournalTrans
+                where etgspainUnsoldJournalTrans.JournalId == _contract.parmETGSPAINUnsoldJournalId()
+            {
+                InventDim 				    inventDimETGSPAINFrom;
+                InventDim                   inventDim;
+                ETGSPAINUnsoldInventTrans   etgspainUnsoldInventTrans;
+                InventTrans                 inventTrans;                
+
+                inventDimETGSPAINFrom = InventDim::find(etgspainUnsoldJournalTrans.InventDimId);                            
+
+                select firstonly inventTrans
+                    where inventTrans.ETGSPAINInventTransIsUnsold   == NoYes::Yes                       
+                    join etgspainUnsoldInventTrans
+                        where etgspainUnsoldInventTrans.RefRecId    == inventTrans.RecId
+                    exists join inventDim
+                        where inventDim.InventDimId                 == inventTrans.InventDimId
+                            && (!inventDimETGSPAINFrom.InventSiteId
+                                || inventDim.inventSiteId           == inventDimETGSPAINFrom.InventSiteId)
+                            && (!inventDimETGSPAINFrom.InventLocationId
+                                || inventDim.inventLocationId       == inventDimETGSPAINFrom.InventLocationId)
+                            && (!inventDimETGSPAINFrom.inventSerialId
+                                || inventDim.inventSerialId         == inventDimETGSPAINFrom.inventSerialId)
+                            && (!inventDimETGSPAINFrom.inventDimension1
+                                || inventDim.inventDimension1       == inventDimETGSPAINFrom.inventDimension1)
+                            && (!inventDimETGSPAINFrom.inventBatchId
+                                ||inventDim.inventBatchId           == inventDimETGSPAINFrom.inventBatchId);
+
+                InventTrans                 inventTransTo;
+                ETGSPAINUnsoldInventTrans   etgspainUnsoldInventTransTo;
+                InventDim                   inventDimTo;
+                InventDim 				    inventDimETGSPAINTo = InventDim::find(etgspainUnsoldJournalTrans.ToInventDimId);
+
+                select firstonly inventTransTo
+                    where inventTransTo.ETGSPAINInventTransIsUnsold   == NoYes::Yes                        
+                    join etgspainUnsoldInventTransTo
+                        where etgspainUnsoldInventTransTo.RefRecId    == inventTransTo.RecId
+                    exists join inventDimTo
+                        where inventDimTo.InventDimId                 == inventTransTo.InventDimId
+                            && (!inventDimETGSPAINTo.InventSiteId
+                                || inventDimTo.inventSiteId           == inventDimETGSPAINTo.InventSiteId)
+                            && (!inventDimETGSPAINTo.InventLocationId
+                                || inventDimTo.inventLocationId       == inventDimETGSPAINTo.InventLocationId)
+                            && (!inventDimETGSPAINTo.inventSerialId
+                                || inventDimTo.inventSerialId         == inventDimETGSPAINTo.inventSerialId)
+                            && (!inventDimETGSPAINTo.inventDimension1
+                                || inventDimTo.inventDimension1       == inventDimETGSPAINTo.inventDimension1)
+                            && (!inventDimETGSPAINTo.inventBatchId
+                                ||inventDimTo.inventBatchId           == inventDimETGSPAINTo.inventBatchId);    
+                            
+                RecId unitFromRecId = UnitOfMeasure::findBySymbol(etgspainUnsoldJournalTrans.Unit).RecId;
+                RecId unitToRecId   = UnitOfMeasure::findBySymbol(inventTrans.unit()).RecId;
+
+                real qty = unitFromRecId == unitToRecId             ?
+                            etgspainUnsoldJournalTrans.UnsoldQty    :
+                            UnitOfMeasureConverter::convert(etgspainUnsoldJournalTrans.UnsoldQty,
+                                                            unitFromRecId,
+                                                            unitToRecId ,
+                                                            NoYes::Yes,
+                                                            inventTrans.inventTable().Product);
+
+                switch (etgspainUnsoldInventTrans.TableIdRef)
+                {
+                    case tableNum(salesLine):
+                        qty = abs(qty);
+                        break;
+
+                    case tableNum(purchLine):
+                        qty = -abs(qty);
+                        break;
+                }
+
+                ETGSPAINUnsoldInventTransModifyController::updateQty(etgspainUnsoldInventTrans, -qty, false, false);
+
+                /*
+                if (inventTransTo.RecId)
+                {
+                    unitFromRecId = UnitOfMeasure::findBySymbol(etgspainUnsoldJournalTrans.Unit).RecId;
+                    unitToRecId   = UnitOfMeasure::findBySymbol(inventTransTo.unit()).RecId;
+
+                    qty = unitFromRecId == unitToRecId             ?
+                        etgspainUnsoldJournalTrans.UnsoldQty    :
+                        UnitOfMeasureConverter::convert(etgspainUnsoldJournalTrans.UnsoldQty,
+                                                        unitFromRecId,
+                                                        unitToRecId ,
+                                                        NoYes::Yes,
+                                                        inventTransTo.inventTable().Product);
+
+                    switch (etgspainUnsoldInventTransTo.TableIdRef)
+                    {
+                        case tableNum(salesLine):
+                            qty = -abs(qty);
+                            break;
+
+                        case tableNum(purchLine):
+                            qty = abs(qty);
+                            break;
+                    }
+
+                    ETGSPAINUnsoldInventTransModifyController::updateQty(etgspainUnsoldInventTransTo, qty + etgspainUnsoldInventTransTo.UnsoldQty, false, false);
+                    isUnsoldInventTransExist = true;
+                }
+                else
+                {
+                */
+                    SalesLine   salesLine;
+                    PurchLine   purchLine;                    
+
+                    select firstonly salesLine
+                    where salesLine.SalesId == inventDimETGSPAINTo.inventDimension1;
+
+                    if (!salesLine.RecId)
+                    {
+                        select firstonly purchLine
+                            where purchLine.PurchId == inventDimETGSPAINTo.inventDimension1;                        
+                    }                                    
+
+                    Common common = salesLine.RecId ? salesLine as Common : purchLine as Common; 
+
+                    inventTrans         = InventTrans::findTransId(salesLine.InventTransId ? salesLine.InventTransId : purchLine.InventTransId);
+                    InventTransOrigin   inventTransOrigin   = InventTransOrigin::find(inventTrans.InventTransOrigin);
+
+                    if (inventTrans && inventTransOrigin)
+                    {
+                        InventTrans InventTransCreated = InventTrans::ETGSPAINcreateUnsoldInventTrans(inventTrans, inventDimETGSPAINTo.inventDimId);                        
+
+                        if (inventTransCreated)
+                        {
+                            unitFromRecId = UnitOfMeasure::findBySymbol(etgspainUnsoldJournalTrans.Unit).RecId;
+                            unitToRecId   = UnitOfMeasure::findBySymbol(inventTransCreated.unit()).RecId;
+
+                            qty = unitFromRecId == unitToRecId              ?
+                                    etgspainUnsoldJournalTrans.UnsoldQty    :
+                                    UnitOfMeasureConverter::convert(etgspainUnsoldJournalTrans.UnsoldQty,
+                                                                    unitFromRecId,
+                                                                    unitToRecId ,
+                                                                    NoYes::Yes,
+                                                                    InventTransCreated.inventTable().Product);
+
+                            switch (common.TableId)
+                            {
+                                case tableNum(salesLine):
+                                    qty = -abs(qty);
+                                    break;
+
+                                case tableNum(purchLine):
+                                    qty = abs(qty);
+                                    break;
+                            }
+                                                        
+                            ETGSPAINUnsoldInventTrans::findOrCreateByRefRecIdandQty(inventTransCreated.RecId, 
+                                                                                    abs(qty), 
+                                                                                    inventTransCreated.unit(), 
+                                                                                    common,
+                                                                                    false);
+                            isUnsoldInventTransExist = true;
+                        }
+                    }
+                //}                                
+            }
+
+            if (isUnsoldInventTransExist)
+            {            
+                etgspainUnsoldJournalTable.Posted           = NoYes::Yes;
+                etgspainUnsoldJournalTable.PostedDateTime   = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+                etgspainUnsoldJournalTable.PostedUserId     = curUserId();
+                etgspainUnsoldJournalTable.update();            
+            }
+            ttscommit;
+        }        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateJournal</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Validates the unsold journal to ensure it can be posted.
+    /// </summary>
+    /// <param name="_etgspainUnsoldJournalId">The ID of the unsold journal.</param>
+    /// <returns>Returns true if the journal is valid for posting, otherwise false.</returns>
+    private boolean validateJournal(ETGSPAINUnsoldJournalId _etgspainUnsoldJournalId)
+	{
+        boolean                     ret                         = true;
+		ETGSPAINUnsoldJournalTable  etgspainUnsoldJournalTable  = ETGSPAINUnsoldJournalTable::find(_etgspainUnsoldJournalId, true);
+		
+		if (etgspainUnsoldJournalTable.Posted == NoYes::Yes)
+		{
+            ret = checkFailed(strFmt("@ETGSPAINLabels:ETGSPAINUnsoldJournalPostedError", _etgspainUnsoldJournalId));
+		}
+                
+        ETGSPAINUnsoldJournalTrans  etgspainUnsoldJournalTrans;
+
+        select firstonly etgspainUnsoldJournalTrans
+            where etgspainUnsoldJournalTrans.JournalId == _etgspainUnsoldJournalId;
+        
+        if (!etgspainUnsoldJournalTrans.RecId)
+        {
+            return checkFailed(strFmt("@ETGSPAINLabels:ETGSPAINUnsoldJournalLinesError", _etgspainUnsoldJournalId));
+        }
+                
+        while select etgspainUnsoldJournalTrans
+			where etgspainUnsoldJournalTrans.JournalId == _etgspainUnsoldJournalId
+		{            
+            InventDim                   inventDim;
+            ETGSPAINUnsoldInventTrans   etgspainUnsoldInventTrans;        
+            InventTrans                 inventTrans;
+
+            InventDim 				    inventDimETGSPAINFrom = InventDim::find(etgspainUnsoldJournalTrans.InventDimId);                                
+
+            select firstonly inventTrans
+                where inventTrans.ETGSPAINInventTransIsUnsold       == NoYes::Yes					                    
+                join etgspainUnsoldInventTrans
+                    where etgspainUnsoldInventTrans.RefRecId        == inventTrans.RecId
+                        && etgspainUnsoldInventTrans.OriginalUnsold == NoYes::Yes
+                exists join inventDim
+                    where inventDim.InventDimId                     == inventTrans.InventDimId
+                        && (!inventDimETGSPAINFrom.InventSiteId
+                            || inventDim.inventSiteId               == inventDimETGSPAINFrom.InventSiteId)
+                        && (!inventDimETGSPAINFrom.InventLocationId
+                            || inventDim.inventLocationId           == inventDimETGSPAINFrom.InventLocationId)
+                        && (!inventDimETGSPAINFrom.inventSerialId
+                            || inventDim.inventSerialId             == inventDimETGSPAINFrom.inventSerialId)
+                        && (!inventDimETGSPAINFrom.inventDimension1
+                            || inventDim.inventDimension1           == inventDimETGSPAINFrom.inventDimension1)
+                        && (!inventDimETGSPAINFrom.inventBatchId
+                            ||inventDim.inventBatchId               == inventDimETGSPAINFrom.inventBatchId);
+
+            if (!inventTrans.RecId)
+            {
+                return checkFailed(strFmt("@ETGSPAINLabels:ETGSPAINUnsoldJournalInventTransError", etgspainUnsoldJournalTrans.LineNum, etgspainUnsoldJournalTrans.JournalId));
+			}
+            
+            if (abs(etgspainUnsoldJournalTrans.UnsoldQty) > abs(etgspainUnsoldInventTrans.UnsoldQty))
+			{
+                return checkFailed(strFmt("@ETGSPAINLabels:ETGSPAINUnsoldJournalQtyError", etgspainUnsoldJournalTrans.UnsoldQty, etgspainUnsoldJournalTrans.LineNum, etgspainUnsoldJournalTrans.JournalId));
+			}            
+
+            if (inventTrans.RecId && inventDim.inventDimension1)
+            {
+
+                SalesLine salesLine;
+                PurchLine purchLine;
+
+                select firstonly salesLine
+                    where salesLine.SalesId == inventDim.inventDimension1;
+
+                if (!salesLine.RecId)
+                {
+                    select firstonly purchLine
+                        where purchLine.PurchId == inventDim.inventDimension1;
+
+                }
+
+                Qty qtytoMove = salesLine.RecId ? etgspainUnsoldJournalTrans.UnsoldQty : -etgspainUnsoldJournalTrans.UnsoldQty;
+
+                if (abs(abs(etgspainUnsoldInventTrans.UnsoldQty) + qtytoMove) > abs(etgspainUnsoldInventTrans.MaxUnsoldQty))
+                {
+                    return checkFailed(strFmt("@ETGSPAINLabels:ETGSPAINUnsoldJournalMaxQtyError", etgspainUnsoldJournalTrans.LineNum, etgspainUnsoldJournalTrans.JournalId));
+                }
+            }
+
+
+            inventDim.clear();
+            etgspainUnsoldInventTrans.clear();
+            inventTrans.clear();
+
+            InventDim 	inventDimETGSPAINTo = InventDim::find(etgspainUnsoldJournalTrans.ToInventDimId);
+
+            select firstonly inventTrans
+                where inventTrans.ETGSPAINInventTransIsUnsold   == NoYes::Yes                    
+                join etgspainUnsoldInventTrans
+                    where etgspainUnsoldInventTrans.RefRecId    == inventTrans.RecId
+                join inventDim
+                    where inventDim.InventDimId                 == inventTrans.InventDimId
+                        && (!inventDimETGSPAINTo.InventSiteId
+                            || inventDim.inventSiteId           == inventDimETGSPAINTo.InventSiteId)
+                        && (!inventDimETGSPAINTo.InventLocationId
+                            || inventDim.inventLocationId       == inventDimETGSPAINTo.InventLocationId)
+                        && (!inventDimETGSPAINTo.inventSerialId
+                            || inventDim.inventSerialId         == inventDimETGSPAINTo.inventSerialId)
+                        && (!inventDimETGSPAINTo.inventDimension1
+                            || inventDim.inventDimension1       == inventDimETGSPAINTo.inventDimension1)
+                        && (!inventDimETGSPAINTo.inventBatchId
+                            ||inventDim.inventBatchId           == inventDimETGSPAINTo.inventBatchId);
+
+            if (!inventTrans.RecId && inventDimETGSPAINTo.inventDimension1)
+            {
+                SalesLine salesLine;
+                PurchLine purchLine;
+
+                select firstonly salesLine
+                    where salesLine.SalesId == inventDimETGSPAINTo.inventDimension1;
+
+                if (!salesLine.RecId)
+				{
+					select firstonly purchLine
+						where purchLine.PurchId == inventDimETGSPAINTo.inventDimension1;
+
+					if (!purchLine.RecId)
+					{
+						return checkFailed(strFmt("@ETGSPAINLabels:ETGSPAINUnsoldJournalInventTransToError", etgspainUnsoldJournalTrans.LineNum, etgspainUnsoldJournalTrans.JournalId));
+					}
+				}
+            }
+            
+            /*
+            if (inventTrans.RecId && inventDimETGSPAINTo.inventDimension1)                
+            {
+
+                SalesLine salesLine;
+                PurchLine purchLine;
+
+                select firstonly salesLine
+                    where salesLine.SalesId == inventDimETGSPAINTo.inventDimension1;
+
+                if (!salesLine.RecId)
+                {
+                    select firstonly purchLine
+                        where purchLine.PurchId == inventDimETGSPAINTo.inventDimension1;
+
+                }
+
+                Qty qtytoMove = salesLine.RecId ? etgspainUnsoldJournalTrans.UnsoldQty : -etgspainUnsoldJournalTrans.UnsoldQty;
+
+                if (abs(abs(etgspainUnsoldInventTrans.UnsoldQty) + qtytoMove) > abs(etgspainUnsoldInventTrans.MaxUnsoldQty))
+                {
+                    return checkFailed(strFmt("@ETGSPAINLabels:ETGSPAINUnsoldJournalMaxQtyErrorTo", etgspainUnsoldJournalTrans.LineNum, etgspainUnsoldJournalTrans.JournalId));
+                }
+            }
+            */
+		}
+                        
+        return ret;
+	}
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

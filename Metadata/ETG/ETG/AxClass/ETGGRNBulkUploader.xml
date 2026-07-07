@@ -1,0 +1,437 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGGRNBulkUploader</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+using System.IO;
+using OfficeOpenXml;
+using OfficeOpenXml.ExcelPackage;
+using OfficeOpenXml.ExcelRange;
+Public final class ETGGRNBulkUploader
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+        public static void main(Args _args)
+        {
+            System.IO.Stream            stream;
+            ExcelSpreadsheetName        sheeet;
+            FileUploadBuild             fileUpload;
+            DialogGroup                 dlgUploadGroup;
+            FileUploadBuild             fileUploadBuild;
+            FormBuildControl            formBuildControl;
+            Dialog                      dialog = new Dialog("Import File");
+            boolean                      ret = true;
+            ETGGRNUploaderTmp           GRNUploaderTmp;
+            InventSerial                inventSerial;
+
+            dlgUploadGroup          = dialog.addGroup('Select the file');
+            formBuildControl        = dialog.formBuildDesign().control(dlgUploadGroup.name());
+            fileUploadBuild         = formBuildControl.addControlEx(classstr(FileUpload), 'Upload');
+            fileUploadBuild.style(FileUploadStyle::MinimalWithFilename);
+            fileUploadBuild.fileTypesAccepted('.xlsx');
+
+            if (dialog.run() && dialog.closedOk())
+            {
+                FileUpload fileUploadControl     = dialog.formRun().control(dialog.formRun().controlId('Upload'));
+                FileUploadTemporaryStorageResult fileUploadResult = fileUploadControl.getFileUploadResult();
+                
+                delete_from GRNUploaderTmp;
+
+                if (fileUploadResult != null && fileUploadResult.getUploadStatus())
+                {
+                    stream = fileUploadResult.openResult();
+                    using (ExcelPackage Package = new ExcelPackage(stream))
+                    {
+                        int                         rowCount, i;
+                        Package.Load(stream);
+                        ExcelWorksheet  worksheet   = package.get_Workbook().get_Worksheets().get_Item(1);
+                        OfficeOpenXml.ExcelRange    range = worksheet.Cells;
+                        rowCount                    = worksheet.Dimension.End.Row - worksheet.Dimension.Start.Row + 1;
+                        for (i = 2; i<= rowCount; i++)
+                        {
+                            str                 purchId         = range.get_Item(i, 1).value;
+                            String30            packingslipID   = range.get_Item(i, 2).value;
+                            TransDate           receiptDate     = str2Date(range.get_Item(i, 3).Text.ToString(), 213);
+                            AccountNum          vendAccount     = range.get_Item(i, 4).value;
+                            LineNum             lineNum         = range.get_Item(i, 5).value;
+                            ItemId              itemNo          = range.get_Item(i, 6).value;
+                            Qty                 orderedqty      = range.get_Item(i, 7).value;
+                            str                 colourid        = range.get_Item(i, 8).value;
+                            str                 configId        = range.get_Item(i, 9).value;
+                            str                 sizeId          =  range.get_Item(i, 10).value;
+                            str                 styleId         = range.get_Item(i, 11).value;
+                            InventSiteId        siteId          = range.get_Item(i, 12).value;
+                            InventLocationId    warehouseId     = range.get_Item(i, 13).value;
+                            Location            locationId      = range.get_Item(i, 14).value;
+                            String20            batchNo         = range.get_Item(i, 15).value;
+                            str                 serialNo        = range.get_Item(i, 16).value;
+                            Qty                 receiveNow      = range.get_Item(i, 17).value;
+                            str                 billNo          = range.get_Item(i, 18).value;
+                            TransDate           billDate        = str2Date(range.get_Item(i, 19).Text.ToString(), 213);
+                            DiscPct             discPct         = range.get_Item(i, 36).value;
+                            DiscAmount          discAmt         = range.get_Item(i, 37).value;
+                            ETGRateCardId       rateCardId      = range.get_Item(i, 38).value;
+
+                        if(billNo && !serialNo)
+                        {
+                            serialNo = billNo;
+                            if(!InventSerial::exist(serialNo,itemNo))
+                            {
+                                inventSerial.InventSerialId = billNo;
+                                inventSerial.ProdDate       = billDate;
+                                inventSerial.Description    = purchId;
+                                inventSerial.ItemId         = itemNo;
+                                inventSerial.insert();
+
+                            }
+
+                        }
+                            
+                            container       con = [purchId,packingslipID,receiptDate,vendAccount,lineNum,itemNo,orderedqty,
+                                                   colourid,configId,sizeId,styleId,siteId,warehouseId,locationId,batchNo,
+                                                    serialNo,receiveNow,billNo,billDate, discPct, discAmt, rateCardId];
+
+                            ETGGRNBulkUploader::initializeGRNBulkUploader(con);
+                        }
+                            ETGGRNBulkUploader::createGRNHeader();
+                    }
+                }
+                else
+                {
+                    error("Error occurred.");
+                }
+            }
+        }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processRateCardLines</Name>
+				<Source><![CDATA[
+    public static PurchLine processRateCardLines(PurchLine purchLineOrig, ETGGRNUploaderTmp uploadTmp)
+    {
+        PurchLine purchLIneNew;
+
+        ETGPurchRateCardUtil purchRateCardUtil = ETGPurchRateCardUtil::construct();
+        purchRateCardUtil.parmPurchLine(purchLineOrig);
+        purchLIneNew = purchRateCardUtil.processPurchaseOrderGRNUploader(purchLineOrig.InventTransId, uploadTmp);
+
+        return purchLIneNew;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createGRNHeader</Name>
+				<Source><![CDATA[
+    public static void createGRNHeader()
+    {
+        PurchFormLetter                     purchFormLetter;
+        PurchFormletterParmData             purchFormLetterParmData;
+        PurchParmUpdate                     purchParmUpdate;
+        PurchParmTable                      purchParmTable,purchParmTableloc;
+        NumberSeq                           numberSeq;
+        PurchLine                           purchLine;
+        SourceDocumentLine                  sourcedoucumentline;
+        PurchParmLine                      purchParmLine;
+        PurchTable                         purchTable;
+        PurchId                            purchId;
+        InventDim                          inventDim,inventDimloc;
+        int                                 purchidnum,packingid;
+        VendPackingSlipJour                 vendPackingSlipJour;
+        VendPackingSlipTrans                vendPAckingSlipTrans;
+        boolean                             rateCardApplied;
+        ETGRateCardMaster                   rateCardMaster;
+        ETGGRNUploaderTmp                   GRNUploaderTmp,GRNUploaderTmploc,GRNUploaderTmploc1, GRNUploaderTmpCheckSinleLine;
+        boolean                      ret;
+
+        while select * from GRNUploaderTmp
+            group by GRNUploaderTmp.PurchId,GRNUploaderTmp.GRNNum
+        {
+            purchTable   =   PurchTable::find(GRNUploaderTmp.PurchId);
+
+            try
+            {
+                rateCardApplied = false;
+                if(purchTable.DocumentState != VersioningDocumentState::Confirmed)
+                {
+                    warning(strFmt("Purchase order %1 is not confirmed and not imported", purchTable.PurchId));
+                }
+                else
+                {
+                    //select firstonly GRNUploaderTmpCheckSinleLine
+                    //    where GRNUploaderTmpCheckSinleLine.PurchId == GRNUploaderTmp.PurchId
+                    //    && GRNUploaderTmpCheckSinleLine.GRNNum == GRNUploaderTmp.GRNNum
+                    //    && GRNUploaderTmpCheckSinleLine.LineNumber == GRNUploaderTmp
+
+                    select firstonly GRNUploaderTmploc1
+                    where GRNUploaderTmploc1.PurchId == GRNUploaderTmp.PurchId
+                    && GRNUploaderTmploc1.GRNNum == GRNUploaderTmp.GRNNum;
+
+                    ttsbegin;
+                    purchFormLetterParmData = PurchFormletterParmData::newData(DocumentStatus::PackingSlip,VersioningUpdateType::Initial);
+                    purchFormLetterParmData.parmOnlyCreateParmUpdate(true);
+                    purchFormLetterParmData.createData(false);
+                    purchParmUpdate = purchFormLetterParmData.parmParmUpdate();
+ 
+                    //Set PurchParmTable table
+                    purchParmTable.clear();
+                    if(GRNUploaderTmploc1.ProductReceiptDate)
+                    {
+                        purchParmTable.TransDate = GRNUploaderTmploc1.ProductReceiptDate;
+                    
+                    }
+                    else
+                    {
+                        purchParmTable.TransDate = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+                    }
+                    purchParmTable.Ordering                 = DocumentStatus::PackingSlip;
+                    purchParmTable.ParmJobStatus            = ParmJobStatus::Waiting;
+                    purchParmTable.Num                      = GRNUploaderTmp.GRNNum;
+                    purchParmTable.PurchId                  = purchTable.PurchId;
+                    purchParmTable.PurchName                = purchTable.PurchName;
+                    purchParmTable.DeliveryName             = purchTable.DeliveryName;
+                    purchParmTable.DeliveryPostalAddress    = purchTable.DeliveryPostalAddress;
+                    purchParmTable.OrderAccount             = GRNUploaderTmploc1.OrderAccount;
+                    purchParmTable.ETG_BLnumber             = GRNUploaderTmploc1.BLNumber;
+                    purchParmTable.ETG_BLDate               = GRNUploaderTmploc1.BLDate;
+                    purchParmTable.CurrencyCode             = purchTable.CurrencyCode;
+                    purchParmTable.InvoiceAccount           = purchTable.InvoiceAccount;
+                    purchParmTable.ParmId                   = purchParmUpdate.ParmId;
+
+                   
+                    purchParmTable.insert();
+
+                    while select GRNUploaderTmploc
+                    where GRNUploaderTmploc.PurchId == GRNUploaderTmp.PurchId
+                    && GRNUploaderTmploc.GRNNum == GRNUploaderTmp.GRNNum
+                    {
+
+                        if(GRNUploaderTmploc.inventSerialId && ETGACFParameters::find().EnableBLNumberUniqueValidation == NoYes::Yes)
+                        {
+                            boolean isValid = ETGBLNumberUniqueValidation::checkBLNum(GRNUploaderTmploc.inventSerialId, curExt(), ModuleSalesPurch::Purch, purchTable.PurchId);
+                            if(!isValid)
+                            {
+                                throw Error(strFmt("Error. Invalid BL number for purchase order %1", purchTable.PurchId));
+                            }
+                        }
+                        if(GRNUploaderTmploc.RateCardId)
+                        {
+                            select firstonly rateCardMaster where rateCardMaster.RateCardId == GRNUploaderTmploc.RateCardId;
+                            select firstonly RecId from vendPAckingSlipTrans
+                                    where vendPAckingSlipTrans.OrigPurchid == purchTable.PurchId
+                                    && vendPAckingSlipTrans.ItemId == rateCardMaster.itemId;
+                            if(vendPackingSlipJour.RecId)
+                            {
+                                continue;
+                            }
+                        }
+
+                           inventDimloc.clear();
+                        inventDimloc.InventColorId = GRNUploaderTmploc.InventColorId;
+                        inventDimloc.configId   = GRNUploaderTmploc.configId;
+                        inventDimloc.InventSizeId   =GRNUploaderTmploc.InventSizeId;
+                        inventDimloc.InventStyleId  = GRNUploaderTmploc.InventStyleId;
+                        inventDimloc.InventSiteId   = GRNUploaderTmploc.InventSiteId;
+                        inventDimloc.InventLocationId   = GRNUploaderTmploc.InventLocationId;
+                        inventDimloc.wMSLocationId  =GRNUploaderTmploc.wMSLocationId;
+                        inventDimloc.inventBatchId   = GRNUploaderTmploc.inventBatchId;
+                        inventDimloc.InventSerialId  =  GRNUploaderTmploc.inventSerialId;
+
+
+
+                      //  select inventDim
+                      //  where inventDim.InventColorId == GRNUploaderTmploc.InventColorId
+                      //  && inventDim.configId   == GRNUploaderTmploc.configId
+                      //  && inventDim.InventSizeId   ==GRNUploaderTmploc.InventSizeId
+                      //  && inventDim.InventStyleId  == GRNUploaderTmploc.InventStyleId
+                      //  && inventDim.InventSiteId   == GRNUploaderTmploc.InventSiteId
+                      //  && inventDim.InventLocationId   == GRNUploaderTmploc.InventLocationId
+                      //  && inventDim.wMSLocationId  ==GRNUploaderTmploc.wMSLocationId
+                      //      &&inventDim.inventBatchId   == GRNUploaderTmploc.inventBatchId;
+                      ////  && inventDim.inventSerialId == GRNUploaderTmploc.inventSerialId;
+
+                     // inventDimloc = InventDim::findOrCreate(inventDim);
+                      inventDimloc = InventDim::findOrCreate(inventDimloc);
+
+                        select purchLine
+                        where purchLine.PurchId == purchTable.PurchId
+                        && purchLine.ItemId == GRNUploaderTmploc.ItemId
+                        && purchLine.LineNumber == GRNUploaderTmploc.LineNumber;
+
+                        if(GRNUploaderTmploc.RateCardId)
+                        {
+                            purchLine = ETGGRNBulkUploader::processRateCardLines(purchLine, GRNUploaderTmploc);
+                            rateCardApplied = true;
+                            ret = true;
+                            continue;
+                        }
+
+                        purchParmLine.InitFromPurchLine(purchLine);
+                        purchParmLine.ReceiveNow    = GRNUploaderTmploc.Receivenow;
+                        if(GRNUploaderTmploc.RateCardId)
+                        {
+                            purchParmLine.LineNum       = purchLine.LineNumber;
+                            purchParmLine.ItemId        = purchLine.ItemId;
+                            purchParmLine.InventDimId   = purchLine.inventDimId;
+                            purchTable.reread();
+                        }
+                        else
+                        {
+                            purchParmLine.LineNum       = GRNUploaderTmploc.LineNumber;
+                            purchParmLine.ItemId        = GRNUploaderTmploc.ItemId;
+                           //purchParmLine.InventDimId   = inventDimloc.inventDimId;
+
+                            //inventDim                 =  InventDim::find(inventDimloc.InventDimId);
+                            //inventDim.InventSerialId  =  GRNUploaderTmploc.inventSerialId;
+                            //inventDim                 = InventDim::findOrCreate(inventDim);
+                            purchParmLine.InventDimId = inventDimloc.inventDimId;
+
+                        }
+                        purchParmLine.ParmId        = purchParmTable.ParmId;
+                        purchParmLine.TableRefId    = purchParmTable.TableRefId;
+                        purchParmLine.setQty(DocumentStatus::PackingSlip, false, true);
+                        purchParmLine.setLineAmount();
+                        purchParmLine.insert();
+                    }
+
+                    purchFormLetter = PurchFormLetter::construct(DocumentStatus::PackingSlip);
+                    purchFormLetter.transDate(DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()));
+                    purchFormLetter.proforma(false);
+                    purchFormLetter.specQty(PurchUpdate::All);
+                    purchFormLetter.purchTable(purchTable);
+                    purchFormLetter.parmParmTableNum(purchParmTable.ParmId);
+                    purchFormLetter.parmId(purchParmTable.ParmId);
+                    purchFormLetter.purchParmUpdate(purchFormLetterParmData.parmParmUpdate());
+                    purchFormLetter.run();
+                    ttsCommit;
+                    ret = true;
+                }
+            }
+            catch(Exception::Error)
+            {
+                warning(strFmt("Import not completed for purchase order %1", purchTable.PurchId));
+                ret = false;
+                continue;
+            }
+        }
+        if(ret)
+        {
+            info("Import completed");
+        }
+        else
+        {
+            info("Import partially completed");
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initializeGRNBulkUploader</Name>
+				<Source><![CDATA[
+    public static void initializeGRNBulkUploader(container   _con)
+    {
+        ETGGRNUploaderTmp      GRNUploaderTmp;
+
+        ttsbegin;
+        GRNUploaderTmp.PurchId              = conPeek(_con,1);
+        GRNUploaderTmp.GRNNum               = conPeek(_con,2);
+        GRNUploaderTmp.ProductReceiptDate   = conPeek(_con,3);
+        GRNUploaderTmp.OrderAccount         = conPeek(_con,4);
+        GRNUploaderTmp.LineNumber           = conPeek(_con,5);
+        GRNUploaderTmp.ItemId               = conPeek(_con,6);
+        GRNUploaderTmp.QtyOrdered           = conPeek(_con,7);
+        GRNUploaderTmp.InventColorId        = conPeek(_con,8);
+        GRNUploaderTmp.configId             = conPeek(_con,9);
+        GRNUploaderTmp.InventSizeId         = conPeek(_con,10);
+        GRNUploaderTmp.InventStyleId        = conPeek(_con,11);
+        GRNUploaderTmp.InventSiteId         = conPeek(_con,12);
+        GRNUploaderTmp.InventLocationId     = conPeek(_con,13);
+        GRNUploaderTmp.wMSLocationId        =  conPeek(_con,14);
+        GRNUploaderTmp.inventBatchId        =  conPeek(_con,15);
+        //if(!GRNUploaderTmp.inventBatchId)
+        //{
+        //   // GRNUploaderTmp.inventBatchId    = 
+        //}
+        str       serianumber               = conPeek(_con,16);
+
+        if(serianumber == "")
+        {
+            GRNUploaderTmp.inventSerialId    = conPeek(_con,18);
+        }
+        else
+        {
+            GRNUploaderTmp.inventSerialId   = conPeek(_con,16);
+        }
+
+        GRNUploaderTmp.Receivenow           = conPeek(_con,17);
+        GRNUploaderTmp.BLNumber             = conPeek(_con,18);
+        GRNUploaderTmp.BLDate               = conPeek(_con,19);
+        GRNUploaderTmp.DiscPct              = conPeek(_con,20);
+        GRNUploaderTmp.DiscAmount           = conPeek(_con,21);
+        GRNUploaderTmp.RateCardId           = conPeek(_con,22);
+        GRNUploaderTmp.insert();
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>registerInventory</Name>
+				<Source><![CDATA[
+    public static void registerInventory(PurchParmLine  purchParmLine)
+    {
+        InventDim               inventDim,inventBatchCheck,inventDimlocal;
+        InventTransWMS_Register inventTransWMS_register;
+        TmpInventTransWMS       tmpInventTransWMS;
+        InventTrans             inventTranslocal;
+       // PurchParmLine           purchParmLine;
+        PurchParmTable          purchParmTable;
+        PurchTable             purchTable;
+
+
+        select  purchParmTable where purchParmTable.ParmId == purchParmLine.ParmId;
+
+        while select purchParmLine where purchParmLine.ParmId  == purchParmTable.ParmId
+        {
+            inventDim                           =  InventDim::find(purchParmLine.InventDimId);
+
+            inventTranslocal = InventTrans::findTransId(purchParmLine.InventTransId, true);
+
+            inventDimlocal   = inventTranslocal.inventDim();
+ 
+            inventDimlocal.inventBatchId    = inventDim.inventBatchId;
+            inventDimlocal.InventLocationId = inventDim.InventLocationId;
+            inventDimlocal.InventSiteId     = inventDim.inventSiteId;
+            inventDimlocal.inventSerialId   = inventDim.inventSerialId;
+            inventDimlocal.wMSLocationId   = inventDim.wMSLocationId;
+            inventDimlocal                  = InventDim::findOrCreate(inventDimlocal);
+            inventTransWMS_register         = inventTransWMS_register::newStandard(tmpInventTransWMS);
+
+            inventTranslocal.inventDimId    = inventDimlocal.inventDimId;
+    
+            tmpInventTransWMS.clear();
+            tmpInventTransWMS.initFromInventTrans(inventTranslocal);
+            tmpInventTransWMS.ItemId    = inventTranslocal.ItemId;
+            tmpInventTransWMS.InventQty = purchParmLine.ReceiveNow;
+            tmpInventTransWMS.insert();
+
+            inventTransWMS_register.writeTmpInventTransWMS(tmpInventTransWMS,
+                                                       inventTranslocal,
+                                                       inventDimlocal);
+       
+            inventTransWMS_register.updateInvent(inventTranslocal);
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

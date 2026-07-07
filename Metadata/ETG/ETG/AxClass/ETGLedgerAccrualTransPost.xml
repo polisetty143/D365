@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerAccrualTransPost</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Extension class for LedgerAccrualTrans_Fisca Class
+/// </summary>
+public class ETGLedgerAccrualTransPost extends LedgerAccrualTrans
+{
+    ETGLedgerJournalTransAccrual etgLedgerJournalTransAccrual;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>post</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name = "_ledgerPostingController"></param>
+    /// <param name = "_ledgerVoucherTransObject"></param>
+    /// <param name = "_exchangeRateHelper"></param>
+    /// <param name = "_currencyCode"></param>
+    /// <returns></returns>
+    public boolean post(LedgerPostingController _ledgerPostingController, LedgerVoucherTransObject _ledgerVoucherTransObject, CurrencyExchangeHelper _exchangeRateHelper, CurrencyCode _currencyCode = baseCurrencyCode)
+    {
+        boolean ret;
+
+        etgLedgerJournalTransAccrual = ETGLedgerJournalTransAccrual::find(ledgerJournalTrans.TableId,ledgerJournalTrans.RecId);
+
+        ret = this.postETGAccrual(_ledgerPostingController, _ledgerVoucherTransObject, _exchangeRateHelper, _currencyCode);
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>postETGAccrual</Name>
+				<Source><![CDATA[
+    public boolean postETGAccrual(
+        LedgerPostingController _ledgerPostingController,
+        LedgerVoucherTransObject _ledgerVoucherTransObject,
+        CurrencyExchangeHelper   _exchangeRateHelper,
+        CurrencyCode             _currencyCode)
+    {
+        Voucher                     originalReferenceNumber;
+        TransDate                   originalAccountingDate;
+        AmountCur                   transactionCurrencyRemaining;
+        AmountMST                   accountingCurrencyRemaining;
+        AmountMST                   reportingCurrencyRemaining;
+        LedgerVoucherTransObject    ledgerVoucherTransObject;
+        LedgerVoucherObject         ledgerPostingReference;
+        LedgerDimensionAccount      accrualLedgerDimension = this.getOffsetLedgerDimension(_ledgerVoucherTransObject.parmTransactionCurrencyAmount());
+        AmountMST                   accountingCurrencyAmount = _ledgerVoucherTransObject.parmAccountingCurrencyAmount();
+        AmountMSTSecondary          reportingCurrencyAmount = _ledgerVoucherTransObject.parmReportingCurrencyAmount();
+        AmountCur                   transactionCurrencyAmount = _ledgerVoucherTransObject.parmTransactionCurrencyAmount();
+
+        ledgerPostingReference = _ledgerPostingController.getReference();
+
+        _ledgerVoucherTransObject.parmAccrualInfo(etgLedgerJournalTransAccrual.RefTableid, etgLedgerJournalTransAccrual.RefRecid);
+        _ledgerVoucherTransObject.parmLedgerDimensionId(accrualLedgerDimension);
+
+        if (etgLedgerJournalTransAccrual.AmountCur != transactionCurrencyAmount)
+        {
+            if (etgLedgerJournalTransAccrual.AmountCur > 0)
+            {
+                if (etgLedgerJournalTransAccrual.AmountCur > transactionCurrencyAmount)
+                {
+                    throw error("@SYS330326");
+                }
+            }
+            else
+            {
+                if (etgLedgerJournalTransAccrual.AmountCur < transactionCurrencyAmount)
+                {
+                    throw error("@SYS330326");
+                }
+            }
+
+            // Calculate the remaining amount by subtracting out the accrual base amount.
+            transactionCurrencyRemaining = transactionCurrencyAmount - etgLedgerJournalTransAccrual.AmountCur;
+            accountingCurrencyRemaining = _exchangeRateHelper.calculateTransactionToAccounting(_ledgerVoucherTransObject.parmCurrencyCode(), transactionCurrencyRemaining, true);
+            reportingCurrencyRemaining = _exchangeRateHelper.calculateTransactionCurrencyToReportingCurrency(_ledgerVoucherTransObject.parmCurrencyCode(), transactionCurrencyRemaining);
+
+            // Use the accrual base amount for the transaction.
+            transactionCurrencyAmount = etgLedgerJournalTransAccrual.AmountCur;
+            accountingCurrencyAmount = _exchangeRateHelper.calculateTransactionToAccounting(_ledgerVoucherTransObject.parmCurrencyCode(), transactionCurrencyAmount, true);
+            reportingCurrencyAmount = _exchangeRateHelper.calculateTransactionCurrencyToReportingCurrency(_ledgerVoucherTransObject.parmCurrencyCode(), transactionCurrencyAmount);
+
+            // Create an adjustment for the remaining amount.
+            ledgerVoucherTransObject = this.createLedgerVoucherTransObjectAdjustmentForRemainingAmount(
+                _ledgerVoucherTransObject,
+                _exchangeRateHelper,
+                transactionCurrencyRemaining,
+                accountingCurrencyRemaining);
+
+            _ledgerPostingController.addTrans(ledgerVoucherTransObject);
+
+            // Complete the input adjustment.
+            _ledgerVoucherTransObject.parmTransactionCurrencyAmount(transactionCurrencyAmount);
+            _ledgerVoucherTransObject.parmAccountingCurrencyAmount(accountingCurrencyAmount);
+            _ledgerVoucherTransObject.parmReportingCurrencyAmount(
+                _exchangeRateHelper.calculateTransactionCurrencyToReportingCurrency(ledgerVoucherTransObject.parmCurrencyCode(), accountingCurrencyAmount));
+        }
+
+        originalReferenceNumber = ledgerPostingReference.parmReferenceNumber();
+        originalAccountingDate = ledgerPostingReference.parmAccountingDate();
+
+        _ledgerVoucherTransObject = this.initTaxRefLedgerVoucherObject(_ledgerVoucherTransObject);
+
+        _ledgerPostingController.addTrans(_ledgerVoucherTransObject);
+       
+        return true;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>allocate</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <returns></returns>
+    public boolean allocate()
+    {
+        boolean ret;
+
+        ret = super();
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>endDate</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name = "_transDate"></param>
+    /// <returns></returns>
+    public TransDate endDate(TransDate _transDate)
+    {
+        TransDate ret;
+
+        //ret = super(_transDate);
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

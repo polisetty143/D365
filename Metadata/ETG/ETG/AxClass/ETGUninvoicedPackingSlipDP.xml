@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGUninvoicedPackingSlipDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classstr(ETGUninvoicedPackingSlipContract))]
+class ETGUninvoicedPackingSlipDP extends SrsReportDataProviderPreProcessTempDB
+{
+    ETGUninvoicedPackingSlipTmp etgUninvoicedPackingSlipTmp;
+
+
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getetgUninvoicedPackingSlipTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETGUninvoicedPackingSlipTmp))]
+    public ETGUninvoicedPackingSlipTmp getetgUninvoicedPackingSlipTmp()
+    {
+        select etgUninvoicedPackingSlipTmp;
+        return etgUninvoicedPackingSlipTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+        ///<summary>
+        //////main logic of the report
+        ///</summary>
+        public void processReport()
+        {
+            ETGUninvoicedPackingSlipContract contract = this.parmDataContract() as ETGUninvoicedPackingSlipContract;
+
+            SalesLine            salesLine;
+            SalesTable           salesTable;
+            CustPackingSlipJour  packJour;
+            CustPackingSlipTrans packTrans;
+            CustInvoiceTrans     invoiceTrans;
+            InventDim            inventDim;
+            InventTable inventTable;
+
+            Qty packedQty;
+            Qty invoicedQty;
+            Qty uninvoicedQty;
+
+
+            while select packTrans
+             order by packTrans.SalesId,packTrans.PackingSlipId,packTrans.LineNum
+               where  packTrans.DeliveryDate >= contract.parmFromDate()
+               && packTrans.DeliveryDate <= contract.parmToDate()
+               && packTrans.FullyMatched==NoYes::No
+               {
+                    packedQty = packTrans.Qty;
+                    salesLine=packTrans.salesLine();
+                    salesTable=salesLine.salesTable();
+                    inventDim=salesLine.inventDim();
+
+
+
+                    etgUninvoicedPackingSlipTmp.clear();
+
+                    etgUninvoicedPackingSlipTmp.SalesId=salesTable.SalesId;
+                    etgUninvoicedPackingSlipTmp.CustAccount=salesTable.CustAccount;
+                    etgUninvoicedPackingSlipTmp.SalesName=salesTable.SalesName;
+                    etgUninvoicedPackingSlipTmp.InvoiceAccount=salesTable.InvoiceAccount;
+
+                    etgUninvoicedPackingSlipTmp.ItemId=salesLine.ItemId;
+                    etgUninvoicedPackingSlipTmp.ProductName=salesLine.itemName();
+                    etgUninvoicedPackingSlipTmp.PackingSlipId=packTrans.PackingSlipId;
+                    etgUninvoicedPackingSlipTmp.SalesQty=salesLine.SalesQty;
+                    etgUninvoicedPackingSlipTmp.Qty            = packTrans.Qty;
+                    etgUninvoicedPackingSlipTmp.SalesPrice=salesLine.SalesPrice;
+                    etgUninvoicedPackingSlipTmp.SalesUnit=salesLine.SalesUnit;
+
+                    etgUninvoicedPackingSlipTmp.configId=inventDim.configId;
+                    etgUninvoicedPackingSlipTmp.InventStyleId=inventDim.InventStyleId;
+                    etgUninvoicedPackingSlipTmp.InventSizeId=inventDim.InventSizeId;
+                    etgUninvoicedPackingSlipTmp.InventColorId=inventDim.InventColorId;
+                    etgUninvoicedPackingSlipTmp.InventSiteId=inventDim.InventSiteId;
+                    etgUninvoicedPackingSlipTmp.inventBatchId=inventDim.inventBatchId;
+                    etgUninvoicedPackingSlipTmp.InventLocationId=inventDim.InventLocationId;
+                    etgUninvoicedPackingSlipTmp.inventSerialId=inventDim.inventSerialId;
+                    etgUninvoicedPackingSlipTmp.wMSLocationId=inventDim.wMSLocationId;
+                    etgUninvoicedPackingSlipTmp.LineAmount=salesLine.LineAmount;
+
+                    etgUninvoicedPackingSlipTmp.LineDisc=salesLine.LineDisc;
+                    etgUninvoicedPackingSlipTmp.LinePercent=salesLine.LinePercent;
+                    etgUninvoicedPackingSlipTmp.AdjustedLineAmount=salesLine.pdsCalculatedLineAmount();
+  
+
+
+
+                    etgUninvoicedPackingSlipTmp.insert();
+
+
+
+               }
+
+        }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

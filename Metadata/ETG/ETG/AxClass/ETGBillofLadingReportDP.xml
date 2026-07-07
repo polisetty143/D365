@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGBillofLadingReportDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Report Data provider class for - BOL Report
+/// </summary>
+[SRSReportParameterAttribute(classStr(ETGBillofLadingReportContract))]
+class ETGBillofLadingReportDP extends SRSReportDataProviderBase
+{
+    ETGBillofLadingReportTmp etgbillofLadingReportTmp;
+
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getTmp</Name>
+				<Source><![CDATA[
+    [SRSReportDataSetAttribute(tableStr(ETGBillofLadingReportTmp))]
+    public ETGBillofLadingReportTmp getTmp()
+    {
+        select etgbillofLadingReportTmp;
+        return etgbillofLadingReportTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETGBillofLadingReportContract    contract = this.parmDataContract() as ETGBillofLadingReportContract;
+        ETGBillNumber                    billNumber = contract.parmBillNumber();
+        ETGBillofLadingTable             billofLadingTable;
+        ETGCanadaParameters              parameters;
+        CompanyInfo                      companyInfo;
+        DataAreaId                       entityId;
+        Name                             shipperName;
+        ETGRailCarLoadingLineTable       railCarLoadingTable;
+        ETGRailCarLoadingLineDetails     railCarLoadingLineDetails;
+        ETGRailcarloadingtable           railcarTable;
+        Salestable                       salesTable;
+        LogisticsPostalAddress           postalAddress;
+        SalesLine                        salesLine,salesLine1;
+        CustTable                        custTable;
+        DirPartyLocation                 dirPartyLocation;
+        LogisticsLocation                logisticsLocation;
+        DirPartyPostalAddressView        dirPartyPostalAddressView;
+        InventTable                      inventTable;
+        real                             weight;
+
+
+        select firstonly billofLadingTable
+            where billofLadingTable.BillNumber == billNumber;
+
+        select firstOnly crosscompany railcarTable
+          where railcarTable.ETGRailLoadingSerialNumber == billofLadingTable.ETGRailLoadingSerialNumber;
+
+        select firstOnly crosscompany salesTable
+           where salesTable.SalesId == railcarTable.SalesId;
+
+
+        changecompany(salesTable.DataAreaId)
+        {
+            while Select salesLine
+              where salesLine.SalesId==salesTable.SalesId
+
+            {
+                weight=0;
+                etgbillofLadingReportTmp.clear();
+                inventTable=inventTable::find(salesLine.ItemId,false);
+                etgbillofLadingReportTmp.DescriptionofArticles = inventTable.itemName();
+                etgbillofLadingReportTmp.SpecialMarks          = billofLadingTable.SpecialMarks;
+                etgbillofLadingReportTmp.SalesId               = railcarTable.SalesId;
+                etgbillofLadingReportTmp.Rate                  = salesLine.SalesPrice;
+
+
+                while select crosscompany railCarLoadingLineDetails
+                  where salesLine.LineNum ==  railCarLoadingLineDetails.LineNum
+                  && railcarTable.ETGRailLoadingSerialNumber == railCarLoadingLineDetails.ETGRailLoadingSerialNumber
+                  {
+                    weight+= railCarLoadingLineDetails.Qty;
+                    
+                  }
+                  etgbillofLadingReportTmp.Weight = weight;
+                  etgbillofLadingReportTmp.insert();
+            }
+        }
+
+
+        select crosscompany custTable
+            where custTable.AccountNum==billofLadingTable.Agent;
+        if(custTable)
+        {
+            select crosscompany postalAddress 
+              where postalAddress.ValidFrom <= DateTimeUtil::utcNow()
+               && postalAddress.ValidTo   >= DateTimeUtil::utcNow()
+            join logisticsLocation
+                where logisticsLocation.RecId == postalAddress.Location
+                   && logisticsLocation.IsPostalAddress == NoYes::Yes
+            join dirPartyLocation
+                where dirPartyLocation.Location == logisticsLocation.RecId
+                   && dirPartyLocation.Party    == custTable.Party
+                && dirPartyLocation.IsPrimary == NoYes::Yes;
+        }
+
+
+
+
+        // Fetch Default Entity from Canada Parameters
+        parameters = ETGCanadaParameters::find();
+        companyinfo=companyInfo::findDataArea(parameters.DefaultEntityForDocuments);
+
+        if(billofLadingTable)
+                {
+                    update_recordset etgbillofLadingReportTmp
+                        setting BillNumber     = billofLadingTable.BillNumber,
+                        CTNumber               = billofLadingTable.CTNumber,
+                        SINumber               = billofLadingTable.SINumber,
+                        Warehouse              = billofLadingTable.Warehouse,
+                        NameofCarrier          = billofLadingTable.NameofCarrier,
+                        PointofOrigin          = billofLadingTable.PointofOrigin,
+                        ShippingDate           = billofLadingTable.ShippingDate,
+                        ETGCarrierNumber       = billofLadingTable.ETGCarrierNumber,
+                        MailAddress            = billofLadingTable.MailAddress,
+                        Route                  = billofLadingTable.Route,
+                        Carinitial             = billofLadingTable.Carinitial,
+                        CarNumber              = billofLadingTable.CarNumber,
+                        TrailerNumber          = billofLadingTable.TrailerNumber,
+                        ContainerNumber        = billofLadingTable.ContainerNumber,
+                        PiecesPackages         = billofLadingTable.PiecesPackages,
+                        AdvanceandorBeyond     = billofLadingTable.AdvanceandorBeyond,
+                        Misc                   = billofLadingTable.Misc,
+                        Basic                  = billofLadingTable.Basic,
+                        Value                  = billofLadingTable.Value,
+                        Total                  = billofLadingTable.Total,
+                        Fee                    = billofLadingTable.Fee,
+                        Amount                 = billofLadingTable.Amount,
+                        TotalNumberofPackages  = billofLadingTable.TotalNumberofPackages,
+                        DIMofShippment         = billofLadingTable.DIMofShippment,
+                        TotalCubage            = billofLadingTable.TotalCubage,
+                        Dimensionalweight      = billofLadingTable.Dimensionalweight,
+                        NumberofXLPcsorPackages=billofLadingTable.NumberofXLPcsorPackages,
+                        Valuation              = billofLadingTable.Valuation,
+                        DeclaredValueofShipment= billofLadingTable.DeclaredValueofShipment,
+                        ShippersNumber         = billofLadingTable.ShippersNumber,
+                        Agent                  = billofLadingTable.Agent,
+                        Consignee              = salesTable.SalesName,
+                        Pieces                 = billofladingTable.Pieces,
+                        Per                    = companyInfo.postalAddress().Address,
+                        Per1                   = postalAddress.Address,
+                        Shipper                = companyInfo.name,
+                        CosigneesStreetAddress = salesTable.deliveryAddress().Address,
+                        Destination            = salesTable.deliveryAddress().City,
+                        ProvState              = salesTable.deliveryAddress().State,
+                        CountyOf               = salesTable.deliveryAddress().CountryRegionId
+
+                        where billofLadingTable.BillNumber == billNumber;
+
+                }
+            }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

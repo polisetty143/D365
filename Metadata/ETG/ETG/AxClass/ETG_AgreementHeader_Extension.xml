@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_AgreementHeader_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// The class <c>ETG_AgreementHeader_Extension</c> is used to handle the COC methods related to <c>AgreementHeader</c> table.
+/// </summary>
+[ExtensionOf(tablestr(AgreementHeader))]
+final class ETG_AgreementHeader_Extension
+{
+   
+
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>validateField</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///    Validates changes to a field in the <c>AgreementHeader</c> record.
+    /// </summary>
+    /// <param name="_fieldIdToCheck">
+    ///    The field ID to validate.
+    /// </param>
+    /// <returns>
+    ///    true if the value in the field change is valid; otherwise, false.
+    /// </returns>
+    public boolean validateField(fieldId _fieldIdToCheck)
+    {
+        AgreementLine                   agreementLine;
+        AgreementLineQuantityCommitment agreementLineQuantityCommitment;
+        Qty                             toleranceQty;
+        container                       remains;
+        boolean                         ret;
+        Qty                             releasedQty;
+
+        #AgreementsRemains
+
+        ret = next validateField(_fieldIdToCheck);
+
+        switch (_fieldIdToCheck)
+        {
+            case fieldNum(AgreementHeader, AgreementState) :
+                
+                if (this.AgreementState == AgreementState::Closed)
+                {
+                    while select agreementLine
+                        where agreementLine.Agreement == this.RecId
+                    {
+                        agreementLineQuantityCommitment = AgreementLineQuantityCommitment::find(agreementLine.RecId);
+
+                        remains = agreementLineQuantityCommitment.calculateAgreementRemansOnServer();
+
+                        releasedQty = conpeek(remains, #ReleasedNotInvoicedNorDeliveredIndex);
+
+                        if(agreementLineQuantityCommitment && agreementLineQuantityCommitment.ETG_ReleaseOrderLowerLimit)
+                        {
+                            toleranceQty = (agreementLineQuantityCommitment.CommitedQuantity * agreementLineQuantityCommitment.ETG_ReleaseOrderLowerLimit) / 100;
+
+                            if(releasedQty < agreementLineQuantityCommitment.CommitedQuantity - toleranceQty)
+                            {
+                                if(agreementLineQuantityCommitment.ETG_ToleranceAction == ETG_ToleranceAction::Stop)
+                                {
+                                    ret = checkFailed("@ETG:AgreementStatusClosedValidationMsg");
+                                }
+                                else if(agreementLineQuantityCommitment.ETG_ToleranceAction == ETG_ToleranceAction::Warning)
+                                {
+                                    warning("@ETG:AgreementStatusClosedValidationMsg");
+                                }
+                            }
+                        }
+                    }
+                }
+                if (this.AgreementState == AgreementState::Effective 
+                    && this.RecId
+                    && ETGACFParameters::find().EnableSalesAgreementWorkflow == NoYes::Yes
+                    && this.moduleType() == ModuleSalesPurch::Sales
+                    && SalesAgreementHeader::find(this.RecId).ETGWorkflowStatus != VersioningDocumentState::Approved)
+                {
+                    ret = checkFailed(strFmt("@ETG:CheckSalesAgreeStatus", SalesAgreementHeader::find(this.RecId).SalesNumberSequence));
+                }
+                break;            
+        }
+
+        //NS, DLT, 28/02/2025 restrict the effective date of PA\SA. It should not less than 3 days
+        if(_fieldIdToCheck == fieldNum(AgreementHeader, DefaultAgreementLineEffectiveDate)
+            && ETGACFParameters::find().EnableEffectiveDateLogicContracts == NoYes::Yes)
+        {
+            utcdatetime currentDate  = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+            utcdatetime selectedDate = this.DefaultAgreementLineEffectiveDate;
+            utcdatetime minDate      = DateTimeUtil::addDays(currentDate, -3);
+    
+            if (selectedDate > currentDate || selectedDate < minDate)
+            {
+                ret = error(strFmt("@ETG_New:EffectivDate", DatetimeUtil::Date(minDate),DatetimeUtil::Date(currentDate)));
+            }           
+        }
+        //NE, DLT, 28/02/2025 restrict the effective date of PA\SA. It should not less than 3 days
+
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateWrite</Name>
+				<Source><![CDATA[
+    public boolean validateWrite()
+    {
+        boolean ret = next validateWrite();
+    
+        if(ret)
+        {
+            if(ETGACFParameters::find().EnableAbruptTerminationAgreement)
+            { 
+                if(this.orig().AgreementState == AgreementState::ETGTerminated 
+                    || this.orig().AgreementState == AgreementState::ETGForceClosed
+                    || this.orig().AgreementState == AgreementState::Closed)
+                {
+                    if(this.AgreementState == AgreementState::OnHold || this.AgreementState == AgreementState::Effective)
+                    {
+                        ret = checkFailed(strFmt("@ETG:CheckSalesStatus", enum2Str(this.AgreementState)));
+                    }
+                }
+            }
+
+            //NS, DLT ,28/02/2025  Restrict the effective date of PA- it should not more than 3 days
+            if(ETGACFParameters::find().EnableEffectiveDateLogicContracts && this.DefaultAgreementLineEffectiveDate)
+            {
+                utcdatetime currentDate  = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());
+                utcdatetime selectedDate = this.DefaultAgreementLineEffectiveDate;
+                utcdatetime minDate      = DateTimeUtil::addDays(currentDate, -3);
+    
+                if (selectedDate > currentDate || selectedDate < minDate)
+                {
+                    throw error(strFmt("@ETG_New:EffectivDate", DatetimeUtil::Date(minDate),DatetimeUtil::Date(currentDate)));
+                }
+            }
+            //NE, DLT ,28/02/2025  Restrict the effective date of PA- it should not more than 3 days
+        }
+    
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insert</Name>
+				<Source><![CDATA[
+    public void insert()
+    {
+        if(ETGACFParameters::find().EnableExpirationDateOptionalContracts == NoYes::Yes)
+        {
+            this.DefaultAgreementLineExpirationDate = DateTimeUtil::date(DateTimeUtil::addYears(this.DefaultAgreementLineEffectiveDate, 3));
+        }
+
+        next insert();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>modifiedField</Name>
+				<Source><![CDATA[
+    public void modifiedField(FieldId _fieldId)
+    {
+        next modifiedField(_fieldId);
+
+        switch(_fieldId)
+        {
+            case fieldNum(AgreementHeader, DefaultAgreementLineEffectiveDate):
+                 if(ETGACFParameters::find().EnableExpirationDateOptionalContracts == NoYes::Yes)
+                {
+                    this.DefaultAgreementLineExpirationDate = DateTimeUtil::date(DateTimeUtil::addYears(this.DefaultAgreementLineEffectiveDate, 3));
+                }
+                break;           
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

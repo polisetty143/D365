@@ -1,0 +1,529 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_InventAgingStorageService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_InventAgingStorageService
+{
+    Query                               query;
+    createdTransactionId                transactionId;
+    ETG_InventAgingContract                 dataContract;
+    InventAgingReportLines              inventAgingReportLinesDetail, inventAgingResportLinesSelected;
+    InventAgingCmdAggregateCost         inventAgingCmdAggregateCost;
+    InventAgingCmdMapQuery              inventAgingCmdMapQueryAsOf;
+    boolean                             cannotCalculateAsOfQtyWithAsOfQuery;
+
+    //CostManagementInstrumentationLogger logger;
+
+    //final internal CostManagementInstrumentationLogger instrumentationLogger()
+    //{
+    //    if (!logger)
+    //    {
+    //        logger = CostManagementInstrumentationLogger::createLogger(classStr(ETG_InventAgingStorageService));
+    //    }
+
+    //    return logger;
+    //}
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>parmCreatedTransactionId</Name>
+				<Source><![CDATA[
+    public createdTransactionId parmCreatedTransactionId(createdTransactionId _transactionId = transactionId)
+    {
+        transactionId = _transactionId;
+        return transactionId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmQuery</Name>
+				<Source><![CDATA[
+    private Query parmQuery(Query _query = query)
+    {
+        query = _query;
+        return query;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmDataContract</Name>
+				<Source><![CDATA[
+    private ETG_InventAgingContract parmDataContract(ETG_InventAgingContract _dataContract = dataContract)
+    {
+        dataContract = _dataContract;
+        return dataContract;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>commandsToExecuteForFetchedAsOfQtyRow</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates an instance of the <c>InventAgingCmdList</c> class with a list of commands to
+    /// execute for each fetched row in the as of qty query.
+    /// </summary>
+    /// <param name="_queryRun">
+    /// The <c>QueryRun</c> that fetched the as of qty.
+    /// </param>
+    /// <returns>
+    /// An instance of the <c>InventAgingCmdList</c> class with a list of commands to
+    /// execute for each fetched row in the as of qty query.
+    /// </returns>
+    private InventAgingCmdList commandsToExecuteForFetchedAsOfQtyRow(QueryRun _queryRun)
+    {
+        InventAgingCmdMapQuery inventAgingCmdMapQuery = InventAgingCmdMapQuery::newFromQueryRun(_queryRun);
+        InventAgingCmdAggregateAsOfQty inventAgingCmdAggregateAsOfQty = InventAgingCmdAggregateAsOfQty::newFromParameters(inventAgingCmdMapQuery, inventAgingReportLinesDetail);
+
+        return InventAgingCmdList::construct().add(inventAgingCmdMapQuery)
+                                              .add(inventAgingCmdAggregateAsOfQty);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>commandsToExecuteForFetchedAsOfRow</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates an instance of the <c>InventAgingCmdList</c> class with a list of commands to
+    /// execute for each fetched row in the as of qty and amount query.
+    /// </summary>
+    /// <param name="_queryRun">
+    /// The <c>QueryRun</c> that fetched the as of qty.
+    /// </param>
+    /// <returns>
+    /// An instance of the <c>InventAgingCmdList</c> class with a list of commands to
+    /// execute for each fetched row in the as of qty and amount query.
+    /// </returns>
+    private InventAgingCmdList commandsToExecuteForFetchedAsOfRow(QueryRun _queryRun)
+    {
+        InventAgingCmdList list = InventAgingCmdList::construct();
+
+        inventAgingCmdMapQueryAsOf = InventAgingCmdMapQuery::newFromQueryRun(_queryRun);
+        list.add(inventAgingCmdMapQueryAsOf);
+
+        inventAgingCmdAggregateCost = InventAgingCmdAggregateCost::newFromParameters(inventAgingCmdMapQueryAsOf);
+        list.add(inventAgingCmdAggregateCost);
+
+        if (!cannotCalculateAsOfQtyWithAsOfQuery)
+        {
+            list.add(InventAgingCmdAggregateAsOfQty::newFromParameters(inventAgingCmdMapQueryAsOf, inventAgingReportLinesDetail));
+        }
+
+        return list;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>commandsToExecuteForFetchedReceiptRow</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates an instance of the <c>InventAgingCmdList</c> class with a list of commands to
+    /// execute for each fetched row in the receipt query.
+    /// </summary>
+    /// <param name="_inventAgingCmdMapQuery">
+    /// The <c>InventAgingCmdMapQuery</c> class that maps the recipt query.
+    /// </param>
+    /// <returns>
+    /// An instance of the <c>InventAgingCmdList</c> class with a list of commands to
+    /// execute for each fetched row in the receipt query.
+    /// </returns>
+    private InventAgingCmdList commandsToExecuteForFetchedReceiptRow(InventAgingCmdMapQuery _inventAgingCmdMapQuery)
+    {
+        ETG_InventAgingCmdAggregateReceiptQty inventAgingCmdAggregateReceiptQty = ETG_InventAgingCmdAggregateReceiptQty::newFromParameters(_inventAgingCmdMapQuery,
+                                                                                                                                   this.parmDataContract(),
+                                                                                                                                   inventAgingReportLinesDetail);
+
+        return InventAgingCmdList::construct().add(_inventAgingCmdMapQuery)
+                                              .add(inventAgingCmdAggregateReceiptQty);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>commandsToExecuteOnDetailLines</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates an instance of the <c>InventAgingCmdList</c> class with a list of commands to execute
+    /// on the detailed lines.
+    /// </summary>
+    /// <returns>
+    /// An instance of the <c>InventAgingCmdList</c> class with a list of commands to execute
+    /// on the detailed lines.
+    /// </returns>
+    private InventAgingCmdList commandsToExecuteOnDetailLines()
+    {
+        ETG_InventAgingCmdCalcAgingQty inventAgingCmdCalcAgingQty = ETG_InventAgingCmdCalcAgingQty::newFromInventAgingReportLines(inventAgingReportLinesDetail);
+        ETG_InventAgingCmdCalcAmounts  inventAgingCmdCalcAmounts  = ETG_InventAgingCmdCalcAmounts::newFromParameters(inventAgingReportLinesDetail,
+                                                                                                           inventAgingCmdAggregateCost);
+        ETG_InventAgingCmdAggregateSelected inventAgingCmdAggregateSelected = ETG_InventAgingCmdAggregateSelected::newFromParameters(this.parmDataContract(),
+                                                                                                                             inventAgingReportLinesDetail,
+                                                                                                                             inventAgingResportLinesSelected);
+
+        return InventAgingCmdList::construct().add(inventAgingCmdCalcAgingQty)
+                                              .add(inventAgingCmdCalcAmounts)
+                                              .add(inventAgingCmdAggregateSelected);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>isViewNonMandatoryFinancialDimension</Name>
+				<Source><![CDATA[
+    private boolean isViewNonMandatoryFinancialDimension()
+    {
+        ETG_InventAgingContract contract = this.parmDataContract() as ETG_InventAgingContract;
+        return  contract.parmViewConfigId()
+                || contract.parmViewDimension1()
+                || contract.parmViewDimension2()
+                || contract.parmViewDimension3()
+                || contract.parmViewDimension4()
+                || contract.parmViewDimension5()
+                || contract.parmViewDimension6()
+                || contract.parmViewDimension7()
+                || contract.parmViewDimension8()
+                || contract.parmViewDimension9()
+                || contract.parmViewDimension10()
+                || contract.parmViewInventBatchId()
+                || contract.parmViewInventColorId()
+                || contract.parmViewInventGTDId_RU()
+                || contract.parmViewInventLocationId()
+                || contract.parmViewInventOwnerId_RU()
+                || contract.parmViewInventProfileId_RU()
+                || contract.parmViewInventSerialId()
+                || contract.parmViewInventSizeId()
+                || contract.parmViewInventStatusId()
+                || contract.parmViewInventStyleId();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createQueryProcessorForAsOf</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates an instance <c>InventAgingQueryProcessor</c> class configured with an as of query on qty and amount and
+    /// a list of commands to execute for each row.
+    /// </summary>
+    /// <returns>
+    /// An instance <c>InventAgingQueryProcessor</c> class.
+    /// </returns>
+    private InventAgingQueryProcessor createQueryProcessorForAsOf()
+    {
+        ETG_InventAgingQueryBuilder inventAgingQueryBuilder = ETG_InventAgingQueryBuilder::newAsOfQtyAndAmountQuery(this.parmDataContract());
+        Query queryLoc = inventAgingQueryBuilder.build();
+
+        boolean isWMSorWHSEnabled = isConfigurationkeyEnabled(configurationKeyNum(WMSBasic))
+                                    || isConfigurationkeyEnabled(configurationKeyNum(WHSAndTMS));
+        cannotCalculateAsOfQtyWithAsOfQuery = !inventAgingQueryBuilder.canCalculateAsOfQty() || (isWMSorWHSEnabled && this.isViewNonMandatoryFinancialDimension());
+
+        QueryRun queryRun = new QueryRun(queryLoc);
+        InventAgingQueryProcessor inventAgingQueryProcessor = InventAgingQueryProcessor::newFromParameters(queryRun,
+                                                                                                           this.commandsToExecuteForFetchedAsOfRow(queryRun));
+        inventAgingQueryProcessor.parmSetDelimiter(InventAgingSetDelimiterAsOf::construct(queryRun));
+
+        return inventAgingQueryProcessor;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createQueryProcessorForAsOfQty</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates an instance <c>InventAgingQueryProcessor</c> class configured with an as of query on qty and
+    /// a list of commands to execute for each row.
+    /// </summary>
+    /// <returns>
+    /// An instance <c>InventAgingQueryProcessor</c> class.
+    /// </returns>
+    private InventAgingQueryProcessor createQueryProcessorForAsOfQty()
+    {
+        Query queryLoc = ETG_InventAgingQueryBuilder::newAsOfQtyQuery(this.parmDataContract()).build();
+        QueryRun queryRun = new QueryRun(queryLoc);
+        InventAgingQueryProcessor inventAgingQueryProcessor = InventAgingQueryProcessor::newFromParameters(queryRun,
+                                                                                                           this.commandsToExecuteForFetchedAsOfQtyRow(queryRun));
+        inventAgingQueryProcessor.parmSetDelimiter(InventAgingSetDelimiterReceipt::construct(queryRun, inventAgingCmdMapQueryAsOf));
+
+        return inventAgingQueryProcessor;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createQueryProcessorForReceipt</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates an instance of the <c>InventAgingCmdList</c> class configured with a <c>InventAgingQueryProcessor</c> to process
+    /// receipt for each period.
+    /// </summary>
+    /// <returns>
+    /// An instance of the <c>InventAgingCmdList</c> class configured with a <c>InventAgingQueryProcessor</c> to process
+    /// receipt for each period.
+    /// </returns>
+    protected InventAgingCmdList createQueryProcessorForReceipt()
+    {
+        InventAgingCmdList  list = InventAgingCmdList::construct();
+
+        list.add(this.createQueryProcessorForReceiptPeriod(this.parmDataContract().getPeriodOne(), this.parmDataContract().parmAsOnDate()));
+        list.add(this.createQueryProcessorForReceiptPeriod(this.parmDataContract().getPeriodTwo(), this.parmDataContract().getPeriodOne()-1));
+        list.add(this.createQueryProcessorForReceiptPeriod(this.parmDataContract().getPeriodThree(), this.parmDataContract().getPeriodTwo()-1));
+        list.add(this.createQueryProcessorForReceiptPeriod(this.parmDataContract().getPeriodFour(), this.parmDataContract().getPeriodThree()-1));
+       
+        //customization start
+        list.add(this.createQueryProcessorForReceiptPeriod(this.parmDataContract().getPeriodFive(), this.parmDataContract().getPeriodFour()-1));
+        list.add(this.createQueryProcessorForReceiptPeriod(this.parmDataContract().getPeriodSix(), this.parmDataContract().getPeriodFive()-1));
+        //customization end
+
+        return list;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createQueryProcessorForReceiptPeriod</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates an instance <c>InventAgingQueryProcessor</c> class configured with a reciept qty query and
+    /// a list of commands to execute for each row.
+    /// </summary>
+    /// <param name="_fromDate">
+    /// The from date of the period to query.
+    /// </param>
+    /// <param name="_toDate">
+    /// The to date of the period to query.
+    /// </param>
+    /// <returns>
+    /// An instance <c>InventAgingQueryProcessor</c> class.
+    /// </returns>
+    private InventAgingQueryProcessor createQueryProcessorForReceiptPeriod(TransDate _fromDate, TransDate _toDate)
+    {
+        Query queryLoc = ETG_InventAgingQueryBuilder::newReceiptQtyQuery(this.parmDataContract(), _fromDate, _toDate).build();
+        QueryRun queryRun = new QueryRun(queryLoc);
+
+        var inventAgingCmdMapQueryReciept = InventAgingCmdMapQuery::newFromQueryRun(queryRun);
+        InventAgingQueryProcessor inventAgingQueryProcessorReceipt = InventAgingQueryProcessor::newFromParameters(queryRun,
+                                                                                                                  this.commandsToExecuteForFetchedReceiptRow(inventAgingCmdMapQueryReciept));
+
+        inventAgingQueryProcessorReceipt.parmSetDelimiter(InventAgingSetDelimiterReceipt::construct(queryRun, inventAgingCmdMapQueryAsOf));
+        inventAgingQueryProcessorReceipt.parmSkipRecord(InventAgingSkipRecordReceipt::construct(inventAgingCmdMapQueryAsOf, inventAgingCmdMapQueryReciept));
+
+        return inventAgingQueryProcessorReceipt;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>process</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Generate Inventory aging report data.
+    /// </summary>
+    /// <param name="_dataContract">
+    /// A <c>InventAgingStorageContract</c> object specifying the parameter for generating Invent aging report data.
+    /// </param>
+    public void process(ETG_InventAgingStorageContract _dataContract)
+    {
+      //  if (FeatureStateProvider::isFeatureEnabled(ETG_InventAgingReportStorageFeature::instance()))
+        {
+            if (!_dataContract.parmAsOnDate())
+            {
+                // When the AsOnDate is not given then use the batch execution date.
+                _dataContract.parmAsOnDate(_dataContract.getAsOnDateOrDefault());
+            }
+
+            this.parmCreatedTransactionId(appl.curTransactionId(true));
+            this.parmDataContract(this.getInventValueReportContract(_dataContract));
+
+         //   using (var activityContext = this.instrumentationLogger().processActivities().process(transactionId))
+            {
+
+                InventAgingQueryProcessor           queryProcessorAsOf, queryProcessorAsOfQty;
+
+                ttsbegin;
+                inventAgingReportLinesDetail = InventAgingReportLines::construct();
+                inventAgingResportLinesSelected = InventAgingReportLines::construct();
+
+                queryProcessorAsOf = this.createQueryProcessorForAsOf();
+                if (cannotCalculateAsOfQtyWithAsOfQuery)
+                {
+                    queryProcessorAsOfQty = this.createQueryProcessorForAsOfQty();
+                }
+                InventAgingICommand queryProcessorReceipt = this.createQueryProcessorForReceipt();
+                InventAgingCmdList commandsToExecuteOnDetailLines = this.commandsToExecuteOnDetailLines();
+
+                do
+                {
+                    queryProcessorAsOf.execute();
+                    if (queryProcessorAsOfQty)
+                    {
+                        queryProcessorAsOfQty.execute();
+                    }
+                    queryProcessorReceipt.execute();
+
+                    inventAgingReportLinesDetail.executeCommand(commandsToExecuteOnDetailLines);
+
+                    inventAgingReportLinesDetail.flush();
+                    inventAgingCmdAggregateCost.flush();
+
+                    if (this.parmDataContract().parmViewItem())
+                    {
+                        inventAgingResportLinesSelected.bulkInsertDatabase();
+                    }
+                }
+                while (queryProcessorAsOf.isSetDelimited());
+
+                inventAgingResportLinesSelected.insertDatabaseForTheRestList();
+
+                if (!this.parmDataContract().parmViewItem())
+                {
+                    inventAgingResportLinesSelected.insertDatabase();
+                }
+
+                this.insertInventAgingStorage(_dataContract);
+
+                ttscommit;
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertInventAgingStorage</Name>
+				<Source><![CDATA[
+    protected void insertInventAgingStorage(ETG_InventAgingStorageContract _dataContract)
+    {
+        InventAgingStorage inventAgingStorage;
+
+        inventAgingStorage.TransactionId = this.parmCreatedTransactionId();
+        inventAgingStorage.ExecutionName = _dataContract.parmExecutionName();
+        inventAgingStorage.ExecutionTime = DateTimeUtil::toStr(DateTimeUtil::getSystemDateTime());
+        inventAgingStorage.Filters = SysOperationHelper::base64Decode(_dataContract.parmQuery());
+
+        inventAgingStorage.AgingPeriodUnit = _dataContract.parmAgingPeriodUnit();
+        inventAgingStorage.AsOnDate = _dataContract.parmAsOnDate();
+        inventAgingStorage.IntervalDateOne = _dataContract.parmIntervalDateOne();
+        inventAgingStorage.IntervalDateTwo = _dataContract.parmIntervalDateTwo();
+        inventAgingStorage.IntervalDateThree = _dataContract.parmIntervalDateThree();
+        inventAgingStorage.IntervalDateFour = _dataContract.parmIntervalDateFour();
+        inventAgingStorage.IntervalDatePeriodOne = _dataContract.parmIntervalDatePeriodOne();
+        inventAgingStorage.IntervalDatePeriodTwo = _dataContract.parmIntervalDatePeriodTwo();
+        inventAgingStorage.IntervalDatePeriodThree = _dataContract.parmIntervalDatePeriodThree();
+        inventAgingStorage.IntervalDatePeriodFour = _dataContract.parmIntervalDatePeriodFour();
+        inventAgingStorage.IntervalDaysOne = _dataContract.parmIntervalDaysOne();
+        inventAgingStorage.IntervalDaysTwo = _dataContract.parmIntervalDaysTwo();
+        inventAgingStorage.IntervalDaysThree = _dataContract.parmIntervalDaysThree();
+        inventAgingStorage.IntervalDaysFour = _dataContract.parmIntervalDaysFour();
+        inventAgingStorage.ViewConfigId = _dataContract.parmViewConfigId();
+        inventAgingStorage.ViewDimension1 = _dataContract.parmViewDimension1();
+        inventAgingStorage.ViewDimension2 = _dataContract.parmViewDimension2();
+        inventAgingStorage.ViewDimension3 = _dataContract.parmViewDimension3();
+        inventAgingStorage.ViewDimension4 = _dataContract.parmViewDimension4();
+        inventAgingStorage.ViewDimension5 = _dataContract.parmViewDimension5();
+        inventAgingStorage.ViewDimension6 = _dataContract.parmViewDimension6();
+        inventAgingStorage.ViewDimension7 = _dataContract.parmViewDimension7();
+        inventAgingStorage.ViewDimension8 = _dataContract.parmViewDimension8();
+        inventAgingStorage.ViewDimension9 = _dataContract.parmViewDimension9();
+        inventAgingStorage.ViewDimension10 = _dataContract.parmViewDimension10();
+        inventAgingStorage.ViewDimension11 = _dataContract.parmViewDimension11();
+        inventAgingStorage.ViewDimension12 = _dataContract.parmViewDimension12();
+        inventAgingStorage.ViewInventBatchId = _dataContract.parmViewInventBatchId();
+        inventAgingStorage.ViewInventColorId = _dataContract.parmViewInventColorId();
+        inventAgingStorage.ViewInventGTDId_RU = _dataContract.parmViewInventGTDId_RU();
+        inventAgingStorage.ViewInventLocationId = _dataContract.parmViewInventLocationId();
+        inventAgingStorage.ViewInventOwnerId_RU = _dataContract.parmViewInventOwnerId_RU();
+        inventAgingStorage.ViewInventProfileId_RU = _dataContract.parmViewInventProfileId_RU();
+        inventAgingStorage.ViewInventSerialId = _dataContract.parmViewInventSerialId();
+        inventAgingStorage.ViewInventSiteId = _dataContract.parmViewInventSiteId();
+        inventAgingStorage.ViewInventSizeId = _dataContract.parmViewInventSizeId();
+        inventAgingStorage.ViewInventStatusId = _dataContract.parmViewInventStatusId();
+        inventAgingStorage.ViewInventStyleId = _dataContract.parmViewInventStyleId();
+        inventAgingStorage.ViewInventVersionId = _dataContract.parmViewInventVersionId();
+        inventAgingStorage.ViewItem = _dataContract.parmViewItem();
+        inventAgingStorage.ViewItemGroup = _dataContract.parmViewItemGroup();
+        inventAgingStorage.ViewLicensePlateId = _dataContract.parmViewLicensePlateId();
+        inventAgingStorage.ViewWMSLocationId = _dataContract.parmViewWMSLocationId();
+
+        //customization start
+        inventAgingStorage.DimensionSetName = _dataContract.parmFinancialDimSet();
+        inventAgingStorage.IntervalDaysFive = _dataContract.parmIntervalDaysFive();
+        inventAgingStorage.IntervalDaysSix  = _dataContract.parmIntervalDaysSix();
+        //customization end
+
+        inventAgingStorage.insert();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getInventValueReportContract</Name>
+				<Source><![CDATA[
+    protected ETG_InventAgingContract getInventValueReportContract(ETG_InventAgingStorageContract _dataContract)
+    {
+        ETG_InventAgingContract reportContract = ETG_InventAgingContract::construct();
+        reportContract.parmAgingPeriodUnit(_dataContract.parmAgingPeriodUnit());
+        reportContract.parmAsOnDate(_dataContract.parmAsOnDate());
+        reportContract.parmIntervalDateFour(_dataContract.parmIntervalDateFour());
+        reportContract.parmIntervalDateOne(_dataContract.parmIntervalDateOne());
+        reportContract.parmIntervalDatePeriodFour(_dataContract.parmIntervalDatePeriodFour());
+        reportContract.parmIntervalDatePeriodOne(_dataContract.parmIntervalDatePeriodOne());
+        reportContract.parmIntervalDatePeriodThree(_dataContract.parmIntervalDatePeriodThree());
+        reportContract.parmIntervalDatePeriodTwo(_dataContract.parmIntervalDatePeriodTwo());
+        reportContract.parmIntervalDateThree(_dataContract.parmIntervalDateThree());
+        reportContract.parmIntervalDateTwo(_dataContract.parmIntervalDateTwo());
+        reportContract.parmIntervalDaysFour(_dataContract.parmIntervalDaysFour());
+        reportContract.parmIntervalDaysOne(_dataContract.parmIntervalDaysOne());
+        reportContract.parmIntervalDaysThree(_dataContract.parmIntervalDaysThree());
+        reportContract.parmIntervalDaysTwo(_dataContract.parmIntervalDaysTwo());
+        reportContract.parmQuery(this.parmQuery(new Query(SysOperationHelper::base64Decode(_dataContract.parmQuery()))));
+        reportContract.parmViewConfigId(_dataContract.parmViewConfigId());
+        reportContract.parmViewDimension1(_dataContract.parmViewDimension1());
+        reportContract.parmViewDimension2(_dataContract.parmViewDimension2());
+        reportContract.parmViewDimension3(_dataContract.parmViewDimension3());
+        reportContract.parmViewDimension4(_dataContract.parmViewDimension4());
+        reportContract.parmViewDimension5(_dataContract.parmViewDimension5());
+        reportContract.parmViewDimension6(_dataContract.parmViewDimension6());
+        reportContract.parmViewDimension7(_dataContract.parmViewDimension7());
+        reportContract.parmViewDimension8(_dataContract.parmViewDimension8());
+        reportContract.parmViewDimension9(_dataContract.parmViewDimension9());
+        reportContract.parmViewDimension10(_dataContract.parmViewDimension10());
+        reportContract.parmViewDimension11(_dataContract.parmViewDimension11());
+        reportContract.parmViewDimension12(_dataContract.parmViewDimension12());
+        reportContract.parmViewInventBatchId(_dataContract.parmViewInventBatchId());
+        reportContract.parmViewInventColorId(_dataContract.parmViewInventColorId());
+        reportContract.parmViewInventGTDId_RU(_dataContract.parmViewInventGTDId_RU());
+        reportContract.parmViewInventLocationId(_dataContract.parmViewInventLocationId());
+        reportContract.parmViewInventOwnerId_RU(_dataContract.parmViewInventOwnerId_RU());
+        reportContract.parmViewInventProfileId_RU(_dataContract.parmViewInventProfileId_RU());
+        reportContract.parmViewInventSerialId(_dataContract.parmViewInventSerialId());
+        reportContract.parmViewInventSiteId(_dataContract.parmViewInventSiteId());
+        reportContract.parmViewInventSizeId(_dataContract.parmViewInventSizeId());
+        reportContract.parmViewInventStatusId(_dataContract.parmViewInventStatusId());
+        reportContract.parmViewInventStyleId(_dataContract.parmViewInventStyleId());
+        reportContract.parmViewInventVersionId(_dataContract.parmViewInventVersionId());
+        reportContract.parmViewItem(_dataContract.parmViewItem());
+        reportContract.parmViewItemGroup(_dataContract.parmViewItemGroup());
+        reportContract.parmViewLicensePlateId(_dataContract.parmViewLicensePlateId());
+        reportContract.parmViewWMSLocationId(_dataContract.parmViewWMSLocationId());
+
+        //customization start
+        reportContract.parmIntervalDaysFive(_dataContract.parmIntervalDaysFive());
+        reportContract.parmIntervalDaysSix(_dataContract.parmIntervalDaysSix());
+        reportContract.parmFinancialDimSet(_dataContract.parmFinancialDimSet());
+        //customization end
+
+        return reportContract;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

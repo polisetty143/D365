@@ -1,0 +1,324 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGGeneralJournalEntry_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tableStr(GeneralJournalEntry))]
+internal final class ETGGeneralJournalEntry_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>counterPartyCode</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adding Customer or vendor number based on voucher number.
+    /// </summary>
+    /// <param name = "_this"></param>
+    /// <returns></returns>
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display str counterPartyCode(GeneralJournalEntry _this)
+    {
+        CustTrans custTrans;
+        VendTrans vendTrans;
+        str counterPartyCode;
+
+        select * from custTrans
+            where custTrans.Voucher == _this.SubledgerVoucher;
+
+        if(custTrans)
+        {
+            counterPartyCode = custTrans.AccountNum;
+        }
+
+        select * from vendTrans 
+            where vendTrans.Voucher == _this.SubledgerVoucher;
+
+        if(vendTrans)
+        {
+            counterPartyCode = vendTrans.AccountNum;
+        }
+       
+        return counterPartyCode;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>counterPartyName</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adding Customer or vendor name based on voucher number.
+    /// </summary>
+    /// <param name = "_this"></param>
+    /// <returns></returns>
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display DirPartyName counterPartyName(GeneralJournalEntry _this)
+    {
+        CustTrans custTrans;
+        VendTrans vendTrans;
+        DirPartyName counterPartyName;
+
+        select * from custTrans
+            where custTrans.Voucher == _this.SubledgerVoucher;
+
+        if(custTrans)
+        {
+            counterPartyName = CustTable::find(custTrans.AccountNum).name();            
+        }
+
+        select * from vendTrans
+            where vendTrans.Voucher == _this.SubledgerVoucher;
+
+        if(vendTrans)
+        {
+            counterPartyName = VendTable::find(vendTrans.AccountNum).name();
+        }
+       
+        return counterPartyName;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>entityCode</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Current legal entity code.
+    /// </summary>
+    /// <param name = "_this"></param>
+    /// <returns></returns>
+    //[SysClientCacheDataMethodAttribute(true)]
+    public display str entityCode()
+    {
+        CompanyInfo companyInfo;
+
+        str entityCode;
+
+        select * from companyInfo where companyInfo.DataArea == curExt();
+       
+        if(companyInfo)
+        {
+            entityCode = companyInfo.DataArea;
+        }
+        else
+        {
+            entityCode = "0";
+        }
+        
+        return entityCode;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>invoiceNum</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name = "_this"></param>
+    /// <returns></returns>
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display InvoiceId invoiceNum(GeneralJournalEntry _this)
+    {
+        LedgerJournalTrans ledgerJournalTrans;
+        InvoiceId invoiceId;
+        ETG_ARAP_MSGHEADER header;
+        CustTrans custTransLoc;
+        VendTrans vendTransLoc;
+
+        select * from ledgerJournalTrans
+            where ledgerJournalTrans.Voucher == _this.SubledgerVoucher;
+
+        if(ledgerJournalTrans)
+        {
+            select * from header
+               where header.ETGARAPREF == ledgerJournalTrans.Invoice;
+
+            if(header)
+            {
+                invoiceId = ledgerJournalTrans.Invoice;
+            }
+        }
+        else if(!invoiceId)
+        {
+            select * from custTransLoc
+               where custTransLoc.Voucher == _this.SubledgerVoucher;
+
+            if(custTransLoc)
+            {
+                invoiceId = custTransLoc.Invoice;
+            }
+        }
+        else if(!invoiceId)
+        {
+            select * from vendTransLoc
+               where vendTransLoc.Voucher == _this.SubledgerVoucher;
+
+            if(vendTransLoc)
+            {
+                invoiceId = vendTransLoc.Invoice;
+            }
+        }
+        return invoiceId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>integrationContractNumber</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name = "_this"></param>
+    /// <returns></returns>
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display ETGIntegrationInvoice integrationContractNumber(GeneralJournalEntry _this)
+    {
+        LedgerJournalTrans ledgerJournalTrans;
+        ETGIntegrationInvoice integrationContractNum;
+        ETG_ARAP_MSGHEADER header, headerCust, headerVend;
+        CustTrans custTransLoc;
+        VendTrans vendTransLoc;
+
+        select * from ledgerJournalTrans
+            where ledgerJournalTrans.Voucher == _this.SubledgerVoucher;
+
+        select * from header
+               where header.ETGARAPREF == ledgerJournalTrans.Invoice;
+        if(ledgerJournalTrans && header)
+        {           
+           integrationContractNum = ledgerJournalTrans.ETGIntegrationContractNumber;           
+        }
+        else if(!integrationContractNum)
+        {
+            select * from custTransLoc
+               where custTransLoc.Voucher == _this.SubledgerVoucher;
+
+            if(custTransLoc)
+            {
+                select * from headerCust
+                  where headerCust.ETGARAPREF == custTransLoc.Invoice;
+                if(headerCust)
+                {
+                   integrationContractNum = headerCust.ETGCONTRACTNUMBER;
+                }
+            }
+        }
+        else if(!integrationContractNum)
+        {
+            select * from vendTransLoc
+               where vendTransLoc.Voucher == _this.SubledgerVoucher;
+
+            if(vendTransLoc)
+            {
+                select * from headerVend
+                  where headerVend.ETGARAPREF == vendTransLoc.Invoice;
+                if(headerVend)
+                {
+                    integrationContractNum = headerVend.ETGCONTRACTNUMBER;
+                }
+            }
+        }
+        return integrationContractNum;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>displayModifiedBy</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adding modifiedBy Field value.
+    /// </summary>
+    /// <param name = "_this"></param>
+    /// <returns></returns>
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display String20 displayModifiedBy(GeneralJournalEntry _this)
+    {
+        string20            modifiedBy;
+        TmpLedgerBase       tmpLedgerBase;
+        LedgerJournalTable  ledgerJournalTable;
+        GeneralJournalEntry generalJournalEntry;
+        LedgerJournalTrans  ledgerJournalTrans;
+
+        select * from ledgerJournalTrans
+            where ledgerJournalTrans.Voucher == _this.SubledgerVoucher;
+
+        if(ledgerJournalTrans)
+        {
+            ledgerJournalTable = LedgerJournalTable::find(ledgerJournalTrans.JournalNum);
+            modifiedBy         = ledgerJournalTable.ModifiedBy;
+        }
+       return modifiedBy;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>displayPostingDate</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adding posting date value.
+    /// </summary>
+    /// <param name = "_this"></param>
+    /// <returns></returns>
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display TransDate displayPostingDate(GeneralJournalEntry _this)
+    {
+        TransDate           postedDate;
+        TmpLedgerBase       tmpLedgerBase;
+        LedgerJournalTable  ledgerJournalTable;
+        GeneralJournalEntry generalJournalEntry;
+        LedgerJournalTrans  ledgerJournalTrans;
+
+        select * from ledgerJournalTrans
+            where ledgerJournalTrans.Voucher == _this.SubledgerVoucher;
+
+        if(ledgerJournalTrans)
+        {
+            ledgerJournalTable = LedgerJournalTable::find(ledgerJournalTrans.JournalNum);
+            postedDate         = DateTimeUtil::date(ledgerJournalTable.PostedDateTime);
+        }
+        return postedDate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>displayPostingTime</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adding posting time value.
+    /// </summary>
+    /// <param name = "_this"></param>
+    /// <returns></returns>
+    [SysClientCacheDataMethodAttribute(true)]
+    public static display str displayPostingTime(GeneralJournalEntry _this)
+    {
+        TmpLedgerBase       tmpLedgerBase;
+        LedgerJournalTable  ledgerJournalTable;
+        GeneralJournalEntry generalJournalEntry;
+        LedgerJournalTrans  ledgerJournalTrans;
+        str                 timeStr;
+
+        select * from ledgerJournalTrans
+            where ledgerJournalTrans.Voucher == _this.SubledgerVoucher;
+
+        if(ledgerJournalTrans)
+        {
+            ledgerJournalTable = LedgerJournalTable::find(ledgerJournalTrans.JournalNum);
+            TimeOfDay timeOnly = DateTimeUtil::time(ledgerJournalTable.PostedDateTime); // Extracts only time from Date and time.
+            timeStr            = time2Str(timeOnly, TimeSeparator::Colon, TimeFormat::Hour24);// Formats to HH:MM:SS
+        }
+        return timeStr;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

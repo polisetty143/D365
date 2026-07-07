@@ -1,0 +1,363 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ProdParmReportFinishedFormETG_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formStr(ProdParmReportFinished))]
+final class ProdParmReportFinishedFormETG_Extension
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>closeOk</Name>
+				<Source><![CDATA[
+    void closeOk()
+    {
+        if(!ETGCanadaParameters::find().EnableExcludeCustomizations)
+        {
+            ProdJournalBOM              prodJournalBOM, prodJournalBOMPost, prodJournalBOMloc;
+            ProdParmReportFinished      prodParmReportFinished, prodParmReportFinishedloc, prodParmReportFinishedFormula;
+            ProdJournalTable            prodJournalTable, prodJournalTableRAF;
+            ParmId                      parmId;
+            Qty                         consump, rafQty;
+            Dialogbutton                db;
+            boolean                     packingFind;
+            InventItemGroupItem         inventItemGroupItem;
+            ProdJournalProd             prodJournalProd;
+
+            consump = 0; rafQty = 0;
+            FormRun         formRun = this;
+            prodParmReportFinishedloc = formrun.dataSource(formDataSourceStr(ProdParmReportFinished,ProdParmReportFinished)).cursor();
+
+            select * from prodParmReportFinishedFormula
+                 where prodParmReportFinishedFormula.ParmId == prodParmReportFinishedloc.ParmId
+                    && prodParmReportFinishedFormula.PmfProductType == PmfProductType::Formula;
+            if (!prodParmReportFinishedFormula.QtyGood || prodParmReportFinishedFormula.QtyGood <= 0)
+            {
+                throw Error('Formula should not be empty or Negative');
+            }
+
+            
+            parmId = prodMultiReportFinished.ParmId();
+
+            select sum(QtyGood) from  prodParmReportFinished group by prodParmReportFinished.ParmId
+                where prodParmReportFinished.ParmId == parmId;
+
+            while select * from prodJournalTable
+                where prodJournalTable.ProdId == prodParmReportFinishedloc.ProdId
+                    && prodJournalTable.JournalType == ProdJournalType::Picklist
+            {
+            
+                if (!packingFind)
+                {
+                    while select * from prodJournalBOMloc
+                    where prodJournalBOMloc.ProdId == prodJournalTable.ProdId
+                    join inventItemGroupItem
+                        where  inventItemGroupItem.ItemId == prodJournalBOMloc.ItemId
+                        && inventItemGroupItem.ItemGroupId == "PK"
+                    {
+                        packingFind = true;
+                    }
+
+                    if (!packingFind)
+                    {
+                        if (!prodJournalBOMloc)
+                        {
+                            //checkFailed(strFmt("Packing material not posted for this order"));
+                            db = box::yesNo("Packing material not posted for this order, Would you like to proceed?", dialogButton::Yes, "YesNo Box Example");
+                            if(db == Dialogbutton::No)
+                            {
+                                throw error(strFmt('Packing material not posted for this order'));;
+                            }
+
+                        }
+                    }
+                    else
+                    {
+                        if (prodJournalTable.Posted == NoYes::No)
+                        {
+                            db = box::yesNo("Packing material not posted for this order, Would you like to proceed?", dialogButton::Yes, "YesNo Box Example");
+                            if(db == Dialogbutton::No)
+                            {
+                                throw error(strFmt('Packing material not posted for this order'));;
+                            }
+                        }
+                    }
+                }
+
+                select sum(BOMConsump) from prodJournalBOM group by prodJournalBOM.JournalId
+                        where prodJournalBOM.JournalId == prodJournalTable.JournalId
+                    join inventItemGroupItem
+                        where  inventItemGroupItem.ItemId == prodJournalBOM.ItemId
+                        && (inventItemGroupItem.ItemGroupId == "RM" || inventItemGroupItem.ItemGroupId == "SFG");
+
+                consump += prodJournalBOM.BOMConsump;
+            }
+
+            while select * from prodJournalTableRAF
+                where prodJournalTableRAF.ProdId == prodParmReportFinishedloc.ProdId
+                && prodJournalTableRAF.JournalType == ProdJournalType::ReportFinished
+            {
+
+                select sum(QtyGood) from prodJournalProd group by prodJournalProd.JournalId
+                        where prodJournalProd.JournalId == prodJournalTableRAF.JournalId;
+
+                rafQty += prodJournalProd.QtyGood;
+            }
+
+        
+            if (consump < rafQty + prodParmReportFinished.QtyGood)
+            {
+                throw error(strFmt('Input-Out quantities are not Matching'));
+            }
+
+            if(prodParmReportFinished.QtyGood > consump)
+            {
+
+                throw error(strFmt('Input-Out quantities are not Matching'));
+
+            }
+            else
+            {
+                if(prodParmReportFinished.QtyGood < consump)
+
+                {
+                    //checkFailed(strFmt('Input-Out quantities are not Matching'));
+                    db = box::yesNo("Input-Out quantities are not Matching, Would you like to proceed?", dialogButton::Yes, "YesNo Box Example");
+                    if(db == Dialogbutton::No)
+                    {
+                        throw error(strFmt('Input-Out quantities are not Matching'));;
+                    }
+                }
+            }
+        
+
+            // date validation
+            prodJournalBOMloc.clear();
+            prodParmReportFinishedFormula.clear();
+
+            while select TransDate from prodParmReportFinishedFormula
+            where prodParmReportFinishedFormula.ProdId == prodParmReportFinishedloc.ProdId
+                && prodParmReportFinishedFormula.ParmId == prodParmReportFinishedloc.ParmId
+            {
+                while select TransDate from prodJournalBOMloc where prodJournalBOMloc.ProdId == prodParmReportFinishedloc.ProdId
+                {
+                    if (prodJournalBOMloc.TransDate > prodParmReportFinishedFormula.TransDate)
+                    {
+                        throw error ('RAF Date should be greater than picking list posted date');
+                    }
+                }
+            }
+        }
+
+       
+
+
+
+        next closeOk();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>inventBatchId_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataFieldEventHandler(formDataFieldStr(ProdParmReportFinished, InventDim, inventBatchId), FormDataFieldEventType::Modified)]
+    public static void inventBatchId_OnModified(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        if(!ETGCanadaParameters::find().EnableExcludeCustomizations)
+        {
+            ProdParmReportFinished     prodParmReportFinished,prodParmReportFinishedLoc;
+            InventDim                 inventDim,inventDimLoc, inventdimupd;
+            FormRun         formrun = sender.datasource().formRun();
+            FormDataSource  ProdParmReportFinished_ds = formrun.dataSource(formDataSourceStr(ProdParmReportFinished, ProdParmReportFinished));
+            FormDataSource  inventdim_ds = formrun.dataSource(formDataSourceStr(ProdParmReportFinished, InventDim));
+
+            inventDimLoc = inventdim_ds.cursor();
+            prodParmReportFinished = ProdParmReportFinished_ds.cursor();
+
+            while select forupdate  prodParmReportFinishedLoc
+            where prodParmReportFinishedLoc.ParmId == prodParmReportFinished.ParmId
+                && prodParmReportFinishedLoc.ProdId == prodParmReportFinished.ProdId
+            {
+                ttsbegin;
+                select forupdate inventDim where inventDim.inventDimId == prodParmReportFinishedLoc.InventDimId;
+
+                inventDim.inventBatchId = inventDimLoc.inventBatchId;
+                inventdimupd = InventDim::findOrCreate(inventDim);
+                prodParmReportFinishedLoc.InventDimId = inventdimupd.inventDimId;
+                prodParmReportFinishedLoc.ETGBatchCreationDate = today();
+                prodParmReportFinishedLoc.doUpdate();
+                ttscommit;
+            }
+        
+            prodParmReportFinished_ds.reread();
+            prodParmReportFinished_ds.executeQuery();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>wMSLocationId_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataFieldEventHandler(formDataFieldStr(ProdParmReportFinished, InventDim, wMSLocationId), FormDataFieldEventType::Modified)]
+    public static void wMSLocationId_OnModified(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+        if(!ETGCanadaParameters::find().EnableExcludeCustomizations)
+        {
+            ProdParmReportFinished     prodParmReportFinished,prodParmReportFinishedLoc;
+            InventDim                 inventDim,inventDimLoc, inventdimupd;
+            FormRun         formrun = sender.datasource().formRun();
+            FormDataSource  ProdParmReportFinished_ds = formrun.dataSource(formDataSourceStr(ProdParmReportFinished, ProdParmReportFinished));
+            FormDataSource  inventdim_ds = formrun.dataSource(formDataSourceStr(ProdParmReportFinished, InventDim));
+
+            inventDimLoc = inventdim_ds.cursor();
+            prodParmReportFinished = ProdParmReportFinished_ds.cursor();
+
+            while select forupdate  prodParmReportFinishedLoc
+            where prodParmReportFinishedLoc.ParmId == prodParmReportFinished.ParmId
+                && prodParmReportFinishedLoc.ProdId == prodParmReportFinished.ProdId
+            {
+                ttsbegin;
+                select forupdate inventDim where inventDim.InventDimId == prodParmReportFinishedLoc.InventDimId;
+
+                inventDim.wMSLocationId = inventDimLoc.wMSLocationId;
+                inventdimupd = InventDim::findOrCreate(inventDim);
+                prodParmReportFinishedLoc.InventDimId = inventdimupd.inventDimId;
+           
+                prodParmReportFinishedLoc.doUpdate();
+                ttscommit;
+            }
+
+            prodParmReportFinished_ds.reread();
+            prodParmReportFinished_ds.executeQuery();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ETGProductionShift_OnModified</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormDataFieldEventHandler(formDataFieldStr(ProdParmReportFinished, ProdParmReportFinished, ETGProductionShift), FormDataFieldEventType::Modified)]
+    public static void ETGProductionShift_OnModified(FormDataObject sender, FormDataFieldEventArgs e)
+    {
+   
+        ProdParmReportFinished     prodParmReportFinished,prodParmReportFinishedLoc;
+        InventDim                 inventDim,inventDimLoc, inventdimupd;
+        FormRun         formrun = sender.datasource().formRun();
+        FormDataSource  ProdParmReportFinished_ds = formrun.dataSource(formDataSourceStr(ProdParmReportFinished, ProdParmReportFinished));
+        // FormDataSource  inventdim_ds = formrun.dataSource(formDataSourceStr(ProdParmReportFinished, Pool));
+
+        //inventDimLoc = inventdim_ds.cursor();
+        prodParmReportFinished = ProdParmReportFinished_ds.cursor();
+
+        while select forupdate  prodParmReportFinishedLoc
+            where prodParmReportFinishedLoc.ParmId == prodParmReportFinished.ParmId
+                && prodParmReportFinishedLoc.ProdId == prodParmReportFinished.ProdId
+        {
+            ttsbegin;
+            //select forupdate prodParmReportFinished where prodParmReportFinished.ETGProductionShift == prodParmReportFinishedLoc.ETGProductionShift;
+
+            
+            prodParmReportFinishedLoc.ETGProductionShift = prodParmReportFinished.ETGProductionShift;
+            prodParmReportFinishedLoc.doUpdate();
+            ttscommit;
+        }
+
+        prodParmReportFinished_ds.reread();
+        prodParmReportFinished_ds.executeQuery();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {
+        int ret;
+        FormDatasource     InventDim_Ds;
+
+        InventDim_Ds.object(fieldNum(InventDim,InventBatchId)).mandatory(true);
+        
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>Ok_OnClicked</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
+    [FormControlEventHandler(formControlStr(ProdParmReportFinished, Ok), FormControlEventType::Clicked)]
+    public static void Ok_OnClicked(FormControl sender, FormControlEventArgs e)
+    {
+
+        ProdParmReportFinished  prodParmReportFinished, prodParmReportFinishedloc;
+        InventSum       inventsum, inventsumloc;
+        InventDim  inventdim;
+
+        prodParmReportFinished = sender.formRun().dataSource(formDataSourceStr(ProdParmReportFinished,ProdParmReportFinished)).cursor();
+
+        while select forupdate  prodParmReportFinishedLoc
+            where prodParmReportFinishedLoc.ParmId == prodParmReportFinished.ParmId
+                && prodParmReportFinishedLoc.ProdId == prodParmReportFinished.ProdId
+        {
+            inventsum.clear();
+            inventDim.clear();
+            inventsumloc.clear();
+            ttsbegin;
+
+            select forupdate inventsum where inventsum.ItemId == prodParmReportFinishedLoc.ItemId && inventsum.InventDimId == prodParmReportFinishedLoc.InventDimId;
+            if (inventsum.RecId)
+            {
+                inventsum.AvailOrdered      += 0;//prodParmReportFinishedLoc.QtyGood;
+                inventsum.PhysicalInvent    += 0;//prodParmReportFinishedLoc.QtyGood;
+                inventsum.Registered        += 0;//prodParmReportFinishedLoc.QtyGood;
+                inventsum.AvailPhysical     += 0;//prodParmReportFinishedLoc.QtyGood;
+                inventsum.doUpdate();
+            }
+            else
+            {
+                inventsumloc.ItemId            = prodParmReportFinishedLoc.ItemId;
+                inventsumloc.AvailOrdered      = 0;//prodParmReportFinishedLoc.QtyGood;
+                inventsumloc.PhysicalInvent    = 0;//prodParmReportFinishedLoc.QtyGood;
+                inventsumloc.Registered        = 0;//prodParmReportFinishedLoc.QtyGood;
+                inventsumloc.AvailPhysical     = 0;//prodParmReportFinishedLoc.QtyGood;
+                inventsumloc.InventDimId       = prodParmReportFinishedLoc.inventDimId;
+                inventsumloc.insert();
+            }
+
+            ttscommit;
+        }
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

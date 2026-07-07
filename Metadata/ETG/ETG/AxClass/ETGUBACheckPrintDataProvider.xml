@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGUBACheckPrintDataProvider</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(ETGUBACheckPrintContract))]
+class ETGUBACheckPrintDataProvider extends  SRSReportDataProviderPreProcessTempDB
+
+{
+    ETGUBACheckPrintTmp           ETGUBACheckPrintTmp;
+    RecId                         _RecId;
+    LedgerJournalTrans            LedgerJournalTrans;
+    VendTable                     VendTable;
+    VendAccount                   _VendAccount;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGUBACheckPrintTmp</Name>
+				<Source><![CDATA[
+    [SrsReportDataSetAttribute(tableStr(ETGUBACheckPrintTmp))]
+    public ETGUBACheckPrintTmp getETGUBACheckPrintTmp()
+    {
+        select * from ETGUBACheckPrintTmp;
+        return ETGUBACheckPrintTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>FetchVendorCity</Name>
+				<Source><![CDATA[
+    Public  string255 FetchVendorCity(VendAccount  _vendAcc)
+    {
+        VendTable                   vendTableRec;
+        DirPartyTable               dirPartyTable;
+        DirPartyLocation            dirPartyLocation;
+        DirPartyLocationRole        dirPartyLocationRole;
+        LogisticsLocation           logisticsLocation;
+        LogisticsLocationRole       logisticsLocationRole;
+        LogisticsPostalAddress      logisticsPostalAddress;
+        str                         isPrimary;
+        select AccountNum from vendTableRec
+            where vendTableRec.AccountNum == _vendAcc
+        join Name from dirPartyTable
+            where dirPartyTable.RecId == vendTableRec.Party
+        join IsPrimary from dirPartyLocation
+            where dirPartyLocation.Party == vendTableRec.Party
+        join dirPartyLocationRole
+            where dirPartyLocationRole.PartyLocation == dirPartyLocation.RecId
+        join Type from logisticsLocationRole
+            where logisticsLocationRole.RecId == dirPartyLocationRole.LocationRole
+        join  logisticsLocation
+            where logisticsLocation.RecId == dirPartyLocation.Location
+        join logisticsPostalAddress
+            where logisticsPostalAddress.Location == logisticsLocation.RecId;
+
+        return logisticsPostalAddress.City;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ProcessReport</Name>
+				<Source><![CDATA[
+    public void ProcessReport()
+    {
+        CompanyInfo      CompanyInfo = CompanyInfo::find();
+        
+        ETGUBACheckPrintContract   Contract;
+
+        Contract            = this.parmDataContract();
+        
+        _RecId              = contract.parmRecId();
+
+        select * from ledgerjournaltrans
+            where ledgerjournaltrans.RecId == _RecId;
+        
+
+
+        ETGUBACheckPrintTmp.clear();
+        ETGUBACheckPrintTmp.initValue();
+        ETGUBACheckPrintTmp.ChequeDate      = LedgerJournalTrans.TransDate;
+        ETGUBACheckPrintTmp.VendorName      = LedgerJournalTrans.LedgerDimensionName;
+        _VendAccount  = LedgerJournalTrans.accountDisplay();//LedgerDimensionFacade::ven//DimensionStorage::ledgerDimension2AccountNum(LedgerJournalTrans.LedgerDimension);
+        ETGUBACheckPrintTmp.City         = this.FetchVendorCity(_VendAccount);
+        ETGUBACheckPrintTmp.AmountInWords   = Global::numeralsToTxt_FR(LedgerJournalTrans.AmountCurDebit);
+        ETGUBACheckPrintTmp.AmountInWords   = subStr(ETGUBACheckPrintTmp.AmountInWords,1,strLen(ETGUBACheckPrintTmp.AmountInWords)-6);
+        ETGUBACheckPrintTmp.insert();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

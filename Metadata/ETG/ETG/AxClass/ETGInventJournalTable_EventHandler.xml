@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGInventJournalTable_EventHandler</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGInventJournalTable_EventHandler
+{
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>InventJournalTable_onUpdated</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// event handler for on update of InventJournalTable
+    /// </summary>
+    [DataEventHandler(tableStr(InventJournalTable), DataEventType::Updated)]
+    public static void InventJournalTable_onUpdated(Common sender, DataEventArgs e)
+    {
+        InventJournalTable InventJournalTable = sender as InventJournalTable;
+ 
+        if(InventJournalTable.Posted == NoYes::Yes)
+        {
+            InventJournalTrans  InventJournalTrans;
+
+            if(InventJournalTable.ETGBinProcessType == ETGBinProcessType::B2BTransfer &&
+                        InventJournalTable.JournalType == InventJournalType::Transfer)
+            {
+
+                while select InventJournalTrans
+                      where InventJournalTrans.JournalId == InventJournalTable.JournalId
+                {
+                    ETGBin2BinTransferHistory   ETGBin2BinTransferHistory;
+
+                    select firstonly ETGBin2BinTransferHistory where ETGBin2BinTransferHistory.RecId == InventJournalTrans.ETGRefBinRecid;
+                    if(ETGBin2BinTransferHistory.RecId)
+                    {
+                        ETGBinJournalLine  ETGBinJournalLine;
+                        select firstonly ETGBinJournalLine where ETGBinJournalLine.RecId == ETGBin2BinTransferHistory.BinJournalLine;
+                        ttsbegin;
+                        ETGBin2BinTransferHistory.selectForUpdate(true);
+                        ETGBin2BinTransferHistory.TransferQtyPosted = abs(InventJournalTrans.Qty);
+                        ETGBin2BinTransferHistory.PostedJournal = NoYes::Yes;
+                        ETGBin2BinTransferHistory.doUpdate();
+                        ttscommit;
+
+                        if(ETGBinJournalLine.RecId)
+                        {
+                            ttsbegin;
+                            ETGBinJournalLine.selectForUpdate(true);
+                            if(ETGBinJournalLine.ToBatch == ETGBin2BinTransferHistory.FromBatch)
+                            {
+                                ETGBinJournalLine.BinQty = ETGBinJournalLine.BinQty - abs(InventJournalTrans.Qty);
+                                ETGBinJournalLine.modifiedField(fieldNum(ETGBinJournalLine,BinQty));
+                            }
+                            else if(ETGBinJournalLine.ToBatch != ETGBin2BinTransferHistory.FromBatch && ETGBinJournalLine.ToBatch == ETGBin2BinTransferHistory.ToBatch  )
+                            {
+                                ETGBinJournalLine.BinQty = ETGBinJournalLine.BinQty + abs(InventJournalTrans.Qty);
+                                ETGBinJournalLine.modifiedField(fieldNum(ETGBinJournalLine,BinQty));
+                            }
+                            else
+                            {
+                                ETGBinJournalLine.BinQty = ETGBinJournalLine.BinQty - abs(InventJournalTrans.Qty);
+                                ETGBinJournalLine.modifiedField(fieldNum(ETGBinJournalLine,BinQty));
+                            }
+                            ETGBinJournalLine.doUpdate();
+                            ttscommit;
+                        }
+                    }
+                }
+            }
+
+            if(InventJournalTable.ETGBinProcessType == ETGBinProcessType::BinAdjustment &&
+                InventJournalTable.JournalType == InventJournalType::LossProfit)
+            {
+
+                while select InventJournalTrans
+                      where InventJournalTrans.JournalId == InventJournalTable.JournalId
+                {
+                    ETGBinAdjustmentDetails   ETGBinAdjustmentDetails;
+
+                    select firstonly ETGBinAdjustmentDetails where ETGBinAdjustmentDetails.RecId == InventJournalTrans.ETGRefBinRecid;
+                    if(ETGBinAdjustmentDetails.RecId)
+                    {
+                        ETGBinJournalLine  ETGBinJournalLine;
+                        select firstonly ETGBinJournalLine where ETGBinJournalLine.RecId == ETGBinAdjustmentDetails.BinJournalLine;
+                        ttsbegin;
+                        ETGBinAdjustmentDetails.selectForUpdate(true);
+                        ETGBinAdjustmentDetails.TransferQtyPosted = InventJournalTrans.Qty;
+                        ETGBinAdjustmentDetails.PostedJournal = NoYes::Yes;
+                        ETGBinAdjustmentDetails.doUpdate();
+                        ttscommit;
+
+                        if(ETGBinJournalLine.RecId)
+                        {
+                            ttsbegin;
+                            ETGBinJournalLine.selectForUpdate(true);
+                            ETGBinJournalLine.BinQty = ETGBinJournalLine.BinQty + InventJournalTrans.Qty;
+                            ETGBinJournalLine.modifiedField(fieldNum(ETGBinJournalLine,BinQty));
+                            ETGBinJournalLine.doUpdate();
+                            ttscommit;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

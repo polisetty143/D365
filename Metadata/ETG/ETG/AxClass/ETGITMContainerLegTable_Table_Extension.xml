@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGITMContainerLegTable_Table_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// extension of table <c>ITMContainerLegTable</c>
+/// </summary>
+[ExtensionOf(tableStr(ITMContainerLegTable))]
+internal final class ETGITMContainerLegTable_Table_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>initFromShipContainersOutETG</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// initialize fields for outbound orders
+    /// </summary>
+    /// <param name = "_shipContainers">ITMContainers _shipContainers</param>
+    public void initFromShipContainersOutETG(ITMContainers _shipContainers)
+    {
+        this.ShipId = _shipContainers.ShipId;
+        this.ShipContainerId = _shipContainers.ShipContainerId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>initFromShipJourneyLineOutETG</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// initialize fields for outbound orders
+    /// </summary>
+    /// <param name = "_shipJourneyLine">ITMJourneyLine _shipJourneyLine</param>
+    internal void initFromShipJourneyLineOutETG(ITMJourneyLine _shipJourneyLine)
+    {
+        this.ShipLegId = _shipJourneyLine.LegId;
+        this.ShipFromPort = _shipJourneyLine.FromPort;
+        this.ShipToPort = _shipJourneyLine.ToPort;
+        this.LineNum = _shipJourneyLine.LineNum;
+        this.DlvModeId = _shipJourneyLine.DlvModeId;
+        this.ShipVendAccount = _shipJourneyLine.ShipVendAccount;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>copyActivitiesOutETG</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// copy activities for outbound orders
+    /// </summary>
+    /// <param name = "_shipContainers">ITMContainers _shipContainers</param>
+    /// <param name = "_shipContainerLegTable">ITMContainerLegTable _shipContainerLegTable</param>
+    public static void copyActivitiesOutETG(ITMContainers _shipContainers, ITMContainerLegTable _shipContainerLegTable)
+    {
+        ITMLeadTimeTable shipLeadTimeTable;
+        Set addedActivities = new Set(Types::String);
+        ITMContainerActivityTable shipContainerActivityTable;
+    
+        Map records = new Map(Types::Real, Types::Record);
+    
+        while select shipLeadTimeTable
+            order by ShipContainerTypeId desc
+            where shipLeadTimeTable.ShipLegId == _shipContainerLegTable.ShipLegId
+                && shipLeadTimeTable.ShipFromPort == _shipContainerLegTable.ShipFromPort
+                && shipLeadTimeTable.ShipToPort == _shipContainerLegTable.ShipToPort
+                && shipLeadTimeTable.DlvMode == _shipContainerLegTable.DlvModeId
+                && (shipLeadTimeTable.ShipContainerTypeId == _shipContainers.ShipContainerTypeId || !shipLeadTimeTable.ShipContainerTypeId)
+                && shipLeadTimeTable.ShipActivityId
+        {
+            if (!addedActivities.in(shipLeadTimeTable.ShipActivityId))
+            {
+                if (_shipContainerLegTable.ShipVendAccount && ETGOTMContainerLegCopyActivitiesPerVendorFlight::instance().isEnabled())
+                {
+                    ITMActivityTable activity = ITMActivityTable::find(shipLeadTimeTable.ShipActivityId);
+                    if (activity.ShipVendAccount && activity.ShipVendAccount != _shipContainerLegTable.ShipVendAccount)
+                    {
+                        continue;
+                    }
+                }
+                addedActivities.add(shipLeadTimeTable.ShipActivityId);
+    
+                records.insert(shipLeadTimeTable.LineNum, shipLeadTimeTable);
+            }
+        }
+    
+        MapEnumerator recordEnumerator = records.getEnumerator();
+    
+        RecordInsertList insertList = new RecordInsertList(tableNum(ITMContainerActivityTable));
+
+        while (recordEnumerator.moveNext())
+        {
+            shipContainerActivityTable.clear();
+            shipContainerActivityTable.initFromShipContainers(_shipContainers);
+            shipContainerActivityTable.initFromShipLeadTimeTable(recordEnumerator.currentValue());
+            shipContainerActivityTable.ShipLegId = _shipContainerLegTable.ShipLegId;
+
+            insertList.add(shipContainerActivityTable);
+        }
+
+        insertList.insertDatabase();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

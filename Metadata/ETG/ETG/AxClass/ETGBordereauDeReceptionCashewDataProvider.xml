@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGBordereauDeReceptionCashewDataProvider</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[SRSReportParameterAttribute(classStr(ETGBordereauDeReceptionCashewContract))]
+class ETGBordereauDeReceptionCashewDataProvider extends  SRSReportDataProviderPreProcessTempDB
+
+{
+    ETGBordereauDeReceptionCashewTmp            ETGBordereauDeReceptionCashewTmp;
+   
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETGBordereauDeReceptionCashewTmp</Name>
+				<Source><![CDATA[
+    [SrsReportDataSetAttribute(tableStr(ETGBordereauDeReceptionCashewTmp))]
+    public ETGBordereauDeReceptionCashewTmp getETGBordereauDeReceptionCashewTmp()
+    {
+        select * from ETGBordereauDeReceptionCashewTmp;
+        return ETGBordereauDeReceptionCashewTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>ProcessReport</Name>
+				<Source><![CDATA[
+    public void ProcessReport()
+    {
+        Query                               query;
+        QueryRun                            queryRun;
+        QueryBuildDataSource                queryBuildDataSource, queryBuildDataSource1;
+        QueryBuildDataSource                queryBuildDataSource2;
+        QueryBuildRange                     queryBuildRange;
+        QueryBuildRange                     queryBuildRange2;
+        RecId                               _RecId;
+        ETGPurchLineCashewQuality            _ETGPurchLineCashewQuality,_ETGPurchLineCashewQualityRec;
+        PurchLine                           _PurchLine;
+        PurchTable                          _PurchTable;
+        VendPackingSlipJour                 vendPackingSlipJour;
+        MarkupTrans                         _MarkupTrans;
+        VendParameters                      vendParameters;
+        VendPackingSlipTrans                vendPackingSlipTrans;
+        CompanyInfo      CompanyInfo = CompanyInfo::find();
+        
+        ETGBordereauDeReceptionCashewContract   Contract;
+
+        Contract        = this.parmDataContract();
+
+        _RecId          = Contract.parmRecId();
+
+
+        select vendPackingSlipJour
+            where VendPackingSlipJour.RecId == _RecId;
+
+
+        ETGBordereauDeReceptionCashewTmp.clear();
+        ETGBordereauDeReceptionCashewTmp.initValue();
+
+        select firstonly _ETGPurchLineCashewQualityRec
+            join _PurchLine
+                where _PurchLine.RecId == _ETGPurchLineCashewQualityRec.PurchLineRecId
+            && _PurchLine.PurchId == _ETGPurchLineCashewQualityRec.RefPurchId
+            join _PurchTable
+                where _PurchTable.PurchId == _PurchLine.PurchId
+                    && _PurchTable.PurchId == vendPackingSlipJour.PurchId
+             join VendPackingSlipTrans
+                 where VendPackingSlipTrans.vendPackingslipJour == vendPackingSlipJour.RecId
+                 &&    _PurchLine.InventTransId == VendPackingSlipTrans.InventTransId;
+
+        ETG_PurchTableTrade ETG_PurchTableTrade;
+        select ETG_PurchTableTrade where ETG_PurchTableTrade.PurchId == vendPackingSlipJour.PurchId;
+
+        ETGBordereauDeReceptionCashewTmp.Branch      = ETG_PurchTableTrade.PortOfLoadingDesc;
+        ETGBordereauDeReceptionCashewTmp.PONumber  = vendPackingSlipJour.PurchId;
+        ETGBordereauDeReceptionCashewTmp.POGrnDate = vendPackingSlipJour.DeliveryDate;
+        ETGBordereauDeReceptionCashewTmp.VendorCode   = _PurchTable.InvoiceAccount;
+        ETGBordereauDeReceptionCashewTmp.VendorName    = _PurchTable.invoiceName();
+        ETGBordereauDeReceptionCashewTmp.ProductReceiptCode    = vendPackingSlipJour.PackingSlipId;
+        ETGBordereauDeReceptionCashewTmp.Origin    = _ETGPurchLineCashewQualityRec.Origin;
+        ETGBordereauDeReceptionCashewTmp.Campagne   = _ETGPurchLineCashewQualityRec.Campane;
+        ETGBordereauDeReceptionCashewTmp.NatureDuProduit    = _ETGPurchLineCashewQualityRec.Mark;
+        ETGBordereauDeReceptionCashewTmp.BillOfLaddingNum  = vendPackingSlipJour.BOLNo;
+        ETGBordereauDeReceptionCashewTmp.TruckNo  = _ETGPurchLineCashewQualityRec.TruckNo;
+        ETGBordereauDeReceptionCashewTmp.CompanyName   = CompanyInfo.Name;
+        ETGBordereauDeReceptionCashewTmp.CompanyLogo   = CompanyImage::findByRecord(CompanyInfo).Image;
+
+
+
+        while select * from _ETGPurchLineCashewQuality
+            join _PurchLine 
+                where _PurchLine.RecId == _ETGPurchLineCashewQuality.PurchLineRecId
+            && _PurchLine.PurchId == _ETGPurchLineCashewQuality.RefPurchId
+            join _PurchTable
+                where _PurchTable.PurchId == _PurchLine.PurchId
+                && _PurchTable.PurchId == vendPackingSlipJour.PurchId
+             join VendPackingSlipTrans
+                 where VendPackingSlipTrans.vendPackingslipJour == vendPackingSlipJour.RecId
+                 &&    _PurchLine.InventTransId == VendPackingSlipTrans.InventTransId
+        {
+            ETGBordereauDeReceptionCashewTmp.GrossWeight += _ETGPurchLineCashewQuality.GrossWeight;
+            ETGBordereauDeReceptionCashewTmp.WeightofBags     += _ETGPurchLineCashewQuality.WeightofBags;
+            ETGBordereauDeReceptionCashewTmp.TareSacKg += _ETGPurchLineCashewQuality.WeightofBags ;
+            ETGBordereauDeReceptionCashewTmp.PoisNetAvantRefactionkg =0;
+            ETGBordereauDeReceptionCashewTmp.Humidityreaction  += _ETGPurchLineCashewQuality.Humidityreaction;
+            ETGBordereauDeReceptionCashewTmp.Qualityreaction   += _ETGPurchLineCashewQuality.Qualityreaction;
+            ETGBordereauDeReceptionCashewTmp.NetWeight         += VendPackingSlipTrans.Qty;//_ETGPurchLineCashewQuality.NetWeight;
+            ETGBordereauDeReceptionCashewTmp.LandedPrice       = round((vendPackingSlipTrans.ValueMST/VendPackingSlipTrans.Qty),0.01);//_ETGPurchLineCashewQuality.LandedPrice;
+            ETGBordereauDeReceptionCashewTmp.ActualCost        += vendPackingSlipTrans.ValueMST;
+            //ETGBordereauDeReceptionCashewTmp.TransportRate
+            ETGBordereauDeReceptionCashewTmp.MTNValue           += vendPackingSlipTrans.ValueMST;
+
+           
+
+            select VendParameters;
+            ETGBordereauDeReceptionCashewTmp.ReceiptAmount += _ETGPurchLineCashewQuality.ReceiptAmount;
+          
+        }
+        str a,b;
+
+        
+        a = Global::numeralsToTxt_FR(ETGBordereauDeReceptionCashewTmp.MTNValue);
+        b = subStr(a,1,strLen(a)-6);
+        ETGBordereauDeReceptionCashewTmp.AmountInWords  = b;
+        ETGBordereauDeReceptionCashewTmp.Email      = this.CompanyPrimaryEmail();
+        ETGBordereauDeReceptionCashewTmp.insert();
+
+        
+
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>CompanyPrimaryEmail</Name>
+				<Source><![CDATA[
+    Public  str CompanyPrimaryEmail()
+    {
+        LogisticsLocationAccessView         logisticsLocationAccessView;
+        LogisticsLocation                   contactLocation, logisticsLocation1;
+        LogisticsElectronicAddress          elecAddress;
+        CompanyInfo      CompanyInfo = CompanyInfo::find();
+
+    
+        select logisticsLocationAccessView
+        where logisticsLocationAccessView.Entity    == companyInfo.RecId;//inventLocation.RecId;
+
+        select elecAddress
+        join contactLocation
+        where   contactLocation.ParentLocation  == logisticsLocationAccessView.Location
+        &&      contactLocation.RecId           == elecAddress.Location
+        &&      elecAddress.IsPrimary           == NoYes::Yes
+        &&      elecAddress.Type   == LogisticsElectronicAddressMethodType::Email;
+   
+        return elecAddress.Locator;
+      
+
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

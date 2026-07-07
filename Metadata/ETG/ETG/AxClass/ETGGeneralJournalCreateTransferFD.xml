@@ -1,0 +1,282 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGGeneralJournalCreateTransferFD</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class ETGGeneralJournalCreateTransferFD
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>createGeneralJournal</Name>
+				<Source><![CDATA[
+    public static void createGeneralJournal(JournalId journalId)
+    {
+        if(ETGACFParameters::find().EnablefinancialdimensionVertical)
+        {
+            LedgerJournalTable           journalTable;
+            LedgerJournalTrans           journalTrans;
+            LedgerJournalName            journalName;
+            GeneralJournalEntry          generaljournalentry;
+            GeneralJournalAccountEntry   generaljournalaccountentry;
+            VendInvoiceJour              vendinvoicejour;
+            InventJournalTrans           inventJournalTrans,inventJournalTransloc, inventJournalTransPowerBI;
+            InventJournalTable           inventjournaltable = InventJournalTable::find(journalId);
+            ItemName                     commodity;
+            container                    conparameter;
+            boolean                      exist = false;
+            DimensionAttributeLevelValueAllView dimAttriView;
+            DimensionAttribute                  dimAttri;
+            str                                  mainAccount;
+            MainAccount                         mainaccountloc;
+            real                                totalTransactionCurrencyAmount = 0;
+            real                                 AccountingCurrencyAmount = 0;
+            ExchangeRate                        exchangeRate;
+            ExchangeRateType                    ExchangeRateType;
+            ExchangeRateCurrencyPair             exchangeRateCurrencyPair;
+            real                                 exchRate;
+            CurrencyCode                         toCurrency       = Ledger::accountingCurrency();
+            Qty                                  invoiceqty;
+
+
+            if(InventJournalName::find(inventjournaltable.JournalNameId).ETGTransferJournalFDChange == NoYes::No
+                || inventjournaltable.NumOfLines <= 0)
+               
+            {
+                return;
+            }
+
+            ttsBegin;
+       
+            journalName = LedgerJournalName::find(ETGACFParameters::find().Generaljournal);
+            journalTable.JournalName = journalName.JournalName;
+            journalTable.initFromLedgerJournalName();
+            journalTable.insert();
+
+            while select inventJournalTrans where inventJournalTrans.JournalId == inventjournaltable.JournalId
+            {
+                NumberSeq  numberSeq = NumberSeq::newGetVoucherFromId((journalName.NumberSequenceTable));
+                str    vocher  = numberSeq.voucher();
+
+                select firstonly vendinvoicejour
+                    where vendinvoicejour.InvoiceId == inventJournalTrans.ETGTransferJournalPurchInvoiceId;
+
+                select firstonly generaljournalentry
+                    where generaljournalentry.SubledgerVoucher == vendinvoicejour.LedgerVoucher;
+
+                while select generaljournalaccountentry
+                        where generaljournalaccountentry.GeneralJournalEntry == generaljournalentry.RecId
+                {
+                    commodity = ETGGeneralJournalAccountEntry_Extension::commodity(generaljournalaccountentry);
+
+                    str enumValue = Enum2Str(generaljournalaccountentry.PostingType);
+
+                    conparameter = str2con(ETGACFParameters::find().ETGPostingValues, ';');
+                    exist        = (conFind(conparameter, enumValue) > 0);
+
+                    PurchLine           purchline = PurchLine::findInventTransId(inventJournalTrans.ETGTransferJournalInvoicetransid);
+                    VendInvoiceTrans    vendInvoiceTrans = VendInvoiceTrans::findInventTransid(inventJournalTrans.ETGTransferJournalInvoicetransid);
+                    invoiceqty  = vendInvoiceTrans.Qty;
+                    RecId         dimrecid = LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(generaljournalaccountentry.LedgerDimension);
+
+                    if(inventJournalTrans.ItemId == ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(dimrecid, ETGACFParameters::find().ItemId) && generaljournalaccountentry.PostingType != LedgerPostingType::VendBalance && exist == true)
+                    {
+
+                        journalTrans.clear();
+                        journalTrans.JournalNum             = journalTable.JournalNum;
+                        journalTrans.Voucher                = vocher;
+                        journalTrans.TransDate              = inventJournalTrans.TransDate;
+
+                        select DisplayValue from dimAttriView
+                            where dimAttriView.ValueCombinationRecId == generaljournalaccountentry.LedgerDimension
+                            join BackingEntityType from dimAttri
+                            where dimAttri.RecId == dimAttriView.DimensionAttribute
+                            && dimAttri.Name == "@ETG_ENG_Labels:MainAccount";
+
+                        if(dimAttriView)
+                        {
+                            mainAccount = dimAttriView.DisplayValue;
+                        }
+
+                        select firstonly mainaccountloc 
+                            where mainaccountloc.MainAccountId == mainAccount
+                                && mainaccountloc.LedgerChartOfAccounts == LedgerChartOfAccounts::current();
+                       
+                        journalTrans.LedgerDimension        = LedgerDimensionFacade::serviceCreateLedgerDimension(
+                                                                LedgerDefaultAccountHelper::getDefaultAccountFromMainAccountRecId(mainaccountloc.RecId),
+                                                                LedgerDimensionFacade::getDefaultDimensionFromLedgerDimension(generaljournalaccountentry.LedgerDimension));
+
+                        journalTrans.DefaultDimension       = vendinvoicejour.DefaultDimension;
+                        journalTrans.AccountType            = LedgerJournalACType::Ledger;
+                        journalTrans.company                = curExt();
+
+                        if(invoiceqty != 0)
+                        {
+                            journalTrans.AmountCurCredit        = decRound(abs(generaljournalaccountentry.TransactionCurrencyAmount/invoiceqty * inventJournalTrans.Qty), 2) ;
+                        }
+                        else
+                        {
+                            journalTrans.AmountCurCredit        = decRound(abs(generaljournalaccountentry.TransactionCurrencyAmount), 2);
+                        }
+                        journalTrans.Txt                    = strFmt("General journal for transfer journal %1, %2", inventJournalTrans.JournalId, inventJournalTrans.ETGTransferJournalPurchInvoiceId);
+                        journalTrans.CurrencyCode           = generaljournalaccountentry.TransactionCurrencyCode;
+                        journalTrans.initForCurrency(journalTable);
+                        journalTrans.DocumentNum            = inventJournalTrans.ETGTransferJournalPurchInvoiceId + ' - Transfer';
+                        journalTrans.insert();
+                      
+
+                        //To dimeestion 2nd line inserting
+                        journalTrans.clear();
+                        journalTrans.JournalNum             = journalTable.JournalNum;
+                        journalTrans.Voucher                = vocher;
+                        journalTrans.TransDate              = inventJournalTrans.TransDate;
+                        journalTrans.DefaultDimension       = inventJournalTrans.ETGToDefaultDimension;
+
+                        select DisplayValue from dimAttriView
+                            where dimAttriView.ValueCombinationRecId == generaljournalaccountentry.LedgerDimension
+                            join BackingEntityType from dimAttri
+                            where dimAttri.RecId == dimAttriView.DimensionAttribute
+                            && dimAttri.Name == "@ETG_ENG_Labels:MainAccount";
+
+                        if(dimAttriView)
+                        {
+                            mainAccount = dimAttriView.DisplayValue;
+                        }
+
+                        select firstonly mainaccountloc
+                            where mainaccountloc.MainAccountId == mainAccount
+                                && mainaccountloc.LedgerChartOfAccounts == LedgerChartOfAccounts::current();
+                       
+                        journalTrans.LedgerDimension        = LedgerDimensionFacade::serviceCreateLedgerDimension(LedgerDefaultAccountHelper::getDefaultAccountFromMainAccountRecId(mainaccountloc.RecId),
+                                                        inventJournalTrans.ETGToDefaultDimension);
+                        journalTrans.AccountType            = LedgerJournalACType::Ledger;
+                        journalTrans.company                = curExt();
+                        if(invoiceqty != 0)
+                        {
+                            journalTrans.AmountCurDebit         = decRound(abs(generaljournalaccountentry.TransactionCurrencyAmount/invoiceqty * inventJournalTrans.Qty), 2);
+                        }
+                        else
+                        {
+                            journalTrans.AmountCurDebit         = decRound(abs(generaljournalaccountentry.TransactionCurrencyAmount), 2);
+                        }
+                        journalTrans.Txt                    = strFmt("General journal for transfer journal %1,%2", inventJournalTrans.JournalId, inventJournalTrans.ETGTransferJournalPurchInvoiceId);
+                        journalTrans.CurrencyCode           = generaljournalaccountentry.TransactionCurrencyCode;
+                        journalTrans.initForCurrency(journalTable);
+                        journalTrans.DocumentNum            = inventJournalTrans.ETGTransferJournalPurchInvoiceId + ' - Transfer';
+                        journalTrans.insert();
+                    }
+                    else if(generaljournalaccountentry.PostingType == LedgerPostingType::VendBalance && ETGACFParameters::find().vendorbalancetransfer)
+                    {
+                        journalTrans.clear();
+                        journalTrans.JournalNum             = journalTable.JournalNum;
+                        journalTrans.Voucher                = vocher;
+                        journalTrans.TransDate              = inventJournalTrans.TransDate;
+                        journalTrans.LedgerDimension        = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(vendinvoicejour.InvoiceAccount,LedgerJournalACType::Vend);
+                        journalTrans.DefaultDimension       = vendinvoicejour.DefaultDimension;
+                        journalTrans.AccountType            = LedgerJournalACType::Vend;
+                        journalTrans.OffsetAccountType      = LedgerJournalACType::Vend;
+                        journalTrans.company                = curExt();
+                        if(invoiceqty != 0)
+                        {
+                            journalTrans.AmountCurDebit         = abs(vendInvoiceTrans.LineAmount / invoiceqty * inventJournalTrans.Qty);
+                        }
+                        else
+                        {
+                            journalTrans.AmountCurDebit         = abs(vendInvoiceTrans.LineAmount);
+                        }
+                        journalTrans.Txt                    = strFmt("General journal for transfer journal %1,%2", inventJournalTrans.JournalId, inventJournalTrans.ETGTransferJournalPurchInvoiceId);
+                        journalTrans.CurrencyCode           = generaljournalaccountentry.TransactionCurrencyCode;
+                        journalTrans.DocumentNum            = inventJournalTrans.ETGTransferJournalPurchInvoiceId + ' - Transfer';
+                        journalTrans.initForCurrency(journalTable);
+                        journalTrans.insert();
+
+                        // 2nd line inserting
+                        journalTrans.clear();
+                        journalTrans.JournalNum             = journalTable.JournalNum;
+                        journalTrans.Voucher                = vocher;
+                        journalTrans.TransDate              = inventJournalTrans.TransDate;
+                        journalTrans.DefaultDimension       = inventJournalTrans.ETGToDefaultDimension;
+                        journalTrans.LedgerDimension        = LedgerDynamicAccountHelper::getDynamicAccountFromAccountNumber(vendinvoicejour.InvoiceAccount,LedgerJournalACType::Vend);
+                        journalTrans.AccountType            = LedgerJournalACType::Vend;
+                        journalTrans.OffsetAccountType      = LedgerJournalACType::Vend;
+                        journalTrans.company                = curExt();
+
+                        if(invoiceqty != 0 )
+                        {
+                            journalTrans.AmountCurCredit        = decRound(abs(vendInvoiceTrans.LineAmount / invoiceqty * inventJournalTrans.Qty), 2);
+                        }
+                        else
+                        {
+                            journalTrans.AmountCurCredit        = decRound(abs(vendInvoiceTrans.LineAmount), 2);
+
+                        }
+                        journalTrans.Txt                    = strFmt("General journal for transfer journal %1,%2", inventJournalTrans.JournalId, inventJournalTrans.ETGTransferJournalPurchInvoiceId);
+                        journalTrans.CurrencyCode           = generaljournalaccountentry.TransactionCurrencyCode;
+                        journalTrans.initForCurrency(journalTable);
+                        journalTrans.DocumentNum            = inventJournalTrans.ETGTransferJournalPurchInvoiceId + ' - Transfer';
+                        journalTrans.insert();
+                    }
+                }
+            }
+            info(strFmt("General journal %1 is Created", journalTable.JournalNum));
+
+            ttscommit;
+
+            //Post
+            if(ETGACFParameters::find().EnableFinDimGenPosting == NoYes::Yes)
+            {
+                ttsbegin;
+                LedgerJournalCheckPost jourPost;
+                jourPost = LedgerJournalCheckPost::newLedgerJournalTable(journalTable, NoYes::Yes);
+                jourPost.runOperation();
+                ttscommit;
+            }
+            //Post end
+
+            InventTransPosting inventTransPosting;
+            ETGACFParameters   aCFParameters =  ETGACFParameters::find();
+            MainAccountRecId   mainAccountRecId, offsetMainAccountRecId;
+            LedgerDimensionAccount ledgerDimension, offsetLedgerDimension;
+            InventTransOrigin inventTransOrigin;
+           
+            while select inventJournalTransPowerBI 
+                where inventJournalTransPowerBI.JournalId == inventjournaltable.JournalId
+            {
+                inventTransOrigin = InventTransOrigin::findByInventTransId(inventJournalTransPowerBI.ToInventTransId);
+                select forupdate inventTransPosting
+                    where inventTransPosting.InventTransOrigin == inventTransOrigin.RecId
+                    && inventTransPosting.InventTransPostingType == InventTransPostingType::Financial
+                    && inventTransPosting.PostingType == LedgerPostingType::InventReceipt
+                    && inventTransPosting.ItemId == inventJournalTransPowerBI.ItemId;
+
+                if(inventTransPosting)
+                {
+                    mainAccountRecId       = LedgerDimensionFacade::getMainAccountRecIdFromLedgerDimension(inventTransPosting.LedgerDimension);
+                    offsetMainAccountRecId = LedgerDimensionFacade::getMainAccountRecIdFromLedgerDimension(inventTransPosting.OffsetLedgerDimension);
+                    ledgerDimension        = LedgerDimensionFacade::serviceCreateLedgerDimension(
+                                                                LedgerDefaultAccountHelper::getDefaultAccountFromMainAccountRecId(mainAccountRecId),
+                                                                inventJournalTransPowerBI.ETGToDefaultDimension);
+                    offsetLedgerDimension  = LedgerDimensionFacade::serviceCreateLedgerDimension(
+                                                                LedgerDefaultAccountHelper::getDefaultAccountFromMainAccountRecId(offsetMainAccountRecId),
+                                                                inventJournalTransPowerBI.ETGToDefaultDimension);
+                    ttsbegin;
+                    inventTransPosting.LedgerDimension       = ledgerDimension;
+                    inventTransPosting.OffsetLedgerDimension = offsetLedgerDimension;
+                    inventTransPosting.ETGVertical           = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(inventJournalTransPowerBI.ETGToDefaultDimension, aCFParameters.Vertical);
+                    inventTransPosting.ETGSubVertical        = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(inventJournalTransPowerBI.ETGToDefaultDimension, aCFParameters.SubVertical);
+                    inventTransPosting.ETGCommodity          = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(inventJournalTransPowerBI.ETGToDefaultDimension, aCFParameters.MainCommodity);
+                    inventTransPosting.ETGSubCommodity       = ETGFixedAssetFinancialsDimensions::getDimensionDisplayValueCodeOnlyETG(inventJournalTransPowerBI.ETGToDefaultDimension, aCFParameters.SubCommodity);
+                    inventTransPosting.DefaultDimension      = inventJournalTransPowerBI.ETGToDefaultDimension;
+                    inventTransPosting.doUpdate();
+                    ttscommit;
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

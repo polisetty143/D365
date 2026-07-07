@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerJournalWFApprovalStatusManager_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(LedgerJournalWFApprovalStatusManager))]
+internal final class ETGLedgerJournalWFApprovalStatusManager_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>returnFromElementEvent</Name>
+				<Source><![CDATA[
+    public static void returnFromElementEvent(RecId _recId)
+    {
+        next returnFromElementEvent(_recId);
+
+        if(ETGACFParameters::find().EnableIntercompanyTransactions == NoYes::Yes)
+        {
+            LedgerJournalTable ledgerjournalTable = LedgerJournalTable::findByRecId(_recId);
+
+            if(ledgerjournalTable.ETGICSourceEntity)
+            {
+                changecompany(ledgerjournalTable.ETGICSourceEntity)
+                {
+                    LedgerJournalTable ledgerJournalTableSource;
+
+                    select firstonly ledgerJournalTableSource
+                    where ledgerJournalTableSource.JournalNum == ledgerjournalTable.ETGSourceEntityJournalNum;
+
+                    if(ledgerJournalTableSource)
+                    {
+                        try
+                        {
+                            SysEmailParameters _SysEmailParameters;
+
+                            var builder = new SysMailerMessageBuilder();
+                            select SMTPUserName from _SysEmailParameters;
+
+                            if(_SysEmailParameters.SMTPUserName)
+                            {
+                                LedgerJournalName ledgerjournalnameloc;
+
+                                select firstonly ledgerjournalnameloc
+                                where ledgerjournalnameloc.Journalname == ledgerjournalTable.JournalName;
+
+                                UserInfo userinfo;
+                            
+                                select firstonly userinfo
+                                where userinfo.id == ledgerJournalTableSource.CreatedBy;
+
+                                if(userinfo)
+                                {
+                                    builder.setFrom(_SysEmailParameters.SMTPUserName);
+                                    builder.addTo(userinfo.networkAlias);
+
+                                    builder.setSubject(strFmt("Journal rejected"));
+
+                                    builder.setBody(strFmt("Journal is rejected in %1  Journal number : %2  Source journal number : %3 Source journal entity : %4",ledgerJournalTableSource.ETGICDestinationentity,ledgerjournalTable.JournalNum,ledgerJournalTableSource.JournalNum,ledgerJournalTableSource.DataAreaId));
+
+                                    var message = builder.getMessage();
+
+                                    SysMailerFactory::getNonInteractiveMailer().sendNonInteractive(message);
+
+                                    Info("@ETG_New:EmailSuccess");
+                                }
+                            }
+
+                        }
+                        catch
+                        {
+                            return;
+                        }
+                   
+                    }
+
+                }
+            }
+        }
+        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>requestChangeFromElementEvent</Name>
+				<Source><![CDATA[
+    public static void requestChangeFromElementEvent(RecId _recId)
+    {
+        LedgerJournalTable ledgerjournalTable = LedgerJournalTable::findByRecId(_recId);
+
+        if(ledgerjournalTable.ETGICSourceEntity)
+        {
+            throw Error("@ETG_New:RequestChangeNotAllowed");
+        }
+
+        next requestChangeFromElementEvent(_recId);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

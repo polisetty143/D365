@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_VendPackingSlipJourTable_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(tableStr(VendPackingSlipJour))]
+final class ETG_VendPackingSlipJourTable_Extension
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>inserMarkupTrans</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// QualitySpecificationGroup,25 Jan 2021 , Binay
+    /// </summary>
+    /// <param name = "_salesParmLineloc"></param>
+    public static void  inserMarkupTrans(PurchParmLine  _purchparmline)
+    {
+        LineAmount                         charges, addcharges;
+        MarkupTrans                        markupTrans, markupTransloc;
+        boolean                            updateStatus;
+        ETGQualitySpecificationSubGroup    etgQualitySpecificationSubGroup;
+        ETG_ProductReceiptQualityGrp       ProductReceiptQualityGrp;
+        PurchLine                          purchLine = _purchparmline.purchLine();;
+                            
+        #define.Percent(100)
+        charges = 0;
+
+        if(!purchLine.InterCompanyInventTransId)
+        {
+            while select forupdate ProductReceiptQualityGrp
+                where ProductReceiptQualityGrp.PurchId == purchLine.PurchId
+                    && ProductReceiptQualityGrp.ResultValue > 0
+            join etgQualitySpecificationSubGroup
+                where etgQualitySpecificationSubGroup.SubGroupID == ProductReceiptQualityGrp.SubGroupID
+            {            
+                if (etgQualitySpecificationSubGroup.PurchaseChargeCode 
+                    && ProductReceiptQualityGrp.ResultValue >= ProductReceiptQualityGrp.MinRange
+                    && ProductReceiptQualityGrp.ResultValue <= ProductReceiptQualityGrp.MaxRange)
+                {
+
+                    if (ProductReceiptQualityGrp.Increment)
+                    {
+                        charges = _purchparmline.LineAmount * ProductReceiptQualityGrp.Increment/#Percent ;
+                        addcharges  += charges;
+                    }
+                    else if (ProductReceiptQualityGrp.FixedValue)
+                    {
+                        charges = ProductReceiptQualityGrp.FixedValue;
+                        addcharges  += charges;
+                    }
+
+                    select count(RecId) from markupTransloc
+                        where markupTransloc.TransRecId == purchLine.RecId;
+            
+                    markupTrans.initValue();
+                    markupTrans.initFromPurchLine(purchLine);
+                    markupTrans.initFromMarkupTable(MarkupTable::find(MarkupModuleType::Vend,etgQualitySpecificationSubGroup.PurchaseChargeCode));
+
+                    markupTrans.Value                       = addcharges;
+                    markupTrans.LineNum                     = markupTransloc.recid + 1;
+                    markupTrans.TransRecId                  = purchLine.RecId;
+                    markupTrans.TransTableId                = purchLine.TableId;
+
+                    markupTrans.MarkupCode                  = etgQualitySpecificationSubGroup.PurchaseChargeCode;
+                    markupTrans.Txt                         = etgQualitySpecificationSubGroup.SubGroupDescription;
+                    markupTrans.ModuleCategory              = HeadingLine::Line;
+                    markupTrans.ModuleType                  = MarkupModuleType::Vend;
+                    markupTrans.MCROriginalMiscChargeValue  = markupTrans.Value;
+                    markupTrans.insert();                
+               
+                }
+            }
+        }        
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>inserSalesMarkupTrans</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// QualitySpecificationGroup,25 Jan 2021 , Binay
+    /// </summary>
+    /// <param name = "_salesParmLineloc"></param>
+    public static void  inserSalesMarkupTrans(SalesParmLine  _salesParmLineloc)
+    {
+        LineAmount                         charges, addcharges;
+        MarkupTrans                        markupTrans, markupTransloc;
+        boolean                             updateStatus;
+        ETGQualitySpecificationSubGroup    etgQualitySpecificationSubGroup;
+        SalesLine                      _salesline = _salesParmLineloc.salesLine();
+        ETG_PostPackingQualityGrp       packingSlipQtygrp;
+
+        #define.Percent(100)
+        
+        ttsbegin;
+        while select forupdate packingSlipQtygrp
+            where packingSlipQtygrp.SalesId == _salesLine.SalesId
+            && packingSlipQtygrp.ResultValue > 0
+        {
+            charges = 0;
+            select firstonly etgQualitySpecificationSubGroup
+                where etgQualitySpecificationSubGroup.SubGroupID == packingSlipQtygrp.SubGroupID;
+
+            
+            if (packingSlipQtygrp.MinRange <= packingSlipQtygrp.ResultValue
+                && packingSlipQtygrp.MaxRange >= packingSlipQtygrp.ResultValue && etgQualitySpecificationSubGroup.SalesChargeCode)
+            {
+                if (packingSlipQtygrp.Increment)
+                {
+                    charges = _salesParmLineloc.LineAmount * packingSlipQtygrp.Increment/#Percent;
+                    addcharges  += charges;
+                }
+                if (packingSlipQtygrp.FixedValue)
+                {
+                    charges = packingSlipQtygrp.FixedValue;
+                    addcharges  += charges;
+                }
+
+                select count(RecId) from markupTransloc 
+                    where markupTransloc.TransRecId == _salesLine.RecId;
+
+                markupTrans.initValue();
+                markupTrans.initFromSalesLine(_salesLine);
+                markupTrans.TransRecId      = _salesLine.RecId;
+                markupTrans.TransTableId    = _salesLine.TableId;
+                markupTrans.Value           = addcharges;
+                markupTrans.LineNum         = markupTransloc.recid + 1;
+                
+                markupTrans.MarkupCode      = etgQualitySpecificationSubGroup.SalesChargeCode;
+                markupTrans.Txt             = etgQualitySpecificationSubGroup.SubGroupDescription;
+                markupTrans.ModuleCategory  = HeadingLine::Line;
+                markupTrans.ModuleType      = MarkupModuleType::Cust;
+                markupTrans.MCROriginalMiscChargeValue  = markupTrans.Value;
+                markupTrans.insert();
+            }
+        }
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

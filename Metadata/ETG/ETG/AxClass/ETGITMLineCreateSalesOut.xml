@@ -1,0 +1,433 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGITMLineCreateSalesOut</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// this class will generate voyage lines for transaction type sales order
+/// </summary>
+using System.ComponentModel.Composition;
+[
+    ExportMetadataAttribute(enumStr(InventTransType), enumLiteralStr(InventTransType, Sales)),
+    ExportAttribute(identifierStr(Dynamics.AX.Application.ITMLineCreate))
+]
+public class ETGITMLineCreateSalesOut extends ITMLineCreate
+{
+
+    boolean isDelReq;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>splitSourceLine</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// split sales order lines if transfering partial quantity in voyage
+    /// </summary>
+    /// <param name = "_sourceLine">Common _sourceLine</param>
+    /// <param name = "_qty">ITMTransferQuantity _qty</param>
+    /// <returns>Common</returns>
+    protected Common splitSourceLine(
+        Common _sourceLine,
+        ITMTransferQuantity _qty)
+    {
+        SalesLine existingSalesLine = _sourceLine as SalesLine;
+        SalesLine newSalesLine;
+        TradeLineNumber nextLineNum;
+        ETGITMSplitMarkingOut shipSplitMarking = ETGITMSplitMarkingOut::construct();
+        ETGITMSalesLineSplitOut salesLineSplitHelper;
+
+        InventUpd_Estimated estimated;
+
+        shipSplitMarking.clearMarking(existingSalesLine);
+        existingSalesLine.reread();
+
+        salesLineSplitHelper = ETGITMSalesLineSplitOut::newSalesLineSplit(existingSalesLine, _qty, shipId);
+        salesLineSplitHelper.run();
+
+        newSalesLine = SalesLine::find(existingSalesLine.SalesId, salesLineSplitHelper.parmNewLineNumber(), true);
+
+        shipSplitMarking.reMark(newSalesLine);
+
+        return newSalesLine;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>splitSourceLineMultipleLines</Name>
+				<Source><![CDATA[
+    protected Common splitSourceLineMultipleLines(Common _sourceLine, ITMTransferQuantity _qty)
+    {
+        SalesLine             existingSalesLine = _sourceLine as SalesLine;
+        SalesLine             newSalesLine, newSalesLineBalanceQty;
+        InventTrans           inventTrans;
+        inventTransOrigin     inventTransOrigin;
+        ETGITMSplitMarkingOut shipSplitMarking = ETGITMSplitMarkingOut::construct();
+        Qty remainigQty;
+
+        shipSplitMarking.clearMarking(existingSalesLine);
+        existingSalesLine.reread();
+
+        newSalesLine = this.createSalesLineTransferQty(existingSalesLine, _qty);
+        if(newSalesLine)
+        {
+            newSalesLineBalanceQty = this.createSalesLineBalanceQty(existingSalesLine, (existingSalesLine.SalesQty - abs(_qty)),
+                (newSalesLine.LineNum + 1));
+        }
+
+        ttsbegin;
+        existingSalesLine.reread();
+        existingSalesLine.selectForUpdate(true);
+        existingSalesLine.LineAmount = 0;
+        existingSalesLine.RemainInventFinancial = 0;
+        existingSalesLine.RemainSalesFinancial  = 0;
+        existingSalesLine.RemainInventPhysical  = 0;
+        existingSalesLine.RemainSalesPhysical   = 0;
+        existingSalesLine.doUpdate();
+
+
+        inventTransOrigin = InventTransOrigin::findByInventTransId(existingSalesLine.InventTransId);
+
+        if(inventTransOrigin)
+        {
+            delete_from inventTrans where inventTrans.InventTransOrigin == inventTransOrigin.RecId;
+        }
+
+        MarkupTrans markUpTransDel;
+
+        if(isDelReq)
+        {
+            delete_from markUpTransDel
+            where markUpTransDel.TransRecId == existingSalesLine.RecId
+            && markUpTransDel.TransTableId == existingSalesLine.TableId;
+        }
+
+        ttscommit;
+
+        if(newSalesLine)
+        {
+            newSalesLine.selectForUpdate(true);
+            shipSplitMarking.reMark(newSalesLine);
+        }
+       
+        return newSalesLine;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createSalesLineTransferQty</Name>
+				<Source><![CDATA[
+    public SalesLine createSalesLineTransferQty(SalesLine origSalesLine, ITMTransferQuantity qty)
+    {
+        SalesLine salesLineNew, salesLineLineNum;
+
+        buf2Buf(origSalesLine, salesLineNew);
+
+        select maxof(LINECREATIONSEQUENCENUMBER), maxof(LineNum) from salesLineLineNum
+            where salesLineLineNum.SalesId == origSalesLine.SalesId
+                && salesLineLineNum.DataAreaId == origSalesLine.DataAreaId;
+
+        salesLineNew.SalesQty                   = abs(qty);
+        salesLineNew.LineNum                    = salesLineLineNum.LineNum + 1;
+        salesLineNew.modifyField(fieldNum(SalesLine, SalesQty));
+        salesLineNew.InventTransId              = NumberSeq::newGetNum(InventParameters::numRefInventTransId()).num();
+        salesLineNew.QtyOrdered                 = salesLineNew.calcQtyOrdered();
+        salesLineNew.RemainSalesPhysical        = qty;
+        salesLineNew.RemainInventPhysical       = salesLineNew.calcQtyOrdered(salesLineNew.RemainSalesPhysical);
+        salesLineNew.RemainSalesFinancial       = 0;
+        salesLineNew.LineAmount                 = salesLineNew.calcLineAmount();
+        salesLineNew.ETGITMId                   = shipId;
+        salesLineNew.InterCompanyInventTransId  = '';
+        salesLineNew.SourceDocumentLine         = (select maxof(RecId) from sourceDocumentLine).RecId + 1;
+        salesLineNew.LINECREATIONSEQUENCENUMBER = salesLineLineNum.LINECREATIONSEQUENCENUMBER + 1;
+
+        if(salesLineNew.validateWrite())
+        {
+            salesLineNew.insert();
+        }
+
+        //allocate charges to new salesline
+        this.allocateChargesToNewSalesLine(origSalesLine, salesLineNew);
+
+        return salesLineNew;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>allocateChargesToNewSalesLine</Name>
+				<Source><![CDATA[
+    public void allocateChargesToNewSalesLine(SalesLine _origSalesLine, SalesLine _newSalesLine)
+    {
+        MarkupTrans markUpTrans, markUpTransInsert, markUpTransDel;
+        boolean isDeleteReq;
+
+        while select markUpTrans
+            where markUpTrans.TransRecId == _origSalesLine.RecId
+            && markUpTrans.TransTableId == _origSalesLine.TableId
+        {
+            if(markUpTrans.RecId)
+            {
+                buf2Buf(markUpTrans, markUpTransInsert);
+
+                markUpTransInsert.TransRecId   = _newSalesLine.RecId;
+                markUpTransInsert.TransTableId = _newSalesLine.TableId;
+                markUpTransInsert.Value        = markUpTrans.Value * (_newSalesLine.LineAmount / _origSalesLine.LineAmount);
+                markUpTransInsert.insert();
+
+                isDelReq = true;
+            }
+        }
+
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createSalesLineBalanceQty</Name>
+				<Source><![CDATA[
+    public SalesLine createSalesLineBalanceQty(SalesLine origSalesLine, ITMTransferQuantity qty, LineNum lineNumber)
+    {
+        SalesLine salesLineNew, salesLineLineNum;
+
+        buf2Buf(origSalesLine, salesLineNew);
+
+        select maxof(LINECREATIONSEQUENCENUMBER) from salesLineLineNum
+            where salesLineLineNum.SalesId == origSalesLine.SalesId
+                && salesLineLineNum.DataAreaId == origSalesLine.DataAreaId;
+
+        salesLineNew.SalesQty                   = qty;
+        salesLineNew.LineNum                    = lineNumber;
+        salesLineNew.modifyField(fieldNum(SalesLine, SalesQty));
+        salesLineNew.InventTransId              = NumberSeq::newGetNum(InventParameters::numRefInventTransId()).num();
+        salesLineNew.QtyOrdered                 = salesLineNew.calcQtyOrdered();
+        salesLineNew.RemainSalesPhysical        = qty;
+        salesLineNew.RemainInventPhysical       = salesLineNew.calcQtyOrdered(salesLineNew.RemainSalesPhysical);
+        salesLineNew.RemainSalesFinancial       = 0;
+        salesLineNew.LineAmount                 = salesLineNew.calcLineAmount();
+        salesLineNew.ETGITMId                   = shipId;
+        salesLineNew.InterCompanyInventTransId  = '';
+        salesLineNew.SourceDocumentLine         = (select maxof(RecId) from sourceDocumentLine).RecId + 1;
+        salesLineNew.LINECREATIONSEQUENCENUMBER = salesLineLineNum.LINECREATIONSEQUENCENUMBER + 1;
+        if(salesLineNew.validateWrite())
+        {
+            salesLineNew.insert();
+        }
+
+        //allocate charges to new salesline
+        this.allocateChargesToNewSalesLine(origSalesLine, salesLineNew);
+
+        return salesLineNew;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateSourceLine</Name>
+				<Source><![CDATA[
+    protected Common updateSourceLine()
+    {
+        boolean isSourceLineUpdated = false;
+        SalesLine salesLine, origSalesLine;
+    
+        salesLine     = SalesLine::findInventTransId(inventTransId, true);
+        origSalesLine = salesLine;
+
+        if (salesLine.receivedInTotalETG())
+        {
+            salesLine           = this.splitSourceLineMultipleLines(origSalesLine, transferQty);
+            isSourceLineUpdated = true;
+        }
+        else if (salesLine.RemainSalesPhysical > transferQty)
+        {
+            if (close)
+            {
+                InventQty originRemainInventPysical = salesLine.RemainInventPhysical;
+                PurchQty  originRemainPurchPhysical = salesLine.RemainSalesPhysical;
+                salesLine.RemainSalesPhysical = transferQty;
+                salesLine.RemainInventPhysical = salesLine.calcQtyOrdered(transferQty);
+                if (originRemainPurchPhysical != salesLine.RemainSalesPhysical && ETGOTMInterCompanyCreateShipmentSyncRemainFlight::instance().isEnabled())
+                
+                {
+                    InterCompanyUpdateRemPhys::synchronize(
+                        salesLine,
+                        originRemainInventPysical - salesLine.RemainInventPhysical,
+                        originRemainPurchPhysical - salesLine.RemainSalesPhysical);
+                }
+            }
+            else
+            {
+                 salesLine = this.splitSourceLineMultipleLines(origSalesLine, transferQty);
+            }
+            isSourceLineUpdated = true;
+        }
+        else if (salesLine.RemainSalesPhysical < transferQty)
+        {
+            salesLine.RemainSalesPhysical = transferQty;
+            salesLine.RemainInventPhysical = salesLine.calcQtyOrdered(transferQty);
+            isSourceLineUpdated = true;
+        }
+    
+        if (!isSourceLineUpdated)
+        {
+            canSourceLineUpdateBeDelayed = true;
+        }
+
+        this.writeSourceLine(salesLine);
+    
+        return salesLine;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>updateSourceLinesWithShipIdAndStatus</Name>
+				<Source><![CDATA[
+    public void updateSourceLinesWithShipIdAndStatus()
+    {
+        super();
+
+        if (shipId != '')
+        {
+            SalesLine salesLine;
+            ITMLine   shipLineLocal;
+
+            update_recordset salesLine
+                setting ETGITMId = shipId, ETGITMStatusId = statusId
+                exists join shipLineLocal
+                where salesLine.ETGITMId == ''
+                   && shipLineLocal.ShipId == shipId
+                   && shipLineLocal.RefRecId == salesLine.RecId
+                   && shipLineLocal.RefTableId == salesLine.TableId;
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>checkMultiFolioVendor</Name>
+				<Source><![CDATA[
+    public boolean checkMultiFolioVendor()
+    {
+        boolean isValid = super();
+
+        // folioId could be multiple values from one shipline creation
+        if (shipId != '' && ITMParameters::find().MultipleFolioVendorTolerance != ErrorTolerance::Accept)
+        {
+            SalesLine  salesLine, duplicateSalesLine;
+            ITMLine    shipLinelocal, duplicateShipLineLocal;
+
+            select firstonly shipLinelocal
+                where shipLinelocal.ShipId == shipId
+                   && shipLinelocal.ShipFolioId != ''
+                exists join salesLine
+                where salesLine.RecId == shipLinelocal.RefRecId
+                   && salesLine.TableId == shipLinelocal.RefTableId
+                exists join duplicateShipLineLocal
+                where duplicateShipLineLocal.ShipId == shipLinelocal.ShipId
+                   && duplicateShipLineLocal.ShipFolioId == shipLinelocal.ShipFolioId
+                exists join duplicateSalesLine
+                where duplicateSalesLine.RecId == duplicateShipLineLocal.RefRecId
+                   && duplicateSalesLine.TableId == duplicateShipLineLocal.RefTableId
+                   && duplicateSalesLine.RecId != salesLine.RecId
+                   && duplicateSalesLine.CustAccount != salesLine.CustAccount;
+
+            if (shipLinelocal.RecId)
+            {
+                isValid = shipLinelocal.throwErrorToleranceForMultiFolioVendor();
+            }
+        }
+
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>checkDlvMode</Name>
+				<Source><![CDATA[
+    public boolean checkDlvMode()
+    {
+        boolean isValid = super();
+
+        if (shipId != '' && shipTable.RecId != 0 && ITMParameters::find().MultipleDlvModeTolerance != ErrorTolerance::Accept)
+        {
+            ITMLine    shipLinelocal;
+            SalesTable salesTable;
+
+            select firstonly shipLinelocal
+                where shipLinelocal.ShipId == shipId
+                exists join salesTable
+                where salesTable.SalesId == shipLinelocal.TransRefId
+                   && salesTable.DlvMode != shipTable.DlvModeId;
+
+            if (shipLinelocal.RecId)
+            {
+                isValid = shipLinelocal.throwErrorToleranceForMultiDlvMode();
+            }
+        }
+
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>writeShipLine</Name>
+				<Source><![CDATA[
+    protected void writeShipLine(Common _sourceLine)
+    {
+        SalesLine salesLine = _sourceLine as SalesLine;
+    
+        shipLine.initFromSalesLine(salesLine);
+        shipLine.ShipQty = abs(salesLine.unitConvertInvent2SalesETG(shipLine.inventTransQty()));
+        shipLine.ShipId = shipId;
+        shipLine.ShipContainerId = shipContainerId;
+        shipLine.ShipFolioId = shipFolioId;
+        shipLine.ShipPosition = position;
+        shipLine.ShipMeasurement = measurement;
+        shipLine.ShipMeasurementUnit = measurementUnit;
+        shipLine.ShipNoOfCartons = cartons;
+    
+        if (!delayShipLineInsert)
+        {
+            if (shipLine.validateWriteOutboundETG())
+            {
+                shipLine.insert();
+            }
+            else
+            {
+                throw error("@SYS18447");
+            }
+        }
+        else
+        {
+            if (!this.validateShipLine(shipLine, _sourceLine))
+            {
+                throw error("@SYS18447");
+            }
+        }
+      //  super(_sourceLine);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>writeSourceLine</Name>
+				<Source><![CDATA[
+    protected void writeSourceLine(Common _sourceLine)
+    {
+        SalesLine salesLine = _sourceLine as SalesLine;
+    
+        salesLine.ETGITMId = shipId;
+    
+        super(salesLine);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

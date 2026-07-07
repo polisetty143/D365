@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_InventTransferUpd_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classStr(InventTransferUpd))]
+final class ETG_InventTransferUpd_Extension
+{
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>createInventTransferJour</Name>
+				<Source><![CDATA[
+    protected void createInventTransferJour()
+    {
+        ETG_TransferBillOfLadingHistory     transferBillOfLadingHistory;
+        ETG_TransferBillOfLading            transferBillOfLading;
+       
+         next createInventTransferJour();
+
+        transferBillOfLadingHistory.initValue();
+        transferBillOfLadingHistory.TransferId  = inventTransferJour.TransferId;
+        transferBillOfLadingHistory.VoucherId   = inventTransferJour.voucherId;
+
+        select firstonly transferBillOfLading
+            where transferBillOfLading.TransferId == inventTransferParmTable.TransferId
+            && transferBillOfLading.ParmId == inventTransferParmTable.ParmId;
+        
+        transferBillOfLadingHistory.initFromETG_TransferBillOfLanding(transferBillOfLading);
+        transferBillOfLadingHistory.insert();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    public void run()
+    {
+        next run();
+
+        if(isSomeThingPosted)
+        {
+            this.createMovementJournal(inventTransferJour);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createMovementJournal</Name>
+				<Source><![CDATA[
+    public void createMovementJournal(InventTransferJour  _inventTransferJour)
+    {
+        InventJournalTable         inventJournalTable;
+        InventJournalTrans         inventJournalTrans;
+        InventJournalNameId        inventJournalNameId;
+        InventJournalName          inventJournalName;       
+        int                        numOfLines = 0;
+        InventTransferJourLine     inventTransferJourLine;
+        JournalCheckPost           journalCheckPost;
+        InventTransferLine         inventTansferLine;
+
+        while select ItemId,QtyOverReceived,TransferId,InventDimId,TransferId,VoucherId,InventTransId from inventTransferJourLine
+            where inventTransferJourLine.VoucherId == _inventTransferJour.VoucherId
+                && inventTransferJourLine.QtyOverReceived > 0
+        {
+            ttsbegin;
+            if(numOfLines == 0)
+            {
+                inventJournalTable.clear();
+                inventJournalNameId =  InventJournalName::standardJournalName(InventJournalType::LossProfit);
+                inventJournalTable.initFromInventJournalName(InventJournalName::find(inventJournalNameId));
+                inventJournalTable.JournalIdOrignal = inventTransferJourLine.TransferId;
+                inventJournalTable.insert();
+            }
+      
+            inventJournalTrans.clear();
+            inventJournalTrans.initFromInventJournalTable(inventJournalTable);
+            inventJournalTrans.TransDate = systemDateGet();
+            inventJournalTrans.ItemId    = inventTransferJourLine.ItemId;
+            inventJournalTrans.initFromInventTable(InventTable::find(inventJournalTrans.ItemId));
+            inventJournalTrans.Qty          = inventTransferJourLine.QtyOverReceived;
+            inventJournalTrans.InventDimId  = inventTransferJourLine.InventDimId;
+            
+            numOfLines++;
+            inventJournalTrans.insert();   
+ 
+            inventTansferLine.clear();
+            inventTansferLine = inventTransferJourLine.inventTransferLine(true);
+
+            inventTansferLine.QtyOverReceived += inventTransferJourLine.QtyOverReceived;
+            inventTansferLine.doUpdate();            
+        }
+        if(inventJournalTable)
+        {
+            //<Post Journal>
+            journalCheckPost = InventJournalCheckPost::newPostJournal(inventJournalTable);
+            journalCheckPost.run();
+            //<End post Journal>           
+
+            _inventTransferJour.AdjustmentJournalId = inventJournalTable.JournalId;
+            _inventTransferJour.doUpdate();
+            ttscommit;
+            info(strFmt("Adjustment journal: %1 posted for over receive qty", inventJournalTable.JournalId));
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

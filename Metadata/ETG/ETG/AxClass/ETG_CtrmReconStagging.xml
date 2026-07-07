@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_CtrmReconStagging</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class ETG_CtrmReconStagging
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>dialog</Name>
+				<Source><![CDATA[
+    public void dialog()
+    {
+        Dialog                       dialog;
+        TransDate                    fromDate,toDate;
+        DialogField                  dialogFromDate,dialogToDate;
+        DialogField                  dialogTransType;
+        ;
+ 
+        dialog = new dialog("Integration Recon Report");
+        dialogFromDate       = dialog.addField(extendedTypeStr(TransDate), "From date");
+        dialogToDate         = dialog.addField(extendedTypeStr(TransDate), "To date");
+        dialog.run();
+ 
+        if(!dialogFromDate.value() || !dialogToDate.value() )
+        {
+            throw error("Date Should Not Be Null");
+        }
+        else if(dialogFromDate.value() >= dialogToDate.value())
+        {
+            throw error("From date should be less than Todate");
+        }
+        else if (dialog.run())
+        {
+            this.Tbl_Autorecondata_ax(dialogFromDate.value(),dialogToDate.value());
+        }
+ 
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>Tbl_Autorecondata_ax</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name = "_fromdate"></param>
+    /// <param name = "_todate"></param>
+    public void Tbl_Autorecondata_ax(date _fromdate, date _todate)
+    {
+        ETG_CtrmInteReconStagging Tbl_AxVsCtrmRecon;
+        ETG_ARAP_MSGHEADER TBL_ARAP_MsgHeader,TBL_ARAP_MsgHeaderlocal;
+        VendTrans           vendTrans;
+        CustTrans           custTrans;
+        VendTable           vendTable;
+        CustTable           custTable;
+        AmountCur           Postedamount = 0.00;
+       
+        date fromdate,todate;
+        timeofday fromtime,totime;
+        Args args = new Args();
+        ;
+        ttsbegin;
+        delete_from Tbl_AxVsCtrmRecon;
+        ttscommit;
+ 
+        while select TBL_ARAP_MsgHeader where TBL_ARAP_MsgHeader.createdDateTime >= datetobeginUtcDateTime(_fromdate, DateTimeUtil::getUserPreferredTimeZone())
+                && TBL_ARAP_MsgHeader.createdDateTime <= datetoendUtcDateTime(_todate, DateTimeUtil::getUserPreferredTimeZone())
+                
+                
+ 
+         if(TBL_ARAP_MsgHeader)
+        {
+            Postedamount  = 0.00;
+                        
+            Tbl_AxVsCtrmRecon.AXNetAmount = str2Num(TBL_ARAP_MsgHeader.AXNetAmount);
+            Tbl_AxVsCtrmRecon.ETGARAPREF  = TBL_ARAP_MsgHeader.ETGARAPREF;
+            Tbl_AxVsCtrmRecon.ETGCOUNTERPARTY = TBL_ARAP_MsgHeader.ETGCOUNTERPARTY;
+            
+            if(TBL_ARAP_MsgHeader.ETGCOUNTERPARTY != "")
+            {
+                select * from vendTable where vendTable.ETGCxcCounterPartyMapping == TBL_ARAP_MsgHeader.ETGCOUNTERPARTY;
+                if(vendTable.ETGCxcCounterPartyMapping != "")
+                {
+                    Tbl_AxVsCtrmRecon.ETGCounterpartyTrans = vendTable.AccountNum;
+                }
+                else
+                {
+                    select * from  custTable where custTable.ETGCxcCounterPartyMapping == TBL_ARAP_MsgHeader.ETGCOUNTERPARTY;
+
+                    if(custTable.ETGCxcCounterPartyMapping != "")
+                    {
+                        Tbl_AxVsCtrmRecon.ETGCounterpartyTrans = custTable.AccountNum;
+                    }
+                }
+            }
+                     
+
+            if(TBL_ARAP_MsgHeader.DocType == ETGDocType::VCH 
+                || TBL_ARAP_MsgHeader.DocType == ETGDocType::APDN 
+                || TBL_ARAP_MsgHeader.DocType == ETGDocType::APCN )
+            {
+               while select sum(AmountCur) from vendTrans
+                    where vendTrans.Invoice == TBL_ARAP_MsgHeader.ETGARAPREF
+                if(vendTrans)
+                {
+                    String10 filterInv = subStr(vendTrans.Voucher, 1, 7);
+ 
+                    if(vendTrans.Voucher != "" && (filterInv == "E016CXC" ))
+                    {
+                        Postedamount = 0.00;
+                        Postedamount = vendTrans.AmountCur;
+                        Tbl_AxVsCtrmRecon.AmountInD365 = Postedamount;
+                    }
+                }
+            }
+
+           else if(TBL_ARAP_MsgHeader.DocType == ETGDocType::INV 
+                || TBL_ARAP_MsgHeader.DocType == ETGDocType::ARCN 
+                || TBL_ARAP_MsgHeader.DocType == ETGDocType::ARDN )
+            {
+               while select sum(AmountCur) from custTrans
+                  where custTrans.Invoice == TBL_ARAP_MsgHeader.ETGARAPREF
+                if(custTrans)
+                {
+
+                    String10 filterInv = subStr(custTrans.Voucher, 1, 7);
+ 
+                    if(custTrans.Voucher != "" && (filterInv == "E016CXC" ))
+                    {
+                        Postedamount = 0.00;
+                        Postedamount = custTrans.AmountCur;
+
+                        Tbl_AxVsCtrmRecon.AmountInD365 = Postedamount;
+                    }
+                }
+            }
+
+            Tbl_AxVsCtrmRecon.DiffAmount = abs(Tbl_AxVsCtrmRecon.AXNetAmount) - abs(Tbl_AxVsCtrmRecon.AmountInD365);
+           
+            Tbl_AxVsCtrmRecon.insert();
+        }
+        new MenuFunction(menuItemdisplayStr(ETG_CtrmInteReconStagging),MenuItemType::Display).run();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    public void run()
+    {
+        this.dialog();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name = "_args"></param>
+    public static void main(Args _args)
+    {
+        ETG_CtrmReconStagging headersLinesDialog;
+ 
+        headersLinesDialog = new ETG_CtrmReconStagging();
+        headersLinesDialog.run();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

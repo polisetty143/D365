@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_PurchTable_DS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formdatasourcestr(PurchTable, PurchTable))]
+final class ETG_PurchTable_DS_Extension
+{
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {        
+        int                 ret;
+        boolean             isAgreementOrder = true;
+        boolean             isInvoiced       = true;
+        FormDataSource      PurchTable_DS    = any2Object(this) as FormDataSource;
+        formRun             formRun          = PurchTable_DS.formRun();
+        PurchTable          purchTable       = PurchTable_ds.cursor();
+        ETG_Parameters      parameter        = ETG_Parameters::find();
+
+        //CS, DLT, 29012025 rate card design changes
+        ETGACFParameters      acfparameter = ETGACFParameters::find();
+        //CE, DLT, 29012025 rate card design changes
+
+        FormDataSource      purchTrade_DS    = formRun.dataSource(formDataSourceStr(PurchTable, ETG_PurchTableTrade)) as FormDataSource;
+        FormDataSource      TMSPurchTable_DS = formRun.dataSource(formDataSourceStr(PurchTable, TMSPurchTable)) as FormDataSource;
+        FormDataSource      LogisticsPostalAddressHeader_ds  = formRun.dataSource(formDataSourceStr(PurchTable, LogisticsPostalAddressHeader)) as FormDataSource;
+        FormDataSource      PurchLineQualityGrp_ds           = formRun.dataSource(formDataSourceStr(PurchTable, ETG_PurchLineQualityGrp)) as FormDataSource;
+
+        ret = next active();
+
+        if(parameter.ETG_FrozenValidations == NoYes::Yes
+            && parameter.ETG_FrozenValidationPurchaseOrder == NoYes::Yes
+            && purchTable.MatchingAgreement)
+        {
+            isAgreementOrder           = false;
+
+            if (purchTable.PurchStatus == PurchStatus::Invoiced)
+            {
+                isInvoiced  = false;
+            }
+        }
+        formRun.design().controlName(formcontrolstr(PurchTable,LogisticsLocationSelectHeader)).enabled(isInvoiced);
+        formRun.design().controlName(formcontrolstr(PurchTable,DirPartyPostalAddressNewHeader)).enabled(isInvoiced);
+        formRun.design().controlName(formcontrolstr(PurchTable,TabFinancialDimensionsHeader)).allowEdit(isInvoiced);
+        formRun.design().controlName(formcontrolstr(PurchTable,PurchTable_DeliveryPostalAddress)).allowEdit(isInvoiced);
+        formRun.design().controlName(formcontrolstr(PurchTable,CustReference)).allowEdit(isInvoiced);
+        formRun.design().controlName(formcontrolstr(PurchTable,Payment_Payment)).allowEdit(isInvoiced);
+        formRun.design().controlName(formcontrolstr(PurchTable,TabFinancialDimensionsLine)).allowEdit(isInvoiced);
+        PurchLineQualityGrp_ds.allowCreate(isAgreementOrder);
+        PurchLineQualityGrp_ds.allowDelete(isAgreementOrder);
+        
+        if(!isInvoiced)
+        {
+            purchTrade_DS.allowEdit(false);
+            PurchTable_DS.allowEdit(false);
+            TMSPurchTable_DS.allowEdit(false);
+            PurchLineQualityGrp_ds.allowCreate(false);
+            PurchLineQualityGrp_ds.allowDelete(false);
+        }
+        
+        else if(!isAgreementOrder)
+        {
+            allowEditFieldGroup(purchTrade_DS, tableFieldGroupStr(purchTrade_DS, AgreementFieldsEditable));
+            allowEditFieldGroup(PurchTable_DS, tableFieldGroupStr(PurchTable_DS, AgreementFieldsEditable));
+            TMSPurchTable_DS.allowEdit(false);
+        }
+        else
+        {
+            ETG_PurchTableTrade    purchTableTrade = purchTrade_DS.cursor();
+            purchTrade_DS.allowEdit(true);
+            PurchTable_DS.allowEdit(true);
+            TMSPurchTable_DS.allowEdit(true);           
+
+            if (purchTableTrade.BuyerSecondaryBank || purchTableTrade.BuyerBank)
+                purchTrade_DS.object(fieldNum(ETG_PurchTableTrade, BuyerSecondaryBank)).allowEdit(false);
+
+            if (purchTableTrade.SellerSecondaryBank || purchTableTrade.SellerBank)
+                purchTrade_DS.object(fieldNum(ETG_PurchTableTrade, SellerSecondaryBank)).allowEdit(false);
+
+            if (purchTableTrade.PortOfLoadingDesc || purchTableTrade.PortOfLoading)
+                purchTrade_DS.object(fieldNum(ETG_PurchTableTrade, PortOfLoadingDesc)).allowEdit(false);
+            
+            if (purchTableTrade.PortOfDischargeDesc  || purchTableTrade.PortOfDischarge)
+                purchTrade_DS.object(fieldNum(ETG_PurchTableTrade, PortOfDischargeDesc)).allowEdit(false);
+                       
+        }
+
+        //CS, DLT, 29012025 rate card design changes
+        formRun.design().controlName(formcontrolstr(PurchTable, ETGPurchRateCard)).visible(acfparameter.EnableAlternateItemPOandGRN);
+        //CE, DLT, 29012025 rate card design changes
+
+        //CS, Abhinav ETG canada
+        if(purchTable.ETGElevatorReceiptNumber && ETGcanadaParameters::find().EnableElevatorReceipt)
+        {
+            formRun.design().controlName(formcontrolstr(PurchTable, ETGAutoPostGRNAndinvoiceBtn)).visible(true);
+        }
+        else if(purchtable.InterCompanyOrder && purchtable.InterCompanySalesId)
+        {
+            formRun.design().controlName(formcontrolstr(PurchTable, ETGAutoPostGRNAndinvoiceBtn)).visible(true);
+        }
+        else
+        {
+            formRun.design().controlName(formcontrolstr(PurchTable, ETGAutoPostGRNAndinvoiceBtn)).visible(false);
+        }
+        //CE
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

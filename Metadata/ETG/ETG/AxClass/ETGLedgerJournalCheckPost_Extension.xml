@@ -1,0 +1,364 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGLedgerJournalCheckPost_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// This class is an extension for class <c>LedgerJournalCheckPost</c>
+/// </summary>
+[ExtensionOf(classStr(LedgerJournalCheckPost))]
+internal final class ETGLedgerJournalCheckPost_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>postJournal</Name>
+				<Source><![CDATA[
+    protected container postJournal()
+    {
+        boolean allOK, allOKIntercompany;
+
+        [allOK, allOKIntercompany] = next postJournal();
+
+        if (allOK && VendParameters::find().ETGEnableTermoNumberFeature == NoYes::Yes)
+        {
+            if(ledgerJournalTable.JournalType     == LedgerJournalType::CustPayment
+                || ledgerJournalTable.JournalType == LedgerJournalType::Payment)
+            {
+                ETGTermoNumberHelper termoHelper = ETGTermoNumberHelper::construct();
+                termoHelper.parmLedgerJournalTable(ledgerJournalTable);
+                allOK = termoHelper.processPaymentJournal();
+            }
+        }
+        //CS, DLT, 01052025 provisional charges reversal
+        if(allOK 
+            && ledgerJournalTable
+            && ETGACFParameters::find().EnableProvisionalCharges == NoYes::Yes
+            && ledgerJournalTable.JournalType == LedgerJournalType::VendInvoiceRegister
+            && LedgerJournalName::find(ledgerJournalTable.JournalName).ETGProvisionalChargesReversal == NoYes::Yes)
+        {
+            //todo add condition to check vendor inv journal
+            ETGProvisionalChargesReversalCreatePost::createReversalJournal(ledgerJournalTable);
+        }
+        if(allOK
+            && ledgerJournalTable
+            && ETGACFParameters::find().EnableProvisionalCharges == NoYes::Yes
+            && ledgerJournalTable.JournalType == LedgerJournalType::Daily
+            && ledgerJournalTable.ETGIsCustVendProvChargesReversalJour == NoYes::Yes)
+        {
+            ETGProvisionalChargesReversalCreatePost::createProvisionalReversalHistory(ledgerJournalTable);
+        }
+        //CE, DLT, 01052025 provisional charges reversal
+
+        //CS, DLT, 01052025 accrual scheme posting
+        if(allOK
+            && ledgerJournalTable
+            && ETGACFParameters::find().EnableAccrualSchemePostingMonthly == NoYes::Yes
+            && ledgerJournalTable.JournalType == LedgerJournalType::Daily
+            && ledgerJournalTable.JournalName == ETGACFParameters::find().AccrualSchemeJournalName)
+        {
+            ETGLedgerJournalTransAccrualTrans::updateTempVoucherNum(ledgerJournalTable.JournalNum);
+        }
+        //CE, DLT, 01052025 accrual scheme posting
+
+        //DMS DealReverse related 
+
+        if (allOK && ledgerJournalTable && ETGACFParameters::find().EnableDMSIntegration && BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGDMSRevereSalesAgreementIntegrationEventClass)))
+        {
+            if(ledgerJournalTable.JournalType == LedgerJournalType::CustPayment)
+            {
+
+                LedgerJournalTrans          ledgerJournalTrans;
+                CustTrans                   custTrans;
+                CustTable                   custTable;
+                CustPackingSlipJour         custPackingSlipJour;
+                CustInvoiceJour             custInvoiceJour;
+                SalesTable                  salesTable;
+
+                select firstOnly ledgerJournalTrans
+                            where ledgerJournalTrans.JournalNum == ledgerJournalTable.JournalNum
+                              && ledgerJournalTrans.AccountType == LedgerJournalACType::Cust;
+
+                select firstOnly custTrans
+                        where custTrans.RecId == ledgerJournalTrans.CustTransId;
+
+
+                select firstonly custInvoiceJour
+                        where custInvoiceJour.InvoiceId == custTrans.Invoice
+                          &&  custInvoiceJour.InvoiceAccount == custTrans.AccountNum
+                          &&  custInvoiceJour.LedgerVoucher == custTrans.Voucher
+                          &&  custInvoiceJour.InvoiceDate == custTrans.TransDate;
+
+                select firstonly salesTable where salesTable.SalesId == custInvoiceJour.salesid;
+
+                if(salesTable.MatchingAgreement)
+                {
+                    SalesAgreementHeader salesAgreementHeader = SalesAgreementHeader::find(salesTable.MatchingAgreement);
+
+                    str formattedDateTime = DateTimeUtil::toStr(ledgerJournalTrans.CreatedDateTime);
+
+                    ETGDMSRevereSalesAgreementIntegrationContract contract = new ETGDMSRevereSalesAgreementIntegrationContract();
+
+                    contract.parmDealNumber(salesAgreementHeader.ETGDMSDealNumber);
+                    contract.parmDataAreaId(curExt());
+                    contract.parmOperationType("Payment posting - Closed");
+                    contract.parmActivityName("Sales Agreement Payment Closed");
+                    contract.parmDocumentNumber(ledgerJournalTrans.Voucher);
+                    contract.parmDocumentDate(formattedDateTime);
+                    contract.parmActivityOwner(ledgerJournalTrans.CreatedBy);
+                    contract.parmActivityRemarks(strFmt("The invoice number %1 is settled",ledgerJournalTrans.Voucher));
+
+                    ETGDMSRevereSalesAgreementIntegrationEventClass eventClass = ETGDMSRevereSalesAgreementIntegrationEventClass::newFromContract(contract);
+                    eventClass.send();
+
+                }
+            
+            }
+        }
+
+        if (allOK && ledgerJournalTable && ETGACFParameters::find().EnableDMSIntegration && BusinessEventsConfigurationReader::isBusinessEventEnabled(classStr(ETGDMSReverePurchAgreementIntegrationEventClass)))
+        {
+            if(ledgerJournalTable.JournalType == LedgerJournalType::Payment)
+            {
+
+                LedgerJournalTrans          ledgerJournalTrans;
+                VendTrans                   vendTrans;
+                VendPackingSlipJour         vendPackingSlipJour;
+                VendInvoiceJour             vendInvoiceJour;
+                PurchTable                  purchTable;
+
+                select firstOnly ledgerJournalTrans
+                            where ledgerJournalTrans.JournalNum == ledgerJournalTable.JournalNum
+                              && ledgerJournalTrans.AccountType == LedgerJournalACType::Vend;
+
+                select firstOnly VendTrans
+                    where VendTrans.RecId == ledgerJournalTrans.VendTransId;
+
+
+                select firstonly vendInvoiceJour
+                        where vendInvoiceJour.InvoiceId == VendTrans.Invoice
+                          &&  vendInvoiceJour.InvoiceAccount == VendTrans.AccountNum
+                          &&  vendInvoiceJour.LedgerVoucher == VendTrans.Voucher
+                          &&  vendInvoiceJour.InvoiceDate == VendTrans.TransDate;
+
+                select firstonly purchTable where purchTable.PurchId == vendInvoiceJour.PurchId;
+
+                if(purchTable.MatchingAgreement)
+                {
+                    PurchAgreementHeader purchAgreementHeader = PurchAgreementHeader::find(purchTable.MatchingAgreement);
+
+                    str formattedDateTime = DateTimeUtil::toStr(ledgerJournalTrans.CreatedDateTime);
+
+                    ETGDMSReverePurchAgreementIntegrationContract contract = new ETGDMSReverePurchAgreementIntegrationContract();
+
+                    contract.parmDealNumber(purchAgreementHeader.ETGDMSDealNumbers);
+                    contract.parmDataAreaId(curExt());
+                    contract.parmOperationType("Payment posting - Closed");
+                    contract.parmActivityName("Purchase Agreement Payment Closed");
+                    contract.parmDocumentNumber(ledgerJournalTrans.Voucher);
+                    contract.parmDocumentDate(formattedDateTime);
+                    contract.parmActivityOwner(ledgerJournalTrans.CreatedBy);
+                    contract.parmActivityRemarks(strFmt("The invoice number %1 is settled",ledgerJournalTrans.Voucher));
+
+                    ETGDMSReverePurchAgreementIntegrationEventClass eventClass = ETGDMSReverePurchAgreementIntegrationEventClass::newFromContract(contract);
+                    eventClass.send();
+
+                }
+            
+            }
+
+        }
+
+        return [allOK, allOKIntercompany];
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validate</Name>
+				<Source><![CDATA[
+    public boolean validate(Object _calledFrom)
+    {
+        if(ETGACFParameters::find().EnableMultiCurrencyVoucherBalanceAmt == NoYes::Yes)
+        {
+            this.createNewjournalLine(ledgerJournalTable);
+        }
+        //NS, DLT, 19032025, validate multiple currency in customer and vendor payment journal and offset bank currency
+        this.validateMultipleCurrencyETG();
+        //NE, DLT, 19032025, validate multiple currency in customer and vendor payment journal and offset bank currency
+
+        boolean isValid = next validate(_calledFrom);
+
+        return isValid;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateMultipleCurrencyETG</Name>
+				<Source><![CDATA[
+    //NS, DLT, 19032025, validate multiple currency in customer and vendor payment journal and offset bank currency
+    public void validateMultipleCurrencyETG()
+    {
+        LedgerJournalTrans ledgerJournalTrans;
+        RecId offsetDim;
+        BankAccountID bankAccountId;
+        BankAccountTable bankAccountTable;
+        CustVendPaymJournalFee feeJournal;
+        CustVendPaymJournalFee custVendPaymJournalFee;
+       
+
+        try
+        {
+            if(ledgerJournalTable 
+                && (ledgerJournalTable.JournalType == LedgerJournalType::CustPayment
+                || ledgerJournalTable.JournalType == LedgerJournalType::Payment)
+                && ETGACFParameters::find().EnableUATSmallPoints == NoYes::Yes)
+            {
+                boolean isErrorFound;
+
+                while select OffsetLedgerDimension, CurrencyCode, Voucher, RecId from ledgerJournalTrans
+                    where ledgerJournalTrans.JournalNum == ledgerJournalTable.JournalNum
+                    && ledgerJournalTrans.OffsetAccountType == LedgerJournalACType::Bank
+                {
+                    bankAccountId = LedgerDynamicAccountHelper::getAccountNumberFromDynamicAccount(ledgerJournalTrans.OffsetLedgerDimension);
+                    if(bankAccountId)
+                    {
+                        select firstonly CurrencyCode from bankAccountTable where bankAccountTable.AccountID == bankAccountId;
+                        if(bankAccountTable.CurrencyCode != ledgerJournalTrans.CurrencyCode)
+                        {
+                            warning(strFmt("@ETG_New:LedgerJournalCurrencyMismatchError", ledgerJournalTable.JournalNum, ledgerJournalTrans.Voucher));
+                            isErrorFound = true;
+                        }
+                    }
+
+                    select firstonly RecId from custVendPaymJournalFee index hint RefIdx
+                            where custVendPaymJournalFee.RefRecId == ledgerJournalTrans.RecId
+                            && custVendPaymJournalFee.FeeCurrency != ledgerJournalTrans.CurrencyCode;
+
+                    if(custVendPaymJournalFee.RecId)
+                    {
+                        warning(strFmt("@ETG_New:LedgerJournalCurrencyFeeMismatch", ledgerJournalTable.JournalNum, ledgerJournalTrans.Voucher));
+                        isErrorFound = true;
+                    }
+                }
+
+                if(isErrorFound)
+                {
+                    throw Error("Error. Currency mismatch in journal");
+                }
+            }
+        }
+        catch(Exception::Error)
+        {
+            info("@ETG_New:LedgerJournalCurrencyMatchCatchError");
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createNewjournalLine</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///     NE, DLT, 19032025, validate multiple currency
+    ///     create new journal line if there is difference in currency conversion
+    ///     will be applicable only if flag (Enable multi currency flag) is enabled on journal name master
+    /// </summary>
+    /// <param name = "_ledgerJournalTable">LedgerJournalTable _ledgerJournalTable</param>
+    public void createNewjournalLine(LedgerJournalTable _ledgerJournalTable)
+    {
+        LedgerJournalTable              ledgerJournalTable;
+        LedgerJournalTrans              ledgerJournalTrans,ledgerJournalTransLoc, ledgerJournalTransLocCheck, ledgerJournalTransLocDD;
+        LedgerJournalName               ledgerJournalName;
+        LedgerDimensionAccount          ledgerDimension;
+        DimensionDefault                dimensionDefault;
+        MainAccountRecId                mainAccRecId;
+        LedgerGainLossAccount           ledgerGainLossAccount;
+        LedgerJournalEngine             ledgerJournalEngine =  new LedgerJournalEngine();
+        Ledger                          ledger = Ledger::find(Ledger::current());
+        
+        select firstonly ETGMultiCurrencyVoucherBalanceAmt from ledgerJournalName
+            where ledgerJournalName.JournalName == _ledgerJournalTable.JournalName;
+
+        if(ledgerJournalName.ETGMultiCurrencyVoucherBalanceAmt == NoYes::No)
+        {
+            return;
+        }
+
+        select firstonly RecId from ledgerJournalTransLocCheck
+            where ledgerJournalTransLocCheck.JournalNum == _ledgerJournalTable.JournalNum
+            && ledgerJournalTransLocCheck.ETGMultiCurrencyBalanceLineCreated == NoYes::Yes;
+
+        if(ledgerJournalTransLocCheck.RecId)
+        {
+            return;
+        }
+
+        select firstonly ledgerJournalTrans order by RecId
+                where ledgerJournalTrans.JournalNum == _ledgerJournalTable.JournalNum;
+
+        select firstonly DefaultDimension from ledgerJournalTransLocDD order by RecId
+                where ledgerJournalTransLocDD.JournalNum == _ledgerJournalTable.JournalNum
+                && ledgerJournalTransLocDD.AccountType != LedgerJournalACType::Ledger;
+
+        if(ledgerJournalTrans)
+        {
+            ledgerJournalEngine = LedgerJournalEngine::construct(_ledgerJournalTable.JournalType);
+            ledgerJournalEngine.newJournalActive(_ledgerJournalTable);
+            ledgerJournalTransLoc.JournalNum  = _ledgerJournalTable.JournalNum;
+            ledgerJournalTransLoc.ETGMultiCurrencyBalanceLineCreated = NoYes::Yes;
+            ledgerJournalTransLoc.TransDate             = ledgerJournalTrans.TransDate;
+            ledgerJournalTransLoc.Voucher               = ledgerJournalTrans.Voucher;
+            ledgerJournalTransLoc.Company               = ledgerJournalTrans.Company;
+            ledgerJournalTransLoc.AccountType           = LedgerJournalACType::Ledger;//Added by sai as per tejas ask
+            ledgerJournalTransLoc.Txt                   = ledgerJournalTrans.Txt;//Added by sai as per tejas ask
+            ledgerJournalTransLoc.OffsetCompany         = ledgerJournalTrans.OffsetCompany;
+            ledgerJournalTransLoc.OffsetAccountType     = ledgerJournalTrans.OffsetAccountType;
+            ledgerJournalTransLoc.OffsetLedgerDimension = ledgerJournalTrans.OffsetLedgerDimension;
+            ledgerJournalTransLoc.CurrencyCode          = Ledger::accountingCurrency();
+            ledgerJournalTransLoc.ExchRate              = 1.0 * 100;
+
+          
+            ledgerJournalTransLoc.TaxItemGroup          = ledgerJournalTrans.TaxItemGroup;
+
+            dimensionDefault = ledgerJournalTransLocDD.DefaultDimension;
+            
+            if(ledgerJournalEngine.voucherDebit(ledgerJournalTrans) > ledgerJournalEngine.voucherCredit(ledgerJournalTrans))
+            {
+                select firstonly LedgerDimension from ledgerGainLossAccount 
+                    where ledgerGainLossAccount.Ledger == Ledger::current()
+                    && ledgerGainLossAccount.AccountType == CurrencyGainLossAccountType::RealizedGain;
+
+                ledgerDimension                             = LedgerDimensionFacade::serviceCreateLedgerDimension(ledgerGainLossAccount.LedgerDimension, dimensionDefault);
+                ledgerJournalTransLoc.LedgerDimension       = ledgerDimension;
+                ledgerJournalTransLoc.AmountCurCredit       = abs(ledgerJournalEngine.voucherDebit(ledgerJournalTrans) - ledgerJournalEngine.voucherCredit(ledgerJournalTrans));
+                if(ledgerJournalTransLoc.validateWrite())
+                {
+                    ledgerJournalTransLoc.insert();
+                }
+            }
+            else if(ledgerJournalEngine.voucherCredit(ledgerJournalTrans) > ledgerJournalEngine.voucherDebit(ledgerJournalTrans))
+            {
+                select firstonly LedgerDimension from ledgerGainLossAccount
+                    where ledgerGainLossAccount.Ledger == Ledger::current()
+                    && ledgerGainLossAccount.AccountType == CurrencyGainLossAccountType::RealizedLoss;
+
+                ledgerDimension                             = LedgerDimensionFacade::serviceCreateLedgerDimension(ledgerGainLossAccount.LedgerDimension, dimensionDefault);
+                ledgerJournalTransLoc.LedgerDimension       = ledgerDimension;
+                ledgerJournalTransLoc.AmountCurDebit        = abs(ledgerJournalEngine.voucherCredit(ledgerJournalTrans) - ledgerJournalEngine.voucherDebit(ledgerJournalTrans));
+                if(ledgerJournalTransLoc.validateWrite())
+                {
+                    ledgerJournalTransLoc.insert();
+                }
+            }
+        }
+    }
+    //NE, DLT, 19032025, validate multiple currency
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

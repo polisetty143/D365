@@ -1,0 +1,359 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGElevatorReceiptRateCardApplyHelper</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+internal final class ETGElevatorReceiptRateCardApplyHelper
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>autoApplyRateCardOnPurchOrder</Name>
+				<Source><![CDATA[
+    public static void autoApplyRateCardOnPurchOrder(PurchLine purchLine,AgreementLine _agreementLine)
+    {
+        ttsbegin;
+        PurchTable              purchTable      = purchLine.purchTable();
+        DataAreaId              CurrentCompany  = curExt();
+        ETGElevatorReceiptRateCardApplyHelper etgElevatorReceiptRateCardApplyHelper = new ETGElevatorReceiptRateCardApplyHelper();
+
+        changecompany(purchTable.ETGERNEntity)
+        {
+            etgElevatorReceiptRateCardApplyHelper.insertGrainItemPurchLine(purchLine,_agreementLine,CurrentCompany,purchTable);
+            etgElevatorReceiptRateCardApplyHelper.insertSplitsItemPurchLine(purchLine,_agreementLine,CurrentCompany,purchTable);
+            etgElevatorReceiptRateCardApplyHelper.insertDockageItemPurchLine(purchLine,_agreementLine,CurrentCompany,purchTable);
+        }
+
+        //cancel old purchline qty
+        etgElevatorReceiptRateCardApplyHelper.cancelOldPurchLineQty(purchLine);
+ 
+        PurchTableVersion purchTableVersion = PurchTableVersion::findLatest(purchTable.PurchId, purchTable.DataAreaId, true);
+        if(purchTableVersion)
+        {
+            purchTableVersion.IsArchived = NoYes::Yes;
+            purchTableVersion.update();
+        }
+  
+        purchTable.autoApproveChangeRequest(true);
+
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertNewPurchaseLines</Name>
+				<Source><![CDATA[
+    public void insertNewPurchaseLines(PurchLine purchLine,TmpInventTransWMS inventTransWMS)
+    {
+        PurchLine purchLineNew;
+        InventDim inventDimNew;
+        PurchTable purchtable = purchLine.purchTable();
+
+        purchLineNew.clear();
+        inventDimNew.clear();
+
+        if(inventTransWMS.ItemId == purchLine.ItemId)
+        {
+            buf2Buf(purchLine, purchLineNew);
+        }
+        purchLineNew.initFromPurchTable(purchTable);
+
+        purchLineNew.ItemId     = inventTransWMS.ItemId;
+        purchLineNew.LineNumber = purchLine.nextLineNum();
+        purchLineNew.modifiedField(fieldNum(PurchLine, ItemId));
+        purchLineNew.PurchQty = inventTransWMS.InventQty;
+        purchLineNew.initFromInventTable(InventTable::find(inventTransWMS.ItemId));
+        purchLineNew.PurchPrice = inventTransWMS.ETGRateCardUnitPrice;
+
+        if(purchLineNew.LinePercent == 0 && inventTransWMS.ETGRateCardDiscPct != 0)
+        {
+            purchLineNew.LinePercent = inventTransWMS.ETGRateCardDiscPct;
+        }
+        if(purchLineNew.LineDisc == 0 && inventTransWMS.ETGRateCardDiscAmount != 0)
+        {
+            purchLineNew.LineDisc = inventTransWMS.ETGRateCardDiscAmount;
+        }
+
+        purchLineNew.LineAmount = inventTransWMS.ETGRateCardLineAmount;
+        inventDimNew            = InventDim::findOrCreate(inventDim::find(inventTransWMS.InventDimId));
+        inventDimNew.inventBatchId  = InventTable::find(inventTransWMS.ItemId).ETGDefaultBatchNumber;
+        inventDimNew.inventSerialId  = InventTable::find(inventTransWMS.ItemId).ETGDefaultSerialNumber;
+
+        purchLineNew.InventDimId = InventDim::findOrCreate(inventDimNew).inventDimId;
+        purchLineNew.modifiedField(fieldNum(PurchLine, InventDimId));
+        purchLineNew.initVariantId(inventDimNew);
+        purchLineNew.MatchingAgreementLine = purchLine.MatchingAgreementLine;
+
+        if(purchLineNew.validateWrite())
+        {
+            purchTable.reread();
+            purchTable.selectForUpdate(true);
+            purchTable.DocumentState = VersioningDocumentState::Draft;
+            purchTable.update();
+
+            purchLineNew.RemainInventPhysical = inventTransWMS.InventQty;
+            purchLineNew.RemainPurchPhysical  = inventTransWMS.InventQty;
+            purchLineNew.ETGRateCardApplied   = NoYes::Yes;
+            purchLineNew.WorkflowState        = TradeWorkflowState::Approved;
+
+            if(ETGCanadaParameters::find().EnableRateCardChanges && purchTable.ETGElevatorReceiptNumber)
+            {
+                changecompany(purchTable.ETGERNEntity)
+                {
+                    ETGElevatorReceiptSplitsItemTable   etgElevatorReceiptSplitsItemTable;
+                    ETGElevatorReceiptTable             etgElevatorReceiptTableLoc;
+
+                    select firstonly etgElevatorReceiptSplitsItemTable
+                                where etgElevatorReceiptSplitsItemTable.ElevatorReceiptNumber == purchTable.ETGElevatorReceiptNumber
+                                && etgElevatorReceiptSplitsItemTable.ItemId == purchLineNew.ItemId;
+
+                    if(etgElevatorReceiptSplitsItemTable)
+                    {
+                        purchLineNew.ETGIsSplitItem = NoYes::Yes;
+                    }
+
+                    select firstonly etgElevatorReceiptTableLoc
+                                where etgElevatorReceiptTableLoc.ElevatorReceiptNumber == purchTable.ETGElevatorReceiptNumber;
+
+                    if(etgElevatorReceiptTableLoc.DockageGrain == purchLineNew.ItemId)
+                    {
+                        purchLineNew.ETGIsDockageItem = NoYes::Yes;
+                    }
+                }
+            }
+
+            purchLineNew.insert();
+
+            //allocate charges to new purchline
+            MarkupTrans markUpTrans, markUpTransUpd;
+
+            select firstonly RecId from markUpTrans
+                where markUpTrans.TransRecId == purchLine.RecId
+                && markUpTrans.TransTableId == purchLine.TableId;
+
+            if(markUpTrans.RecId)
+            {
+                update_recordset markUpTransUpd
+                    setting TransRecId = purchLineNew.RecId
+                where markUpTransUpd.TransRecId == purchLine.RecId
+                    && markUpTransUpd.TransTableId == purchLine.TableId
+                    && markUpTransUpd.DataAreaId == purchLine.DataAreaId;
+            }
+        }
+        else
+        {
+            throw error("Error. Purchase rate card is not applied.");
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>cancelOldPurchLineQty</Name>
+				<Source><![CDATA[
+    public void cancelOldPurchLineQty(PurchLine purchLine)
+    {
+        ttsbegin;
+        purchLine.reread();
+        purchLine.selectForUpdate(true);
+        purchLine.RemainInventPhysical  = 0;
+        purchLine.PurchQty              = 0;
+        purchLine.QtyOrdered            = 0;
+        purchLine.LineAmount            = 0;
+        purchLine.RemainPurchPhysical   = 0;
+        purchLine.PurchStatus = PurchStatus::Canceled;
+        purchLine.updateWorkflowState(TradeWorkflowState::Submitted);
+        purchLine.update();
+        InventMovement::bufferSetRemainQty(purchLine);
+        ttscommit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertGrainItemPurchLine</Name>
+				<Source><![CDATA[
+    public void insertGrainItemPurchLine(PurchLine purchLine,AgreementLine _agreementLine,dataAreaid CurrentCompany,PurchTable purchTable)
+    {
+        EtgElevatorReceiptGrainItemTable    etgElevatorReceiptGrainItemTable;
+       
+        ///Grain Item
+        while select etgElevatorReceiptGrainItemTable
+              where etgElevatorReceiptGrainItemTable.ElevatorReceiptNumber == purchTable.ETGElevatorReceiptNumber
+        {
+            changecompany(CurrentCompany)
+            {
+                InventDim                           inventDImLoc = purchLine.inventDim();
+                InventDim                           inventDim;
+                TmpInventTransWMS                   inventTransWMS;
+                ETGRateCardMaster                   rateCardMaster;
+                LineAmount                          priceAfterCashDisc, priceAfterDiscPercent;
+                DiscPct                             totalDiscPct;
+
+                inventTransWMS.clear();
+                inventTransWMS.itemid = etgElevatorReceiptGrainItemTable.ItemId;
+                inventTransWMS.InventQty = etgElevatorReceiptGrainItemTable.GrainQty;
+            
+                select firstonly rateCardMaster
+                    where rateCardMaster.ItemId == etgElevatorReceiptGrainItemTable.ItemId
+                    && rateCardMaster.RefRecId == _agreementLine.recid;
+
+                inventTransWMS.ETGRateCardUnitPrice     = purchLine.PurchPrice;
+                priceAfterCashDisc                      = purchLine.PurchPrice;
+                priceAfterCashDisc                      = purchLine.PurchPrice - (rateCardMaster.DiscAmount + purchLine.LineDisc);
+
+                inventTransWMS.ETGRateCardDiscAmount    = rateCardMaster.DiscAmount + purchLine.LineDisc;
+                inventTransWMS.ETGRateCardLineAmount    = priceAfterCashDisc * inventTransWMS.InventQty;
+
+                totalDiscPct                            = rateCardMaster.DiscPct + purchLine.LinePercent;
+                priceAfterDiscPercent                   = priceAfterCashDisc - (priceAfterCashDisc * totalDiscPct) / 100;
+                inventTransWMS.ETGRateCardDiscPct       = rateCardMaster.DiscPct;
+                inventTransWMS.ETGRateCardLineAmount    = priceAfterDiscPercent * inventTransWMS.InventQty;
+
+                inventDim.configId          = rateCardMaster.configId;
+                inventDim.InventColorId     = rateCardMaster.InventColorId;
+                inventDim.InventSizeId      = rateCardMaster.InventSizeId;
+                inventDim.InventStyleId     = rateCardMaster.InventStyleId;
+                inventDim.InventSiteId      = inventDImLoc.InventSiteId;
+                inventDim.InventLocationId  = inventDImLoc.InventLocationId;
+                inventDim.wMSLocationId     = inventDImLoc.wMSLocationId;
+
+                inventTransWMS.InventDimId = InventDim::findOrCreate(inventDim).inventDimId;
+
+                if(inventTransWMS.InventQty)
+                {
+                    this.insertNewPurchaseLines(purchLine,inventTransWMS);
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertSplitsItemPurchLine</Name>
+				<Source><![CDATA[
+    public void insertSplitsItemPurchLine(PurchLine purchLine,AgreementLine _agreementLine,dataAreaid CurrentCompany,PurchTable purchTable)
+    {
+        ETGElevatorReceiptSplitsItemTable   etgElevatorReceiptSplitsItemTable;
+        ETGElevatorReceiptTable             etgElevatorReceiptTable;
+
+        select firstonly etgElevatorReceiptTable
+            where etgElevatorReceiptTable.ElevatorReceiptNumber == purchTable.ETGElevatorReceiptNumber;
+
+        //Splits Item
+        while select etgElevatorReceiptSplitsItemTable
+                    where etgElevatorReceiptSplitsItemTable.ElevatorReceiptNumber == purchTable.ETGElevatorReceiptNumber
+        {
+            changecompany(CurrentCompany)
+            {
+                InventDim                           inventDImLoc = purchLine.inventDim();
+                TmpInventTransWMS                   inventTransWMS;
+                InventDim                           inventDim;
+                ETGRateCardMaster                   rateCardMaster;
+                LineAmount                          priceAfterCashDisc, priceAfterDiscPercent;
+                DiscPct                             totalDiscPct;
+
+                inventTransWMS.clear();
+                inventTransWMS.itemid = etgElevatorReceiptSplitsItemTable.ItemId;
+                inventTransWMS.InventQty = decround(((etgElevatorReceiptTable.GrainUnloadedWeight * etgElevatorReceiptSplitsItemTable.SplitsPercentage ) / 100),3);
+
+                select firstonly rateCardMaster
+                            where rateCardMaster.ItemId == etgElevatorReceiptSplitsItemTable.ItemId
+                            && rateCardMaster.RefRecId == _agreementLine.recid;
+
+                inventTransWMS.ETGRateCardUnitPrice     = purchLine.PurchPrice;
+                priceAfterCashDisc                      = purchLine.PurchPrice;
+                priceAfterCashDisc                      = purchLine.PurchPrice - (rateCardMaster.DiscAmount + purchLine.LineDisc);
+
+                inventTransWMS.ETGRateCardDiscAmount    = rateCardMaster.DiscAmount + purchLine.LineDisc;
+                inventTransWMS.ETGRateCardLineAmount    = priceAfterCashDisc * inventTransWMS.InventQty;
+
+                totalDiscPct                            = rateCardMaster.DiscPct + purchLine.LinePercent;
+                priceAfterDiscPercent                   = priceAfterCashDisc - (priceAfterCashDisc * totalDiscPct) / 100;
+                inventTransWMS.ETGRateCardDiscPct       = rateCardMaster.DiscPct;
+                inventTransWMS.ETGRateCardLineAmount    = priceAfterDiscPercent * inventTransWMS.InventQty;
+
+                inventDim.configId          = rateCardMaster.configId;
+                inventDim.InventColorId     = rateCardMaster.InventColorId;
+                inventDim.InventSizeId      = rateCardMaster.InventSizeId;
+                inventDim.InventStyleId     = rateCardMaster.InventStyleId;
+                inventDim.InventSiteId      = inventDImLoc.InventSiteId;
+                inventDim.InventLocationId  = inventDImLoc.InventLocationId;
+                inventDim.wMSLocationId     = inventDImLoc.wMSLocationId;
+
+                inventTransWMS.InventDimId = InventDim::findOrCreate(inventDim).inventDimId;
+
+                if(inventTransWMS.InventQty)
+                {
+                    this.insertNewPurchaseLines(purchLine,inventTransWMS);
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>insertDockageItemPurchLine</Name>
+				<Source><![CDATA[
+    public void insertDockageItemPurchLine(PurchLine purchLine,AgreementLine _agreementLine,dataAreaid CurrentCompany,PurchTable purchTable)
+    {
+        ETGElevatorReceiptTable             etgElevatorReceiptTable;
+
+        select firstonly etgElevatorReceiptTable
+            where etgElevatorReceiptTable.ElevatorReceiptNumber == purchTable.ETGElevatorReceiptNumber;
+
+        changecompany(CurrentCompany)
+        {
+            InventDim                           inventDImLoc = purchLine.inventDim();
+            InventDim inventDim;
+            ETGRateCardMaster                   rateCardMaster;
+            LineAmount                          priceAfterCashDisc, priceAfterDiscPercent;
+            DiscPct                             totalDiscPct;
+            TmpInventTransWMS                   inventTransWMS;
+
+            inventTransWMS.clear();
+            inventTransWMS.itemid = etgElevatorReceiptTable.DockageGrain;
+            inventTransWMS.InventQty = etgElevatorReceiptTable.DockageWeight;
+
+            select firstonly rateCardMaster
+                where rateCardMaster.ItemId == etgElevatorReceiptTable.DockageGrain
+                && rateCardMaster.RefRecId == _agreementLine.recid;
+
+            inventTransWMS.ETGRateCardUnitPrice     = purchLine.PurchPrice;
+            priceAfterCashDisc                      = purchLine.PurchPrice;
+            priceAfterCashDisc                      = purchLine.PurchPrice - (rateCardMaster.DiscAmount + purchLine.LineDisc);
+
+            inventTransWMS.ETGRateCardDiscAmount    = rateCardMaster.DiscAmount + purchLine.LineDisc;
+            inventTransWMS.ETGRateCardLineAmount    = priceAfterCashDisc * inventTransWMS.InventQty;
+
+            totalDiscPct                            = rateCardMaster.DiscPct + purchLine.LinePercent;
+            priceAfterDiscPercent                   = priceAfterCashDisc - (priceAfterCashDisc * totalDiscPct) / 100;
+            inventTransWMS.ETGRateCardDiscPct       = rateCardMaster.DiscPct;
+            inventTransWMS.ETGRateCardLineAmount    = priceAfterDiscPercent * inventTransWMS.InventQty;
+
+            inventDim.configId          = rateCardMaster.configId;
+            inventDim.InventColorId     = rateCardMaster.InventColorId;
+            inventDim.InventSizeId      = rateCardMaster.InventSizeId;
+            inventDim.InventStyleId     = rateCardMaster.InventStyleId;
+            inventDim.InventSiteId      = inventDImLoc.InventSiteId;
+            inventDim.InventLocationId  = inventDImLoc.InventLocationId;
+            inventDim.wMSLocationId     = inventDImLoc.wMSLocationId;
+
+            inventTransWMS.InventDimId = InventDim::findOrCreate(inventDim).inventDimId;
+
+            if(inventTransWMS.InventQty)
+            {
+                this.insertNewPurchaseLines(purchLine,inventTransWMS);
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

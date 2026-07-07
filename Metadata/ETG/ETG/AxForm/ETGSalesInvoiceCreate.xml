@@ -1,0 +1,840 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxForm xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V6">
+	<Name>ETGSalesInvoiceCreate</Name>
+	<SourceCode>
+		<Methods xmlns="">
+			<Method>
+				<Name>classDeclaration</Name>
+				<Source><![CDATA[
+[Form]
+public class ETGSalesInvoiceCreate extends FormRun
+{
+}
+]]></Source>
+			</Method>
+		</Methods>
+		<DataSources xmlns="">
+			<DataSource>
+				<Name>ETGSalesLines</Name>
+				<Methods>
+					<Method>
+						<Name>active</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        /// <returns></returns>
+        public int active()
+        {
+            int ret;
+            ETGSalesLines salesLines;
+            ETGSalesHeader salesHeader;
+            InventTable inventTable;
+            InventTableModule inventTableModule;
+            boolean           isEditable, isMandatory;
+
+            ret = super();
+
+            salesLines = ETGSalesLines_ds.cursor();
+
+            select * from salesHeader
+                where salesHeader.RecId == salesLines.ETGSalesHeaderRecId;
+
+            //if(salesLines.ETGConnectionType != ETGConnectionType::NewConnectionorCylinder)
+            //{
+            //    ETGSalesLines_ETGDepositAmount.allowEdit(false);
+            //    //ETGSalesLines_ETGDepositAmount.value(0.00);
+            //}
+            //else
+            //{
+            //    ETGSalesLines_ETGDepositAmount.allowEdit(true);
+            //}
+
+            inventTable = InventTable::find(salesLines.ItemIdSmall);
+
+            inventTableModule = InventTableModule::find(inventTable.ItemId, ModuleInventPurchSales::Sales);
+
+            if(salesLines.ETGConnectionType == ETGConnectionType::NewConnectionorCylinder)
+            {
+                if(salesHeader.ETGBusinessSegment == ETGBusinessSegment::Domestic)
+                {
+                    isEditable  = true;
+                    isMandatory = true;
+                }
+                if(salesHeader.ETGBusinessSegment == ETGBusinessSegment::Commercial
+                    || salesHeader.ETGBusinessSegment == ETGBusinessSegment::Industrial
+                    || salesHeader.ETGBusinessSegment == ETGBusinessSegment::Distributor)
+                {
+                    isEditable  = true;
+                }
+            }
+
+            if(salesLines.ETGConnectionType == ETGConnectionType::Surrenderofcylinders)
+            {
+                if(salesHeader.ETGBusinessSegment == ETGBusinessSegment::Domestic)
+                {
+                    isEditable  = true;
+                    isMandatory = true;
+                }
+                if(salesHeader.ETGBusinessSegment == ETGBusinessSegment::Commercial
+                    || salesHeader.ETGBusinessSegment == ETGBusinessSegment::Industrial
+                    || salesHeader.ETGBusinessSegment == ETGBusinessSegment::Distributor)
+                {
+                    isEditable  = true;
+                }
+            }
+
+            ETGSalesLines_ETGDepositRate.allowEdit(inventTableModule.ETGDepositNeeded == NoYes::Yes && isEditable);
+            ETGSalesLines_ETGDepositAmount.allowEdit(inventTableModule.ETGDepositNeeded == NoYes::Yes && isEditable);
+            ETGSalesLines_ETGDepositAmount.mandatory(inventTableModule.ETGDepositNeeded == NoYes::Yes && isMandatory);
+            ETGSalesLines_SalesPrice.allowEdit(inventTableModule.ETGDepositNeeded == NoYes::No);            
+            ETGSalesLines_ETGFilledOrEmpty.allowEdit(inventTableModule.ETGFilledEmptyNeeded == NoYes::Yes);
+
+            //if(inventTableModule.ETGDepositNeeded == NoYes::Yes)
+            //{
+            //    ETGSalesLines_ETGDepositAmount.allowEdit(true);
+            //}
+            //else
+            //{
+            //    ETGSalesLines_ETGDepositAmount.allowEdit(false);
+            //}
+
+            //if(inventTableModule.ETGFilledEmptyNeeded == NoYes::Yes)
+            //{
+            //    ETGSalesLines_ETGFilledOrEmpty.allowEdit(true);
+            //}
+            //else
+            //{
+            //    ETGSalesLines_ETGFilledOrEmpty.allowEdit(false);
+            //}
+
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>write</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void write()
+        {
+            ETGSalesLines salesLines = this.cursor();
+            ETGSalesHeader salestheader = ETGSalesHeader_ds.cursor();
+            salesLines.ETGSalesHeaderRecId = salestheader.RecId;
+            super();
+            this.formRun().dataSource(2).research(true);           
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields />
+			</DataSource>
+		</DataSources>
+		<DataControls xmlns="">
+			<Control>
+				<Name>ETGSalesHeader_InventSiteId</Name>
+				<Type>String</Type>
+				<Methods>
+					<Method>
+						<Name>lookup</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void lookup()
+        {
+            SysTableLookup           lookup;
+            QueryBuildDataSource qbds;
+            Query q = new Query();
+            qbds = q.addDataSource(tableNum(InventSite));
+            lookup = SysTableLookup::newParameters(tableNum(InventSite),
+                         this,
+                         true);
+            lookup.addLookupField(fieldnum(InventSite, SiteId), true);
+            lookup.addLookupField(fieldnum(InventSite, Name));
+            lookup.parmQuery(q);
+            
+            lookup.performFormLookup();
+
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ETGSalesHeader_CustCurrencyCode</Name>
+				<Type>String</Type>
+				<Methods>
+					<Method>
+						<Name>lookup</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void lookup()
+        {
+            SysTableLookup           lookup;
+            QueryBuildDataSource qbds;
+            Query q = new Query();
+            qbds = q.addDataSource(tableNum(Currency));
+            lookup = SysTableLookup::newParameters(tableNum(Currency),
+                         this,
+                         true);
+            lookup.addLookupField(fieldnum(Currency, CurrencyCodeISO), true);
+            lookup.addLookupField(fieldnum(Currency, Txt));
+            lookup.parmQuery(q);
+            
+            lookup.performFormLookup();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ETGSalesHeader_CustPaymMode</Name>
+				<Type>String</Type>
+				<Methods>
+					<Method>
+						<Name>lookup</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void lookup()
+        {
+            SysTableLookup           lookup;
+            QueryBuildDataSource qbds;
+            Query q = new Query();
+            qbds = q.addDataSource(tableNum(CustPaymModeTable));
+            lookup = SysTableLookup::newParameters(tableNum(CustPaymModeTable),
+                         this,
+                         true);
+            lookup.addLookupField(fieldnum(CustPaymModeTable, PaymMode), true);
+            lookup.addLookupField(fieldnum(CustPaymModeTable, Name));
+            lookup.parmQuery(q);
+            
+            lookup.performFormLookup();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>ETGSalesLines_TaxItemGroup</Name>
+				<Type>String</Type>
+				<Methods>
+					<Method>
+						<Name>lookup</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void lookup()
+        {
+            SysTableLookup           lookup;
+            QueryBuildDataSource qbds;
+            Query q = new Query();
+            qbds = q.addDataSource(tableNum(TaxItemGroupHeading));
+            lookup = SysTableLookup::newParameters(tableNum(TaxItemGroupHeading),
+                         this,
+                         true);
+            lookup.addLookupField(fieldnum(TaxItemGroupHeading, TaxItemGroup), true);
+            lookup.addLookupField(fieldnum(TaxItemGroupHeading, Name));
+            lookup.parmQuery(q);
+            
+            lookup.performFormLookup();
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+		</DataControls>
+		<Members xmlns="" />
+	</SourceCode>
+	<DataSources>
+		<AxFormDataSource xmlns="">
+			<Name>ETGSalesLines</Name>
+			<Table>ETGSalesLines</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGConnectionType</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGDepositAmount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGDepositRate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGFilledOrEmpty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGSalesHeaderRecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventBatchId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ItemIdSmall</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SalesLineAmount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SalesOrderedQty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SalesPrice</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SalesUnit</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TaxGroup</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TaxItemGroup</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<JoinSource>ETGSalesHeader</JoinSource>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+		<AxFormDataSource xmlns="">
+			<Name>ETGSalesHeader</Name>
+			<Table>ETGSalesHeader</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>CustAccount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CustCurrencyCode</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CustPaymMode</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGAddressOfCust</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGBusinessSegment</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGMobileNumberOfCust</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGNameOfCust</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ETGNRCOfCust</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventBatchId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventLocationId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventSiteId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SalesShippingDateRequested</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<InsertIfEmpty>No</InsertIfEmpty>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+	</DataSources>
+	<Design>
+		<Caption xmlns="">Simple sales invoice</Caption>
+		<DataSource xmlns="">ETGSalesHeader</DataSource>
+		<Pattern xmlns="">SimpleListDetails</Pattern>
+		<PatternVersion xmlns="">1.3</PatternVersion>
+		<Style xmlns="">SimpleListDetails</Style>
+		<Controls xmlns="">
+			<AxFormControl xmlns=""
+				i:type="AxFormActionPaneControl">
+				<Name>FormActionPane</Name>
+				<Type>ActionPane</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormButtonGroupControl">
+						<Name>FormButtonGroupControl2</Name>
+						<Type>ButtonGroup</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormMenuFunctionButtonControl">
+								<Name>ETGSimpleSalesInvoicePost</Name>
+								<Type>MenuFunctionButton</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<MenuItemName>ETGSimpleSalesInvoicePost</MenuItemName>
+								<MenuItemType>Action</MenuItemType>
+							</AxFormControl>
+						</Controls>
+					</AxFormControl>
+				</Controls>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGroupControl">
+				<Name>FormGroup</Name>
+				<HeightMode>SizeToAvailable</HeightMode>
+				<Type>Group</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl>
+						<Name>QuickFilterControl1</Name>
+						<WidthMode>SizeToAvailable</WidthMode>
+						<FormControlExtension>
+							<Name>QuickFilterControl</Name>
+							<ExtensionComponents />
+							<ExtensionProperties>
+								<AxFormControlExtensionProperty>
+									<Name>targetControlName</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>placeholderText</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>defaultColumnName</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+							</ExtensionProperties>
+						</FormControlExtension>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormGridControl">
+						<Name>FormGridControl1</Name>
+						<AllowEdit>No</AllowEdit>
+						<Type>Grid</Type>
+						<WidthMode>SizeToContent</WidthMode>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>ETGSalesHeader_CustAccount</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>CustAccount</DataField>
+								<DataSource>ETGSalesHeader</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormInt64Control">
+								<Name>ETGSalesHeader_RecId</Name>
+								<Type>Int64</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>RecId</DataField>
+								<DataSource>ETGSalesHeader</DataSource>
+							</AxFormControl>
+						</Controls>
+						<DataSource>ETGSalesHeader</DataSource>
+						<MultiSelect>No</MultiSelect>
+						<ShowRowLabels>No</ShowRowLabels>
+						<Style>List</Style>
+					</AxFormControl>
+				</Controls>
+				<FrameType>None</FrameType>
+				<Style>SidePanel</Style>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGroupControl">
+				<Name>FormGroupControl1</Name>
+				<Pattern>FieldsFieldGroups</Pattern>
+				<PatternVersion>1.1</PatternVersion>
+				<Type>Group</Type>
+				<WidthMode>SizeToAvailable</WidthMode>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGSalesHeader_CustAccount1</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>CustAccount</DataField>
+						<DataSource>ETGSalesHeader</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGSalesHeader_ETGNameOfCust</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ETGNameOfCust</DataField>
+						<DataSource>ETGSalesHeader</DataSource>
+						<Label>Name of cust</Label>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGSalesHeader_ETGMobileNumberOfCust</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ETGMobileNumberOfCust</DataField>
+						<DataSource>ETGSalesHeader</DataSource>
+						<Label>Mobile no of cust</Label>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGSalesHeader_ETGAddressOfCust</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ETGAddressOfCust</DataField>
+						<DataSource>ETGSalesHeader</DataSource>
+						<Label>Address of cust</Label>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGSalesHeader_ETGNRCOfCust</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ETGNRCOfCust</DataField>
+						<DataSource>ETGSalesHeader</DataSource>
+						<Label>NRC of cust</Label>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormDateControl">
+						<Name>ETGSalesHeader_SalesShippingDateRequested</Name>
+						<Type>Date</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>SalesShippingDateRequested</DataField>
+						<DataSource>ETGSalesHeader</DataSource>
+						<Label>Date</Label>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGSalesHeader_InventSiteId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>InventSiteId</DataField>
+						<DataSource>ETGSalesHeader</DataSource>
+						<Label>Site</Label>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGSalesHeader_InventLocationId</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>InventLocationId</DataField>
+						<DataSource>ETGSalesHeader</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGSalesHeader_CustCurrencyCode</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>CustCurrencyCode</DataField>
+						<DataSource>ETGSalesHeader</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGSalesHeader_CustPaymMode</Name>
+						<Type>String</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>CustPaymMode</DataField>
+						<DataSource>ETGSalesHeader</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormComboBoxControl">
+						<Name>ETGSalesHeader_ETGBusinessSegment</Name>
+						<Type>ComboBox</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>ETGBusinessSegment</DataField>
+						<DataSource>ETGSalesHeader</DataSource>
+						<Items />
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormStringControl">
+						<Name>ETGSalesHeader_InventBatchId</Name>
+						<Type>String</Type>
+						<Visible>No</Visible>
+						<FormControlExtension
+							i:nil="true" />
+						<DataField>InventBatchId</DataField>
+						<DataSource>ETGSalesHeader</DataSource>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormRealControl">
+						<Name>ETGAmount</Name>
+						<Type>Real</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<DataMethod>totalamount</DataMethod>
+						<DataSource>ETGSalesHeader</DataSource>
+						<Label>Total Amount</Label>
+					</AxFormControl>
+				</Controls>
+				<ColumnsMode>Fill</ColumnsMode>
+				<FrameType>None</FrameType>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormTabControl">
+				<Name>FormTabControl1</Name>
+				<Type>Tab</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>FormTabPageControl1</Name>
+						<Pattern>ToolbarList</Pattern>
+						<PatternVersion>1.2</PatternVersion>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormActionPaneControl">
+								<Name>ActionPane1</Name>
+								<Type>ActionPane</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormActionPaneTabControl">
+										<Name>FormActionPaneTab</Name>
+										<Type>ActionPaneTab</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<Controls>
+											<AxFormControl xmlns=""
+												i:type="AxFormButtonGroupControl">
+												<Name>FormButtonGroupControl1</Name>
+												<HeightMode>Auto</HeightMode>
+												<Type>ButtonGroup</Type>
+												<WidthMode>Auto</WidthMode>
+												<FormControlExtension
+													i:nil="true" />
+												<Controls>
+													<AxFormControl xmlns=""
+														i:type="AxFormCommandButtonControl">
+														<Name>FormCommandButtonControl1</Name>
+														<Type>CommandButton</Type>
+														<FormControlExtension
+															i:nil="true" />
+														<ButtonDisplay>TextWithImageLeft</ButtonDisplay>
+														<Command>New</Command>
+														<NormalImage>New</NormalImage>
+														<Text>New</Text>
+													</AxFormControl>
+													<AxFormControl xmlns=""
+														i:type="AxFormCommandButtonControl">
+														<Name>FormCommandButtonControl2</Name>
+														<Type>CommandButton</Type>
+														<FormControlExtension
+															i:nil="true" />
+														<ButtonDisplay>TextWithImageLeft</ButtonDisplay>
+														<Command>DeleteRecord</Command>
+														<NormalImage>Delete</NormalImage>
+														<SaveRecord>No</SaveRecord>
+														<Text>Delete</Text>
+													</AxFormControl>
+												</Controls>
+												<ArrangeMethod>Vertical</ArrangeMethod>
+											</AxFormControl>
+										</Controls>
+									</AxFormControl>
+								</Controls>
+								<DataSource>ETGSalesLines</DataSource>
+								<Style>Strip</Style>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormGridControl">
+								<Name>FormGrid</Name>
+								<Type>Grid</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSalesLines_ItemIdSmall</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ItemIdSmall</DataField>
+										<DataSource>ETGSalesLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSalesLines_ItemIName</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataMethod>itemName</DataMethod>
+										<DataSource>ETGSalesLines</DataSource>
+										<Text>Product name</Text>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGSalesLines_SalesOrderedQty</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>SalesOrderedQty</DataField>
+										<DataSource>ETGSalesLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSalesLines_InventBatchId</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>InventBatchId</DataField>
+										<DataSource>ETGSalesLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSalesLines_SalesUnit</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>SalesUnit</DataField>
+										<DataSource>ETGSalesLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGSalesLines_SalesPrice</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>SalesPrice</DataField>
+										<DataSource>ETGSalesLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSalesLines_TaxItemGroup</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>TaxItemGroup</DataField>
+										<DataSource>ETGSalesLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>ETGSalesLines_TaxGroup</Name>
+										<Type>String</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>TaxGroup</DataField>
+										<DataSource>ETGSalesLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormComboBoxControl">
+										<Name>ETGSalesLines_ETGConnectionType</Name>
+										<Type>ComboBox</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ETGConnectionType</DataField>
+										<DataSource>ETGSalesLines</DataSource>
+										<Label>Connection type</Label>
+										<Items />
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormIntegerControl">
+										<Name>ETGSalesLines_ETGDepositRate</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>Integer</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ETGDepositRate</DataField>
+										<DataSource>ETGSalesLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormIntegerControl">
+										<Name>ETGSalesLines_ETGDepositAmount</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>Integer</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ETGDepositAmount</DataField>
+										<DataSource>ETGSalesLines</DataSource>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormRealControl">
+										<Name>ETGSalesLines_SalesLineAmount</Name>
+										<Type>Real</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>SalesLineAmount</DataField>
+										<DataSource>ETGSalesLines</DataSource>
+										<Label>Total Invoice</Label>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormComboBoxControl">
+										<Name>ETGSalesLines_ETGFilledOrEmpty</Name>
+										<AutoDeclaration>Yes</AutoDeclaration>
+										<Type>ComboBox</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>ETGFilledOrEmpty</DataField>
+										<DataSource>ETGSalesLines</DataSource>
+										<Items />
+									</AxFormControl>
+								</Controls>
+								<DataSource>ETGSalesLines</DataSource>
+								<Style>Tabular</Style>
+							</AxFormControl>
+						</Controls>
+					</AxFormControl>
+				</Controls>
+				<Style>FastTabs</Style>
+			</AxFormControl>
+		</Controls>
+	</Design>
+	<Parts />
+</AxForm>

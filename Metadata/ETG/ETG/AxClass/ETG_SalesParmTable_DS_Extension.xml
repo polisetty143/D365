@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_SalesParmTable_DS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formdatasourcestr(SalesEditLines, SalesParmTable))]
+final class ETG_SalesParmTable_DS_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {
+        int                 idx, ret;
+        FormDataSource      salesEditLines  = any2Object(this) as FormDataSource;
+        FormDataSource      fds;
+        formRun             formRun = salesEditLines.formRun();
+        SalesParmTable      salesParmTable;
+        str 60              parmId, salesId, TableRefId;
+        ETG_BillOfLading    billOfLadingUpd;
+        InventTransOrigin   inventTransOrigin;
+        InventTrans         inventTrans;
+        boolean             shouldRefresh = true; // Default to true to preserve existing behavior
+
+        ret = next active();
+
+        if (formRun)
+        {
+            for (idx = 1; idx <= formRun.dataSourceCount(); idx++)
+            {
+                if (formRun.dataSource(idx).cursor() is SalesParmTable)
+                {
+                    fds             = formRun.dataSource(idx);
+                    salesParmTable  = fds.cursor();
+
+                    parmId      = salesParmTable.ParmId;
+                    salesId     = salesParmTable.SalesId;
+                    TableRefId  = salesParmTable.TableRefId;
+
+                    select sum(Qty) from inventTrans
+                        join inventTransOrigin
+                        where inventTrans.InventTransOrigin    == inventTransOrigin.RecId
+                           && inventTransOrigin.ReferenceId    == salesParmTable.SalesId
+                           && inventTrans.StatusIssue          == StatusIssue::Picked;
+                
+                    select firstonly billOfLadingUpd
+                        where billOfLadingUpd.ParmId     == salesParmTable.ParmId
+                           && billOfLadingUpd.TableRefId == salesParmTable.TableRefId;
+
+                    if (billOfLadingUpd)
+                    {
+                        // FIX BY RAVI: If O001, SKIP the update and SKIP the refresh to prevent overwriting manual input
+                        if (curExt() == 'O001')
+                        {
+                            shouldRefresh = false;
+                        }
+                        else
+                        {
+                            
+                            ttsbegin;
+                            billOfLadingUpd.selectForUpdate(true);
+                            billOfLadingUpd.NetWeight   = abs(inventTrans.Qty);
+                            billOfLadingUpd.update();
+                            ttscommit;
+                        }
+                    }
+                    else
+                    {
+                        
+                        billOfLadingUpd.initValue();
+                        billOfLadingUpd.ParmId      = salesParmTable.ParmId;
+                        billOfLadingUpd.TableRefId  = salesParmTable.TableRefId;
+                        billOfLadingUpd.NetWeight   = abs(inventTrans.Qty);
+                        billOfLadingUpd.insert();
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Only refresh if we are NOT in the O001 manual update scenario.
+        // Refreshing reloading the record from DB would wipe unsaved manual changes.
+        if (shouldRefresh && fds)
+        {
+            fds.research(true);
+        }
+
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

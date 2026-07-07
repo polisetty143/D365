@@ -1,0 +1,1592 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxForm xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V6">
+	<Name>ETGBinLotLine</Name>
+	<SourceCode>
+		<Methods xmlns="">
+			<Method>
+				<Name>classDeclaration</Name>
+				<Source><![CDATA[
+[Form]
+public class ETGBinLotLine extends FormRun
+{
+
+}
+]]></Source>
+			</Method>
+			<Method>
+				<Name>close</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///
+    /// </summary>
+    public void close()
+    {
+        FormDataSource ds;
+        super();
+
+        ds = element.args().record().dataSource();
+        ds.research(true);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+		<DataSources xmlns="">
+			<DataSource>
+				<Name>ETGBinLotLine</Name>
+				<Methods>
+					<Method>
+						<Name>create</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        /// <param name = "_append"></param>
+        public void create(boolean _append = false)
+        {
+            super(_append);
+
+            ETGBinJournalLine       ETGBinJournalLine;
+
+            select ETGBinJournalLine where ETGBinJournalLine.RecId == ETGBinLotLine.BinJournalLine;
+
+            ETGBinLotLine.Transdate = ETGBinJournalLine.TransDate;
+            ETGBinLotLine.ItemId = ETGBinJournalLine.ItemId;       
+            ETGBinLotLine.Configuration = ETGBinJournalLine.Configuration;
+            ETGBinLotLine.Size = ETGBinJournalLine.size;
+            ETGBinLotLine.Colour = ETGBinJournalLine.Colour;
+            ETGBinLotLine.Style = ETGBinJournalLine.Style;
+            ETGBinLotLine.SiteId = ETGBinJournalLine.SiteId;
+            ETGBinLotLine.Warehouse = ETGBinJournalLine.Warehouse;
+            ETGBinLotLine.Location = ETGBinJournalLine.Location;
+            ETGBinLotLine.ToBatch = ETGBinJournalLine.ToBatch;
+            ETGBinLotLine.FromInventSerialId = ETGBinJournalLine.InventSerialId;
+
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>write</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void write()
+        {
+            super();
+
+            ETGBinJournalLine   ETGBinJournalLine;
+            ETGBinLotLine       ETGBinLotLinesum;            
+
+            select ETGBinJournalLine where ETGBinJournalLine.RecId == ETGBinLotLine.BinJournalLine;
+            select sum(lotqty) from  ETGBinLotLinesum where ETGBinLotLinesum.BinJournalLine == ETGBinLotLine.BinJournalLine;
+
+            if(ETGBinJournalLine.RecId)
+            {
+                ttsbegin;
+                ETGBinJournalLine.selectForUpdate(true);
+                ETGBinJournalLine.FGRNQty = ETGBinLotLinesum.LotQty;
+                ETGBinJournalLine.modifiedField(fieldNum(ETGBinJournalLine,FGRNQty));
+                ETGBinJournalLine.doUpdate();
+                ttscommit;               
+            }
+        }
+
+]]></Source>
+					</Method>
+					<Method>
+						<Name>active</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        /// <returns></returns>
+        public int active()
+        {
+            int ret;
+        
+            ret = super();
+
+            boolean  Serialenable,FromSerialenable;
+
+            Serialenable=   ecoResTrackingDimensionGroupFldSetup::findByDimensionGroupFieldId(InventTable::find(ETGBinLotLine.ItemId).trackingDimensionGroup(), fieldNum(InventDim,InventSerialId)).IsActive;
+            ETGBinLotLine_ds.object(fieldNum(ETGBinLotLine,InventSerialId)).allowEdit(Serialenable);
+
+            FromSerialenable=   ecoResTrackingDimensionGroupFldSetup::findByDimensionGroupFieldId(InventTable::find(ETGBinLotLine.ItemId).trackingDimensionGroup(), fieldNum(InventDim,InventSerialId)).IsActive;
+            ETGBinLotLine_ds.object(fieldNum(ETGBinLotLine,FromInventSerialId)).allowEdit(FromSerialenable);
+
+            ETGBinLotLine_ds.allowEdit(ETGBinLotLine.TransferJRNId == "");
+            ETGBinLotLine_ds.allowDelete(ETGBinLotLine.TransferJRNId == "");
+        
+            ETGBinJournalLine       ETGBinJournalLine;
+
+            select ETGBinJournalLine where ETGBinJournalLine.RecId == ETGBinLotLine.BinJournalLine;
+
+            if(ETGBinJournalLine.RecId && ETGBinJournalLine.BinFGRNLocked == NoYes::Yes)
+            {
+                ETGBinLotLine_ds.allowCreate(false);
+                ETGBinLotLine_ds.allowDelete(false);
+                ETGBinLotLine_ds.allowEdit(false);                
+                ETGLotInfoDetails_ds.allowCreate(false);
+                ETGLotInfoDetails_ds.allowDelete(false);
+                ETGLotInfoDetails_ds.allowEdit(false);
+            }
+
+            return ret;
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+				<Fields />
+			</DataSource>
+		</DataSources>
+		<DataControls xmlns="">
+			<Control>
+				<Name>FGRNLockGroup</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void clicked()
+        {
+            super();
+
+            if (box::yesNo('Are you sure to Lock the FGRN ?', dialogButton::Yes, 'Confirmation') == dialogButton::Yes)
+            {
+                ETGBinJournalLine       ETGBinJournalLine;
+
+                select ETGBinJournalLine where ETGBinJournalLine.RecId == ETGBinLotLine.BinJournalLine;
+
+                if(ETGBinJournalLine.RecId)
+                {
+                    ttsbegin;
+                    ETGBinJournalLine.selectForUpdate(true);
+                    ETGBinJournalLine.BinFGRNLocked = NoYes::Yes;
+                    ETGBinJournalLine.doUpdate();
+                    ttscommit;
+                    ETGBinLotLine_ds.research(true);
+                    ETGLotInfoDetails_ds.research(true);
+                    Info(strFmt('%1',"FGRN has been locked successfully."));
+                }
+            }
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+			<Control>
+				<Name>CreateTO</Name>
+				<Type>Button</Type>
+				<Methods>
+					<Method>
+						<Name>clicked</Name>
+						<Source><![CDATA[
+        /// <summary>
+        ///
+        /// </summary>
+        public void clicked()
+        {           
+            ETGBinLotLine       ETGBinLotLineloop;
+            InventJournalId  TransferId;
+            int loopcount=0;
+
+
+            boolean  Serialenable;
+
+            if(InventParameters::find().ETGLotTransferJrnName == '')
+            {
+                throw error(strFmt('%1','Define the Lot Transfer Journal Name setup in Inventory Parameter setup.'));
+            }
+
+            Serialenable=   ecoResTrackingDimensionGroupFldSetup::findByDimensionGroupFieldId(InventTable::find(ETGBinLotLine.ItemId).trackingDimensionGroup(), fieldNum(InventDim,InventSerialId)).IsActive;
+
+            if(Serialenable == NoYes::Yes && ETGBinLotLine.InventSerialId == '')
+            {
+                throw error(strFmt('Serial id must be filled in.'));
+            }
+
+            super();
+           
+            for(ETGBinLotLineloop = getFirstSelection(ETGBinLotLine_ds); ETGBinLotLineloop;
+            ETGBinLotLineloop = ETGBinLotLine_ds.getNext())
+            {
+                if(ETGBinLotLineloop.TransferJRNId == '')
+                {
+                    loopcount++;
+                    if(loopcount ==1)
+                    {
+                        TransferId =  ETGGlobal::CreateTransferJournalHeaderLot(ETGBinLotLineloop.RecId);
+                    }
+                    ETGGlobal::CreateTransferJournalLineLot(ETGBinLotLineloop.RecId,loopcount,TransferId);
+                }
+            }
+
+            if(TransferId)
+            {
+                Info(strFmt('Lot Transfer Journal %1 has been created.',TransferId));
+            }
+            ETGBinLotLine_ds.research(true);
+        }
+
+]]></Source>
+					</Method>
+				</Methods>
+			</Control>
+		</DataControls>
+		<Members xmlns="" />
+	</SourceCode>
+	<DataSources>
+		<AxFormDataSource xmlns="">
+			<Name>ETGBinLotLine</Name>
+			<Table>ETGBinLotLine</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>BinJournalLine</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Colour</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Configuration</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CreatedBy</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CreatedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>FromInventSerialId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InventSerialId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<AllowEdit>No</AllowEdit>
+					<DataField>ItemId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>JournalId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LineNum</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Location</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LotQty</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ModifiedBy</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ModifiedDateTime</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>SiteId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Size</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Style</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ToBatch</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Transdate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TransferJRNId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Warehouse</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<CounterField>LineNum</CounterField>
+			<InsertIfEmpty>No</InsertIfEmpty>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+		<AxFormDataSource xmlns="">
+			<Name>ETGLotInfoDetails</Name>
+			<Table>ETGLotInfoDetails</Table>
+			<Fields>
+				<AxFormDataSourceField>
+					<DataField>BillofLadingWeight</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>BillofLadingWeightLoss</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>BillofLadingWeightLossPer</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>BinLotLine</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Blue</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Brokenparts</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Brokensmallparts</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Collectedaftercleaning</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Consumer</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>CRM</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Damaged</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DamagedInsectedamaged</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>DataAreaId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Dirt</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>FFA</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>flatSeeds</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ForeignItems</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Fragment</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>GradeClassification</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Growing</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Humidity</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Insectedamaged</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>InternationalContractNumber</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>JournalId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>LotsTransferDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Nutcount</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>PalletsLotWeight</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Partition</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Port</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ProcessingPlant</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ProcessingPlantTimeofStorage</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>ProductionDate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>RecId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Seedsstickstogether</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Storageweightloss</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>StorageweightlossPer</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Stuffing</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Stuffingdate</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>StuffingWeight</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TableId</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TheoreticalWeight</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TimeofStoragebeforeStuffing</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TransitOrder</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>TransitWarehouse</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>VerifiedGrossShippedWeight</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>VerifiedGrossShippedWeightloss</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>VerifiedGrossShippedWeightlossPer</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Violet</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Waste</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>WeightatProcessingExit</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>Wharfage</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>WharfageWeightLoss</DataField>
+				</AxFormDataSourceField>
+				<AxFormDataSourceField>
+					<DataField>WharfageWeightLossPer</DataField>
+				</AxFormDataSourceField>
+			</Fields>
+			<ReferencedDataSources />
+			<JoinSource>ETGBinLotLine</JoinSource>
+			<DataSourceLinks />
+			<DerivedDataSources />
+		</AxFormDataSource>
+	</DataSources>
+	<Design>
+		<Caption xmlns="">Lot Details</Caption>
+		<Pattern xmlns="">DetailsTransaction</Pattern>
+		<PatternVersion xmlns="">1.4</PatternVersion>
+		<Style xmlns="">DetailsFormTransaction</Style>
+		<Controls xmlns="">
+			<AxFormControl xmlns=""
+				i:type="AxFormActionPaneControl">
+				<Name>ActionPaneHeader</Name>
+				<Type>ActionPane</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormButtonGroupControl">
+						<Name>FormButtonGroupControl2</Name>
+						<Type>ButtonGroup</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormButtonControl">
+								<Name>FGRNLockGroup</Name>
+								<Type>Button</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Text>FGRN Lock</Text>
+							</AxFormControl>
+						</Controls>
+					</AxFormControl>
+				</Controls>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormGroupControl">
+				<Name>NavigationList</Name>
+				<HeightMode>SizeToAvailable</HeightMode>
+				<Type>Group</Type>
+				<Visible>No</Visible>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl>
+						<Name>QuickFilterControl1</Name>
+						<WidthMode>SizeToAvailable</WidthMode>
+						<FormControlExtension>
+							<Name>QuickFilterControl</Name>
+							<ExtensionComponents />
+							<ExtensionProperties>
+								<AxFormControlExtensionProperty>
+									<Name>targetControlName</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>placeholderText</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+								<AxFormControlExtensionProperty>
+									<Name>defaultColumnName</Name>
+									<Type>String</Type>
+								</AxFormControlExtensionProperty>
+							</ExtensionProperties>
+						</FormControlExtension>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormGridControl">
+						<Name>NavigationListGrid</Name>
+						<AllowEdit>No</AllowEdit>
+						<Type>Grid</Type>
+						<WidthMode>SizeToContent</WidthMode>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>FormGridControl1_JournalId</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>JournalId</DataField>
+								<DataSource>ETGBinLotLine</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>FormGridControl1_ItemId</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>ItemId</DataField>
+								<DataSource>ETGBinLotLine</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormRealControl">
+								<Name>FormGridControl1_LotQty</Name>
+								<Type>Real</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>LotQty</DataField>
+								<DataSource>ETGBinLotLine</DataSource>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormStringControl">
+								<Name>FormGridControl1_InventSerialId</Name>
+								<Type>String</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<DataField>InventSerialId</DataField>
+								<DataSource>ETGBinLotLine</DataSource>
+							</AxFormControl>
+						</Controls>
+						<DataGroup>Overview</DataGroup>
+						<DataSource>ETGBinLotLine</DataSource>
+						<MultiSelect>No</MultiSelect>
+						<ShowRowLabels>No</ShowRowLabels>
+						<Style>List</Style>
+					</AxFormControl>
+				</Controls>
+				<FrameType>None</FrameType>
+				<Style>SidePanel</Style>
+			</AxFormControl>
+			<AxFormControl xmlns=""
+				i:type="AxFormTabControl">
+				<Name>MainTab</Name>
+				<Type>Tab</Type>
+				<FormControlExtension
+					i:nil="true" />
+				<Controls>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>TabPageDetails</Name>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormGroupControl">
+								<Name>HeaderInfo</Name>
+								<Type>Group</Type>
+								<WidthMode>SizeToAvailable</WidthMode>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormStringControl">
+										<Name>FormStringControl1</Name>
+										<Skip>Yes</Skip>
+										<Type>String</Type>
+										<WidthMode>SizeToAvailable</WidthMode>
+										<FormControlExtension
+											i:nil="true" />
+										<DataField>JournalId</DataField>
+										<DataSource>ETGBinLotLine</DataSource>
+										<ShowLabel>No</ShowLabel>
+										<Style>TitleField</Style>
+									</AxFormControl>
+								</Controls>
+								<ArrangeMethod>HorizontalLeft</ArrangeMethod>
+								<FrameType>None</FrameType>
+								<Style>DetailTitleContainer</Style>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormTabControl">
+								<Name>DetailsTab</Name>
+								<Type>Tab</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl xmlns=""
+										i:type="AxFormTabPageControl">
+										<Name>LineView</Name>
+										<Type>TabPage</Type>
+										<FormControlExtension
+											i:nil="true" />
+										<Controls>
+											<AxFormControl xmlns=""
+												i:type="AxFormTabControl">
+												<Name>LineViewTab</Name>
+												<Type>Tab</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<Controls>
+													<AxFormControl xmlns=""
+														i:type="AxFormTabPageControl">
+														<Name>LineViewHeader</Name>
+														<Pattern>FieldsFieldGroups</Pattern>
+														<PatternVersion>1.1</PatternVersion>
+														<Type>TabPage</Type>
+														<Visible>No</Visible>
+														<FormControlExtension
+															i:nil="true" />
+														<Controls />
+														<ColumnsMode>Fill</ColumnsMode>
+													</AxFormControl>
+													<AxFormControl xmlns=""
+														i:type="AxFormTabPageControl">
+														<Name>LineViewLine</Name>
+														<HeightMode>SizeToAvailable</HeightMode>
+														<Type>TabPage</Type>
+														<FormControlExtension
+															i:nil="true" />
+														<Controls>
+															<AxFormControl xmlns=""
+																i:type="AxFormActionPaneControl">
+																<Name>LineOverviewActionStrip</Name>
+																<Type>ActionPane</Type>
+																<FormControlExtension
+																	i:nil="true" />
+																<Controls>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormActionPaneTabControl">
+																		<Name>FormActionPaneTabControl1</Name>
+																		<Type>ActionPaneTab</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<Controls>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormButtonGroupControl">
+																				<Name>FormButtonGroupControl1</Name>
+																				<Type>ButtonGroup</Type>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<Controls>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormButtonControl">
+																						<Name>CreateTO</Name>
+																						<Type>Button</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<MultiSelect>Yes</MultiSelect>
+																						<Text>Create Transfer</Text>
+																					</AxFormControl>
+																				</Controls>
+																				<DataSource>ETGBinLotLine</DataSource>
+																			</AxFormControl>
+																		</Controls>
+																		<DataSource>ETGBinLotLine</DataSource>
+																	</AxFormControl>
+																</Controls>
+																<DataSource>ETGBinLotLine</DataSource>
+																<Style>Strip</Style>
+															</AxFormControl>
+															<AxFormControl xmlns=""
+																i:type="AxFormGridControl">
+																<Name>LineSpec</Name>
+																<Type>Grid</Type>
+																<FormControlExtension
+																	i:nil="true" />
+																<Controls>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormDateControl">
+																		<Name>LineSpec_Transdate</Name>
+																		<Type>Date</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>Transdate</DataField>
+																		<DataSource>ETGBinLotLine</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormStringControl">
+																		<Name>FormGridControl1_JournalId1</Name>
+																		<Type>String</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>JournalId</DataField>
+																		<DataSource>ETGBinLotLine</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormStringControl">
+																		<Name>FormGridControl1_ItemId1</Name>
+																		<Type>String</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>ItemId</DataField>
+																		<DataSource>ETGBinLotLine</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormStringControl">
+																		<Name>LineSpec_Configuration</Name>
+																		<Type>String</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>Configuration</DataField>
+																		<DataSource>ETGBinLotLine</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormStringControl">
+																		<Name>LineSpec_Size</Name>
+																		<Type>String</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>Size</DataField>
+																		<DataSource>ETGBinLotLine</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormStringControl">
+																		<Name>LineSpec_Colour</Name>
+																		<Type>String</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>Colour</DataField>
+																		<DataSource>ETGBinLotLine</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormStringControl">
+																		<Name>LineSpec_Style</Name>
+																		<Type>String</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>Style</DataField>
+																		<DataSource>ETGBinLotLine</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormStringControl">
+																		<Name>LineSpec_SiteId</Name>
+																		<Type>String</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>SiteId</DataField>
+																		<DataSource>ETGBinLotLine</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormStringControl">
+																		<Name>LineSpec_Warehouse</Name>
+																		<Type>String</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>Warehouse</DataField>
+																		<DataSource>ETGBinLotLine</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormStringControl">
+																		<Name>LineSpec_Location</Name>
+																		<Type>String</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>Location</DataField>
+																		<DataSource>ETGBinLotLine</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormStringControl">
+																		<Name>LineSpec_ToBatch</Name>
+																		<Type>String</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>ToBatch</DataField>
+																		<DataSource>ETGBinLotLine</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormStringControl">
+																		<Name>LineSpec_FromInventSerialId</Name>
+																		<Type>String</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>FromInventSerialId</DataField>
+																		<DataSource>ETGBinLotLine</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormStringControl">
+																		<Name>FormGridControl1_InventSerialId1</Name>
+																		<Type>String</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>InventSerialId</DataField>
+																		<DataSource>ETGBinLotLine</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormRealControl">
+																		<Name>FormGridControl1_LotQty1</Name>
+																		<Type>Real</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>LotQty</DataField>
+																		<DataSource>ETGBinLotLine</DataSource>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormStringControl">
+																		<Name>LineSpec_TransferJRNId</Name>
+																		<Type>String</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<DataField>TransferJRNId</DataField>
+																		<DataSource>ETGBinLotLine</DataSource>
+																	</AxFormControl>
+																</Controls>
+																<DataGroup>Overview</DataGroup>
+																<DataSource>ETGBinLotLine</DataSource>
+																<Style>Tabular</Style>
+																<VisibleRows>5</VisibleRows>
+																<VisibleRowsMode>Fixed</VisibleRowsMode>
+															</AxFormControl>
+														</Controls>
+														<Caption>Lot Details</Caption>
+														<FastTabExpanded>Always</FastTabExpanded>
+													</AxFormControl>
+													<AxFormControl xmlns=""
+														i:type="AxFormTabPageControl">
+														<Name>LineViewLineDetails</Name>
+														<Type>TabPage</Type>
+														<FormControlExtension
+															i:nil="true" />
+														<Controls>
+															<AxFormControl xmlns=""
+																i:type="AxFormTabControl">
+																<Name>LineDetailTab</Name>
+																<AutoDeclaration>Yes</AutoDeclaration>
+																<Type>Tab</Type>
+																<FormControlExtension
+																	i:nil="true" />
+																<Controls>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormTabPageControl">
+																		<Name>StorageAndProcessing</Name>
+																		<Type>TabPage</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<Controls>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormGroupControl">
+																				<Name>StorageProcessing</Name>
+																				<Type>Group</Type>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<Controls>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>StorageProcessing_Port</Name>
+																						<Type>String</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Port</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>StorageProcessing_ProcessingPlant</Name>
+																						<Type>String</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>ProcessingPlant</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormDateControl">
+																						<Name>StorageProcessing_ProductionDate</Name>
+																						<Type>Date</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>ProductionDate</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>StorageProcessing_TheoreticalWeight</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>TheoreticalWeight</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>StorageProcessing_PalletsLotWeight</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>PalletsLotWeight</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormDateControl">
+																						<Name>StorageProcessing_LotsTransferDate</Name>
+																						<Type>Date</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>LotsTransferDate</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>StorageProcessing_ProcessingPlantTimeofStorage</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>ProcessingPlantTimeofStorage</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>StorageProcessing_TransitWarehouse</Name>
+																						<Type>String</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>TransitWarehouse</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>StorageProcessing_WeightatProcessingExit</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>WeightatProcessingExit</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>StorageProcessing_Storageweightloss</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Storageweightloss</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>StorageProcessing_StorageweightlossPer</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>StorageweightlossPer</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																				</Controls>
+																				<Columns>5</Columns>
+																				<Caption>@ETGReport:StorageAndProcessing</Caption>
+																				<DataGroup>StorageandProcessing</DataGroup>
+																				<DataSource>ETGLotInfoDetails</DataSource>
+																			</AxFormControl>
+																		</Controls>
+																		<Caption>@ETGReport:StorageAndProcessing</Caption>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormTabPageControl">
+																		<Name>StuffingAndShipment</Name>
+																		<Type>TabPage</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<Controls>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormGroupControl">
+																				<Name>Stuffing</Name>
+																				<Type>Group</Type>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<Controls>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>Stuffing_Stuffing</Name>
+																						<Type>String</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Stuffing</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormDateControl">
+																						<Name>Stuffing_Stuffingdate</Name>
+																						<Type>Date</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Stuffingdate</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>Stuffing_TimeofStoragebeforeStuffing</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>TimeofStoragebeforeStuffing</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>Stuffing_StuffingWeight</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>StuffingWeight</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>Stuffing_Wharfage</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Wharfage</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>Stuffing_WharfageWeightLoss</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>WharfageWeightLoss</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>Stuffing_WharfageWeightLossPer</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>WharfageWeightLossPer</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>Stuffing_VerifiedGrossShippedWeight</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>VerifiedGrossShippedWeight</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>Stuffing_VerifiedGrossShippedWeightloss</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>VerifiedGrossShippedWeightloss</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>Stuffing_VerifiedGrossShippedWeightlossPer</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>VerifiedGrossShippedWeightlossPer</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>Stuffing_BillofLadingWeight</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>BillofLadingWeight</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>Stuffing_BillofLadingWeightLoss</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>BillofLadingWeightLoss</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>Stuffing_BillofLadingWeightLossPer</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>BillofLadingWeightLossPer</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																				</Controls>
+																				<Columns>5</Columns>
+																				<Caption>@ETGReport:StuffingAndShipment</Caption>
+																				<DataGroup>StuffingandShipment</DataGroup>
+																				<DataSource>ETGLotInfoDetails</DataSource>
+																			</AxFormControl>
+																		</Controls>
+																		<Caption>@ETGReport:StuffingAndShipment</Caption>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormTabPageControl">
+																		<Name>International</Name>
+																		<Type>TabPage</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<Controls>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormGroupControl">
+																				<Name>InternationalGroup</Name>
+																				<Type>Group</Type>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<Controls>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>InternationalGroup_TransitOrder</Name>
+																						<Type>String</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>TransitOrder</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>InternationalGroup_Consumer</Name>
+																						<Type>String</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Consumer</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormStringControl">
+																						<Name>InternationalGroup_InternationalContractNumber</Name>
+																						<Type>String</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>InternationalContractNumber</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																				</Controls>
+																				<Columns>5</Columns>
+																				<Caption>@ETGReport:International</Caption>
+																				<DataGroup>International</DataGroup>
+																				<DataSource>ETGLotInfoDetails</DataSource>
+																			</AxFormControl>
+																		</Controls>
+																		<Caption>@ETGReport:International</Caption>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormTabPageControl">
+																		<Name>Damages</Name>
+																		<Type>TabPage</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<Controls>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormGroupControl">
+																				<Name>DamagesGroup</Name>
+																				<Type>Group</Type>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<Controls>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>DamagesGroup_Collectedaftercleaning</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Collectedaftercleaning</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>DamagesGroup_Nutcount</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Nutcount</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>DamagesGroup_Humidity</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Humidity</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>DamagesGroup_Damaged</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Damaged</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>DamagesGroup_Blue</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Blue</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>DamagesGroup_Insectedamaged</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Insectedamaged</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>DamagesGroup_flatSeeds</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>flatSeeds</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>DamagesGroup_Growing</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Growing</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>DamagesGroup_DamagedInsectedamaged</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>DamagedInsectedamaged</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																				</Controls>
+																				<Columns>5</Columns>
+																				<Caption>@ETGReport:Damages</Caption>
+																				<DataGroup>Damages</DataGroup>
+																				<DataSource>ETGLotInfoDetails</DataSource>
+																			</AxFormControl>
+																		</Controls>
+																		<Caption>@ETGReport:Damages</Caption>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormTabPageControl">
+																		<Name>CocoaRelatedMatter</Name>
+																		<Type>TabPage</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<Controls>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormGroupControl">
+																				<Name>CocoaGroup</Name>
+																				<Type>Group</Type>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<Controls>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>CocoaGroup_Violet</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Violet</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>CocoaGroup_Brokenparts</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Brokenparts</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>CocoaGroup_Fragment</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Fragment</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>CocoaGroup_Brokensmallparts</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Brokensmallparts</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>CocoaGroup_Seedsstickstogether</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Seedsstickstogether</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>CocoaGroup_CRM</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>CRM</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																				</Controls>
+																				<Columns>5</Columns>
+																				<Caption>@ETGReport:CocoaRelatedMatter</Caption>
+																				<DataGroup>CocoaRelatedMatter</DataGroup>
+																				<DataSource>ETGLotInfoDetails</DataSource>
+																			</AxFormControl>
+																		</Controls>
+																		<Caption>@ETGReport:CocoaRelatedMatter</Caption>
+																	</AxFormControl>
+																	<AxFormControl xmlns=""
+																		i:type="AxFormTabPageControl">
+																		<Name>Waste</Name>
+																		<Type>TabPage</Type>
+																		<FormControlExtension
+																			i:nil="true" />
+																		<Controls>
+																			<AxFormControl xmlns=""
+																				i:type="AxFormGroupControl">
+																				<Name>WasteGroup</Name>
+																				<Type>Group</Type>
+																				<FormControlExtension
+																					i:nil="true" />
+																				<Controls>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>WasteGroup_Dirt</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Dirt</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>WasteGroup_ForeignItems</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>ForeignItems</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>WasteGroup_Waste</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>Waste</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>WasteGroup_FFA</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>FFA</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																					<AxFormControl xmlns=""
+																						i:type="AxFormRealControl">
+																						<Name>WasteGroup_GradeClassification</Name>
+																						<Type>Real</Type>
+																						<FormControlExtension
+																							i:nil="true" />
+																						<DataField>GradeClassification</DataField>
+																						<DataSource>ETGLotInfoDetails</DataSource>
+																					</AxFormControl>
+																				</Controls>
+																				<Columns>5</Columns>
+																				<Caption>@ETGReport:Waste</Caption>
+																				<DataGroup>Waste</DataGroup>
+																				<DataSource>ETGLotInfoDetails</DataSource>
+																			</AxFormControl>
+																		</Controls>
+																		<Caption>@ETGReport:Waste</Caption>
+																	</AxFormControl>
+																</Controls>
+																<ArrangeMethod>Vertical</ArrangeMethod>
+															</AxFormControl>
+														</Controls>
+														<Caption>Lot Details Info</Caption>
+													</AxFormControl>
+												</Controls>
+												<Style>FastTabs</Style>
+											</AxFormControl>
+										</Controls>
+										<PanelStyle>DetailsLine</PanelStyle>
+									</AxFormControl>
+									<AxFormControl xmlns=""
+										i:type="AxFormTabPageControl">
+										<Name>HeaderView</Name>
+										<Type>TabPage</Type>
+										<Visible>No</Visible>
+										<FormControlExtension
+											i:nil="true" />
+										<Controls>
+											<AxFormControl xmlns=""
+												i:type="AxFormTabControl">
+												<Name>FormTabControl4</Name>
+												<Type>Tab</Type>
+												<FormControlExtension
+													i:nil="true" />
+												<Controls>
+													<AxFormControl xmlns=""
+														i:type="AxFormTabPageControl">
+														<Name>FormTabPageControl6</Name>
+														<Type>TabPage</Type>
+														<FormControlExtension
+															i:nil="true" />
+														<Controls />
+													</AxFormControl>
+												</Controls>
+												<Style>FastTabs</Style>
+											</AxFormControl>
+										</Controls>
+										<PanelStyle>DetailsHeader</PanelStyle>
+									</AxFormControl>
+								</Controls>
+								<ShowTabs>No</ShowTabs>
+							</AxFormControl>
+						</Controls>
+						<PanelStyle>Details</PanelStyle>
+						<Style>DetailsFormDetails</Style>
+					</AxFormControl>
+					<AxFormControl xmlns=""
+						i:type="AxFormTabPageControl">
+						<Name>TabPageGrid</Name>
+						<Type>TabPage</Type>
+						<FormControlExtension
+							i:nil="true" />
+						<Controls>
+							<AxFormControl xmlns=""
+								i:type="AxFormGroupControl">
+								<Name>FormGroupControl3</Name>
+								<Pattern>CustomAndQuickFilters</Pattern>
+								<PatternVersion>1.1</PatternVersion>
+								<Type>Group</Type>
+								<WidthMode>SizeToAvailable</WidthMode>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls>
+									<AxFormControl>
+										<Name>QuickFilterControl2</Name>
+										<FormControlExtension>
+											<Name>QuickFilterControl</Name>
+											<ExtensionComponents />
+											<ExtensionProperties>
+												<AxFormControlExtensionProperty>
+													<Name>targetControlName</Name>
+													<Type>String</Type>
+												</AxFormControlExtensionProperty>
+												<AxFormControlExtensionProperty>
+													<Name>placeholderText</Name>
+													<Type>String</Type>
+												</AxFormControlExtensionProperty>
+												<AxFormControlExtensionProperty>
+													<Name>defaultColumnName</Name>
+													<Type>String</Type>
+												</AxFormControlExtensionProperty>
+											</ExtensionProperties>
+										</FormControlExtension>
+									</AxFormControl>
+								</Controls>
+								<ArrangeMethod>HorizontalLeft</ArrangeMethod>
+								<FrameType>None</FrameType>
+								<Style>CustomFilter</Style>
+								<ViewEditMode>Edit</ViewEditMode>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormGridControl">
+								<Name>FormGridControl2</Name>
+								<Type>Grid</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Controls />
+								<DefaultAction>FormCommandButtonControl1</DefaultAction>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormCommandButtonControl">
+								<Name>FormCommandButtonControl1</Name>
+								<Type>CommandButton</Type>
+								<Visible>No</Visible>
+								<FormControlExtension
+									i:nil="true" />
+								<Command>DetailsView</Command>
+							</AxFormControl>
+						</Controls>
+						<PanelStyle>Grid</PanelStyle>
+						<Style>DetailsFormGrid</Style>
+					</AxFormControl>
+				</Controls>
+				<ShowTabs>No</ShowTabs>
+			</AxFormControl>
+		</Controls>
+	</Design>
+	<Parts />
+</AxForm>

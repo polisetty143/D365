@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETG_VendOpeningBalanceDP</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[
+SRSReportParameterAttribute(classStr(ETG_VendOpeningBalanceContract))
+ ]
+    public class ETG_VendOpeningBalanceDP extends SRSReportDataProviderBase
+{
+    
+    ETG_VendOpeningBalanceTmp     eTG_VendOpeningBalanceTmp;
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>getETG_VendOpeningBalanceTmp</Name>
+				<Source><![CDATA[
+    [
+        SRSReportDataSetAttribute(tableStr(ETG_VendOpeningBalanceTmp))
+    ]
+    public ETG_VendOpeningBalanceTmp getETG_VendOpeningBalanceTmp()
+    {
+        select * from eTG_VendOpeningBalanceTmp;
+        return eTG_VendOpeningBalanceTmp;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>processReport</Name>
+				<Source><![CDATA[
+    public void processReport()
+    {
+        ETG_VendOpeningBalanceContract            contract = this.parmDataContract() as ETG_VendOpeningBalanceContract;
+        
+        TransDate       fromDate = contract.parmFromDate();
+        TransDate       toDate   = contract.parmToDate();
+        VendAccount     vendorAccount = contract.parmVendorAccount();
+        VendTable       vendtable;
+        AmountCur    openingdebit,openingcredit;
+        AmountMST    openingdebitlocal,openingcreditlocal;
+        DirPartyTable       dirPartyTable;
+        VendTrans  vendTrans,vendtranslocal;
+        Map   map,mapAll;
+        MapEnumerator           mapEnum, mapEnumAll;
+        mapAll          = new Map(Types::String, Types::Real);
+        CurrencyCode            currency, currency_1;
+
+
+        map     = this.getCurrencies(vendorAccount);
+
+        mapEnum = map.getEnumerator();
+
+        while (mapEnum.moveNext())
+        {
+            currency_1 = mapEnum.currentValue();
+
+
+            select sum(AmountCur),sum(AmountMST),AccountNum,CurrencyCode from vendtrans
+             group by vendTrans.AccountNum,vendTrans.CurrencyCode
+             where vendTrans.AccountNum == vendorAccount
+                && vendTrans.CurrencyCode  == currency_1
+                && vendTrans.TransDate < fromDate
+                && vendTrans.AmountCur > 0;
+
+            if(vendTrans)
+            {
+                openingdebit         = vendTrans.AmountCur; // Trans Debit
+                openingdebitlocal        = vendTrans.AmountMST;  // Local Debit
+
+            }
+            select sum(AmountCur),sum(AmountMST),AccountNum,CurrencyCode from vendtranslocal
+             group by vendtranslocal.AccountNum,vendtranslocal.CurrencyCode
+             where vendtranslocal.AccountNum == vendorAccount
+               && vendtranslocal.CurrencyCode  == currency_1
+               && vendtranslocal.TransDate < fromDate
+                && vendtranslocal.AmountCur < 0;
+            if(vendtranslocal)
+            {
+                openingcredit           = vendtranslocal.AmountCur;  // Trans Credit
+                openingcreditlocal      = vendtranslocal.AmountMST; //  Local Credit
+
+            }
+            eTG_VendOpeningBalanceTmp.VendCode =  vendorAccount;
+            eTG_VendOpeningBalanceTmp.VendName  =  vendtable::find(vendorAccount).name();
+
+            eTG_VendOpeningBalanceTmp.TransactionCurrencyCredit  = abs(openingcredit);// Trans Credit
+            eTG_VendOpeningBalanceTmp.LocalCurrencyCredit  =  abs(openingcreditlocal);//  Local Credit
+
+            eTG_VendOpeningBalanceTmp.LocalCurrencyDebit  =  abs(openingdebitlocal);// Local Debit
+            eTG_VendOpeningBalanceTmp.TransactionCurrencyDebit  =  abs(openingdebit);// Trans Debit
+            
+            eTG_VendOpeningBalanceTmp.Currency             =  currency_1;
+
+            
+            eTG_VendOpeningBalanceTmp.insert();
+        
+
+        
+    }
+
+}
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getCurrencies</Name>
+				<Source><![CDATA[
+    Map getCurrencies(AccountNum   _accountId)
+    {
+        VendTrans   vendTransmap;
+        Map         mapCurrency = new Map(Types::String, Types::String);
+        ;
+        while select vendTransmap group by CurrencyCode where vendTransmap.AccountNum == _accountId
+        {
+            mapCurrency.insert(vendTransmap.CurrencyCode, vendTransmap.CurrencyCode);
+        }
+
+        return mapCurrency;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

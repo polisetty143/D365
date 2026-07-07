@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ProdMultiReportFinishedETG_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(classstr(ProdMultiReportFinished))]
+final class ProdMultiReportFinishedETG_Extension
+{
+
+
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>canGoBatch</Name>
+				<Source><![CDATA[
+    public boolean canGoBatch()
+    {
+        boolean  batch;
+        batch =  next  canGoBatch();
+        batch = false;
+        return batch;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>reportFinishedProductionOrder</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Abhinav - RAF Production order in parent entity
+    /// </summary>
+    protected void reportFinishedProductionOrder(ProdParmReportFinished _prodParmReportFinished)
+    {
+        try
+        {
+            ttsbegin;
+
+            next reportFinishedProductionOrder(_prodParmReportFinished);
+            
+            if(ETGCanadaParameters::find().EnableSubContractingPO)
+            {
+                ProdTable prodTable = ProdTable::find(_prodParmReportFinished.ProdId);
+                ProdJournaltable prodJournaltableParent;
+                str currCompany = curExt(); 
+                if(prodTable && prodTable.ETGIsSubContractingOrder && prodTable.ETGParentProdId) //&& prodTable.ProdStatus == ProdStatus::ReportedFinished
+                {
+                    changecompany(prodTable.ETGParentEntity)
+                    {
+                        Args _argsNew = new Args();
+                        
+                        ProdTable                   prodTableParent = ProdTable::find(prodTable.ETGParentProdId);
+                        _argsNew.record(prodTableParent);
+
+                        ProdParmReportFinished      prodParmRAF,prodParmReportFinished;
+                        ProdMultiReportFinished     prodMultiReportFinished = ProdMultiReportFinished::construct(_argsNew);
+
+                        prodParmReportFinished.clear();
+                        prodParmReportFinished.initValue();
+                        prodParmReportFinished.ParmId = RunBaseMultiParm::getSysParmId();
+                        ParmId parentParmId = prodParmReportFinished.ParmId;
+                        //prodParmReportFinished.initParmDefault();
+                        //prodParmReportFinished.initReportFinishProd();
+                        prodParmReportFinished.initFromProdTable(prodTableParent);
+                        prodParmReportFinished.LineNum = 1;
+                        prodMultiReportFinished.parmId(RunBaseMultiParm::getSysParmId());
+
+                        prodMultiReportFinished.insert(prodTableParent, prodParmReportFinished);
+
+                        JmgProdParametersDim jmgProdParametersDim    = JmgProdParametersDim::find(prodParmReportFinished.InventDimId);
+
+                        if (jmgProdParametersDim.ReportFinishUseSFCParameters == NoYes::Yes)
+                        {
+                            prodParmReportFinished.RouteJournalNameId       = jmgProdParametersDim.ReportFinishRouteJournalNameId;
+                            prodParmReportFinished.RouteAutoConsump         = jmgProdParametersDim.ReportFinishRouteAutoConsump;
+                            prodParmReportFinished.EndRouteCard             = jmgProdParametersDim.ReportFinishEndRouteCard;
+                            prodParmReportFinished.bomJournalNameId         = jmgProdParametersDim.ReportFinishBOMJournalNameId;
+                            prodParmReportFinished.bomAutoConsump           = jmgProdParametersDim.ReportFinishBOMAutoConsump;
+                            prodParmReportFinished.EndPicklist              = jmgProdParametersDim.ReportFinishEndPicklist;
+                            prodParmReportFinished.ProdJournalNameId        = jmgProdParametersDim.ReportFinishProdJournalNameId;
+                            prodParmReportFinished.EndJob                   = jmgProdParametersDim.ReportFinishEndJob;
+                            prodParmReportFinished.AcceptError              = jmgProdParametersDim.ReportFinishAcceptError;
+                        }
+                        else
+                        {
+                            prodParmReportFinished.initFromProdParametersDim(ProdParametersDim::find(prodParmReportFinished.InventDimId));
+                        }
+                        
+                        //prodParmReportFinished.initParmDefault();
+
+                        prodParmReportFinished.EndJob = _prodParmReportFinished.EndJob;
+                        prodParmReportFinished.QtyGood = _prodParmReportFinished.QtyGood;
+                        prodParmReportFinished.QtyError = _prodParmReportFinished.QtyError;
+                        prodParmReportFinished.ErrorCause = _prodParmReportFinished.ErrorCause;
+                        prodParmReportFinished.ETGProductionShift = _prodParmReportFinished.ETGProductionShift;
+                        prodParmReportFinished.TransDate = _prodParmReportFinished.TransDate;
+
+                        if(prodParmReportFinished.PmfProductType == PmfProductType::Formula
+                            || prodParmReportFinished.PmfProductType == PmfProductType::MainItem)
+                        {
+                            int lineCount = prodParmReportFinished.LineNum;
+                            PmfProdCoBy             prodCoBy;
+                            
+                            while select prodCoBy
+                                where prodCoBy.ProdId == prodTableParent.ProdId
+                            {
+                                ProdParmReportFinished  _coByParmBuffer;
+
+                                _coByParmBuffer.LineNum = lineCount + 1;
+                                prodMultiReportFinished.insert(prodCoBy, _coByParmBuffer);
+                                ttsbegin;
+                                _coByParmBuffer.selectForUpdate();
+                                _coByParmBuffer.initParmDefault();
+                                InventDim inventDimLoc = InventDim::find(_coByParmBuffer.InventDimId);
+                                inventDimLoc.inventSerialId = InventTable::find(_coByParmBuffer.ItemId).ETGDefaultSerialNumber;
+                                
+                                //CS, DLT, SB, Assign Custom BatchId
+                                inventDimLoc.inventBatchId = InventTable::find(_coByParmBuffer.ItemId).ETGDefaultBatchNumber;
+                                //CE, SLT, SB
+                                ProdParmReportFinished coByParmBufferOrig;
+
+                                changecompany(currCompany)
+                                { 
+                                    select firstonly coByParmBufferOrig
+                                        order by ParmId Desc
+                                        where coByParmBufferOrig.ProdId == prodTable.ProdId
+                                        && coByParmBufferOrig.ItemId == prodCoBy.ItemId;
+                                }
+                                _coByParmBuffer.QtyGood = coByParmBufferOrig.QtyGood;
+                                _coByParmBuffer.EndJob = _prodParmReportFinished.EndJob;
+                                _coByParmBuffer.QtyError = coByParmBufferOrig.QtyError;
+                                _coByParmBuffer.ErrorCause = coByParmBufferOrig.ErrorCause;
+                                _coByParmBuffer.TransDate = coByParmBufferOrig.TransDate;
+
+                                _coByParmBuffer.InventDimId = InventDim::findOrCreate(inventDimLoc).inventDimId;
+                                _coByParmBuffer.update();
+                                ttscommit;
+                                lineCount++;
+                            }
+                        }
+                        prodMultiReportFinished.reportFinishedProductionOrder(prodParmReportFinished);
+                        
+                        select firstonly prodJournaltableParent
+                                order by CreatedDateTime desc
+                                where prodJournaltableParent.ProdId == prodTableParent.ProdId
+                            && prodJournaltableParent.JournalType == ProdJournalType::ReportFinished;
+                    }
+                    ProdJournaltable prodJournaltable;
+                    ttsbegin;
+                    select forupdate prodJournaltable
+                                order by CreatedDateTime desc
+                                where prodJournaltable.ProdId == prodTable.ProdId
+                        && prodJournaltable.JournalType == ProdJournalType::ReportFinished;
+
+                    if(prodJournaltable)
+                    {
+                        prodJournaltable.ETGParentEntityJournalNumber = prodJournaltableParent.JournalId;
+                        prodJournaltable.update();
+                    }
+                    ttscommit;
+
+                    changecompany(prodTable.ETGParentEntity)
+                    {
+                        ttsbegin;
+                        if(prodJournaltableParent)
+                        {
+                            prodJournaltableParent.selectForUpdate(true);
+                            prodJournaltableParent.ETGSubcontractingJournalNumber = prodJournaltable.JournalId;
+                            prodJournaltableParent.update();
+                        }
+                        ttscommit;
+                    }
+
+                    if(!prodJournaltableParent || !prodJournaltable)
+                    {
+                        throw error("Process cancelled - RAF Journal creation mismatched.");
+                    }
+                }
+            }
+            ttscommit;
+        }
+        catch (Exception::Error)
+        {
+            error("@ETG_New:ErrorInCrossCompanyRAF");
+        }
+        catch (Exception::CLRError)
+        {
+            error("@ETG_New:ErrorInCrossCompanyRAF");
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ETGProdJournalTransProdDS_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[ExtensionOf(formdatasourcestr(ProdJournaltransProd,ProdJournalProd))]
+final class ETGProdJournalTransProdDS_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>active</Name>
+				<Source><![CDATA[
+    public int active()
+    {
+        int                 ret;
+        ret = next active();
+
+        if(ret && ETGCanadaparameters::find().EnableProdJournalValidations)
+        {
+            FormDataSource       ProdJournalProd_DS   = any2Object(this) as FormDataSource;
+            ProdJournalProd          prodJournalProd       = ProdJournalProd_DS.cursor();
+            ProdJournalTable prodJournaltable = ProdJournalTable::find(prodJournalProd.JournalId);
+            ProdTable prodtable = ProdTable::find(prodJournaltable.ProdId);
+
+            if(prodtable.ETGIsSubContractingOrder && prodtable.ETGChildProdId && prodJournaltable.ETGSubcontractingJournalNumber)
+            {
+                ProdJournalProd_DS.allowCreate(false);
+                ProdJournalProd_DS.allowDelete(false);
+
+                ProdJournalProd_DS.object(fieldNum(ProdJournalProd,ItemId)).allowEdit(false);
+                ProdJournalProd_DS.object(fieldNum(ProdJournalProd,QtyGood)).allowEdit(false);
+            }
+        }
+
+        //CS - BIN Qty Status activation - Abhinav
+        FormPartControl formpartcontrol = this.formrun().design().controlName("ETGBinQtyAvailable");
+        formpartcontrol.visible(ETGCanadaParameters::find().EnableBinQtyStatus);
+
+        if(ETGCanadaParameters::find().EnableBinQtyStatus)
+        {
+            FormDataSource       ProdJournalProd_DS   = any2Object(this) as FormDataSource;
+            ProdJournalProd          prodJournalProd       = ProdJournalProd_DS.cursor();
+
+            InventDim inventdim = ProdJournalProd.inventDim();
+            ETGBinQtyVisualChartHelperClass::populateBinQtyChartData(inventdim,formpartcontrol);
+        }
+        //CE
+        return ret;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>
